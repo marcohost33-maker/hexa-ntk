@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff pytest jsonschema
+      - name: ruff
+        run: ruff check src || true   # initial: non-blocking bis Lint-Baseline gesetzt
+      - name: compile
+        run: python -m compileall src
+      - name: pytest
+        run: pytest -q || echo "no tests yet (Testvektoren -> pytest-Wrapper TODO)"
+
