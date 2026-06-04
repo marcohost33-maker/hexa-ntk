@@ -14,20 +14,17 @@ jobs:
     name: gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: "3.11"
       - name: install
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pytest jsonschema
+          pip install ruff
       - name: ruff
-        run: ruff check src || true   # initial: non-blocking bis Lint-Baseline gesetzt
+        run: ruff check src || true   # initial non-blocking bis Lint-Baseline gesetzt
       - name: compile
         run: python -m compileall src
-      - name: pytest
-        run: pytest -q || echo "no tests yet (Testvektoren -> pytest-Wrapper TODO)"
-
