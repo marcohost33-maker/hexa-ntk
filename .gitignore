@@ -11,3 +11,6 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Evidenz-Logs in results/ sind Buerger erster Klasse (Equalita-Fund 2026-06-04)
+!results/**

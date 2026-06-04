@@ -1,0 +1,117 @@
+=== hexantk_v3 START 2026-05-26T12:05:17.6320045Z py=3.13.13 ===
+Doctests: 47/47 PASS
+======================================================================
+HexaNTK v3.0.0 (L014) -- Manuscript Test Suite
+  Module hash: a4b6ef52247ed5aa...
+  Tests: 26 (covers P0.1-P0.5, P1.1, P1.2)
+======================================================================
+
+[TEST] module hash stable
+  hash: a4b6ef52247ed5aa...
+  -> PASS (0.000s)
+
+[TEST] FailureSignature basic
+  failure registered, fields intact
+  -> PASS (0.013s)
+
+[TEST] AtomicWriter basic
+  atomic write survives; no tempfile leak
+  -> PASS (0.019s)
+
+[TEST] AtomicWriter crash safety
+  crash leaves no target file and no tempfile leak
+  -> PASS (0.009s)
+
+[TEST] build_resume_payload fields
+  resume payload fields correct
+  -> PASS (0.000s)
+
+[TEST] BestPolicy min-mode
+  min-mode policy correct
+  -> PASS (0.000s)
+
+[TEST] BestPolicy max-mode
+  max-mode policy correct
+  -> PASS (0.000s)
+
+[TEST] BestPolicy invalid args
+  invalid policy args rejected
+  -> PASS (0.000s)
+
+[TEST] CkptMgr: best roundtrip
+  save/load best roundtrip with policy gates
+  -> PASS (0.041s)
+
+[TEST] CkptMgr: resume roundtrip
+  resume roundtrip + semantics validation
+  -> PASS (0.019s)
+
+[TEST] CkptMgr: bad semantics rejected
+  wrong-semantics resume rejected
+  -> PASS (0.002s)
+
+[TEST] CkptMgr: DDP guard
+  DDP non-main guard works
+  -> PASS (0.002s)
+
+[TEST] Warmstart drops optimizer
+  dropped: ['optimizer_state_dict', 'scheduler_state_dict', 'grad_scaler_state_dict', 'rng_states']
+  -> PASS (0.000s)
+
+[TEST] Warmstart prefix transforms
+  prefix transforms: ['backbone.layer.w', 'decoder.layer.w']
+  -> PASS (0.000s)
+
+[TEST] Hex Laplacian + CFL correct
+  hex stencil weight = 2/3, CFL dt(h=1,D=1,safety=0.85) = 0.2833
+  -> PASS (0.000s)
+
+[TEST] safe_train_step: success
+  ok path
+  -> PASS (0.001s)
+
+[TEST] safe_train_step: NaN
+  NaN path records failure
+  -> PASS (0.023s)
+
+[TEST] safe_train_step: OOM pre-assignment
+  OOM-before-assignment handled without NameError
+  -> PASS (0.019s)
+
+[TEST] OperatorContext: valid GINO
+  valid GINO ctx passes
+  -> PASS (0.000s)
+
+[TEST] OperatorContext: non-shared GINO
+  non-shared GINO rejected
+  -> PASS (0.000s)
+
+[TEST] OperatorContext: missing edge GNO
+  GNO without edge_index rejected
+  -> PASS (0.000s)
+
+[TEST] OperatorContext: shape validations
+  3 shape mismatches rejected
+  -> PASS (0.000s)
+
+[TEST] GAOT config defaults match paper
+  GAOTConfig defaults confirmed vs arXiv:2505.18781 Table 4
+  -> PASS (0.000s)
+
+[TEST] GAOT config validation
+  5/5 invalid configurations rejected
+  -> PASS (0.000s)
+
+[TEST] GAOT context requires config
+  GAOT rejected without gaot_config
+  -> PASS (0.000s)
+
+[TEST] GAOT context dim mismatch caught
+  2D-vs-3D mismatch caught, 2D paper-default passes
+  -> PASS (0.028s)
+
+======================================================================
+Results: 26/26 PASS
+ALL TESTS PASSED -- HexaNTK v3.0.0 manuscript-ready.
+======================================================================
+=== hexantk_v3 EXIT 0 END 2026-05-26T12:05:18.4656976Z ===
