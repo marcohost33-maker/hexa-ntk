@@ -23,7 +23,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn

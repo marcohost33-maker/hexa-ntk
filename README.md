@@ -24,8 +24,10 @@ SOURCES.md  Provenance: Quelle + SHA-256 + mtime je Datei
 ## Reproduzieren
 
 Die Selftests laufen direkt in der Engine (`python <engine>.py --selftest` bzw. eingebaute Runner;
-Details im Engine-Header). CI prueft Syntax (`compileall`) + Lint (non-blocking) — volle
-physikalische Gate-Runs brauchen numpy/scipy/torch und laufen lokal.
+Details im Engine-Header). CI prueft Syntax (`compileall`) + Lint (`ruff check src`, **blocking**,
+gepinnt; Konfiguration in `pyproject.toml`; kanonische Engine `src/hexantk_v3.py` ist vom Lint-Gate
+ausgenommen und wird ueber coworker-dde gepflegt) — volle physikalische Gate-Runs brauchen
+numpy/scipy/torch und laufen lokal.
 
 ## Verwandte Repos
 

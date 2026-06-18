@@ -34,10 +34,9 @@ __all__ = [
 ]
 
 import json
-import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 
@@ -153,19 +152,8 @@ def _hex_gradient_magnitude(
     # field has shape [..., N, C], gather along N dimension
     batch_shape = field.shape[:-2]
     field_flat = field.reshape(-1, N, C)  # [B, N, C]
-    B = field_flat.shape[0]
 
-    # Expand safe_idx for gather: [N, 6] -> [B, N, 6, C]
-    idx_expanded = safe_idx.unsqueeze(0).unsqueeze(-1).expand(B, N, 6, C)
-    field_expanded = field_flat.unsqueeze(2).expand(B, N, 6, C)
-
-    # Gather neighbor values
-    neighbor_vals = torch.gather(
-        field_flat.unsqueeze(2).expand(B, N, N, C),
-        dim=2,
-        index=idx_expanded,
-    )
-    # Actually, simpler: index directly
+    # Gather neighbor values via direct fancy indexing on the neighbor index.
     neighbor_vals = field_flat[:, safe_idx, :]  # [B, N, 6, C]
 
     # Center values

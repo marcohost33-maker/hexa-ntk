@@ -23,8 +23,8 @@ jobs:
       - name: install
         run: |
           python -m pip install --upgrade pip
-          pip install ruff
+          pip install ruff==0.15.8   # gepinnt: reproduzierbares Lint-Gate (Supply-Chain)
       - name: ruff
-        run: ruff check src || true   # initial non-blocking bis Lint-Baseline gesetzt
+        run: ruff check src   # blocking; Konfiguration + Engine-Exclude in pyproject.toml
       - name: compile
         run: python -m compileall src

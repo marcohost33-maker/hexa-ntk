@@ -26,10 +26,9 @@ __all__ = [
     "make_reproducible_dataloader_kwargs",
 ]
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import torch
-from torch.utils.data import DataLoader, Dataset
 
 
 def make_worker_init_fn(base_seed: int):
