@@ -25,6 +25,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff==0.15.8   # gepinnt: reproduzierbares Lint-Gate (Supply-Chain)
       - name: ruff
-        run: ruff check src   # blocking; Konfiguration + Engine-Exclude in pyproject.toml
+        run: ruff check src scripts   # blocking; Konfig + Engine-Exclude in pyproject.toml
       - name: compile
         run: python -m compileall src
+
+  tests:
+    name: tests (cpu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: install (cpu-only torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy
+          # CPU-Wheel ueber den dedizierten Index (kleiner, kein CUDA-Ballast);
+          # torch 2.6.0 = vom Engine-Header geforderte SoTA-Baseline.
+          pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
+      - name: engine doctests + selftests
+        # Wrapper statt `python src/hexantk_v3.py`: letzteres exitet immer 0
+        # (Rueckgabewert ungenutzt). engine_gate.py exitet != 0 bei Fehlern.
+        run: python scripts/engine_gate.py
+      - name: toolkit unit tests
+        # bare imports der Module -> Discovery aus src/toolkit heraus
+        working-directory: src/toolkit
+        run: python -m unittest discover -p "test_*.py" -v
