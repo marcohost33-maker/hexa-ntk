@@ -1,0 +1,36 @@
+==================================================================
+HexaNTK Gate-Run -- Lint-Baseline + Test-Verifikation + CI-Test-Gate
+Datum:    2026-06-18
+Branch:   claude/best-practices-research-33hkwp
+Zweck:    (1) Toolkit-Lintfixes als behavior-preserving verifizieren
+          (2) lokale Parität zum neuen CI tests(cpu)-Gate belegen
+Umgebung: Python 3.11.15 | torch 2.6.0+cu124 | numpy 2.4.6 | ruff 0.15.8
+==================================================================
+
+### [1/4] ruff check src scripts (E/F/W; Engine excluded via pyproject) ###
+All checks passed!
+RESULT: All checks passed
+
+### [2/4] python -m compileall src scripts ###
+RESULT: compile OK
+
+### [3/4] Engine-Gate (scripts/engine_gate.py, exit-korrekt) ###
+Results: 26/26 PASS
+ALL TESTS PASSED -- HexaNTK v3.0.0 manuscript-ready.
+[ENGINE-GATE] doctests 47/47 | selftests_ok=True | overall=PASS
+engine_gate exit: 0
+
+### [4/4] Toolkit unit tests (unittest discover in src/toolkit) ###
+----------------------------------------------------------------------
+Ran 110 tests in 0.823s
+
+OK
+
+==================================================================
+SUMMARY (verified 2026-06-18):
+  ruff check (src+scripts) .. All checks passed
+  compileall ................ OK
+  engine doctests ........... 47/47 PASS
+  engine selftests .......... 26/26 PASS
+  toolkit unittests ......... 110/110 PASS
+==================================================================

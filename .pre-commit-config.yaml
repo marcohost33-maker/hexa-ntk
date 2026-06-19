@@ -1,0 +1,33 @@
+# .pre-commit-config.yaml — HexaNTK
+#
+# Faengt Defekte VOR dem Push (statt erst in CI). Installation:
+#   pip install pre-commit && pre-commit install
+#
+# WICHTIG (Version-Drift): die ruff `rev` MUSS mit dem CI-Pin in
+# .github/workflows/ci.yml (ruff==0.15.8) UND pyproject.toml synchron bleiben,
+# sonst weichen lokales und CI-Lint-Ergebnis ab (Scientific-Python-Guide /
+# pydevtools "sync with uv"). Bei Ruff-Upgrade: alle drei Stellen anheben.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.8
+    hooks:
+      # Lint-only (Paritaet mit CI `ruff check`); --fix darf autofixen.
+      # Bewusst KEIN ruff-format: die gehaerteten Module sind nicht ruff-format-
+      # konform und werden nicht ungeprueft reformatiert (Reality-Anchor). Format
+      # waere ein separater, lokal per torch-Selftest verifizierter Schritt.
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+      # AGENTS.md §Don't: keine Secrets/Keys ins Repo.
+      - id: detect-private-key

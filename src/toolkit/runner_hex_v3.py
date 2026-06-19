@@ -40,7 +40,7 @@ import gc
 import logging
 import statistics
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -53,7 +53,7 @@ from checkpoint_integration_hex_v3 import (
     CheckpointIntegrationManager,
 )
 from failure_signature_hex_v3 import FailureSignature
-from operator_adapter_hex_v3 import OperatorAdapterV3, OperatorBatchContext
+from operator_adapter_hex_v3 import OperatorAdapterV3
 
 logger = logging.getLogger(__name__)
 

@@ -5,8 +5,6 @@ Tests for canonical benchmark metrics.
 """
 from __future__ import annotations
 
-import json
-import math
 import tempfile
 import unittest
 from pathlib import Path

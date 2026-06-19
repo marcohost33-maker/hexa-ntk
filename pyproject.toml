@@ -1,0 +1,25 @@
+# pyproject.toml — HexaNTK
+#
+# Zweck: Single source of truth fuer die Ruff-Lint-Konfiguration, damit CI und
+# lokaler Lauf identisch sind (Ruff liest [tool.ruff] automatisch hoch bis zum
+# Workspace-Root). Kein Build-/Packaging-Setup — dies ist ein Forschungs-Repo,
+# kein distributierbares Paket (AGENTS.md §Project).
+#
+# Lint-Baseline gesetzt 2026-06-18 (vorher CI = `ruff check src || true`,
+# non-blocking). Enforced rule-set bewusst eng (E/F/W = pyflakes + pycodestyle):
+# faengt echte Defekte (unused imports/vars, redefinitions) ohne grossflaechige,
+# hier nicht per torch-Test verifizierbare Stil-/Typing-Umschreibungen.
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+# Kanonische Engine: src/hexantk_v3.py ist byte-identisch mit coworker-dde/src
+# (SOURCES.md, Equalita-Audit 2026-06-04). Aenderungen muessen dort und hier
+# synchron bleiben (AGENTS.md §Project), darum wird sie hier NICHT lint-enforced
+# — Best Practice: Code, den man nicht in diesem Repo pflegt, vom Lint-Gate
+# ausnehmen (Ruff FAQ/docs). Aenderungen an der Engine laufen ueber coworker-dde.
+extend-exclude = ["src/hexantk_v3.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
