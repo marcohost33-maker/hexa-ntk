@@ -133,12 +133,16 @@ class AtomicCheckpointWriter:
                 os.fsync(f.fileno())
             os.replace(tmp_path, path)
             # fsync the parent directory so the rename (the filename entry)
-            # itself is durable. This is POSIX-only: os.fsync() on a directory
-            # descriptor raises OSError(EACCES/EISDIR) on Windows. There,
-            # os.replace() maps to MoveFileEx, and durability of the temp file
-            # content is already guaranteed by the fsync above; the directory
-            # fsync is skipped (same strategy as python-atomicwrites, which
-            # uses MOVEFILE_WRITE_THROUGH on Windows instead of a dir fsync).
+            # itself is durable. POSIX-only: os.fsync() on a directory descriptor
+            # raises OSError(EACCES/EISDIR) on Windows, so it is skipped there.
+            # Honest limitation (do not overclaim): on Windows the temp-file
+            # CONTENT is durable (the fsync above), but the rename's directory
+            # metadata is NOT explicitly flushed — CPython's os.replace maps to
+            # MoveFileExW WITHOUT MOVEFILE_WRITE_THROUGH, so a crash in the narrow
+            # window right after the rename can still drop the directory entry.
+            # Acceptable for checkpoint/preemption use; if full rename-durability
+            # on Windows is ever required, add a ctypes
+            # MoveFileExW(..., MOVEFILE_WRITE_THROUGH) call here.
             if os.name == "posix":
                 dir_fd = os.open(str(path.parent), os.O_RDONLY)
                 try:
