@@ -37,7 +37,9 @@ FILENAME = re.compile(r"([^\\/ ]+\.py)(?:\s*\(.*\))?\s*$")
 
 
 def sha16(path: pathlib.Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()[:16].upper()
+    # LF-normalisiert: CRLF-Checkout (Windows) und LF-Checkout (CI/Linux) ergeben
+    # denselben Digest -> kein Fail-closed-Fehlalarm auf sauberem Checkout (Codex-P1).
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()[:16].upper()
 
 
 def parse_toolkit_rows(text: str) -> dict[str, str]:
