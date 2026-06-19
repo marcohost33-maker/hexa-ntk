@@ -122,15 +122,29 @@ class AtomicCheckpointWriter:
             # os.replace() could leave the temp file with incomplete
             # data in OS buffers. This is critical for cluster preemption.
             # (Pattern from python-atomicwrites, PyTorch Ignite DiskSaver)
-            with open(tmp_path, "rb") as f:
+            #
+            # The handle MUST be opened writable ("rb+"): os.fsync() on a
+            # read-only ("rb") descriptor raises OSError(EBADF, "Bad file
+            # descriptor") on Windows (verified) and is not the documented
+            # contract for flushing prior writes. python-atomicwrites fsyncs
+            # the *write* handle, so we reopen the file writable, flush, fsync.
+            with open(tmp_path, "rb+") as f:
+                f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_path, path)
-            # fsync parent directory to ensure the rename is durable
-            dir_fd = os.open(str(path.parent), os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
+            # fsync the parent directory so the rename (the filename entry)
+            # itself is durable. This is POSIX-only: os.fsync() on a directory
+            # descriptor raises OSError(EACCES/EISDIR) on Windows. There,
+            # os.replace() maps to MoveFileEx, and durability of the temp file
+            # content is already guaranteed by the fsync above; the directory
+            # fsync is skipped (same strategy as python-atomicwrites, which
+            # uses MOVEFILE_WRITE_THROUGH on Windows instead of a dir fsync).
+            if os.name == "posix":
+                dir_fd = os.open(str(path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
         except Exception:
             if tmp_path.exists():
                 try:
