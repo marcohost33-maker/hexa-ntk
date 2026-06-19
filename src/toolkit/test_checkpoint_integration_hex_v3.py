@@ -184,6 +184,45 @@ class TestAtomicCheckpointWriter(unittest.TestCase):
         loaded = torch.load(path, weights_only=True)
         self.assertIn("ema_model_state_dict", loaded)
 
+    def test_durable_write_does_not_raise_on_this_platform(self) -> None:
+        """Regression: the fsync durability path must work cross-platform.
+
+        Before the fix, save_torch_payload_atomic() reopened the temp file
+        read-only ("rb") to fsync and unconditionally fsync'd the parent
+        directory. On Windows the first raised OSError(EBADF, "Bad file
+        descriptor") and the second OSError(EACCES); both aborted the save.
+        This asserts the full durable path completes and yields a loadable
+        file on whatever platform the suite runs on.
+        """
+        path = Path(self.tmpdir.name) / "durable.pt"
+        payload = {"w": torch.arange(64, dtype=torch.float32)}
+
+        # Must NOT raise (the bug surfaced here as OSError).
+        result = AtomicCheckpointWriter.save_torch_payload_atomic(path, payload)
+
+        self.assertTrue(Path(result).exists())
+        loaded = torch.load(result, weights_only=True)
+        self.assertTrue(torch.equal(loaded["w"], payload["w"]))
+
+    def test_durable_write_preserves_large_payload_integrity(self) -> None:
+        """Content integrity after the flush+fsync+os.replace durability path.
+
+        Larger tensors are more likely to exercise OS write buffering, so this
+        guards against the durability path truncating or corrupting data while
+        still being byte-faithful after the atomic rename.
+        """
+        path = Path(self.tmpdir.name) / "large.pt"
+        payload = {
+            "big": torch.randn(256, 256),
+            "meta": torch.tensor([1, 2, 3, 4, 5]),
+        }
+
+        AtomicCheckpointWriter.save_torch_payload_atomic(path, payload)
+
+        loaded = torch.load(path, weights_only=True)
+        self.assertTrue(torch.equal(loaded["big"], payload["big"]))
+        self.assertTrue(torch.equal(loaded["meta"], payload["meta"]))
+
 
 # ------------------------------------------------------------------
 # Tests: CheckpointIntegrationManager
