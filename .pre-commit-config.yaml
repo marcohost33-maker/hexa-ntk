@@ -3,10 +3,11 @@
 # Faengt Defekte VOR dem Push (statt erst in CI). Installation:
 #   pip install pre-commit && pre-commit install
 #
-# WICHTIG (Version-Drift): die ruff `rev` MUSS mit dem CI-Pin in
-# .github/workflows/ci.yml (ruff==0.15.8) UND pyproject.toml synchron bleiben,
-# sonst weichen lokales und CI-Lint-Ergebnis ab (Scientific-Python-Guide /
-# pydevtools "sync with uv"). Bei Ruff-Upgrade: alle drei Stellen anheben.
+# WICHTIG (Version-Drift): die ruff `rev` MUSS mit dem ruff-Pin in
+# requirements-dev.txt synchron bleiben. CI installiert den Ruff-CLI aus dem
+# Dev-Manifest; pre-commit pinnt Hook-Repos ueber `rev`.
+# Bei Ruff-Upgrade: requirements-dev.txt + diese `rev` gemeinsam anheben.
+# Dependabot ueberwacht sowohl pip (`requirements-dev.txt`) als auch pre-commit.
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
