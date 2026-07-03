@@ -26,15 +26,18 @@ requirements-dev.txt  Zentrale CI-/Dev-Tool-Pins fuer Ruff/Coverage
 
 ## Reproduzieren
 
-Lokal (volle Evidenz):
+Lokal in einem frischen Python-3.11-Environment:
 
 ```bash
+python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt                 # zentrale Tool-Pins: ruff/coverage
+python -m pip install numpy
+python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
 python scripts/engine_gate.py                                  # 47 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
 python -m coverage report                                      # 166 Unit-Tests + Coverage-Gate
-pre-commit install && pre-commit run --all-files                # Lint-Hooks (optional)
+python -m pip install pre-commit && pre-commit install && pre-commit run --all-files  # Hooks optional
 ```
 
 CI (`.github/workflows/ci.yml`) hat zwei Gates, beide **blocking**:
