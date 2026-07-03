@@ -1,0 +1,63 @@
+==================================================================
+HexaNTK Gate-Run -- Coverage-Baseline + dataset_split-Testluecke + Provenance-CI
+Datum:    2026-07-03
+Branch:   claude/code-analysis-optimization-ajgyce
+Zweck:    (1) neue test_dataset_split_hex_v3.py (34 Tests) verifizieren
+          (2) Coverage-Baseline messen -> fail_under-Ratchet begruenden
+          (3) verify_sources.py als CI-Gate-Step belegen (17 Eintraege)
+Umgebung: Python 3.11.15 | torch 2.12.1 (lokal; CI-Pin: 2.6.0 cpu) | numpy 2.4.6 | ruff 0.15.8 | coverage 7.15.0
+==================================================================
+
+### [1/5] ruff check src scripts (E/F/W; Engine excluded via pyproject) ###
+All checks passed!
+ruff exit: 0
+
+### [2/5] python -m compileall src scripts ###
+RESULT: compile OK
+
+### [3/5] Provenance-Gate (scripts/verify_sources.py, fail-closed) ###
+[ OK ] warmstart_utils_hex_v3.py: 1FAB88FF9CCA6627
+
+[VERIFY-SOURCES] 17 Toolkit-Eintraege | PASS
+verify_sources exit: 0
+
+### [4/5] Engine-Gate (scripts/engine_gate.py, exit-korrekt) ###
+======================================================================
+Results: 26/26 PASS
+ALL TESTS PASSED -- HexaNTK v3.0.0 manuscript-ready.
+======================================================================
+
+[ENGINE-GATE] doctests 47/47 | selftests_ok=True | overall=PASS
+engine_gate exit: 0
+
+### [5/5] Toolkit unit tests + Branch-Coverage (Konfig: pyproject.toml) ###
+----------------------------------------------------------------------
+Ran 146 tests in 1.870s
+
+OK
+Name                                           Stmts   Miss Branch BrPart  Cover
+--------------------------------------------------------------------------------
+src/toolkit/benchmark_hex_v3.py                  121      3     24      3    96%
+src/toolkit/checkpoint_integration_hex_v3.py     132     12     38      6    88%
+src/toolkit/dataloader_utils_hex_v3.py            22      0      2      0   100%
+src/toolkit/dataset_split_hex_v3.py              131      5     56      5    95%
+src/toolkit/ema_hex_v3.py                         30     11      6      1    56%
+src/toolkit/failure_signature_hex_v3.py           41      3      0      0    93%
+src/toolkit/operator_adapter_hex_v3.py           128     12     94     12    89%
+src/toolkit/resume_utils_hex_v3.py                87     20     48     16    73%
+src/toolkit/runner_hex_v3.py                     268    191     90      0    25%
+src/toolkit/warmstart_utils_hex_v3.py            101     55     40     11    43%
+--------------------------------------------------------------------------------
+TOTAL                                           1061    312    398     54    68%
+coverage report exit (fail_under=65): 0
+
+==================================================================
+SUMMARY (verified 2026-07-03):
+  ruff check (src+scripts) .. All checks passed
+  compileall ................ OK
+  provenance (SOURCES.md) ... 17/17 PASS (neu: test_dataset_split_hex_v3.py)
+  engine doctests ........... 47/47 PASS
+  engine selftests .......... 26/26 PASS
+  toolkit unittests ......... 146/146 PASS (112 + 34 neue dataset_split-Tests)
+  branch coverage ........... 68% TOTAL (dataset_split 0% -> 95%); Gate fail_under=65
+==================================================================

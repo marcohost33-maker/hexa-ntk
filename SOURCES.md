@@ -33,3 +33,11 @@
 | C0EAD8D722BCE4D4 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_operator_adapter_hex_v3.py (in-repo modifiziert, Commit 0865915) |
 | 1F2A9DF150BDAF58 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_runner_hex_v3.py (in-repo modifiziert, Commit 0865915) |
 | 1FAB88FF9CCA6627 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\warmstart_utils_hex_v3.py |
+
+## src/toolkit/ — Ergaenzung 2026-07-03 (append-only)
+
+> Neues Testfile, **in-repo erstellt** (kein 0Archiv-Snapshot als Quelle): schliesst die
+> Coverage-Luecke von `dataset_split_hex_v3.py` (vorher 0% — einziges Modul ohne Tests).
+> `mtime` = Erstellzeit im Repo.
+
+| 8890E69A5CC1AA6B | 2026-07-03 03:51 | src/toolkit | in-repo erstellt, Branch claude/code-analysis-optimization-ajgyce: test_dataset_split_hex_v3.py |

@@ -28,6 +28,10 @@ jobs:
         run: ruff check src scripts   # blocking; Konfig + Engine-Exclude in pyproject.toml
       - name: compile
         run: python -m compileall src
+      - name: provenance (SOURCES.md)
+        # fail-closed: jedes Toolkit-Modul braucht einen SOURCES.md-Eintrag,
+        # jeder Eintrag muss zur aktuellen Datei passen (SHA-256, LF-normalisiert).
+        run: python scripts/verify_sources.py
 
   tests:
     name: tests (cpu)
@@ -44,6 +48,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install numpy
+          pip install coverage==7.15.0   # gepinnt wie ruff (reproduzierbares Gate)
           # CPU-Wheel ueber den dedizierten Index (kleiner, kein CUDA-Ballast);
           # torch 2.6.0 = vom Engine-Header geforderte SoTA-Baseline.
           pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
@@ -51,7 +56,10 @@ jobs:
         # Wrapper statt `python src/hexantk_v3.py`: letzteres exitet immer 0
         # (Rueckgabewert ungenutzt). engine_gate.py exitet != 0 bei Fehlern.
         run: python scripts/engine_gate.py
-      - name: toolkit unit tests
-        # bare imports der Module -> Discovery aus src/toolkit heraus
-        working-directory: src/toolkit
-        run: python -m unittest discover -p "test_*.py" -v
+      - name: toolkit unit tests + coverage
+        # Lauf vom Repo-Root, damit [tool.coverage.*] aus pyproject.toml greift
+        # (coverage.py liest Konfig nur aus dem CWD). -t src/toolkit haelt die
+        # bare imports der Module intakt (wie vorher Discovery aus src/toolkit).
+        run: |
+          python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" -v
+          python -m coverage report   # blocking: fail_under in pyproject.toml
