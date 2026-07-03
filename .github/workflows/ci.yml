@@ -44,6 +44,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          # requirements-dev.txt ist kein setup-python Default-Manifestname;
+          # deshalb explizit in den Cache-Key aufnehmen.
+          cache-dependency-path: requirements-dev.txt
       - name: install (cpu-only torch)
         run: |
           python -m pip install --upgrade pip
