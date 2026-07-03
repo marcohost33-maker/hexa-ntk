@@ -1,5 +1,4 @@
-# Dependabot - github-actions only (kein Python-Manifest im Repo; pip-Block erst
-# wenn pyproject/requirements landet - Schema-Lehre aza-backend PR#14).
+# Dependabot — GitHub Actions, Python-Dev-Tools und pre-commit Hooks.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -20,3 +19,35 @@ updates:
         applies-to: security-updates
         patterns: ["*"]
     labels: ["dependencies", "github-actions"]
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:10"
+      timezone: "Europe/Zurich"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      python-dev-tools:
+        applies-to: version-updates
+        patterns: ["ruff", "coverage"]
+    labels: ["dependencies", "python", "dev-tools"]
+
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:20"
+      timezone: "Europe/Zurich"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      pre-commit-hooks:
+        applies-to: version-updates
+        patterns: ["*"]
+    labels: ["dependencies", "pre-commit"]
