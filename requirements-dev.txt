@@ -1,0 +1,9 @@
+# requirements-dev.txt — HexaNTK CI/dev tool pins
+#
+# Zweck: Single source of truth fuer Python-Dev-Tools, die in CI-Gates laufen.
+# Runtime-/Forschungs-Abhaengigkeiten bleiben bewusst ausserhalb dieses Manifests:
+# - numpy wird im Testjob separat installiert,
+# - torch nutzt den dedizierten CPU-Wheel-Index,
+# - das Repo bleibt ein Forschungs-Repo, kein distributierbares Package.
+ruff==0.15.8
+coverage==7.15.0
