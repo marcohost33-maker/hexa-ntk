@@ -14,15 +14,78 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, Dataset
 
 from runner_hex_v3 import (
+    HexTrainingRunner,
     RunnerConfig,
     TrainingAnomalyDetector,
     dump_replay_capsule_safe,
 )
+
+
+# ------------------------------------------------------------------
+# Test fixtures: tiny model + dict-batch DataLoader
+# ------------------------------------------------------------------
+
+
+class _TinyModel(nn.Module):
+    """Minimal linear model; forward(x) -> (B, out_features)."""
+
+    def __init__(self, in_features: int = 4, out_features: int = 2) -> None:
+        super().__init__()
+        self.lin = nn.Linear(in_features, out_features)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.lin(x)
+
+
+class _DictDataset(Dataset):
+    """Dataset yielding {"input": ..., "target": ...} like the runner expects."""
+
+    def __init__(self, n: int = 4, in_features: int = 4, out_features: int = 2) -> None:
+        self.x = torch.randn(n, in_features)
+        self.y = torch.randn(n, out_features)
+
+    def __len__(self) -> int:
+        return len(self.x)
+
+    def __getitem__(self, idx: int):
+        return {"input": self.x[idx], "target": self.y[idx]}
+
+
+def _make_loaders(
+    n: int = 4, batch_size: int = 2, in_features: int = 4, out_features: int = 2
+):
+    train = DataLoader(
+        _DictDataset(n, in_features, out_features), batch_size=batch_size
+    )
+    val = DataLoader(
+        _DictDataset(n, in_features, out_features), batch_size=batch_size
+    )
+    return train, val
+
+
+def _make_runner(output_dir: Path, config: RunnerConfig | None = None, **kwargs):
+    """Build a CPU HexTrainingRunner with a tiny model over dict batches."""
+    torch.manual_seed(0)
+    cfg = config or RunnerConfig(output_dir=str(output_dir))
+    model = _TinyModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    train_loader, val_loader = _make_loaders()
+    return HexTrainingRunner(
+        cfg,
+        model,
+        optimizer,
+        train_loader,
+        val_loader,
+        device="cpu",
+        **kwargs,
+    )
 
 
 # ------------------------------------------------------------------
@@ -195,6 +258,330 @@ class TestFailureSignatureInRunner(unittest.TestCase):
         self.assertEqual(d["kind"], "NaN_or_Inf_Loss")
         self.assertEqual(d["step"], 100)
         self.assertIn("timestamp", d)
+
+
+# ------------------------------------------------------------------
+# Tests: dump_replay_capsule_safe error paths
+# ------------------------------------------------------------------
+
+
+class TestReplayCapsuleErrorPaths(unittest.TestCase):
+    def test_batch_tensor_copy_failure_is_stringified(self) -> None:
+        """A tensor whose .detach() raises must be stored as a diagnostic string,
+        not crash the capsule dump (partial-failure resilience)."""
+
+        class _Boom:
+            def detach(self):
+                raise RuntimeError("cannot copy")
+
+        model = nn.Linear(4, 2)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Force the is_tensor branch for our sentinel; real model tensors
+            # still copy fine (they are genuine tensors).
+            with mock.patch("runner_hex_v3.torch.is_tensor", return_value=True):
+                path = dump_replay_capsule_safe(
+                    {"bad": _Boom()}, model, Path(tmpdir), step=5
+                )
+            loaded = torch.load(path, weights_only=False)
+            self.assertIsInstance(loaded["batch_data"]["bad"], str)
+            self.assertIn("failed to copy", loaded["batch_data"]["bad"])
+
+    def test_model_state_dict_failure_is_stringified(self) -> None:
+        """If model.state_dict() raises, the capsule records a failure marker
+        instead of propagating (post-mortem must not itself explode)."""
+
+        class _BadStateModel(nn.Module):
+            def state_dict(self, *args, **kwargs):
+                raise RuntimeError("state export failed")
+
+        batch = {"input": torch.randn(2, 4)}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = dump_replay_capsule_safe(
+                batch, _BadStateModel(), Path(tmpdir), step=7
+            )
+            loaded = torch.load(path, weights_only=False)
+            self.assertIsInstance(loaded["model_state_dict"], str)
+            self.assertIn("failed", loaded["model_state_dict"])
+
+
+# ------------------------------------------------------------------
+# Tests: HexTrainingRunner construction
+# ------------------------------------------------------------------
+
+
+class TestRunnerConstruction(unittest.TestCase):
+    def test_init_creates_output_and_ckpt_manager(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "run"
+            runner = _make_runner(out)
+            self.assertTrue(out.exists())
+            self.assertIsNotNone(runner.ckpt_mgr)
+            self.assertIsNotNone(runner.anomaly_detector)
+            self.assertEqual(runner.global_step, 0)
+            self.assertEqual(runner.start_epoch, 0)
+
+    def test_init_ema_enabled_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = _make_runner(Path(tmpdir))
+            self.assertIsNotNone(runner.ema_model)
+
+    def test_init_ema_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = RunnerConfig(output_dir=str(Path(tmpdir)), use_ema=False)
+            runner = _make_runner(Path(tmpdir), config=cfg)
+            self.assertIsNone(runner.ema_model)
+
+    def test_init_no_grad_scaler_on_cpu(self) -> None:
+        """AMP GradScaler must stay None on CPU even if use_amp is requested
+        (GradScaler is CUDA-only)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = RunnerConfig(output_dir=str(Path(tmpdir)), use_amp=True)
+            runner = _make_runner(Path(tmpdir), config=cfg)
+            self.assertIsNone(runner.grad_scaler)
+
+
+# ------------------------------------------------------------------
+# Tests: single training step
+# ------------------------------------------------------------------
+
+
+class TestTrainOneStep(unittest.TestCase):
+    def _batch(self):
+        return {"input": torch.randn(2, 4), "target": torch.randn(2, 2)}
+
+    def test_healthy_step_updates_and_returns_grad_norm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = _make_runner(Path(tmpdir))
+            loss_val, is_healthy, grad_norm = runner._train_one_step(self._batch())
+            self.assertTrue(is_healthy)
+            self.assertIsNotNone(grad_norm)
+            self.assertGreaterEqual(grad_norm, 0.0)
+            self.assertTrue(torch.isfinite(torch.tensor(loss_val)))
+
+    def test_nan_loss_skips_update_and_dumps_capsule(self) -> None:
+        """NaN loss must NOT backprop/step (protect optimizer) and must dump a
+        replay capsule + failure signature."""
+
+        def nan_loss(pred, target):
+            return pred.sum() * float("nan")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner = _make_runner(out, loss_fn=nan_loss)
+            loss_val, is_healthy, grad_norm = runner._train_one_step(self._batch())
+            self.assertFalse(is_healthy)
+            self.assertIsNone(grad_norm)
+            self.assertFalse(torch.isfinite(torch.tensor(loss_val)))
+            capsules = list((out / "failures").glob("replay_capsule_*.pt"))
+            self.assertTrue(capsules, "expected a replay capsule on NaN anomaly")
+
+    def test_loss_spike_dumps_capsule_but_continues_update(self) -> None:
+        """A (non-NaN) loss spike is logged + capsuled, but training still
+        proceeds with a real optimizer step (spike != corruption)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            cfg = RunnerConfig(
+                output_dir=str(out), spike_multiplier=2.0, spike_window_size=10
+            )
+            runner = _make_runner(out, config=cfg)
+            # Prime detector so the rolling median is tiny -> next real MSE spikes.
+            runner.anomaly_detector.loss_history.extend([0.001] * 10)
+            loss_val, is_healthy, grad_norm = runner._train_one_step(self._batch())
+            self.assertTrue(is_healthy)  # non-NaN anomaly still updates
+            self.assertIsNotNone(grad_norm)
+            capsules = list((out / "failures").glob("replay_capsule_*.pt"))
+            self.assertTrue(capsules, "expected a replay capsule on loss spike")
+
+    def test_oom_runtime_error_triggers_rescue_and_reraises(self) -> None:
+        """An OOM RuntimeError must dump a capsule then re-raise (fail loud after
+        rescue)."""
+
+        class _OOMModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = nn.Linear(4, 2)
+
+            def forward(self, x):
+                raise RuntimeError("CUDA out of memory. Tried to allocate 8 GiB")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            torch.manual_seed(0)
+            model = _OOMModel()
+            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+            tl, vl = _make_loaders()
+            runner = HexTrainingRunner(
+                RunnerConfig(output_dir=str(out)),
+                model, opt, tl, vl, device="cpu",
+            )
+            with self.assertRaises(RuntimeError):
+                runner._train_one_step(self._batch())
+            capsules = list((out / "failures").glob("replay_capsule_*.pt"))
+            self.assertTrue(capsules, "OOM rescue should have dumped a capsule")
+
+    def test_non_oom_runtime_error_reraises_without_capsule(self) -> None:
+        """A non-OOM RuntimeError propagates unchanged (no false OOM rescue)."""
+
+        class _BrokenModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = nn.Linear(4, 2)
+
+            def forward(self, x):
+                raise RuntimeError("shape mismatch: not an OOM")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            model = _BrokenModel()
+            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+            tl, vl = _make_loaders()
+            runner = HexTrainingRunner(
+                RunnerConfig(output_dir=str(out)),
+                model, opt, tl, vl, device="cpu",
+            )
+            with self.assertRaisesRegex(RuntimeError, "shape mismatch"):
+                runner._train_one_step(self._batch())
+            self.assertFalse((out / "failures").exists())
+
+    def test_warmup_scales_learning_rate(self) -> None:
+        """During warmup (global_step < warmup_steps) the LR is scaled down from
+        the base LR by the linear warmup factor."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            cfg = RunnerConfig(
+                output_dir=str(out), warmup_steps=10, warmup_start_factor=0.5
+            )
+            runner = _make_runner(out, config=cfg)
+            runner.global_step = 0
+            runner._train_one_step(self._batch())
+            # base lr 0.1, factor at step 0 = 0.5 -> lr == 0.05
+            lr = runner.optimizer.param_groups[0]["lr"]
+            self.assertAlmostEqual(lr, 0.05, places=6)
+            self.assertEqual(runner.optimizer.param_groups[0]["_base_lr"], 0.1)
+
+
+# ------------------------------------------------------------------
+# Tests: epoch / validation / full run
+# ------------------------------------------------------------------
+
+
+class TestEpochAndValidation(unittest.TestCase):
+    def test_train_one_epoch_reports_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            cfg = RunnerConfig(output_dir=str(out), log_every_n_steps=1)
+            runner = _make_runner(out, config=cfg)
+            report = runner._train_one_epoch(epoch=0)
+            self.assertEqual(report["epoch"], 0)
+            self.assertIn("mean_loss", report)
+            self.assertIn("mean_grad_norm", report)
+            self.assertEqual(report["n_anomalies"], 0)
+            self.assertEqual(report["n_batches"], 2)  # 4 samples / batch 2
+            self.assertEqual(runner.global_step, 2)
+
+    def test_train_one_epoch_steps_scheduler(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            torch.manual_seed(0)
+            model = _TinyModel()
+            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+            sched = torch.optim.lr_scheduler.StepLR(opt, step_size=1, gamma=0.5)
+            tl, vl = _make_loaders()
+            runner = HexTrainingRunner(
+                RunnerConfig(output_dir=str(out)),
+                model, opt, tl, vl, scheduler=sched, device="cpu",
+            )
+            runner._train_one_epoch(epoch=0)
+            # StepLR with gamma 0.5 after one epoch step -> lr halved
+            self.assertAlmostEqual(opt.param_groups[0]["lr"], 0.05, places=6)
+
+    def test_validate_with_ema_returns_val_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = _make_runner(Path(tmpdir))
+            report = runner._validate(epoch=0)
+            self.assertIn("val_loss", report)
+            self.assertIn("val_nrmse", report)
+            self.assertTrue(report["used_ema"])
+            self.assertEqual(report["n_batches"], 2)
+
+    def test_validate_without_ema_uses_base_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            cfg = RunnerConfig(output_dir=str(out), use_ema=False)
+            runner = _make_runner(out, config=cfg)
+            report = runner._validate(epoch=0)
+            self.assertFalse(report["used_ema"])
+            self.assertGreaterEqual(report["val_loss"], 0.0)
+
+
+class TestFullRun(unittest.TestCase):
+    def test_run_end_to_end_writes_checkpoints_and_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            cfg = RunnerConfig(
+                output_dir=str(out), num_epochs=2, log_every_n_steps=1
+            )
+            runner = _make_runner(out, config=cfg)
+            summary = runner.run()
+            self.assertEqual(summary["final_epoch"], 1)
+            self.assertEqual(len(summary["history"]["train"]), 2)
+            self.assertEqual(len(summary["history"]["val"]), 2)
+            self.assertEqual(len(summary["history"]["checkpoints"]), 2)
+            self.assertIsNone(summary["resume_report"])
+            self.assertGreater(summary["global_step"], 0)
+            # best/last/resume checkpoints written by _save_checkpoints
+            ckpt_dir = out / "checkpoints"
+            self.assertTrue((ckpt_dir / "best.pt").exists())
+            self.assertTrue((ckpt_dir / "last.pt").exists())
+            self.assertTrue((ckpt_dir / "resume_last.pt").exists())
+
+
+# ------------------------------------------------------------------
+# Tests: resume
+# ------------------------------------------------------------------
+
+
+class TestResume(unittest.TestCase):
+    def test_maybe_resume_returns_none_when_not_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = _make_runner(Path(tmpdir))
+            self.assertIsNone(runner.maybe_resume())
+
+    def test_maybe_resume_nonexistent_path_returns_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            cfg = RunnerConfig(
+                output_dir=str(out), resume_from=str(out / "does_not_exist.pt")
+            )
+            runner = _make_runner(out, config=cfg)
+            self.assertIsNone(runner.maybe_resume())
+            self.assertEqual(runner.start_epoch, 0)
+
+    def test_maybe_resume_restores_epoch_and_step(self) -> None:
+        """End-to-end resume: run, then a fresh runner over the SAME run dir
+        resumes from the written resume checkpoint and advances start_epoch past
+        the saved epoch. (The runner loads via ckpt_mgr.resume_path in its own
+        output_dir; resume_from acts as the existence gate.)"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            # 1. Produce a resume checkpoint via a real run.
+            cfg1 = RunnerConfig(output_dir=str(out), num_epochs=1)
+            runner1 = _make_runner(out, config=cfg1)
+            runner1.run()
+            resume_ckpt = runner1.ckpt_mgr.resume_path
+            self.assertTrue(Path(resume_ckpt).exists())
+
+            # 2. Fresh runner over the same run dir resumes from it (trusted:
+            #    the resume payload carries Python/NumPy RNG state).
+            cfg2 = RunnerConfig(
+                output_dir=str(out),
+                resume_from=resume_ckpt,
+                resume_trusted=True,
+            )
+            runner2 = _make_runner(out, config=cfg2)
+            report = runner2.maybe_resume()
+            self.assertIsNotNone(report)
+            self.assertEqual(runner2.start_epoch, report["epoch"] + 1)
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@
 | 54FE8C5313B45824 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_dataloader_utils_hex_v3.py |
 | 574B8851CE411016 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_ema_hex_v3.py |
 | C0EAD8D722BCE4D4 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_operator_adapter_hex_v3.py (in-repo modifiziert, Commit 0865915) |
-| 1F2A9DF150BDAF58 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_runner_hex_v3.py (in-repo modifiziert, Commit 0865915) |
+| AB14B563E7D9EA9C | 2026-07-03 00:00 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_runner_hex_v3.py (in-repo modifiziert: HexTrainingRunner-Coverage-Tests 25%->79%, vero/hexa-ntk-coverage-ratchet-runner) |
 | 1FAB88FF9CCA6627 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\warmstart_utils_hex_v3.py |
 
 ## src/toolkit/ — Ergaenzung 2026-07-03 (append-only)
