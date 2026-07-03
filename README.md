@@ -8,7 +8,7 @@ Neural-Operator-Toolkit (GINO/GAOT-Familie) fuer physics-informed ML auf hexagon
 ## Kern
 
 - **Engine:** `src/hexantk_v3.py` (kanonisch = coworker-dde/src@main) + `src/toolkit/` (16 gehaertete Module, 2026-04-06)
-- **Evidenz:** Gate-Run 2026-05-26: **26/26 Selftests + 47/47 Doctests PASS** (`results/hexantk_v3.log`); Re-Verifikation 2026-07-03 inkl. **146/146 Toolkit-Unit-Tests + 68% Branch-Coverage + Provenance 17/17** (`results/2026-07-03_coverage-baseline_gate.log`); gehaertetes Experten-Review in `spec/`.
+- **Evidenz:** Gate-Run 2026-05-26: **26/26 Selftests + 47/47 Doctests PASS** (`results/hexantk_v3.log`); Re-Verifikation 2026-07-03 inkl. **166/166 Toolkit-Unit-Tests + 82% Branch-Coverage + Provenance 17/17** (`results/2026-07-03_coverage-baseline_gate.log`); gehaertetes Experten-Review in `spec/`.
 
 ## Struktur
 
@@ -21,6 +21,7 @@ archive/    Vorgaenger-Versionen (Lineage)
 docs/ADR/   Architektur-Entscheide
 docs/ROADMAP.md  Naechste Schritte + offene Lint-Schuld (ehrlich getrackt)
 SOURCES.md  Provenance: Quelle + SHA-256 + mtime je Datei
+requirements-dev.txt  Zentrale CI-/Dev-Tool-Pins fuer Ruff/Coverage
 ```
 
 ## Reproduzieren
@@ -28,21 +29,17 @@ SOURCES.md  Provenance: Quelle + SHA-256 + mtime je Datei
 Lokal (volle Evidenz):
 
 ```bash
+python -m pip install -r requirements-dev.txt                 # zentrale Tool-Pins: ruff/coverage
 python scripts/engine_gate.py                                  # 47 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 146 Unit-Tests + Coverage-Gate
+python -m coverage report                                      # 166 Unit-Tests + Coverage-Gate
 pre-commit install && pre-commit run --all-files                # Lint-Hooks (optional)
 ```
 
 CI (`.github/workflows/ci.yml`) hat zwei Gates, beide **blocking**:
-- **gate** — Syntax (`compileall`) + Lint (`ruff check src scripts`, ruff gepinnt; Konfig in
-  `pyproject.toml`; kanonische Engine `src/hexantk_v3.py` ist vom Lint-Gate ausgenommen und wird
-  ueber coworker-dde gepflegt) + Provenance (`scripts/verify_sources.py`, fail-closed gegen
-  `SOURCES.md`).
-- **tests (cpu)** — installiert CPU-`torch` + `numpy` + `coverage` (gepinnt), faehrt
-  Engine-Doctests/Selftests (`scripts/engine_gate.py`, exit-korrekt) + die 146
-  Toolkit-Unit-Tests unter Branch-Coverage (`fail_under` in `pyproject.toml`).
+- **gate** — installiert zentrale Dev-Tool-Pins aus `requirements-dev.txt`; Syntax (`compileall`) + Lint (`ruff check src scripts`, Konfig in `pyproject.toml`; kanonische Engine `src/hexantk_v3.py` ist vom Lint-Gate ausgenommen und wird ueber coworker-dde gepflegt) + Provenance (`scripts/verify_sources.py`, fail-closed gegen `SOURCES.md`).
+- **tests (cpu)** — installiert zentrale Dev-Tool-Pins aus `requirements-dev.txt`, CPU-`torch` + `numpy`, faehrt Engine-Doctests/Selftests (`scripts/engine_gate.py`, exit-korrekt) + die 166 Toolkit-Unit-Tests unter Branch-Coverage (`fail_under` in `pyproject.toml`).
 
 ## Verwandte Repos
 
