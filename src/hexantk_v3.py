@@ -95,7 +95,9 @@ def module_hash() -> str:
     True
     """
     import inspect
-    src = inspect.getsource(inspect.getmodule(module_hash))
+    mod = inspect.getmodule(module_hash)
+    assert mod is not None  # module_hash is defined in this module
+    src = inspect.getsource(mod)
     return hashlib.sha256(src.encode("utf-8")).hexdigest()
 
 
