@@ -23,7 +23,7 @@ jobs:
       - name: install
         run: |
           python -m pip install --upgrade pip
-          pip install ruff==0.15.8   # gepinnt: reproduzierbares Lint-Gate (Supply-Chain)
+          pip install -r requirements-dev.txt   # zentrale Pins: ruff/coverage
       - name: ruff
         run: ruff check src scripts   # blocking; Konfig + Engine-Exclude in pyproject.toml
       - name: compile
@@ -47,8 +47,8 @@ jobs:
       - name: install (cpu-only torch)
         run: |
           python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt   # zentrale Pins: ruff/coverage
           pip install numpy
-          pip install coverage==7.15.0   # gepinnt wie ruff (reproduzierbares Gate)
           # CPU-Wheel ueber den dedizierten Index (kleiner, kein CUDA-Ballast);
           # torch 2.6.0 = vom Engine-Header geforderte SoTA-Baseline.
           pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
