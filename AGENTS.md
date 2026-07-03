@@ -11,8 +11,12 @@ KI-Coding-Agent-Anweisungen. Reihenfolge: §1 Working agreements > §2 Conventio
 ## Project
 - **Was:** Neural-Operator-Toolkit (GINO/GAOT-Familie) fuer physics-informed ML auf hexagonalen Gittern: Checkpoint/EMA/DDP-Integration, Dataset-Split, Failure-Signatures, Benchmark.
 - **Stack:** Python >= 3.10 (numpy/scipy/torch fuer volle Laeufe; CI = Syntax + Lint).
-- **Provenance:** `SOURCES.md` ist die Integritaets-Wahrheit (SHA-256 je Quelldatei). Kanonische
-  v3-Engines leben zusaetzlich in `coworker-dde/src` — Aenderungen dort und hier synchron halten.
+- **Provenance:** `SOURCES.md` ist der Provenance-/Lineage-Index — Quelle + mtime + ein
+  16-hex **SHA-256-Prefix-Locator** (64 bit) des *importierten Originals*, **kein**
+  Voll-Integritaets-Digest der aktuellen Repo-Bytes (Eintraege append-only, werden bei
+  spaeteren In-Repo-Aenderungen nicht neu geschrieben; vgl. u6 Option A / k-theory #13).
+  Kanonische v3-Engines leben zusaetzlich in `coworker-dde/src` — Aenderungen dort und
+  hier synchron halten (Byte-Mirror, per git-Blob verifiziert).
 
 ## Working agreements
 1. **Reality-Anchor.** "Tests N/N PASS (verified <date>)" statt "sollte gehen". Gate-Logs in `results/` sind die Evidenz.
