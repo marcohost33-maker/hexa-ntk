@@ -73,7 +73,7 @@ import logging
 import os
 import tempfile
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -1036,7 +1036,7 @@ def test_failure_signature_basic() -> bool:
             loaded = json.load(f)
         assert loaded["kind"] == "CUDA_OOM"
         assert loaded["step"] == 42
-    print(f"  failure registered, fields intact")
+    print("  failure registered, fields intact")
     return True
 
 
@@ -1426,7 +1426,7 @@ def test_gaot_config_defaults_match_paper() -> bool:
     assert cfg.vit_heads == 8
     assert cfg.vit_hidden_dim == 256
     assert cfg.matches_paper_default()
-    print(f"  GAOTConfig defaults confirmed vs arXiv:2505.18781 Table 4")
+    print("  GAOTConfig defaults confirmed vs arXiv:2505.18781 Table 4")
     return True
 
 
@@ -1479,7 +1479,7 @@ def test_gaot_context_requires_config() -> bool:
         return False
     except ValueError as e:
         assert "gaot_config" in str(e).lower()
-    print(f"  GAOT rejected without gaot_config")
+    print("  GAOT rejected without gaot_config")
     return True
 
 
@@ -1520,7 +1520,7 @@ def test_gaot_context_dim_mismatch() -> bool:
         gaot_config=cfg_2d,
     )
     ctx_ok.validate(OperatorType.GAOT)  # should not raise
-    print(f"  2D-vs-3D mismatch caught, 2D paper-default passes")
+    print("  2D-vs-3D mismatch caught, 2D paper-default passes")
     return True
 
 
@@ -1569,7 +1569,7 @@ def run_all_tests() -> bool:
                 print(f"  -> PASS ({dt:.3f}s)")
                 passed += 1
             else:
-                print(f"  -> FAIL")
+                print("  -> FAIL")
                 failed += 1
         except Exception as e:
             print(f"  -> FAIL: {type(e).__name__}: {e}")
@@ -1586,6 +1586,10 @@ def run_all_tests() -> bool:
 
 if __name__ == "__main__":
     import doctest
+    import sys
+
     r = doctest.testmod(verbose=False)
+    doctests_ok = r.failed == 0
     print(f"Doctests: {r.attempted - r.failed}/{r.attempted} PASS")
-    run_all_tests()
+    selftests_ok = run_all_tests()
+    sys.exit(0 if doctests_ok and selftests_ok else 1)

@@ -39,20 +39,17 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 - [x] **CI-Test-Gate** — neuer `tests (cpu)`-Job: CPU-torch + Engine-Doctests/Selftests
   (`scripts/engine_gate.py`, exit-korrekt) + 110 Toolkit-Unit-Tests. _Evidenz: s.o._
 - [x] **Pre-Commit-Hooks** — `.pre-commit-config.yaml` (ruff lint + Hygiene/Secret-Hooks).
+- [x] **Engine-Lint-Schuld + `__main__` exit-Code (coworker-dde-Sync).** In der kanonischen
+  Quelle `coworker-dde/src/hexantk_v3.py` gefixt (F401 `field` Z.76, F541 5× f-string ohne
+  Platzhalter, `__main__` fail-closed via `sys.exit`) und byte-identisch hierher gesynct
+  (git-Blob `3dd0b2af55bedd0b7385e9f6569ce84a0f89cc7c`, verifiziert `git hash-object` beide
+  Repos). Ruff (E/F/W, line-length 120) auf der Engine jetzt clean (6→0). `src/hexantk_v3.py`
+  bleibt bewusst in `extend-exclude` (Pflege via coworker-dde, kein hiesiger Lint-Enforce —
+  verhindert, dass ein coworker-dde-Edit die HexaNTK-CI bricht); volle Lint-Enforcement wäre
+  optional und ist ein separater Entscheid. _Evidenz: coworker-dde-Fix-PR + Engine-Gate PASS._
 
 ## Offen
 
-- [ ] **Engine-Lint-Schuld (coworker-dde-Sync).** `src/hexantk_v3.py` ist im hiesigen Lint-Gate
-  via `extend-exclude` ausgenommen (kanonisch, Sync-Disziplin). Ruff (E/F/W) findet dort 6
-  echte, triviale Defekte, die in der kanonischen Quelle `coworker-dde/src` gefixt und dann
-  hierher gesynct werden sollten — **nicht** hier direkt editieren (sonst Divergenz):
-  - `F401` `dataclasses.field` unused — Z. 76
-  - `F541` f-string ohne Platzhalter — Z. 1037, 1427, 1480, 1521, 1570
-  Nach dem Sync kann `src/hexantk_v3.py` aus `extend-exclude` entfernt und voll lint-enforced
-  werden.
-- [ ] **Engine `__main__` exit-Code.** `python src/hexantk_v3.py` exitet immer 0 (Rueckgabewert
-  von `run_all_tests()` ungenutzt). In coworker-dde fixen: `sys.exit(0 if run_all_tests() and
-  doctests_ok else 1)`. Bis dahin deckt `scripts/engine_gate.py` das Gate ab.
 - [ ] **Coverage-Ratchet Richtung 80–90%.** Ist 68% (Branch, 2026-07-03). Schwaechste Module,
   in Prioritaetsreihenfolge des Nutzens: `runner_hex_v3.py` **25%** (191 Stmts offen — groesster
   Hebel), `warmstart_utils_hex_v3.py` **43%**, `ema_hex_v3.py` **56%**, `resume_utils_hex_v3.py`
