@@ -11,7 +11,7 @@
 # hier nicht per torch-Test verifizierbare Stil-/Typing-Umschreibungen.
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py312"
 line-length = 120
 
 # Kanonische Engine: src/hexantk_v3.py ist byte-identisch mit coworker-dde/src
