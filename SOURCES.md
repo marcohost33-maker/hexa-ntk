@@ -29,7 +29,7 @@
 | DE5B1FE6EA89314D | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_benchmark_hex_v3.py (in-repo modifiziert, Commit 0865915) |
 | E18BF23374494EE9 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_checkpoint_integration_hex_v3.py (in-repo modifiziert, Commit c6628d8) |
 | 54FE8C5313B45824 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_dataloader_utils_hex_v3.py |
-| 574B8851CE411016 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_ema_hex_v3.py |
+| B5C8477B5F985FD3 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_ema_hex_v3.py (in-repo modifiziert: Fallback-/Load-Pfad-Tests 56%->100%, claude/hexa-ntk-repo-analysis-3vcvxi) |
 | C0EAD8D722BCE4D4 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_operator_adapter_hex_v3.py (in-repo modifiziert, Commit 0865915) |
 | AB14B563E7D9EA9C | 2026-07-03 00:00 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_runner_hex_v3.py (in-repo modifiziert: HexTrainingRunner-Coverage-Tests 25%->79%, vero/hexa-ntk-coverage-ratchet-runner) |
 | 1FAB88FF9CCA6627 | 2026-04-06 22:50 | src/toolkit | G:\Meine Ablage\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\warmstart_utils_hex_v3.py |
@@ -41,3 +41,13 @@
 > `mtime` = Erstellzeit im Repo.
 
 | 8890E69A5CC1AA6B | 2026-07-03 03:51 | src/toolkit | in-repo erstellt, Branch claude/code-analysis-optimization-ajgyce: test_dataset_split_hex_v3.py |
+
+## src/toolkit/ — Ergaenzung 2026-08-08 (append-only)
+
+> Zwei neue Testfiles, **in-repo erstellt** (kein 0Archiv-Snapshot als Quelle): schliessen die
+> Coverage-Luecken von `warmstart_utils_hex_v3.py` (43% -> 94%) und `resume_utils_hex_v3.py`
+> (76% -> 96%) — beide Module hatten vorher kein eigenes Testfile, nur inzidentelle Abdeckung.
+> `mtime` = Erstellzeit im Repo.
+
+| C8B771AE5244D0D3 | 2026-08-08 14:10 | src/toolkit | in-repo erstellt, Branch claude/hexa-ntk-repo-analysis-3vcvxi: test_warmstart_utils_hex_v3.py |
+| 0C8A071D597A6494 | 2026-08-08 14:10 | src/toolkit | in-repo erstellt, Branch claude/hexa-ntk-repo-analysis-3vcvxi: test_resume_utils_hex_v3.py |

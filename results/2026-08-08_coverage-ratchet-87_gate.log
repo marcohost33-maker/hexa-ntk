@@ -1,0 +1,52 @@
+==================================================================
+HexaNTK Gate-Run -- Coverage-Ratchet 79->87 (warmstart/ema/resume-Testluecken)
+Datum:    2026-08-08
+Branch:   claude/hexa-ntk-repo-analysis-3vcvxi
+Zweck:    (1) neue test_warmstart_utils_hex_v3.py (27 Tests) + test_resume_utils_hex_v3.py
+              (21 Tests) + test_ema_hex_v3.py-Erweiterung (+4 Tests) verifizieren
+          (2) Coverage 82% -> 90% belegen -> fail_under-Ratchet 79 -> 87 begruenden
+          (3) Provenance-Gate mit 19 Eintraegen (2 neue Testfiles, append-only) belegen
+Umgebung: Python 3.12.3 | torch 2.6.0+cu124 (lokal; CI-Pin: 2.6.0 cpu) | numpy 2.5.1 | ruff 0.15.20 | coverage 7.15.0
+==================================================================
+
+### [1/5] ruff check src scripts (E/F/W; Engine excluded via pyproject) ###
+All checks passed!
+ruff exit: 0
+
+### [2/5] python -m compileall src scripts ###
+RESULT: compile OK
+
+### [3/5] Provenance-Gate (scripts/verify_sources.py, fail-closed) ###
+[ OK ] warmstart_utils_hex_v3.py: 1FAB88FF9CCA6627
+
+[VERIFY-SOURCES] 19 Toolkit-Eintraege | PASS
+verify_sources exit: 0
+
+### [4/5] Engine-Gate (scripts/engine_gate.py, exit-korrekt) ###
+======================================================================
+Results: 26/26 PASS
+ALL TESTS PASSED -- HexaNTK v3.0.0 manuscript-ready.
+======================================================================
+
+[ENGINE-GATE] doctests 47/47 | selftests_ok=True | overall=PASS
+engine_gate exit: 0
+
+### [5/5] Toolkit unit tests + Branch-Coverage (Konfig: pyproject.toml) ###
+Ran 218 tests in 2.428s
+
+OK
+Name                                           Stmts   Miss Branch BrPart  Cover
+--------------------------------------------------------------------------------
+src/toolkit/benchmark_hex_v3.py                  121      3     24      3    96%
+src/toolkit/checkpoint_integration_hex_v3.py     132     11     38      5    89%
+src/toolkit/dataloader_utils_hex_v3.py            22      0      2      0   100%
+src/toolkit/dataset_split_hex_v3.py              131      5     56      5    95%
+src/toolkit/ema_hex_v3.py                         30      0      6      0   100%
+src/toolkit/failure_signature_hex_v3.py           41      3      0      0    93%
+src/toolkit/operator_adapter_hex_v3.py           128     12     94     12    89%
+src/toolkit/resume_utils_hex_v3.py                87      3     48      2    96%
+src/toolkit/runner_hex_v3.py                     268     41     90     15    79%
+src/toolkit/warmstart_utils_hex_v3.py            101      7     40      1    94%
+--------------------------------------------------------------------------------
+TOTAL                                           1061     85    398     43    90%
+coverage exit (fail_under=87): 0

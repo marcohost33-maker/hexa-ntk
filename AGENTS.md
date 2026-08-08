@@ -10,7 +10,7 @@ KI-Coding-Agent-Anweisungen. Reihenfolge: §1 Working agreements > §2 Conventio
 
 ## Project
 - **Was:** Neural-Operator-Toolkit (GINO/GAOT-Familie) fuer physics-informed ML auf hexagonalen Gittern: Checkpoint/EMA/DDP-Integration, Dataset-Split, Failure-Signatures, Benchmark.
-- **Stack:** Python >= 3.10 (numpy/scipy/torch fuer volle Laeufe; CI = Syntax + Lint).
+- **Stack:** Python >= 3.12 (Floor seit #19; numpy/scipy/torch fuer volle Laeufe; CI = Syntax + Lint + Provenance + Tests/Coverage).
 - **Provenance:** `SOURCES.md` ist der Provenance-/Lineage-Index — Quelle + mtime + ein
   16-hex **SHA-256-Prefix-Locator** (64 bit) des *importierten Originals*, **kein**
   Voll-Integritaets-Digest der aktuellen Repo-Bytes (Eintraege append-only, werden bei

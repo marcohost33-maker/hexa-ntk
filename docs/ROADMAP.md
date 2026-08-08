@@ -48,12 +48,26 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   verhindert, dass ein coworker-dde-Edit die HexaNTK-CI bricht); volle Lint-Enforcement wäre
   optional und ist ein separater Entscheid. _Evidenz: coworker-dde-Fix-PR + Engine-Gate PASS._
 
+- [x] **Coverage-Ratchet 80–90% erreicht (Ist 90%, fail_under 79→87).** Die drei
+  schwaechsten Module per dedizierter Tests geschlossen: `warmstart_utils_hex_v3.py`
+  **43%→94%** (neu `test_warmstart_utils_hex_v3.py`, 27 Tests: safe-load-Pfad inkl.
+  numpy-safe_globals-Fallback + fail-closed bei nicht-whitelistbaren Objekten,
+  Prefix-Strip/-Map, dtype-Toleranz, diagnose_checkpoint_safety), `resume_utils_hex_v3.py`
+  **76%→96%** (neu `test_resume_utils_hex_v3.py`, 21 Tests: Payload-Komposition,
+  requires_trusted_load-Vertrag, RNG-Roundtrips, safe-vs-trusted-Load, Validierungspfade),
+  `ema_hex_v3.py` **56%→100%** (test_ema-Erweiterung: PyTorch<2.0-Fallback mit
+  EMA-Mathe-Check, Legacy-Load-Pfade). Suite 166→218 Tests. SOURCES.md append-only
+  ergaenzt (2 neue Testfiles, SHA-First); test_ema-Zeile aktualisiert (Praezedenz PR #12).
+  _Evidenz: 218/218 PASS, 90% Branch, `results/2026-08-08_coverage-ratchet-87_gate.log`._
+
 ## Offen
 
-- [ ] **Coverage-Ratchet Richtung 80–90%.** Ist 68% (Branch, 2026-07-03). Schwaechste Module,
-  in Prioritaetsreihenfolge des Nutzens: `runner_hex_v3.py` **25%** (191 Stmts offen — groesster
-  Hebel), `warmstart_utils_hex_v3.py` **43%**, `ema_hex_v3.py` **56%**, `resume_utils_hex_v3.py`
-  **73%**. Pro geschlossener Luecke `fail_under` in `pyproject.toml` nachziehen.
+- [ ] **Rest-Coverage `runner_hex_v3.py` 79%.** Letztes Modul unter 89% (41 Stmts offen,
+  u.a. DDP-/Distributed-Pfade, die ohne Multi-Prozess-Setup schwer testbar sind). Nutzen
+  gegen Aufwand abwaegen; bei Schliessung `fail_under` weiter nachziehen. Die uebrigen
+  offenen Zeilen der Suite sind umgebungsabhaengig (CUDA-only-RNG-Zweige in
+  `resume_utils`, PyTorch<2.6-ImportError-Pfade in `warmstart_utils`) — auf CPU-CI
+  prinzipiell nicht erreichbar, kein ehrlicher Testgegenstand.
 
 ## Zurueckgestellt (bewusst, mit Begruendung)
 
