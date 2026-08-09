@@ -303,6 +303,9 @@ class HexTrainingRunner:
         if self.config.resume_from is not None:
             resume_path = Path(self.config.resume_from)
             if resume_path.exists():
+                # path explizit durchreichen: vorher las load_resume immer den
+                # manager-eigenen resume_path — resume_from war nur Existenz-
+                # Gate, ein fremder Pfad wurde still ignoriert (Footgun).
                 report = self.ckpt_mgr.load_resume(
                     model=self.model,
                     optimizer=self.optimizer,
@@ -310,6 +313,7 @@ class HexTrainingRunner:
                     grad_scaler=self.grad_scaler,
                     map_location=self.device,
                     trusted=self.config.resume_trusted,
+                    path=resume_path,
                 )
                 self.start_epoch = report["epoch"] + 1
                 if report.get("global_step") is not None:

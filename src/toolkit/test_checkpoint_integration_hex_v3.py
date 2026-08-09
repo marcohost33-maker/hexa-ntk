@@ -33,6 +33,7 @@ from checkpoint_integration_hex_v3 import (
     BestCheckpointPolicy,
     CheckpointIntegrationManager,
 )
+from resume_utils_hex_v3 import save_resume_checkpoint
 
 
 # ------------------------------------------------------------------
@@ -409,6 +410,36 @@ class TestCheckpointIntegrationManager(unittest.TestCase):
                 torch.equal(model.state_dict()[key], dst_model.state_dict()[key]),
                 msg=f"Mismatch in {key}",
             )
+
+    def test_load_resume_explicit_path_overrides_manager_default(self) -> None:
+        """load_resume(path=...) laedt exakt die benannte Datei — nicht den
+        manager-eigenen resume_path (Regression fuer den resume_from-Footgun
+        des Runners: Existenz-Check und Load muessen dieselbe Datei meinen)."""
+        mgr = self._make_manager()
+        model = build_test_model()
+        optimizer = build_test_optimizer(model)
+        run_one_step(model, optimizer)
+
+        # Manager-eigener resume-Checkpoint: epoch=1.
+        mgr.save_resume(
+            model=model, optimizer=optimizer, epoch=1,
+            include_python_rng=False, include_numpy_rng=False,
+        )
+        # Fremder Checkpoint an anderem Pfad: epoch=9.
+        foreign = Path(self.tmpdir.name) / "foreign" / "resume.pt"
+        save_resume_checkpoint(
+            foreign, model=model, optimizer=optimizer, epoch=9,
+            include_python_rng=False, include_numpy_rng=False,
+        )
+
+        dst_model = build_test_model()
+        dst_optimizer = build_test_optimizer(dst_model)
+        report = mgr.load_resume(
+            model=dst_model, optimizer=dst_optimizer, path=foreign,
+            restore_rng=False,
+        )
+        self.assertEqual(report["epoch"], 9)
+        self.assertEqual(report["checkpoint_path"], str(foreign))
 
     def test_resume_with_rng_requires_trusted(self) -> None:
         """Resume with Python/NumPy RNG needs trusted=True."""

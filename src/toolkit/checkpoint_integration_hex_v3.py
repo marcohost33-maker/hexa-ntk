@@ -511,6 +511,7 @@ class CheckpointIntegrationManager:
         restore_rng: bool = True,
         strict: bool = True,
         trusted: bool = False,
+        path: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
         """
         Load a resume checkpoint.
@@ -518,9 +519,13 @@ class CheckpointIntegrationManager:
         Delegates to load_resume_checkpoint from resume_utils_hex_v3.py
         which handles the correct restore order:
         1. model, 2. optimizer, 3. scheduler, 4. grad_scaler, 5. RNG
+
+        path: explicit checkpoint file to load; defaults to this manager's
+        own resume_path. Callers resuming from a foreign run dir MUST pass
+        it, otherwise the manager would silently read its own path.
         """
         return load_resume_checkpoint(
-            self.resume_path,
+            path if path is not None else self.resume_path,
             model=model,
             optimizer=optimizer,
             scheduler=scheduler,

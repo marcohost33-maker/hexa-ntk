@@ -11,10 +11,12 @@ Covers:
 """
 from __future__ import annotations
 
+import pickle
 import random
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
@@ -177,7 +179,11 @@ class TestLoadResumeCheckpoint(unittest.TestCase):
         self.tmpdir = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
 
-    def _save_safe_checkpoint(self, **kwargs: object) -> tuple[Path, nn.Module, torch.optim.Optimizer]:
+    def _save_safe_checkpoint(
+        self,
+        extra: Optional[Dict[str, Any]] = None,
+        include_dataloader_state: Optional[Dict[str, Any]] = None,
+    ) -> tuple[Path, nn.Module, torch.optim.Optimizer]:
         """Checkpoint ohne python/numpy-RNG -> safe path (weights_only=True) laedt."""
         model, opt = _make_training_state()
         path = self.tmpdir / "resume.pt"
@@ -188,7 +194,8 @@ class TestLoadResumeCheckpoint(unittest.TestCase):
             epoch=4,
             include_python_rng=False,
             include_numpy_rng=False,
-            **kwargs,  # type: ignore[arg-type]
+            extra=extra,
+            include_dataloader_state=include_dataloader_state,
         )
         return path, model, opt
 
@@ -270,14 +277,19 @@ class TestLoadResumeCheckpoint(unittest.TestCase):
         self.assertTrue(report["grad_scaler_restored"])
         self.assertEqual(scheduler2.last_epoch, scheduler.last_epoch)
 
-    def test_trusted_path_required_for_python_rng(self) -> None:
+    def test_trusted_path_required_for_full_rng_payload(self) -> None:
+        # Der volle RNG-Payload erzwingt den trusted path. Konkreter Ausloeser
+        # (verifiziert torch 2.6): der NUMPY-RNG-State (ndarray/str im Tuple);
+        # Python-getstate() allein besteht aus Primitives und wuerde safe laden
+        # — requires_trusted_load ist fuer python_rng bewusst konservativ.
         model, opt = _make_training_state()
         path = self.tmpdir / "trusted.pt"
-        save_resume_checkpoint(path, model=model, optimizer=opt, epoch=6)
+        report = save_resume_checkpoint(path, model=model, optimizer=opt, epoch=6)
+        self.assertTrue(report["requires_trusted_load"])
 
         model2, opt2 = _make_training_state()
-        # Safe path must fail closed on python/numpy RNG objects...
-        with self.assertRaises(Exception):
+        # Safe path must fail closed (kein stiller Teil-Load) ...
+        with self.assertRaises(pickle.UnpicklingError):
             load_resume_checkpoint(path, model=model2, optimizer=opt2, trusted=False)
         # ...trusted path loads and restores all RNG streams.
         report = load_resume_checkpoint(path, model=model2, optimizer=opt2, trusted=True)

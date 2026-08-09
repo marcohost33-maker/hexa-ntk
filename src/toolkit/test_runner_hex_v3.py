@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from unittest import mock
 
@@ -20,6 +21,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
+from operator_adapter_hex_v3 import OperatorAdapterV3, OperatorBatchContext
+from resume_utils_hex_v3 import save_resume_checkpoint
 from runner_hex_v3 import (
     HexTrainingRunner,
     RunnerConfig,
@@ -560,8 +563,8 @@ class TestResume(unittest.TestCase):
     def test_maybe_resume_restores_epoch_and_step(self) -> None:
         """End-to-end resume: run, then a fresh runner over the SAME run dir
         resumes from the written resume checkpoint and advances start_epoch past
-        the saved epoch. (The runner loads via ckpt_mgr.resume_path in its own
-        output_dir; resume_from acts as the existence gate.)"""
+        the saved epoch. (Seit dem path-Fix laedt maybe_resume genau die in
+        resume_from benannte Datei — nicht mehr implizit ckpt_mgr.resume_path.)"""
         with tempfile.TemporaryDirectory() as tmpdir:
             out = Path(tmpdir)
             # 1. Produce a resume checkpoint via a real run.
@@ -582,6 +585,238 @@ class TestResume(unittest.TestCase):
             report = runner2.maybe_resume()
             self.assertIsNotNone(report)
             self.assertEqual(runner2.start_epoch, report["epoch"] + 1)
+
+    def test_maybe_resume_loads_the_named_foreign_checkpoint(self) -> None:
+        """Regression fuer den resume_from-Footgun: ein Checkpoint AUSSERHALB
+        des Runner-output_dir muss geladen werden (vorher: Existenz-Check auf
+        resume_from, Load aber stumm vom manager-eigenen resume_path)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "run"
+            foreign = Path(tmpdir) / "elsewhere" / "resume.pt"
+            torch.manual_seed(0)
+            src_model = _TinyModel()
+            src_opt = torch.optim.SGD(src_model.parameters(), lr=0.1)
+            save_resume_checkpoint(
+                foreign,
+                model=src_model,
+                optimizer=src_opt,
+                epoch=7,
+                global_step=42,
+                include_python_rng=False,
+                include_numpy_rng=False,
+            )
+
+            cfg = RunnerConfig(output_dir=str(out), resume_from=str(foreign))
+            runner = _make_runner(out, config=cfg)
+            report = runner.maybe_resume()
+
+            self.assertIsNotNone(report)
+            self.assertEqual(report["checkpoint_path"], str(foreign))
+            self.assertEqual(runner.start_epoch, 8)
+            self.assertEqual(runner.global_step, 42)  # global_step-Branch
+            for k, v in src_model.state_dict().items():
+                self.assertTrue(
+                    torch.equal(v, runner.model.state_dict()[k]), msg=f"Mismatch in {k}"
+                )
+
+
+# ------------------------------------------------------------------
+# Tests: Coverage-Hardening (EMA-Fallback, AMP-Scaler-Pfad, Adapter-Pfade)
+# ------------------------------------------------------------------
+
+
+class _AdapterKwModel(nn.Module):
+    """[B,N,C]->[B,N,C]-Modell, nimmt Adapter-kwargs entgegen und merkt sie sich."""
+
+    def __init__(self, channels: int = 4) -> None:
+        super().__init__()
+        self.lin = nn.Linear(channels, channels)
+        self.seen_kwargs: list[list[str]] = []
+
+    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        self.seen_kwargs.append(sorted(kwargs))
+        return self.lin(x)
+
+
+def _adapter_batch(channels: int = 4, n_nodes: int = 3, **ctx_kwargs):
+    x = torch.randn(2, n_nodes, channels)
+    target = torch.randn(2, n_nodes, channels)
+    ctx = OperatorBatchContext(**ctx_kwargs)
+    return {"input": x, "target": target, "context": ctx}
+
+
+class TestEmaFallbackAndScalerPath(unittest.TestCase):
+    def test_init_disables_ema_when_fused_fn_unavailable(self) -> None:
+        # PyTorch < 2.0 Pfad: get_ema_multi_avg_fn fehlt -> EMA aus, Warnung.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.object(
+                torch.optim.swa_utils,
+                "get_ema_multi_avg_fn",
+                side_effect=AttributeError("PyTorch < 2.0"),
+            ):
+                with self.assertLogs("runner_hex_v3", level="WARNING") as cm:
+                    runner = _make_runner(Path(tmpdir))
+            self.assertIsNone(runner.ema_model)
+            self.assertTrue(any("EMA disabled" in line for line in cm.output))
+
+    def test_train_step_via_grad_scaler_branch(self) -> None:
+        # GradScaler("cuda") ist auf CPU-only-Boxen disabled, durchlaeuft aber
+        # funktional denselben scale/unscale_/step/update-Codepfad.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = _make_runner(Path(tmpdir))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")  # "CUDA is not available"-Warnung
+                runner.grad_scaler = torch.amp.GradScaler("cuda")
+            batch = next(iter(runner.train_loader))
+            loss_val, is_healthy, grad_norm = runner._train_one_step(batch)
+            self.assertTrue(is_healthy)
+            self.assertIsNotNone(grad_norm)
+
+    def test_warmup_reuses_cached_base_lr_on_second_step(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            cfg = RunnerConfig(
+                output_dir=str(out), warmup_steps=4, warmup_start_factor=0.25
+            )
+            runner = _make_runner(out, config=cfg)
+            batch = next(iter(runner.train_loader))
+            runner._train_one_step(batch)
+            runner.global_step += 1
+            runner._train_one_step(batch)  # _base_lr existiert bereits
+            pg = runner.optimizer.param_groups[0]
+            self.assertIn("_base_lr", pg)
+            # Schritt 1 von 4: factor = 0.25 + 0.75 * (1/4)
+            self.assertAlmostEqual(pg["lr"], pg["_base_lr"] * 0.4375, places=6)
+
+    def test_oom_capsule_dump_failure_still_reraises(self) -> None:
+        # Wenn im OOM-Rettungspfad auch der Capsule-Dump scheitert, muss die
+        # urspruengliche OOM-Exception trotzdem propagieren (kein Maskieren).
+        class _OOMLoss:
+            def __call__(self, pred, target):
+                raise RuntimeError("CUDA out of memory (simuliert)")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = _make_runner(Path(tmpdir), loss_fn=_OOMLoss())
+            batch = next(iter(runner.train_loader))
+            with mock.patch(
+                "runner_hex_v3.dump_replay_capsule_safe",
+                side_effect=OSError("disk full"),
+            ):
+                with self.assertLogs("runner_hex_v3", level="ERROR") as cm:
+                    with self.assertRaises(RuntimeError):
+                        runner._train_one_step(batch)
+            self.assertTrue(
+                any("Failed to dump OOM replay capsule" in line for line in cm.output)
+            )
+
+    def test_epoch_counts_anomalies(self) -> None:
+        def nan_loss(pred, target):
+            return torch.tensor(float("nan"), requires_grad=True)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = _make_runner(Path(tmpdir), loss_fn=nan_loss)
+            report = runner._train_one_epoch(epoch=0)
+            # Alle Batches anomal (NaN) -> kein healthy Batch gezaehlt.
+            self.assertEqual(report["n_batches"], 0)
+            self.assertEqual(report["n_anomalies"], 2)
+
+
+class TestAdapterPaths(unittest.TestCase):
+    def _make_adapter_runner(self, out: Path, model_type: str):
+        torch.manual_seed(0)
+        model = _AdapterKwModel()
+        adapter = OperatorAdapterV3(model, model_type)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+        train_loader, val_loader = _make_loaders()
+        # use_ema=False: AveragedModel deepcopyt das Modell — mit EMA saehe
+        # _validate nur die Kopie und seen_kwargs bliebe auf dem Original leer.
+        runner = HexTrainingRunner(
+            RunnerConfig(output_dir=str(out), use_ema=False),
+            model,
+            optimizer,
+            train_loader,
+            val_loader,
+            adapter=adapter,
+            device="cpu",
+        )
+        return runner, model
+
+    def test_train_step_routes_through_graph_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner, model = self._make_adapter_runner(Path(tmpdir), "graph_operator_v3")
+            edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long)
+            batch = _adapter_batch(edge_index=edge_index)
+            loss_val, is_healthy, _ = runner._train_one_step(batch)
+            self.assertTrue(is_healthy)
+            self.assertEqual(model.seen_kwargs[-1], ["edge_index"])
+
+    def test_validate_graph_adapter_builds_edge_kwargs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner, model = self._make_adapter_runner(Path(tmpdir), "graph_operator_v3")
+            edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long)
+            coords = torch.randn(3, 2)
+            dt = torch.tensor([0.1])
+            runner.val_loader = [
+                _adapter_batch(edge_index=edge_index, coords=coords, dt=dt)
+            ]
+            report = runner._validate(epoch=0)
+            self.assertEqual(report["n_batches"], 1)
+            self.assertEqual(model.seen_kwargs[-1], ["coords", "dt", "edge_index"])
+
+    def test_validate_gino_adapter_builds_geometry_kwargs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner, model = self._make_adapter_runner(Path(tmpdir), "gino_hex_v3")
+            coords = torch.randn(3, 2)
+            dt = torch.tensor([0.1])
+            sdf = torch.randn(3, 1)
+            boundary_mask = torch.zeros(3, 1)
+            runner.val_loader = [
+                _adapter_batch(
+                    coords=coords,
+                    dt=dt,
+                    extra={"sdf": sdf, "boundary_mask": boundary_mask},
+                )
+            ]
+            report = runner._validate(epoch=0)
+            self.assertEqual(report["n_batches"], 1)
+            self.assertEqual(
+                model.seen_kwargs[-1], ["boundary_mask", "coords_cart", "dt", "sdf"]
+            )
+
+    def test_validate_unknown_adapter_type_falls_back_to_plain_call(self) -> None:
+        # Defensiver else-Zweig in _validate: unbekannter model_type -> eval_module(x).
+        class _StubAdapter:
+            model_type = "future_operator_v9"
+
+            def validate_context(self, x, ctx) -> None:
+                return None
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = _make_runner(Path(tmpdir))
+            runner.adapter = _StubAdapter()
+            x = torch.randn(2, 4)
+            runner.val_loader = [
+                {"input": x, "target": torch.randn(2, 2), "context": object()}
+            ]
+            report = runner._validate(epoch=0)
+            self.assertEqual(report["n_batches"], 1)
+
+
+class TestRunSaveCadenceAndNoEma(unittest.TestCase):
+    def test_run_skips_checkpoints_on_off_epochs_and_handles_no_ema(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            cfg = RunnerConfig(
+                output_dir=str(out),
+                num_epochs=2,
+                save_every_n_epochs=2,
+                use_ema=False,
+            )
+            runner = _make_runner(out, config=cfg)
+            summary = runner.run()
+            # Nur Epoche 0 speichert (0 % 2 == 0), Epoche 1 nicht.
+            self.assertEqual(len(summary["history"]["checkpoints"]), 1)
+            self.assertFalse(summary["history"]["val"][0]["used_ema"])
 
 
 if __name__ == "__main__":

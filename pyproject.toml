@@ -39,9 +39,19 @@ source = ["src/toolkit"]
 [tool.coverage.report]
 # Testfiles selbst zaehlen nicht als abzudeckender Code.
 omit = ["*/test_*.py"]
-# Ratchet-Schwelle: Ist-Wert 90% (verified 2026-08-08 nach warmstart/ema/resume-
-# Tests 43/56/76% -> 94/100/96%, results/), Schwelle knapp darunter — Best
-# Practice: unter Ist setzen und mit neuen Tests hochziehen, nie ueber Ist
-# wuenschen (Gate darf nicht durch Absenken erschlichen werden).
-# Zielkorridor 80-90% (docs/ROADMAP.md) damit erreicht.
-fail_under = 87
+# Umgebungsabhaengige Zweige, auf dem CPU-only-CI prinzipiell unerreichbar
+# (coverage.py-Doku "Excluding code": exclude_also ergaenzt die Default-Regexes;
+# ein Match auf einer if/except-Zeile schliesst die ganze Klausel aus):
+# - CUDA-only-Bloecke (RNG-Save/Restore in resume_utils, empty_cache im Runner)
+# - ImportError-Fallbacks fuer aeltere PyTorch-Versionen (warmstart_utils;
+#   CI pinnt torch 2.6, der Import schlaegt dort nie fehl)
+exclude_also = [
+    "if torch\\.cuda\\.is_available\\(\\)",
+    "except ImportError",
+]
+# Ratchet-Schwelle: Ist-Wert 94% (verified 2026-08-08 nach Runner-Tests 79->94%
+# + exclude_also fuer CPU-CI-unerreichbare Zweige, results/), Schwelle knapp
+# darunter — Best Practice: unter Ist setzen und mit neuen Tests hochziehen,
+# nie ueber Ist wuenschen (Gate darf nicht durch Absenken erschlichen werden).
+# Zielkorridor 80-90% (docs/ROADMAP.md) uebertroffen.
+fail_under = 91

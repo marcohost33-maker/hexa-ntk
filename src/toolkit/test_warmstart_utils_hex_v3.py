@@ -13,8 +13,10 @@ Covers the module design invariants:
 """
 from __future__ import annotations
 
+import pickle
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -222,24 +224,49 @@ class TestLoadPartialCheckpoint(unittest.TestCase):
             {"model_state_dict": src.state_dict(), "best_metric": np.float64(0.125)}
         )
         dst = TinyModel()
-        report = load_partial_checkpoint(dst, path)
+        with warnings.catch_warnings():
+            # np.core-Zugriff im Whitelist-Aufbau (Alt-NumPy-Kompat) warnt unter
+            # NumPy 2.x mit DeprecationWarning — hier erwartet, nicht relevant.
+            warnings.simplefilter("ignore", DeprecationWarning)
+            with self.assertLogs("warmstart_utils_hex_v3", level="WARNING") as cm:
+                report = load_partial_checkpoint(dst, path)
+        self.assertTrue(any("safe_globals" in line for line in cm.output))
         self.assertEqual(report["load_path_type"], "safe")
         for k, v in src.state_dict().items():
             self.assertTrue(torch.equal(v, dst.state_dict()[k]))
 
     def test_non_whitelistable_object_raises(self) -> None:
         # Arbitrary Python objects are NOT rescued by the numpy whitelist:
-        # the fallback must fail closed and re-raise the original error.
+        # the fallback must fail closed and re-raise the ORIGINAL safe-load
+        # error (pickle.UnpicklingError, verified on torch 2.6).
         path = self._save(
             {"model_state_dict": TinyModel().state_dict(), "attack": _NotWhitelistable()}
         )
-        with self.assertRaises(Exception):
-            load_partial_checkpoint(TinyModel(), path)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            with self.assertLogs("warmstart_utils_hex_v3", level="ERROR") as cm:
+                with self.assertRaises(pickle.UnpicklingError):
+                    load_partial_checkpoint(TinyModel(), path)
+        self.assertTrue(any("whitelisting also failed" in line for line in cm.output))
 
-    def test_corrupt_file_error_reraised(self) -> None:
+    def test_corrupt_file_fallback_fails_closed(self) -> None:
+        # b"garbage": torch 2.6 meldet "Weights only load failed" -> der
+        # safe_globals-Fallback greift, scheitert ebenfalls und re-raist das
+        # Original-UnpicklingError (fail-closed, kein stiller Teil-Load).
         path = self.tmpdir / "corrupt.pt"
+        path.write_bytes(b"garbage")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            with self.assertRaises(pickle.UnpicklingError):
+                load_partial_checkpoint(TinyModel(), path)
+
+    def test_non_weights_only_error_reraised_immediately(self) -> None:
+        # Fehler OHNE "Weights only load failed" in der Message (hier: eine
+        # Byte-Folge, die als Legacy-Pickle anparsed und IndexError wirft)
+        # muessen sofort re-raisen — der numpy-Fallback darf NICHT greifen.
+        path = self.tmpdir / "corrupt2.pt"
         path.write_bytes(b"this is not a torch checkpoint")
-        with self.assertRaises(Exception):
+        with self.assertRaises(IndexError):
             load_partial_checkpoint(TinyModel(), path)
 
 

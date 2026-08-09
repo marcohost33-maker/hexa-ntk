@@ -60,14 +60,32 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   ergaenzt (2 neue Testfiles, SHA-First); test_ema-Zeile aktualisiert (Praezedenz PR #12).
   _Evidenz: 218/218 PASS, 90% Branch, `results/2026-08-08_coverage-ratchet-87_gate.log`._
 
+- [x] **Runner-Coverage 79%->94% + `resume_from`-Footgun gefixt (fail_under 87->91).**
+  Selbstkritik-Runde auf der 08-08-Arbeit: (a) **Bug gefixt** — `maybe_resume()` prueft
+  Existenz von `config.resume_from`, lud aber stumm den manager-eigenen `resume_path`
+  (fremder Pfad wurde ignoriert); `load_resume` hat jetzt einen expliziten
+  `path`-Override, der Runner reicht `resume_from` durch (+2 Regressionstests).
+  (b) Runner-Luecken ehrlich getestet: EMA-AttributeError-Fallback, AMP-Scaler-Pfad
+  (via auf CPU disabled `GradScaler("cuda")` — funktional derselbe Codepfad),
+  Adapter-Dispatch in train/validate (graph + gino + defensiver else-Zweig),
+  OOM-Capsule-Dump-Fehlpfad, Warmup-`_base_lr`-Cache, Save-Kadenz/No-EMA.
+  (c) Test-Praezisierung: breite `assertRaises(Exception)` -> konkrete Typen
+  (empirisch verifiziert: `pickle.UnpicklingError`; korrupte Legacy-Streams koennen
+  auch `IndexError` werfen -> beide Re-Raise-Pfade getestet), `assertLogs` statt
+  Log-Rauschen, numpy-RNG (nicht python-RNG) als tatsaechlicher trusted-Ausloeser
+  dokumentiert. (d) `exclude_also` (coverage.py-Doku "Excluding code") fuer auf
+  CPU-CI prinzipiell unerreichbare Zweige (CUDA-only, `except ImportError` bei
+  gepinntem torch 2.6) statt Schein-Tests. Suite 218->231 Tests.
+  _Evidenz: 231/231 PASS, 94% Branch, `results/2026-08-08_selfreview-ratchet-91_gate.log`._
+
 ## Offen
 
-- [ ] **Rest-Coverage `runner_hex_v3.py` 79%.** Letztes Modul unter 89% (41 Stmts offen,
-  u.a. DDP-/Distributed-Pfade, die ohne Multi-Prozess-Setup schwer testbar sind). Nutzen
-  gegen Aufwand abwaegen; bei Schliessung `fail_under` weiter nachziehen. Die uebrigen
-  offenen Zeilen der Suite sind umgebungsabhaengig (CUDA-only-RNG-Zweige in
-  `resume_utils`, PyTorch<2.6-ImportError-Pfade in `warmstart_utils`) — auf CPU-CI
-  prinzipiell nicht erreichbar, kein ehrlicher Testgegenstand.
+- [ ] **Rest-Coverage: Reports-/Diagnose-Zweige in `operator_adapter` (89%),
+  `checkpoint_integration` (89%), `dataset_split` (95%), `benchmark` (96%),
+  `failure_signature` (93%), `warmstart` (96%), `resume` (98%), `runner` (94%).**
+  Verbleibende Misses sind ueberwiegend defensive Fehlerzweige einzelner
+  Validierungspfade; Nutzen gegen Aufwand abwaegen, `fail_under` (91) bei
+  Schliessung weiter nachziehen.
 
 ## Zurueckgestellt (bewusst, mit Begruendung)
 
