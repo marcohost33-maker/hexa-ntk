@@ -52,6 +52,13 @@ Lokale Umgebung dieses Laufs: Python 3.14.4, `torch` 2.12.1+cpu, `numpy` 2.4.6.
 Die CI faehrt dieselbe Kette auf **Python 3.12** mit `torch==2.6.0` (CPU-Wheel).
 Die Zahlen gelten fuer diese beiden Umgebungen; ausserhalb ist nichts zugesichert.
 
+**Bekannter offener Defekt (Stand dieses Commits):** `HexTrainingRunner.maybe_resume()`
+benutzt `config.resume_from` nur als Existenz-Pruefung und laedt dann den
+manager-eigenen Pfad — ein fremder Checkpoint-Pfad wird still ignoriert
+(`src/toolkit/runner_hex_v3.py:303-313`; der Test `test_runner_hex_v3.py:564`
+beschreibt dieses Verhalten heute als erwartet). Die gruenen Gates fangen das
+nicht: 166/166 Tests laufen mit dem Defekt. Fix liegt im offenen Draft-PR #20.
+
 Toolkit-Stand 2026-04-06, Engine-Stand 2026-05-25. Das gehaertete Experten-Review liegt
 in `spec/`, offene Lint-/Test-Schuld in `docs/ROADMAP.md`.
 
