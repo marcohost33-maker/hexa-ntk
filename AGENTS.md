@@ -9,8 +9,8 @@ project: HexaNTK
 KI-Coding-Agent-Anweisungen. Reihenfolge: §1 Working agreements > §2 Conventions > §3 Don't > §4 When stuck.
 
 ## Project
-- **Was:** Neural-Operator-Toolkit (GINO/GAOT-Familie) fuer physics-informed ML auf hexagonalen Gittern: Checkpoint/EMA/DDP-Integration, Dataset-Split, Failure-Signatures, Benchmark.
-- **Stack:** Python >= 3.10 (numpy/scipy/torch fuer volle Laeufe; CI = Syntax + Lint).
+- **Was:** Trainings-/Experiment-Infrastruktur fuer Neural-Operator-Laeufe auf hexagonalen Gittern: Checkpoint/EMA/DDP-Integration, Dataset-Split, Failure-Signatures, Benchmark. **Die Operatoren GINO/GINOT/GAOT sind NICHT implementiert** — nur Config-Vertrag + Shape-Validierung (src/hexantk_v3.py:717-720). Keine Paper-Ergebnisse nachgemessen.
+- **Stack:** Python >= 3.12 (py3.10/3.11 gedroppt, Commit 7e06ad9; CI faehrt 3.12 mit torch==2.6.0 CPU-Wheel).
 - **Provenance:** `SOURCES.md` ist der Provenance-/Lineage-Index — Quelle + mtime + ein
   16-hex **SHA-256-Prefix-Locator** (64 bit) des *importierten Originals*, **kein**
   Voll-Integritaets-Digest der aktuellen Repo-Bytes (Eintraege append-only, werden bei
