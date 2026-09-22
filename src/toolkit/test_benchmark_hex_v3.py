@@ -124,6 +124,28 @@ class TestH1Metrics(unittest.TestCase):
         self.assertTrue(torch.all(h1_nrmse >= 0))
         self.assertTrue(torch.all(h1_nrmse < 1.0))  # Close predictions
 
+    def test_h1_constant_offset_has_zero_gradient_error(self) -> None:
+        target = make_target()
+        pred = target + 3.0
+        neighbors = make_hex_neighbors()
+        l2 = compute_rmse_per_step(pred, target)
+        h1 = compute_h1_rmse_per_step(pred, target, neighbors, h=1.0)
+        # A spatially constant error has zero H¹ seminorm contribution.
+        self.assertTrue(torch.allclose(h1, l2, atol=1e-6))
+
+    def test_h1_opposite_gradient_not_lost_by_magnitude_cancellation(self) -> None:
+        neighbors = make_hex_neighbors()
+        target = torch.zeros(1, N, 1)
+        target[0, 1:, 0] = torch.tensor([1.0, 2.0, 1.0, -1.0, -2.0, -1.0])
+        pred = -target
+
+        l2 = compute_rmse_per_step(pred, target)
+        h1 = compute_h1_rmse_per_step(pred, target, neighbors, h=1.0)
+
+        # Old implementation compared |grad(pred)| with |grad(target)| and
+        # therefore cancelled this case.  H¹ must use grad(pred-target).
+        self.assertGreater(h1.item(), l2.item())
+
 
 class TestDivergenceStep(unittest.TestCase):
     def test_no_divergence_returns_T(self) -> None:
