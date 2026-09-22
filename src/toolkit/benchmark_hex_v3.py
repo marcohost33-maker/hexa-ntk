@@ -5,8 +5,8 @@ Canonical benchmark metrics for HexaNTK PDE operator evaluation.
 
 Metric conventions:
 - nRMSE(t): normalized RMSE per rollout timestep (APEBench Eq.31)
-- H1 RMSE: Sobolev H¹ RMSE (gradient error)
-- H1 nRMSE: normalized H¹ RMSE
+- H1 RMSE: discrete hex H¹ proxy using the gradient seminorm of the error field
+- H1 nRMSE: normalized discrete H¹ proxy (not a continuum Sobolev certificate)
 - divergence_step: first timestep where nRMSE exceeds threshold
 - Aggregation over time: geometric mean (APEBench Eq.32)
 
@@ -121,10 +121,17 @@ def _hex_gradient_magnitude(
     h: float,
 ) -> torch.Tensor:
     """
-    Approximate gradient magnitude on hexagonal grid via finite differences.
+    Approximate gradient magnitude on a regular hexagonal grid via directional
+    finite differences.
 
-    Uses the standard hex-FV stencil: for each node, compute differences
-    to its 6 neighbors and estimate |∇u| ≈ sqrt(2/(3h²) * Σ(u_j - u_0)²).
+    For six equiangular neighbours with spacing h,
+    Σ_j (u_j-u_0)^2 ≈ 3 h^2 |∇u|^2, hence the interior estimator is
+    |∇u|^2 ≈ (1/(3 h^2)) Σ_j (u_j-u_0)^2.
+
+    With missing boundary neighbours we use the direction-average extension
+    2/(n_valid h^2) Σ_j (u_j-u_0)^2.  This is a boundary proxy, not an exact
+    finite-volume Sobolev norm; geometry-aware boundary weights require cell
+    areas/face normals that are not available in this API.
 
     Parameters
     ----------
@@ -169,9 +176,12 @@ def _hex_gradient_magnitude(
     # Count valid neighbors per node
     n_valid = valid_mask.sum(dim=-1, keepdim=True).unsqueeze(0).unsqueeze(-1).float().clamp(min=1)
 
-    # Approximate |∇u|² ≈ (2/(3h²)) * mean(Δu²)
-    # Using sum/n_valid instead of fixed /6 to handle boundary nodes
-    grad_sq = (2.0 / (3.0 * h * h)) * torch.sum(diffs ** 2, dim=2) / n_valid.squeeze(2)
+    # Directional-difference estimator:
+    #   |∇u|² ≈ 2 * mean_j[(u_j-u_0)²] / h².
+    # For six complete equiangular neighbours this is exactly the
+    # second-order linear-field scaling 1/(3h²) * Σ_j (u_j-u_0)².
+    # At incomplete boundaries it is explicitly only a directional proxy.
+    grad_sq = (2.0 / (h * h)) * torch.sum(diffs ** 2, dim=2) / n_valid.squeeze(2)
 
     grad_mag = torch.sqrt(grad_sq + 1e-12)
 
@@ -187,7 +197,12 @@ def compute_h1_rmse_per_step(
     """
     Compute H¹ Sobolev RMSE per rollout timestep.
 
-    H¹ error = sqrt(L² error² + gradient error²)
+    Discrete H¹ proxy = sqrt(L² error² + directional-gradient(error)²).
+
+    This computes the seminorm of e = pred - target, as required by the H¹
+    error definition.  The hex gradient term is exact in scale for linear
+    fields at complete regular six-neighbour interior nodes; boundary nodes
+    remain an explicitly documented directional proxy.
 
     If hex_neighbors is not provided, falls back to pure L² RMSE.
 
@@ -214,10 +229,13 @@ def compute_h1_rmse_per_step(
 
     grad_errors = []
     for t in range(T):
-        grad_pred = _hex_gradient_magnitude(pred[t], hex_neighbors, h)
-        grad_target = _hex_gradient_magnitude(target[t], hex_neighbors, h)
-        diff = (grad_pred - grad_target).reshape(-1)
-        grad_rmse_t = torch.sqrt(torch.mean(diff ** 2))
+        # H¹ error uses the seminorm of the ERROR FIELD:
+        #   ||pred-target||_{H¹}² = ||e||² + ||∇e||².
+        # Comparing only gradient magnitudes, || |∇pred|-|∇target| ||, is
+        # incorrect because opposite gradients can have identical magnitude.
+        error_field = pred[t] - target[t]
+        grad_error = _hex_gradient_magnitude(error_field, hex_neighbors, h)
+        grad_rmse_t = torch.sqrt(torch.mean(grad_error.reshape(-1) ** 2))
         grad_errors.append(grad_rmse_t)
 
     grad_rmse = torch.stack(grad_errors)
