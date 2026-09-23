@@ -52,12 +52,24 @@ higher-is-better scores MUST first use a separately specified transformation.
 For baseline error `E_0`, shifted error `E_s`, and positive numerical floor
 `epsilon`:
 
-`D = E_s / max(E_0, epsilon)`
+`D = max(E_s, epsilon) / max(E_0, epsilon)`
 
-Special cases:
+The floor applies to BOTH errors. This keeps the direction of the comparison:
 
-- E_s = 0 and E_0 = 0 -> D = 1 (no degradation).
-- E_s = 0 and E_0 > 0 -> D = 0.
+- E_s > E_0 -> D >= 1; E_s < E_0 -> D <= 1; E_s = E_0 -> D = 1.
+- E_s <= epsilon and E_0 <= epsilon -> D = 1 (indistinguishable below the floor;
+  this includes E_s = E_0 = 0).
+
+(Pre-merge revision 2026-09-23: the earlier draft `E_s / max(E_0, epsilon)`
+inverted the direction when E_0 < epsilon, e.g. E_s = 1e-13, E_0 = 0,
+epsilon = 1e-12 gave D = 0.1 although the shifted error is larger.)
+
+Special cases and flags:
+
+- E_s < epsilon or E_0 < epsilon -> the case MUST set
+  `degradation_floored = true`. D is then a floor-bounded ratio, not the exact
+  quotient E_s / E_0, and MUST NOT be interpreted as an exact magnitude
+  (e.g. E_s = 0.1, E_0 = 0, epsilon = 1e-6 gives D = 1e5 with the flag set).
 - finite inputs whose ratio exceeds IEEE-754 binary64 range -> the stored factor
   saturates at `sys.float_info.max` and the case MUST set
   `degradation_saturated = true`;
@@ -65,8 +77,10 @@ Special cases:
   stored factor is clamped to the smallest positive representable float and the
   case MUST set `degradation_underflowed = true`.
 
-Saturation/underflow flags are explicit numerical evidence. A clamped factor MUST
-NOT be interpreted as the exact mathematical ratio magnitude.
+Floor/saturation/underflow flags are explicit numerical evidence. A floored or
+clamped factor MUST NOT be interpreted as the exact mathematical ratio
+magnitude. `degradation_floored` may be true together with either clamp flag;
+`degradation_saturated` and `degradation_underflowed` are mutually exclusive.
 
 ## 5. Evidence integrity
 
@@ -83,8 +97,8 @@ metadata so later mutation of the source configuration cannot alter a completed
 report.
 
 A `StressReport` MUST validate every stored `degradation_factor`,
-`degradation_saturated`, and `degradation_underflowed` value against its own
-baseline, floor, and case error.
+`degradation_saturated`, `degradation_underflowed`, and `degradation_floored`
+value against its own baseline, floor, and case error.
 Manually constructed or deserialized reports that violate this relation are
 invalid.
 
@@ -141,6 +155,7 @@ v1 serialization includes:
   - `degradation_factor`
   - `degradation_saturated`
   - `degradation_underflowed`
+  - `degradation_floored`
   - `metadata`
 
 Consumers MUST ignore unknown future fields but MUST NOT silently reinterpret

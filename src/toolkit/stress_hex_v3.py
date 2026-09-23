@@ -122,35 +122,52 @@ def _thaw_metadata_value(value: Any) -> Any:
     return value
 
 
+@dataclass(frozen=True)
+class _DegradationDetails:
+    factor: float
+    saturated: bool
+    underflowed: bool
+    floored: bool
+
+
 def _compute_degradation_details(
     shifted_error: Any,
     baseline_error: Any,
     *,
     floor: Any,
-) -> tuple[float, bool, bool]:
-    """Return finite ratio plus overflow/underflow clamp flags."""
+) -> _DegradationDetails:
+    """Return the floor-bounded ratio plus floor/overflow/underflow flags.
+
+    D = max(E_s, eps) / max(E_0, eps)   (spec/STRESS_SHIFT_CONTRACT_v1.md §4)
+
+    Flooring BOTH errors keeps the direction of the comparison: the true
+    quotient is >= 1 whenever E_s >= E_0 and <= 1 whenever E_s <= E_0, and
+    IEEE-754 division is correctly rounded, so the stored factor never crosses
+    1 against the direction of the raw errors. Flooring only the baseline
+    (E_s / max(E_0, eps)) inverted it: D(1e-13, 0.0) was 0.1 although the
+    shifted error is larger. ``floored`` marks every case in which at least
+    one error lies below the floor, i.e. the factor is not the exact ratio
+    E_s / E_0 and must not be read as a magnitude.
+    """
     shifted = _finite_nonnegative(shifted_error, name="shifted_error")
     baseline = _finite_nonnegative(baseline_error, name="baseline_error")
     eps = _positive_finite(floor, name="floor")
 
-    if shifted == 0.0 and baseline == 0.0:
-        return 1.0, False, False
-    if shifted == 0.0:
-        return 0.0, False, False
-
-    denominator = max(baseline, eps)
-    ratio = shifted / denominator
+    floored = shifted < eps or baseline < eps
+    ratio = max(shifted, eps) / max(baseline, eps)
     if math.isfinite(ratio) and ratio > 0.0:
-        return ratio, False, False
+        return _DegradationDetails(ratio, False, False, floored)
     if ratio == 0.0:
-        # Preserve the semantic distinction between an exact zero shifted error
-        # and a positive mathematical ratio that underflows binary64.
-        return math.nextafter(0.0, math.inf), False, True
+        # The numerator is >= eps > 0, so the mathematical ratio is positive;
+        # binary64 underflow must not be reported as an exact zero.
+        return _DegradationDetails(
+            math.nextafter(0.0, math.inf), False, True, floored
+        )
 
     # Finite inputs can still overflow their ratio, e.g. baseline=0 and a
     # subnormal floor. Preserve a finite sortable value and expose saturation
     # explicitly rather than silently returning +inf.
-    return sys.float_info.max, True, False
+    return _DegradationDetails(sys.float_info.max, True, False, floored)
 
 
 def compute_degradation_factor(
@@ -159,19 +176,20 @@ def compute_degradation_factor(
     *,
     floor: Any = 1e-12,
 ) -> float:
-    """Return a finite lower-is-better error ratio.
+    """Return the finite floor-bounded ratio max(E_s, eps) / max(E_0, eps).
 
-    Ratios that exceed IEEE-754 binary64 range saturate at sys.float_info.max.
-    Positive ratios that underflow to zero clamp to the smallest positive
-    representable float. StressCaseResult records both conditions explicitly
+    Direction-preserving: E_s >= E_0 implies a factor >= 1 and E_s <= E_0 a
+    factor <= 1; both errors below the floor give exactly 1. Ratios that exceed
+    IEEE-754 binary64 range saturate at sys.float_info.max. Positive ratios
+    that underflow to zero clamp to the smallest positive representable float.
+    StressCaseResult records floor use, saturation and underflow explicitly
     when reports are built through evaluate_stress_cases.
     """
-    factor, _, _ = _compute_degradation_details(
+    return _compute_degradation_details(
         shifted_error,
         baseline_error,
         floor=floor,
-    )
-    return factor
+    ).factor
 
 
 @dataclass(frozen=True)
@@ -215,6 +233,8 @@ class StressCaseResult:
     degradation_saturated: bool = False
     degradation_underflowed: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    # Appended after metadata so positional construction stays compatible.
+    degradation_floored: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.case_id, str) or not self.case_id.strip():
@@ -240,6 +260,8 @@ class StressCaseResult:
             raise TypeError("degradation_saturated must be bool")
         if not isinstance(self.degradation_underflowed, bool):
             raise TypeError("degradation_underflowed must be bool")
+        if not isinstance(self.degradation_floored, bool):
+            raise TypeError("degradation_floored must be bool")
         if self.degradation_saturated and self.degradation_underflowed:
             raise ValueError(
                 "degradation_saturated and degradation_underflowed "
@@ -299,24 +321,29 @@ class StressReport:
             )
 
         for case in self.cases:
-            expected, saturated, underflowed = _compute_degradation_details(
+            details = _compute_degradation_details(
                 case.error_value,
                 baseline,
                 floor=floor,
             )
-            if case.degradation_saturated != saturated:
+            if case.degradation_saturated != details.saturated:
                 raise ValueError(
                     f"case {case.case_id!r} has inconsistent "
                     "degradation_saturated"
                 )
-            if case.degradation_underflowed != underflowed:
+            if case.degradation_underflowed != details.underflowed:
                 raise ValueError(
                     f"case {case.case_id!r} has inconsistent "
                     "degradation_underflowed"
                 )
-            if case.degradation_factor != expected and not math.isclose(
+            if case.degradation_floored != details.floored:
+                raise ValueError(
+                    f"case {case.case_id!r} has inconsistent "
+                    "degradation_floored"
+                )
+            if case.degradation_factor != details.factor and not math.isclose(
                 case.degradation_factor,
-                expected,
+                details.factor,
                 rel_tol=1e-12,
                 abs_tol=0.0,
             ):
@@ -347,6 +374,7 @@ class StressReport:
                     "degradation_factor": case.degradation_factor,
                     "degradation_saturated": case.degradation_saturated,
                     "degradation_underflowed": case.degradation_underflowed,
+                    "degradation_floored": case.degradation_floored,
                     "metadata": _thaw_metadata_value(case.metadata),
                 }
                 for case in self.cases
@@ -386,7 +414,7 @@ def evaluate_stress_cases(
 
     results = []
     for case in case_list:
-        factor, saturated, underflowed = _compute_degradation_details(
+        details = _compute_degradation_details(
             case.error_value,
             baseline,
             floor=floor,
@@ -397,10 +425,11 @@ def evaluate_stress_cases(
                 axis=case.axis,
                 regime=case.regime,
                 error_value=case.error_value,
-                degradation_factor=factor,
-                degradation_saturated=saturated,
-                degradation_underflowed=underflowed,
+                degradation_factor=details.factor,
+                degradation_saturated=details.saturated,
+                degradation_underflowed=details.underflowed,
                 metadata=case.metadata,
+                degradation_floored=details.floored,
             )
         )
 

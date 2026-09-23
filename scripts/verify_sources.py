@@ -1,19 +1,31 @@
 #!/usr/bin/env python3
 """verify_sources.py — fail-closed Provenance-Gate fuer SOURCES.md.
 
-Prueft, dass die in SOURCES.md fuer ``src/toolkit`` eingetragenen SHA-256-Praefixe
-mit den AKTUELLEN Repo-Dateien uebereinstimmen UND dass JEDES Toolkit-Modul (ausser
-``__init__.py``) genau einen Eintrag hat. Damit ist SOURCES.md kein statischer Text
-mehr, sondern ein re-verifizierbarer Integritaets-Vertrag (AGENTS.md: "SOURCES.md ist
-die Integritaets-Wahrheit"; SLSA-Praxis: Artefakt-Digest gegen Manifest pruefen).
+Prueft, dass die in SOURCES.md fuer ``src/toolkit`` UND ``spec`` eingetragenen
+SHA-256-Praefixe mit den AKTUELLEN Repo-Dateien uebereinstimmen UND dass JEDE
+Datei dieser Ziele einen Eintrag hat:
 
-SHA-Konvention (identisch zu SOURCES.md): ``sha256(<repo-Datei>)[:16].upper()``.
+* ``src/toolkit``: jedes ``*.py`` ausser ``__init__.py``;
+* ``spec``: jedes ``*.md`` (Vertrags-Quelle laut AGENTS.md "Specs in spec/ sind
+  Vertrags-Quelle; Code folgt der Spec" — ein ungepinnter Vertrag war vorher
+  fuer dieses Gate unsichtbar, PR #32 F32-2).
+
+Damit ist SOURCES.md kein statischer Text mehr, sondern ein re-verifizierbarer
+Integritaets-Vertrag (AGENTS.md: "SOURCES.md ist die Integritaets-Wahrheit";
+SLSA-Praxis: Artefakt-Digest gegen Manifest pruefen). Mehrere Zeilen fuer
+denselben Dateinamen sind Lineage (append-only); massgeblich ist die LETZTE.
+
+Nicht geprueft (bewusst): Ziele ``src`` (Engine) und ``results`` — deren Zeilen
+sind Import-Locatoren des Originals, keine Pins der aktuellen Repo-Bytes.
+
+SHA-Konvention (identisch zu SOURCES.md): ``sha256(<repo-Datei>)[:16].upper()``,
+LF-normalisiert.
 
 Deterministisch + offline. Exit-Codes:
-  0  alle Toolkit-Module erfasst und SHA stimmt
+  0  alle Dateien erfasst und SHA stimmt
   1  Drift (SHA mismatch) oder Eintrag ohne Datei
-  2  Toolkit-Modul ohne SOURCES.md-Eintrag (Luecke)
-  3  SOURCES.md fehlt / nicht parsebar
+  2  Datei ohne SOURCES.md-Eintrag (Luecke)
+  3  SOURCES.md fehlt / nicht parsebar / keine src/toolkit-Eintraege
 
 Lauf: python scripts/verify_sources.py   (aus dem Repo-Root)
 """
@@ -25,15 +37,23 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SOURCES = ROOT / "SOURCES.md"
-TOOLKIT = ROOT / "src" / "toolkit"
 
-# Zeilen der Form: | <SHA16> | <mtime> | src/toolkit | ...\<datei>.py[ (...)] |
+# Ziel-Spalte -> (Verzeichnis relativ zum Repo-Root, Dateiendung, ausgenommen)
+TARGETS: dict[str, tuple[str, str, frozenset[str]]] = {
+    "src/toolkit": ("src/toolkit", ".py", frozenset({"__init__.py"})),
+    "spec": ("spec", ".md", frozenset()),
+}
+
+# Zeilen der Form: | <SHA16> | <mtime> | <ziel> | ...\<datei>[ (...)] |
 ROW = re.compile(
-    r"^\|\s*([0-9A-Fa-f]{16})\s*\|[^|]*\|\s*src/toolkit\s*\|\s*(.+?)\s*\|\s*$"
+    r"^\|\s*([0-9A-Fa-f]{16})\s*\|[^|]*\|\s*(src/toolkit|spec)\s*\|\s*(.+?)\s*\|\s*$"
 )
 # Dateiname am Ende des Quell-Pfads (vor optionalem " (in-repo ...)"-Suffix).
-FILENAME = re.compile(r"([^\\/ ]+\.py)(?:\s*\(.*\))?\s*$")
+FILENAME = re.compile(r"([^\\/ ]+\.[A-Za-z0-9]+)(?:\s*\(.*\))?\s*$")
+
+
+class SourcesParseError(Exception):
+    """SOURCES.md row that names a target but no usable file name."""
 
 
 def sha16(path: pathlib.Path) -> str:
@@ -42,66 +62,89 @@ def sha16(path: pathlib.Path) -> str:
     return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()[:16].upper()
 
 
-def parse_toolkit_rows(text: str) -> dict[str, str]:
-    """filename -> erwarteter SHA16 (nur src/toolkit-Zeilen)."""
-    out: dict[str, str] = {}
+def parse_rows(text: str) -> dict[str, dict[str, str]]:
+    """target -> {filename -> erwarteter SHA16}; letzte Zeile je Datei gewinnt."""
+    out: dict[str, dict[str, str]] = {target: {} for target in TARGETS}
     for line in text.splitlines():
         m = ROW.match(line)
         if not m:
             continue
-        sha, src = m.group(1).upper(), m.group(2)
+        sha, target, src = m.group(1).upper(), m.group(2), m.group(3)
+        suffix = TARGETS[target][1]
         fn = FILENAME.search(src)
-        if not fn:
-            print(f"[FAIL] SOURCES-Zeile ohne erkennbaren Dateinamen: {line.strip()}")
-            sys.exit(3)
-        out[fn.group(1)] = sha
+        if not fn or not fn.group(1).endswith(suffix):
+            raise SourcesParseError(
+                f"SOURCES-Zeile ({target}) ohne erkennbaren {suffix}-Dateinamen: "
+                f"{line.strip()}"
+            )
+        out[target][fn.group(1)] = sha
     return out
 
 
-def main() -> int:
-    if not SOURCES.exists():
-        print(f"[FAIL] SOURCES.md fehlt: {SOURCES}")
+def parse_toolkit_rows(text: str) -> dict[str, str]:
+    """filename -> erwarteter SHA16 (nur src/toolkit-Zeilen; Rueckwaerts-API)."""
+    return parse_rows(text)["src/toolkit"]
+
+
+def main(root: pathlib.Path = ROOT) -> int:
+    sources = root / "SOURCES.md"
+    if not sources.exists():
+        print(f"[FAIL] SOURCES.md fehlt: {sources}")
         return 3
-    expected = parse_toolkit_rows(SOURCES.read_text(encoding="utf-8"))
-    if not expected:
+    try:
+        expected = parse_rows(sources.read_text(encoding="utf-8"))
+    except SourcesParseError as exc:
+        print(f"[FAIL] {exc}")
+        return 3
+    if not expected["src/toolkit"]:
         print("[FAIL] keine src/toolkit-Eintraege in SOURCES.md gefunden")
         return 3
 
-    actual_files = {
-        p.name for p in TOOLKIT.glob("*.py") if p.name != "__init__.py"
-    }
-
-    ok = True
-    # 1) Luecke: Modul ohne Eintrag.
-    missing = sorted(actual_files - expected.keys())
-    for fn in missing:
-        print(f"[GAP ] {fn}: Toolkit-Modul ohne SOURCES.md-Eintrag")
-        ok = False
-    if missing:
+    # 1) Luecke: Datei ohne Eintrag (alle Ziele pruefen, dann gesammelt melden).
+    gap = False
+    for target, (rel_dir, suffix, excluded) in TARGETS.items():
+        directory = root / rel_dir
+        actual = {
+            p.name
+            for p in directory.glob(f"*{suffix}")
+            if p.is_file() and p.name not in excluded
+        }
+        for fn in sorted(actual - expected[target].keys()):
+            print(f"[GAP ] {target}/{fn}: Datei ohne SOURCES.md-Eintrag")
+            gap = True
+        # SOURCES-Zeilen tragen nur den Dateinamen: eine Datei in einem
+        # Unterordner waere fuer dieses Gate unsichtbar -> fail-closed melden
+        # statt still ungeprueft lassen.
+        for p in sorted(directory.rglob(f"*{suffix}")):
+            if p.is_file() and p.parent != directory and "__pycache__" not in p.parts:
+                rel = p.relative_to(root).as_posix()
+                print(f"[GAP ] {rel}: verschachtelte Datei, vom Gate nicht abgedeckt")
+                gap = True
+    if gap:
         return 2
 
     # 2) Drift: Eintrag ohne Datei oder SHA mismatch.
     drift = False
-    for fn, exp in sorted(expected.items()):
-        path = TOOLKIT / fn
-        if not path.exists():
-            print(f"[FAIL] SOURCES-Eintrag {fn}: Datei fehlt im Repo")
-            drift = True
-            continue
-        got = sha16(path)
-        if got != exp:
-            print(f"[FAIL] {fn}: SHA {got} != SOURCES {exp}")
-            drift = True
-        else:
-            print(f"[ OK ] {fn}: {got}")
-    if drift:
-        ok = False
+    for target, (rel_dir, _suffix, _excluded) in TARGETS.items():
+        for fn, exp in sorted(expected[target].items()):
+            path = root / rel_dir / fn
+            if not path.is_file():
+                print(f"[FAIL] SOURCES-Eintrag {target}/{fn}: Datei fehlt im Repo")
+                drift = True
+                continue
+            got = sha16(path)
+            if got != exp:
+                print(f"[FAIL] {target}/{fn}: SHA {got} != SOURCES {exp}")
+                drift = True
+            else:
+                print(f"[ OK ] {target}/{fn}: {got}")
 
     print(
-        f"\n[VERIFY-SOURCES] {len(expected)} Toolkit-Eintraege | "
-        f"{'PASS' if ok else 'FAIL'}"
+        f"\n[VERIFY-SOURCES] {len(expected['src/toolkit'])} Toolkit-Eintraege + "
+        f"{len(expected['spec'])} Spec-Eintraege | "
+        f"{'FAIL' if drift else 'PASS'}"
     )
-    return 0 if ok else 1
+    return 1 if drift else 0
 
 
 if __name__ == "__main__":
