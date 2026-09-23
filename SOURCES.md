@@ -57,5 +57,5 @@
 > New in-repo ReferenceSpec implementation and contract tests. SHA prefixes are
 > filled from the fail-closed provenance gate before review readiness.
 
-| 0000000000000000 | 2026-09-23 00:00 | src/toolkit | in-repo created, ReferenceSpec v1: reference_spec_hex_v3.py |
-| 0000000000000000 | 2026-09-23 00:00 | src/toolkit | in-repo created, ReferenceSpec v1 tests: test_reference_spec_hex_v3.py |
+| 892D90A81D2DE830 | 2026-09-23 00:00 | src/toolkit | in-repo created, ReferenceSpec v1: reference_spec_hex_v3.py |
+| 74158FD15466A368 | 2026-09-23 00:00 | src/toolkit | in-repo created, ReferenceSpec v1 tests: test_reference_spec_hex_v3.py |
