@@ -35,6 +35,7 @@ __all__ = [
 
 import json
 import math
+import numbers
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -72,11 +73,28 @@ def _validate_rollout_pair(pred: torch.Tensor, target: torch.Tensor) -> None:
         raise ValueError("pred and target must contain only finite values")
 
 
-def _validate_positive_finite(value: float, *, name: str) -> None:
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
+def _coerce_real_scalar(value: Any, *, name: str) -> float:
+    """Normalize Python/NumPy real scalars without accepting booleans."""
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise TypeError(f"{name} must be a real scalar")
-    if not math.isfinite(float(value)) or float(value) <= 0.0:
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{name} must be finite")
+    return result
+
+
+def _validate_positive_finite(value: Any, *, name: str) -> float:
+    result = _coerce_real_scalar(value, name=name)
+    if result <= 0.0:
         raise ValueError(f"{name} must be finite and > 0")
+    return result
+
+
+def _validate_nonnegative_finite(value: Any, *, name: str) -> float:
+    result = _coerce_real_scalar(value, name=name)
+    if result < 0.0:
+        raise ValueError(f"{name} must be finite and >= 0")
+    return result
 
 
 def _validate_nonnegative_metric_vector(
@@ -96,13 +114,34 @@ def _validate_nonnegative_metric_vector(
         raise ValueError(f"{name} must be non-negative")
 
 
-def _validate_hex_neighbors(
+def _validate_real_field(field: torch.Tensor) -> None:
+    if not torch.is_tensor(field):
+        raise TypeError("field must be a torch.Tensor")
+    if field.ndim < 2 or not field.is_floating_point():
+        raise TypeError("field must be a real floating tensor with node/channel axes")
+    if not torch.isfinite(field).all():
+        raise ValueError("field must contain only finite values")
+
+
+@dataclass(frozen=True)
+class _PreparedHexTopology:
+    """Validated topology tensors reusable across an entire rollout."""
+
+    safe_idx: torch.Tensor
+    valid_mask: torch.Tensor
+    n_valid: torch.Tensor
+    n_nodes: int
+    h: float
+
+
+def _prepare_hex_topology(
     field: torch.Tensor,
     hex_neighbors: torch.Tensor,
-    h: float,
-) -> torch.Tensor:
-    """Validate and normalize a regular six-neighbour hex topology."""
-    _validate_positive_finite(h, name="h")
+    h: Any,
+) -> _PreparedHexTopology:
+    """Validate/normalize a regular six-neighbour topology exactly once."""
+    _validate_real_field(field)
+    h_value = _validate_positive_finite(h, name="h")
     if not torch.is_tensor(hex_neighbors):
         raise TypeError("hex_neighbors must be a torch.Tensor")
 
@@ -119,18 +158,33 @@ def _validate_hex_neighbors(
     if torch.any(neighbors < -1) or torch.any(neighbors >= n_nodes):
         raise ValueError("hex_neighbors entries must be -1 or valid node indices")
 
-    # Duplicate/self edges silently distort directional norms, so reject them.
-    rows = neighbors.detach().cpu().tolist()
-    for node_idx, row in enumerate(rows):
-        valid = [idx for idx in row if idx >= 0]
-        if not valid:
-            raise ValueError(f"hex node {node_idx} has no valid neighbours")
-        if node_idx in valid:
-            raise ValueError(f"hex node {node_idx} contains a self-neighbour")
-        if len(valid) != len(set(valid)):
-            raise ValueError(f"hex node {node_idx} contains duplicate neighbours")
+    valid_mask = neighbors >= 0
+    if torch.any(valid_mask.sum(dim=-1) == 0):
+        raise ValueError("every hex node must have at least one valid neighbour")
 
-    return neighbors
+    node_ids = torch.arange(n_nodes, device=field.device).unsqueeze(1)
+    if torch.any(valid_mask & (neighbors == node_ids)):
+        raise ValueError("hex topology contains a self-neighbour")
+
+    # Detect duplicates on-device. Invalid -1 slots are replaced by a unique
+    # sentinel outside the valid node range before sorting.
+    sentinel = torch.full_like(neighbors, n_nodes)
+    sortable = torch.where(valid_mask, neighbors, sentinel)
+    sorted_neighbors = torch.sort(sortable, dim=1).values
+    duplicate_pairs = (
+        (sorted_neighbors[:, 1:] == sorted_neighbors[:, :-1])
+        & (sorted_neighbors[:, 1:] != n_nodes)
+    )
+    if torch.any(duplicate_pairs):
+        raise ValueError("hex topology contains duplicate neighbours")
+
+    return _PreparedHexTopology(
+        safe_idx=neighbors.clamp(min=0),
+        valid_mask=valid_mask,
+        n_valid=valid_mask.sum(dim=-1),
+        n_nodes=n_nodes,
+        h=h_value,
+    )
 
 
 def compute_rmse_per_step(
@@ -185,198 +239,141 @@ def compute_nrmse_per_step(
     torch.Tensor : shape [T]
     """
     _validate_rollout_pair(pred, target)
-    _validate_positive_finite(eps, name="eps")
+    eps_value = _validate_positive_finite(eps, name="eps")
 
     T = pred.shape[0]
     diff_flat = (pred - target).reshape(T, -1)
     target_flat = target.reshape(T, -1)
 
     numerator = torch.sqrt(torch.mean(diff_flat ** 2, dim=-1))
-    denominator = torch.sqrt(torch.mean(target_flat ** 2, dim=-1)) + eps
+    denominator = torch.sqrt(torch.mean(target_flat ** 2, dim=-1)) + eps_value
 
     return numerator / denominator
+
+
+def _hex_gradient_magnitude_prepared(
+    field: torch.Tensor,
+    topology: _PreparedHexTopology,
+) -> torch.Tensor:
+    """Compute the directional gradient proxy using prevalidated topology."""
+    if field.shape[-2] != topology.n_nodes:
+        raise ValueError(
+            f"field has {field.shape[-2]} nodes but topology has "
+            f"{topology.n_nodes}"
+        )
+
+    n_nodes = topology.n_nodes
+    n_channels = field.shape[-1]
+    batch_shape = field.shape[:-2]
+    field_flat = field.reshape(-1, n_nodes, n_channels)
+
+    neighbor_vals = field_flat[:, topology.safe_idx, :]
+    center_vals = field_flat.unsqueeze(2)
+    diffs = neighbor_vals - center_vals
+
+    mask = topology.valid_mask.unsqueeze(0).unsqueeze(-1).to(field_flat.dtype)
+    diffs = diffs * mask
+    n_valid = (
+        topology.n_valid.unsqueeze(0).unsqueeze(-1).to(field_flat.dtype)
+    )
+
+    grad_sq = (
+        (2.0 / (topology.h * topology.h))
+        * torch.sum(diffs ** 2, dim=2)
+        / n_valid
+    )
+
+    # grad_sq is a sum-of-squares estimator and therefore non-negative.
+    # Do NOT add an epsilon here: an exactly constant/error-zero field must
+    # retain an exactly zero H1 seminorm.
+    grad_mag = torch.sqrt(torch.clamp(grad_sq, min=0.0))
+    return grad_mag.reshape(*batch_shape, n_nodes, n_channels)
 
 
 def _hex_gradient_magnitude(
     field: torch.Tensor,
     hex_neighbors: torch.Tensor,
-    h: float,
+    h: Any,
 ) -> torch.Tensor:
-    """
-    Approximate gradient magnitude on a regular hexagonal grid via directional
-    finite differences.
+    """Validated convenience wrapper around the prepared-topology kernel."""
+    topology = _prepare_hex_topology(field, hex_neighbors, h)
+    return _hex_gradient_magnitude_prepared(field, topology)
 
-    For six equiangular neighbours with spacing h,
-    Σ_j (u_j-u_0)^2 ≈ 3 h^2 |∇u|^2, hence the interior estimator is
-    |∇u|^2 ≈ (1/(3 h^2)) Σ_j (u_j-u_0)^2.
 
-    With missing boundary neighbours we use the direction-average extension
-    2/(n_valid h^2) Σ_j (u_j-u_0)^2.  This is a boundary proxy, not an exact
-    finite-volume Sobolev norm; geometry-aware boundary weights require cell
-    areas/face normals that are not available in this API.
+def _compute_h1_terms_prepared(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    topology: _PreparedHexTopology,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return H1 error and target norm using one reusable topology."""
+    t_steps = pred.shape[0]
 
-    Parameters
-    ----------
-    field : shape [..., N, C]
-        Field values at each node.
-    hex_neighbors : shape [N, 6]
-        Index array: hex_neighbors[i, j] = index of j-th neighbor of node i.
-        Use -1 for boundary nodes with fewer than 6 neighbors.
-    h : float
-        Hex grid spacing.
+    error = pred - target
+    l2_error = torch.sqrt(
+        torch.mean(error.reshape(t_steps, -1) ** 2, dim=-1)
+    )
+    grad_error = _hex_gradient_magnitude_prepared(error, topology)
+    grad_error_rmse = torch.sqrt(
+        torch.mean(grad_error.reshape(t_steps, -1) ** 2, dim=-1)
+    )
+    h1_error = torch.sqrt(l2_error ** 2 + grad_error_rmse ** 2)
 
-    Returns
-    -------
-    torch.Tensor : shape [..., N, C]
-        Approximate gradient magnitude at each node.
-    """
-    if not torch.is_tensor(field):
-        raise TypeError("field must be a torch.Tensor")
-    if field.ndim < 2 or not field.is_floating_point():
-        raise TypeError("field must be a real floating tensor with node/channel axes")
-    if not torch.isfinite(field).all():
-        raise ValueError("field must contain only finite values")
+    target_flat = target.reshape(t_steps, -1)
+    l2_target = torch.sqrt(torch.mean(target_flat ** 2, dim=-1))
+    grad_target = _hex_gradient_magnitude_prepared(target, topology)
+    grad_target_rmse = torch.sqrt(
+        torch.mean(grad_target.reshape(t_steps, -1) ** 2, dim=-1)
+    )
+    h1_target = torch.sqrt(l2_target ** 2 + grad_target_rmse ** 2)
 
-    N = field.shape[-2]
-    C = field.shape[-1]
-    neighbors = _validate_hex_neighbors(field, hex_neighbors, h)
-
-    # Gather neighbor values: [..., N, 6, C]
-    # Clamp -1 indices to 0, then mask
-    valid_mask = neighbors >= 0  # [N, 6]
-    safe_idx = neighbors.clamp(min=0)  # [N, 6]
-
-    # field has shape [..., N, C], gather along N dimension
-    batch_shape = field.shape[:-2]
-    field_flat = field.reshape(-1, N, C)  # [B, N, C]
-
-    # Gather neighbor values via direct fancy indexing on the neighbor index.
-    neighbor_vals = field_flat[:, safe_idx, :]  # [B, N, 6, C]
-
-    # Center values
-    center_vals = field_flat.unsqueeze(2)  # [B, N, 1, C]
-
-    # Differences
-    diffs = neighbor_vals - center_vals  # [B, N, 6, C]
-
-    # Mask invalid neighbors
-    mask = valid_mask.unsqueeze(0).unsqueeze(-1).float()  # [1, N, 6, 1]
-    diffs = diffs * mask
-
-    # Count valid neighbors per node
-    n_valid = valid_mask.sum(dim=-1, keepdim=True).unsqueeze(0).unsqueeze(-1).float().clamp(min=1)
-
-    # Directional-difference estimator:
-    #   |∇u|² ≈ 2 * mean_j[(u_j-u_0)²] / h².
-    # For six complete equiangular neighbours this is exactly the
-    # second-order linear-field scaling 1/(3h²) * Σ_j (u_j-u_0)².
-    # At incomplete boundaries it is explicitly only a directional proxy.
-    grad_sq = (2.0 / (h * h)) * torch.sum(diffs ** 2, dim=2) / n_valid.squeeze(2)
-
-    grad_mag = torch.sqrt(grad_sq + 1e-12)
-
-    return grad_mag.reshape(*batch_shape, N, C)
+    return h1_error, h1_target
 
 
 def compute_h1_rmse_per_step(
     pred: torch.Tensor,
     target: torch.Tensor,
     hex_neighbors: Optional[torch.Tensor] = None,
-    h: float = 1.0,
+    h: Any = 1.0,
 ) -> torch.Tensor:
-    """
-    Compute H¹ Sobolev RMSE per rollout timestep.
+    """Compute the discrete H1 error proxy per rollout timestep."""
+    _validate_rollout_pair(pred, target)
 
-    Discrete H¹ proxy = sqrt(L² error² + directional-gradient(error)²).
-
-    This computes the seminorm of e = pred - target, as required by the H¹
-    error definition.  The hex gradient term is exact in scale for linear
-    fields at complete regular six-neighbour interior nodes; boundary nodes
-    remain an explicitly documented directional proxy.
-
-    If hex_neighbors is not provided, falls back to pure L² RMSE.
-
-    Parameters
-    ----------
-    pred : shape [T, N, C] or [T, B, N, C]
-    target : shape [T, N, C] or [T, B, N, C]
-    hex_neighbors : shape [N, 6], optional
-        Hex neighbor index array for gradient computation.
-    h : float
-        Hex grid spacing for gradient scaling.
-
-    Returns
-    -------
-    torch.Tensor : shape [T]
-        H¹ RMSE for each timestep.
-    """
-    l2_rmse = compute_rmse_per_step(pred, target)
-
+    t_steps = pred.shape[0]
+    l2_rmse = torch.sqrt(
+        torch.mean((pred - target).reshape(t_steps, -1) ** 2, dim=-1)
+    )
     if hex_neighbors is None:
         return l2_rmse
 
-    T = pred.shape[0]
-
-    grad_errors = []
-    for t in range(T):
-        # H¹ error uses the seminorm of the ERROR FIELD:
-        #   ||pred-target||_{H¹}² = ||e||² + ||∇e||².
-        # Comparing only gradient magnitudes, || |∇pred|-|∇target| ||, is
-        # incorrect because opposite gradients can have identical magnitude.
-        error_field = pred[t] - target[t]
-        grad_error = _hex_gradient_magnitude(error_field, hex_neighbors, h)
-        grad_rmse_t = torch.sqrt(torch.mean(grad_error.reshape(-1) ** 2))
-        grad_errors.append(grad_rmse_t)
-
-    grad_rmse = torch.stack(grad_errors)
-
-    # H¹ = sqrt(L² + |∇|²)
-    h1_rmse = torch.sqrt(l2_rmse ** 2 + grad_rmse ** 2)
-    return h1_rmse
+    topology = _prepare_hex_topology(pred, hex_neighbors, h)
+    h1_error, _ = _compute_h1_terms_prepared(pred, target, topology)
+    return h1_error
 
 
 def compute_h1_nrmse_per_step(
     pred: torch.Tensor,
     target: torch.Tensor,
     hex_neighbors: Optional[torch.Tensor] = None,
-    h: float = 1.0,
-    eps: float = 1e-8,
+    h: Any = 1.0,
+    eps: Any = 1e-8,
 ) -> torch.Tensor:
-    """
-    Compute normalized H¹ RMSE per rollout timestep.
+    """Compute normalized discrete H1 error per rollout timestep."""
+    _validate_rollout_pair(pred, target)
+    eps_value = _validate_positive_finite(eps, name="eps")
+    t_steps = pred.shape[0]
 
-    H¹ nRMSE(t) = H¹ RMSE(t) / (H¹ norm of target(t) + eps)
+    if hex_neighbors is None:
+        error = torch.sqrt(
+            torch.mean((pred - target).reshape(t_steps, -1) ** 2, dim=-1)
+        )
+        target_norm = torch.sqrt(
+            torch.mean(target.reshape(t_steps, -1) ** 2, dim=-1)
+        )
+        return error / (target_norm + eps_value)
 
-    Parameters
-    ----------
-    pred, target : shape [T, N, C] or [T, B, N, C]
-    hex_neighbors : optional [N, 6]
-    h : hex grid spacing
-    eps : regularization
-
-    Returns
-    -------
-    torch.Tensor : shape [T]
-    """
-    _validate_positive_finite(eps, name="eps")
-    h1_rmse = compute_h1_rmse_per_step(pred, target, hex_neighbors, h)
-
-    # Compute H¹ norm of target
-    T = target.shape[0]
-    target_flat = target.reshape(T, -1)
-    l2_norm = torch.sqrt(torch.mean(target_flat ** 2, dim=-1))
-
-    if hex_neighbors is not None:
-        grad_norms = []
-        for t in range(T):
-            grad_t = _hex_gradient_magnitude(target[t], hex_neighbors, h)
-            grad_norms.append(torch.sqrt(torch.mean(grad_t.reshape(-1) ** 2)))
-        grad_norm = torch.stack(grad_norms)
-        h1_norm = torch.sqrt(l2_norm ** 2 + grad_norm ** 2)
-    else:
-        h1_norm = l2_norm
-
-    return h1_rmse / (h1_norm + eps)
+    topology = _prepare_hex_topology(pred, hex_neighbors, h)
+    h1_error, h1_target = _compute_h1_terms_prepared(pred, target, topology)
+    return h1_error / (h1_target + eps_value)
 
 
 def compute_divergence_step(
@@ -398,12 +395,9 @@ def compute_divergence_step(
         Returns T (total steps) if no divergence detected.
     """
     _validate_nonnegative_metric_vector(nrmse_per_step, name="nrmse_per_step")
-    if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
-        raise TypeError("threshold must be a real scalar")
-    if not math.isfinite(float(threshold)) or float(threshold) < 0.0:
-        raise ValueError("threshold must be finite and >= 0")
+    threshold_value = _validate_nonnegative_finite(threshold, name="threshold")
 
-    exceeded = (nrmse_per_step > threshold).nonzero(as_tuple=False)
+    exceeded = (nrmse_per_step > threshold_value).nonzero(as_tuple=False)
     if exceeded.numel() == 0:
         return int(nrmse_per_step.shape[0])
     return int(exceeded[0, 0].item())
@@ -486,7 +480,12 @@ def evaluate_rollout(
         num_steps: int
         aggregation_method: str
     """
-    nrmse = compute_nrmse_per_step(pred, target, eps=eps)
+    eps_value = _validate_positive_finite(eps, name="eps")
+    divergence_threshold_value = _validate_nonnegative_finite(
+        divergence_threshold,
+        name="divergence_threshold",
+    )
+    nrmse = compute_nrmse_per_step(pred, target, eps=eps_value)
     rmse = compute_rmse_per_step(pred, target)
 
     result: Dict[str, Any] = {
@@ -494,15 +493,25 @@ def evaluate_rollout(
         "rmse_per_step": rmse.tolist(),
         "nrmse_mean": aggregate_over_time(nrmse, aggregation),
         "rmse_mean": aggregate_over_time(rmse, aggregation),
-        "divergence_step": compute_divergence_step(nrmse, divergence_threshold),
+        "divergence_step": compute_divergence_step(
+            nrmse,
+            divergence_threshold_value,
+        ),
         "num_steps": int(pred.shape[0]),
         "aggregation_method": aggregation,
-        "divergence_threshold": divergence_threshold,
+        "divergence_threshold": divergence_threshold_value,
     }
 
     if hex_neighbors is not None:
-        h1_rmse = compute_h1_rmse_per_step(pred, target, hex_neighbors, h)
-        h1_nrmse = compute_h1_nrmse_per_step(pred, target, hex_neighbors, h, eps)
+        # Prepare/validate the topology once for the whole rollout and reuse it
+        # for both error and target-gradient terms.
+        topology = _prepare_hex_topology(pred, hex_neighbors, h)
+        h1_rmse, h1_target = _compute_h1_terms_prepared(
+            pred,
+            target,
+            topology,
+        )
+        h1_nrmse = h1_rmse / (h1_target + eps_value)
 
         result["h1_rmse_per_step"] = h1_rmse.tolist()
         result["h1_nrmse_per_step"] = h1_nrmse.tolist()
