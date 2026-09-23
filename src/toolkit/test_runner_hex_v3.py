@@ -20,6 +20,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
+from resume_utils_hex_v3 import save_resume_checkpoint
 from runner_hex_v3 import (
     HexTrainingRunner,
     RunnerConfig,
@@ -560,8 +561,7 @@ class TestResume(unittest.TestCase):
     def test_maybe_resume_restores_epoch_and_step(self) -> None:
         """End-to-end resume: run, then a fresh runner over the SAME run dir
         resumes from the written resume checkpoint and advances start_epoch past
-        the saved epoch. (The runner loads via ckpt_mgr.resume_path in its own
-        output_dir; resume_from acts as the existence gate.)"""
+        the saved epoch. The runner loads exactly resume_from."""
         with tempfile.TemporaryDirectory() as tmpdir:
             out = Path(tmpdir)
             # 1. Produce a resume checkpoint via a real run.
@@ -582,6 +582,39 @@ class TestResume(unittest.TestCase):
             report = runner2.maybe_resume()
             self.assertIsNotNone(report)
             self.assertEqual(runner2.start_epoch, report["epoch"] + 1)
+
+    def test_maybe_resume_loads_named_foreign_checkpoint(self) -> None:
+        """resume_from must not silently load output_dir/checkpoints/resume_last.pt."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "run"
+            foreign = Path(tmpdir) / "elsewhere" / "resume.pt"
+
+            torch.manual_seed(0)
+            src_model = _TinyModel()
+            src_optimizer = torch.optim.SGD(src_model.parameters(), lr=0.1)
+            save_resume_checkpoint(
+                foreign,
+                model=src_model,
+                optimizer=src_optimizer,
+                epoch=7,
+                global_step=42,
+                include_python_rng=False,
+                include_numpy_rng=False,
+            )
+
+            cfg = RunnerConfig(output_dir=str(out), resume_from=str(foreign))
+            runner = _make_runner(out, config=cfg)
+            report = runner.maybe_resume()
+
+            self.assertIsNotNone(report)
+            self.assertEqual(report["checkpoint_path"], str(foreign))
+            self.assertEqual(runner.start_epoch, 8)
+            self.assertEqual(runner.global_step, 42)
+            for key, value in src_model.state_dict().items():
+                self.assertTrue(
+                    torch.equal(value, runner.model.state_dict()[key]),
+                    msg=f"Mismatch in {key}",
+                )
 
 
 if __name__ == "__main__":
