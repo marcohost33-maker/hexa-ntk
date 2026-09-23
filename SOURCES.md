@@ -1,4 +1,4 @@
-| E7F1CCEF86878A56 || 00AC58F5C9B3E19F || 749CE5BA397FCD1D || B8BE0568BB7AF782 |# _SOURCES_raw.md — hexa-ntk (Staging 2026-06-04)
+# _SOURCES_raw.md — hexa-ntk (Staging 2026-06-04)
 
 > **Pfad-Entschaerfung 2026-08-26.** Die Quelle-Spalte trug vollstaendige lokale Pfade
 > des Arbeitsrechners (Benutzername, Cloud-Ordner). Vor einem Sichtbarkeits-Wechsel
