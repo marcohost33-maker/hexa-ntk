@@ -67,3 +67,13 @@
 
 | 34C92C112A40BE46 | 2026-09-23 00:49 | src/toolkit | in-repo derived, PR #32 review-hardening: stress_hex_v3.py |
 | 75AEA74A3CF101F0 | 2026-09-23 00:49 | src/toolkit | in-repo derived, PR #32 review-hardening tests: test_stress_hex_v3.py |
+
+## spec/ + src/toolkit/ — Second-review hardening 2026-09-23 (append-only, PR #32)
+
+> The authoritative stress contract itself is now SHA-indexed. Prior toolkit
+> rows remain as lineage; the following rows pin the current underflow-hardened
+> implementation and tests.
+
+| A9EB2FEE22AB4A97 | 2026-09-23 01:00 | spec | in-repo created/updated, PR #32: STRESS_SHIFT_CONTRACT_v1.md |
+| 34876C4B56EFACA1 | 2026-09-23 01:00 | src/toolkit | in-repo derived, PR #32 underflow hardening: stress_hex_v3.py |
+| 4A0685F445D0A679 | 2026-09-23 01:00 | src/toolkit | in-repo derived, PR #32 underflow regression tests: test_stress_hex_v3.py |
