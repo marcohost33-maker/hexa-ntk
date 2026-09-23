@@ -355,6 +355,25 @@ def _hex_gradient_magnitude(
     return _hex_gradient_magnitude_prepared(field, topology)
 
 
+def _compute_h1_error_prepared(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    topology: _PreparedHexTopology,
+) -> torch.Tensor:
+    """Return only the per-step H1 error, without target-norm work."""
+    acc_dtype = _accumulation_dtype(pred.dtype, target.dtype)
+    h1_error_steps = []
+    for t in range(pred.shape[0]):
+        pred_t = pred[t].to(acc_dtype)
+        target_t = target[t].to(acc_dtype)
+        error_t = pred_t - target_t
+        l2_error = torch.sqrt(torch.mean(error_t ** 2))
+        grad_error = _hex_gradient_magnitude_prepared(error_t, topology)
+        grad_error_rmse = torch.sqrt(torch.mean(grad_error ** 2))
+        h1_error_steps.append(torch.sqrt(l2_error ** 2 + grad_error_rmse ** 2))
+    return torch.stack(h1_error_steps)
+
+
 def _compute_h1_terms_prepared(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -364,30 +383,21 @@ def _compute_h1_terms_prepared(
 
     The neighbour gather materialises [B, N, 6, C] temporaries; looping over
     the rollout axis keeps that peak independent of T (as on main before the
-    H1 rework) instead of [T*B, N, 6, C]. Accumulation dtype as in
-    ``_accumulation_dtype``; the returned [T] tensors use it as well.
+    H1 rework) instead of [T*B, N, 6, C]. The unnormalised H1 API uses the
+    error-only helper above so it does not pay for an unused target gradient.
     """
+    h1_error = _compute_h1_error_prepared(pred, target, topology)
     acc_dtype = _accumulation_dtype(pred.dtype, target.dtype)
-    h1_error_steps = []
     h1_target_steps = []
-    for t in range(pred.shape[0]):
-        pred_t = pred[t].to(acc_dtype)
+    for t in range(target.shape[0]):
         target_t = target[t].to(acc_dtype)
-        error_t = pred_t - target_t
-
-        l2_error = torch.sqrt(torch.mean(error_t ** 2))
-        grad_error = _hex_gradient_magnitude_prepared(error_t, topology)
-        grad_error_rmse = torch.sqrt(torch.mean(grad_error ** 2))
-        h1_error_steps.append(torch.sqrt(l2_error ** 2 + grad_error_rmse ** 2))
-
         l2_target = torch.sqrt(torch.mean(target_t ** 2))
         grad_target = _hex_gradient_magnitude_prepared(target_t, topology)
         grad_target_rmse = torch.sqrt(torch.mean(grad_target ** 2))
         h1_target_steps.append(
             torch.sqrt(l2_target ** 2 + grad_target_rmse ** 2)
         )
-
-    return torch.stack(h1_error_steps), torch.stack(h1_target_steps)
+    return h1_error, torch.stack(h1_target_steps)
 
 
 def compute_h1_rmse_per_step(
@@ -402,8 +412,7 @@ def compute_h1_rmse_per_step(
         return _rmse_per_step_unchecked(pred, target)
 
     topology = _prepare_hex_topology(pred, hex_neighbors, h, validate_field=False)
-    h1_error, _ = _compute_h1_terms_prepared(pred, target, topology)
-    return h1_error
+    return _compute_h1_error_prepared(pred, target, topology)
 
 
 def compute_h1_nrmse_per_step(
