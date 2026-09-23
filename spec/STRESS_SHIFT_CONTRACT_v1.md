@@ -49,11 +49,10 @@ The v1 degradation ratio accepts only finite, non-negative,
 **lower-is-better error metrics**. Accuracy-like, signed, reward-like, or
 higher-is-better scores MUST first use a separately specified transformation.
 
-For baseline error E_0, shifted error E_s, and positive numerical floor epsilon:
+For baseline error `E_0`, shifted error `E_s`, and positive numerical floor
+`epsilon`:
 
-[
-D = E_s / max(E_0, epsilon)
-]
+`D = E_s / max(E_0, epsilon)`
 
 Special cases:
 
@@ -83,8 +82,9 @@ Metadata is snapshot evidence. Implementations MUST deep-copy/freeze nested
 metadata so later mutation of the source configuration cannot alter a completed
 report.
 
-A `StressReport` MUST validate every stored `degradation_factor` and
-`degradation_saturated` value against its own baseline, floor, and case error.
+A `StressReport` MUST validate every stored `degradation_factor`,
+`degradation_saturated`, and `degradation_underflowed` value against its own
+baseline, floor, and case error.
 Manually constructed or deserialized reports that violate this relation are
 invalid.
 
