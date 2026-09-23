@@ -61,10 +61,13 @@ Special cases:
 - E_s = 0 and E_0 > 0 -> D = 0.
 - finite inputs whose ratio exceeds IEEE-754 binary64 range -> the stored factor
   saturates at `sys.float_info.max` and the case MUST set
-  `degradation_saturated = true`.
+  `degradation_saturated = true`;
+- finite positive inputs whose positive ratio underflows to IEEE-754 zero -> the
+  stored factor is clamped to the smallest positive representable float and the
+  case MUST set `degradation_underflowed = true`.
 
-Saturation is explicit evidence and MUST NOT be interpreted as the actual finite
-ratio magnitude.
+Saturation/underflow flags are explicit numerical evidence. A clamped factor MUST
+NOT be interpreted as the exact mathematical ratio magnitude.
 
 ## 5. Evidence integrity
 
@@ -137,6 +140,7 @@ v1 serialization includes:
   - `error_value`
   - `degradation_factor`
   - `degradation_saturated`
+  - `degradation_underflowed`
   - `metadata`
 
 Consumers MUST ignore unknown future fields but MUST NOT silently reinterpret
