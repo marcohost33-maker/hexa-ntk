@@ -7,10 +7,14 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest import mock
+
+import numpy as np
 from pathlib import Path
 
 import torch
 
+import benchmark_hex_v3 as benchmark
 from benchmark_hex_v3 import (
     BenchmarkReport,
     aggregate_over_time,
@@ -133,6 +137,21 @@ class TestH1Metrics(unittest.TestCase):
         # A spatially constant error has zero H¹ seminorm contribution.
         self.assertTrue(torch.allclose(h1, l2, atol=1e-6))
 
+    def test_identical_zero_field_has_exact_zero_h1_error(self) -> None:
+        target = torch.zeros(T, N, 1)
+        neighbors = make_hex_neighbors()
+
+        h1 = compute_h1_rmse_per_step(target, target, neighbors, h=1.0)
+        h1_nrmse = compute_h1_nrmse_per_step(
+            target,
+            target,
+            neighbors,
+            h=1.0,
+        )
+
+        self.assertTrue(torch.equal(h1, torch.zeros_like(h1)))
+        self.assertTrue(torch.equal(h1_nrmse, torch.zeros_like(h1_nrmse)))
+
     def test_h1_opposite_gradient_not_lost_by_magnitude_cancellation(self) -> None:
         neighbors = make_hex_neighbors()
         target = torch.zeros(1, N, 1)
@@ -214,6 +233,20 @@ class TestEvaluateRollout(unittest.TestCase):
         self.assertIn("h1_nrmse_mean", result)
         self.assertEqual(len(result["h1_rmse_per_step"]), T)
 
+    def test_hex_topology_is_prepared_once_per_evaluate_rollout(self) -> None:
+        target = make_target()
+        pred = make_pred_close(target)
+        neighbors = make_hex_neighbors()
+
+        with mock.patch.object(
+            benchmark,
+            "_prepare_hex_topology",
+            wraps=benchmark._prepare_hex_topology,
+        ) as prepare:
+            evaluate_rollout(pred, target, hex_neighbors=neighbors, h=1.0)
+
+        self.assertEqual(prepare.call_count, 1)
+
     def test_diverging_rollout_detects_divergence(self) -> None:
         target = make_target()
         pred = make_pred_diverging(target)
@@ -234,6 +267,23 @@ class TestBenchmarkInputValidation(unittest.TestCase):
         target = make_target().to(torch.complex64)
         with self.assertRaisesRegex(TypeError, "real floating"):
             compute_rmse_per_step(target, target)
+
+    def test_numpy_real_scalars_are_accepted(self) -> None:
+        target = make_target()
+        neighbors = make_hex_neighbors()
+
+        compute_nrmse_per_step(target, target, eps=np.float32(1e-6))
+        compute_h1_rmse_per_step(
+            target,
+            target,
+            neighbors,
+            h=np.float32(1.0),
+        )
+        step = compute_divergence_step(
+            torch.full((T,), 0.1),
+            threshold=np.float32(1.0),
+        )
+        self.assertEqual(step, T)
 
     def test_nonpositive_h_fails_closed(self) -> None:
         target = make_target()
