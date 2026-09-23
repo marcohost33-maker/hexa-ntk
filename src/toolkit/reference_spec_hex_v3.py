@@ -150,7 +150,7 @@ class ConvergenceStudy:
     levels: tuple[RefinementLevel, ...]
     evidence_ref: str
     observed_order: float | None = None
-    fine_grid_uncertainty: float | None = None
+    fine_grid_relative_error_estimate: float | None = None
     asymptotic_range_checked: bool = False
 
     def __post_init__(self) -> None:
@@ -176,6 +176,10 @@ class ConvergenceStudy:
         if not all(isinstance(level, RefinementLevel) for level in self.levels):
             raise TypeError("levels must contain only RefinementLevel values")
 
+        level_ids = [level.level_id for level in self.levels]
+        if len(level_ids) != len(set(level_ids)):
+            raise ValueError("refinement level_id values must be unique")
+
         sizes = [level.characteristic_size for level in self.levels]
         if any(b <= a for a, b in zip(sizes, sizes[1:])):
             raise ValueError(
@@ -193,13 +197,13 @@ class ConvergenceStudy:
                 )
             object.__setattr__(self, "observed_order", order)
 
-        if self.fine_grid_uncertainty is not None:
+        if self.fine_grid_relative_error_estimate is not None:
             object.__setattr__(
                 self,
-                "fine_grid_uncertainty",
+                "fine_grid_relative_error_estimate",
                 _finite_nonnegative(
-                    self.fine_grid_uncertainty,
-                    name="fine_grid_uncertainty",
+                    self.fine_grid_relative_error_estimate,
+                    name="fine_grid_relative_error_estimate",
                 ),
             )
 
@@ -213,6 +217,15 @@ class ConvergenceStudy:
     @property
     def level_count(self) -> int:
         return len(self.levels)
+
+    @property
+    def supports_verified_reference(self) -> bool:
+        return (
+            self.level_count >= 3
+            and self.observed_order is not None
+            and self.asymptotic_range_checked
+            and self.fine_grid_relative_error_estimate is not None
+        )
 
 
 @dataclass(frozen=True)
@@ -337,7 +350,7 @@ class ReferenceSpec:
             return study is None
         if check.status is not EvidenceStatus.PASS:
             return False
-        return study is not None and study.level_count >= 3
+        return study is not None and study.supports_verified_reference
 
     def claim_ceiling(self) -> ClaimCeiling:
         if self.kind in {
@@ -412,7 +425,7 @@ class ReferenceSpec:
                 ],
                 "evidence_ref": study.evidence_ref,
                 "observed_order": study.observed_order,
-                "fine_grid_uncertainty": study.fine_grid_uncertainty,
+                "fine_grid_relative_error_estimate": study.fine_grid_relative_error_estimate,
                 "asymptotic_range_checked": study.asymptotic_range_checked,
             }
 
