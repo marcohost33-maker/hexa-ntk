@@ -371,6 +371,15 @@ class ReferenceSpec:
                 EvidenceStatus.NOT_APPLICABLE,
             }:
                 return ClaimCeiling.COMPARISON_ONLY
+            if not any(
+                check.status is EvidenceStatus.PASS
+                for check in (
+                    self.spatial_verification,
+                    self.temporal_verification,
+                    self.iterative_verification,
+                )
+            ):
+                return ClaimCeiling.COMPARISON_ONLY
             if self.numerical_uncertainty is None:
                 return ClaimCeiling.COMPARISON_ONLY
             return ClaimCeiling.VERIFIED_NUMERICAL_REFERENCE
