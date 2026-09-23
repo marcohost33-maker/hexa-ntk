@@ -363,6 +363,7 @@ class TestStressReport(unittest.TestCase):
         self.assertEqual(tiny.degradation_factor, 1.0)
         self.assertTrue(clean.degradation_floored)  # baseline 0 < floor
         payload = report.to_dict()
+        self.assertIn("degradation_floored", payload["cases"][0])
         self.assertIs(payload["cases"][0]["degradation_floored"], True)
 
         exact = evaluate_stress_cases(
