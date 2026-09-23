@@ -44,7 +44,7 @@ def three_level_study(axis: ConvergenceAxis) -> ConvergenceStudy:
         ),
         evidence_ref=f"results/{axis.value}_convergence.json",
         observed_order=1.8,
-        fine_grid_uncertainty=0.0012,
+        fine_grid_relative_error_estimate=0.0012,
         asymptotic_range_checked=True,
     )
 
@@ -88,6 +88,18 @@ class TestConvergenceStudy(unittest.TestCase):
                 ),
                 evidence_ref="results/two_grid.json",
                 asymptotic_range_checked=True,
+            )
+
+    def test_level_ids_must_be_unique(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unique"):
+            ConvergenceStudy(
+                axis=ConvergenceAxis.SPATIAL,
+                quantity_of_interest="drag_coefficient",
+                levels=(
+                    RefinementLevel("same", 0.5, 1.0),
+                    RefinementLevel("same", 1.0, 1.1),
+                ),
+                evidence_ref="results/duplicate_ids.json",
             )
 
     def test_levels_must_be_finest_to_coarsest(self) -> None:
@@ -165,6 +177,38 @@ class TestReferenceClaimCeiling(unittest.TestCase):
             numerical_uncertainty=UncertaintyStatement(
                 UncertaintyKind.ABSOLUTE,
                 0.001,
+                "results/u.json",
+            ),
+        )
+        self.assertEqual(
+            reference.claim_ceiling(),
+            ClaimCeiling.COMPARISON_ONLY,
+        )
+
+    def test_three_raw_levels_without_convergence_assessment_do_not_promote(self) -> None:
+        raw_study = ConvergenceStudy(
+            axis=ConvergenceAxis.SPATIAL,
+            quantity_of_interest="drag_coefficient",
+            levels=(
+                RefinementLevel("fine", 0.25, 0.971),
+                RefinementLevel("medium", 0.5, 0.969),
+                RefinementLevel("coarse", 1.0, 0.963),
+            ),
+            evidence_ref="results/raw_three_level.json",
+        )
+        reference = ReferenceSpec(
+            reference_id="solver/raw-three-level",
+            kind=ReferenceKind.NUMERICAL,
+            context_of_use="steady external-flow regression",
+            quantity_of_interest="drag_coefficient",
+            code_verification=pass_check("results/code.log"),
+            spatial_verification=pass_check("results/spatial.log"),
+            temporal_verification=na_check("steady"),
+            iterative_verification=na_check("direct solve"),
+            spatial_study=raw_study,
+            numerical_uncertainty=UncertaintyStatement(
+                UncertaintyKind.ABSOLUTE,
+                0.01,
                 "results/u.json",
             ),
         )
