@@ -222,6 +222,61 @@ class TestEvaluateRollout(unittest.TestCase):
         self.assertLess(result["divergence_step"], T)
 
 
+class TestBenchmarkInputValidation(unittest.TestCase):
+    def test_nonfinite_rollout_fails_closed(self) -> None:
+        target = make_target()
+        pred = target.clone()
+        pred[0, 0, 0] = float("nan")
+        with self.assertRaisesRegex(ValueError, "finite"):
+            compute_nrmse_per_step(pred, target)
+
+    def test_complex_rollout_requires_explicit_metric(self) -> None:
+        target = make_target().to(torch.complex64)
+        with self.assertRaisesRegex(TypeError, "real floating"):
+            compute_rmse_per_step(target, target)
+
+    def test_nonpositive_h_fails_closed(self) -> None:
+        target = make_target()
+        neighbors = make_hex_neighbors()
+        with self.assertRaisesRegex(ValueError, "h must be finite and > 0"):
+            compute_h1_rmse_per_step(target, target, neighbors, h=0.0)
+
+    def test_out_of_range_neighbor_fails_closed(self) -> None:
+        target = make_target()
+        neighbors = make_hex_neighbors()
+        neighbors[0, 0] = N
+        with self.assertRaisesRegex(ValueError, "valid node indices"):
+            compute_h1_rmse_per_step(target, target, neighbors, h=1.0)
+
+    def test_duplicate_neighbor_fails_closed(self) -> None:
+        target = make_target()
+        neighbors = make_hex_neighbors()
+        neighbors[0, 1] = neighbors[0, 0]
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            compute_h1_rmse_per_step(target, target, neighbors, h=1.0)
+
+    def test_self_neighbor_fails_closed(self) -> None:
+        target = make_target()
+        neighbors = make_hex_neighbors()
+        neighbors[0, 0] = 0
+        with self.assertRaisesRegex(ValueError, "self-neighbour"):
+            compute_h1_rmse_per_step(target, target, neighbors, h=1.0)
+
+    def test_invalid_geometric_metric_not_silently_clamped(self) -> None:
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            aggregate_over_time(torch.tensor([0.1, -0.2, 0.3]), "geometric_mean")
+        with self.assertRaisesRegex(ValueError, "finite"):
+            aggregate_over_time(
+                torch.tensor([0.1, float("nan"), 0.3]),
+                "geometric_mean",
+            )
+
+    def test_invalid_divergence_threshold_fails_closed(self) -> None:
+        nrmse = torch.full((T,), 0.1)
+        with self.assertRaisesRegex(ValueError, "finite and >= 0"):
+            compute_divergence_step(nrmse, threshold=float("nan"))
+
+
 class TestBenchmarkReport(unittest.TestCase):
     def test_save_and_load_json(self) -> None:
         target = make_target()
