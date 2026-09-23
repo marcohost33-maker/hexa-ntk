@@ -616,6 +616,67 @@ class TestResume(unittest.TestCase):
                     msg=f"Mismatch in {key}",
                 )
 
+    def test_maybe_resume_prefers_resume_from_over_own_checkpoint(self) -> None:
+        """F31-1: the pre-fix failure mode. output_dir already holds the
+        runner's OWN resume checkpoint (different epoch/step/weights) and
+        resume_from names a foreign one. The foreign file must be loaded;
+        silently loading output_dir/checkpoints/resume_last.pt is the bug."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "run"
+            foreign = Path(tmpdir) / "elsewhere" / "resume.pt"
+
+            torch.manual_seed(0)
+            src_model = _TinyModel()
+            src_optimizer = torch.optim.SGD(src_model.parameters(), lr=0.1)
+            save_resume_checkpoint(
+                foreign,
+                model=src_model,
+                optimizer=src_optimizer,
+                epoch=7,
+                global_step=42,
+                include_python_rng=False,
+                include_numpy_rng=False,
+            )
+
+            cfg = RunnerConfig(output_dir=str(out), resume_from=str(foreign))
+            runner = _make_runner(out, config=cfg)
+
+            # Own checkpoint in output_dir with distinct epoch/step/weights.
+            torch.manual_seed(123)
+            own_model = _TinyModel()
+            own_optimizer = torch.optim.SGD(own_model.parameters(), lr=0.1)
+            runner.ckpt_mgr.save_resume(
+                model=own_model,
+                optimizer=own_optimizer,
+                epoch=1,
+                global_step=5,
+                include_python_rng=False,
+                include_numpy_rng=False,
+            )
+            own_path = Path(runner.ckpt_mgr.resume_path)
+            self.assertTrue(own_path.exists())
+            self.assertNotEqual(own_path.resolve(), foreign.resolve())
+            self.assertFalse(
+                all(
+                    torch.equal(v, own_model.state_dict()[k])
+                    for k, v in src_model.state_dict().items()
+                ),
+                msg="precondition: own and foreign weights must differ",
+            )
+
+            report = runner.maybe_resume()
+
+            self.assertIsNotNone(report)
+            self.assertEqual(report["checkpoint_path"], str(foreign))
+            self.assertEqual(report["epoch"], 7)
+            self.assertEqual(runner.start_epoch, 8)
+            self.assertEqual(runner.global_step, 42)
+            for key, value in src_model.state_dict().items():
+                self.assertTrue(
+                    torch.equal(value, runner.model.state_dict()[key]),
+                    msg=f"Mismatch in {key}",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

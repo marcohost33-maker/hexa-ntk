@@ -56,7 +56,10 @@ Die Zahlen gelten fuer diese beiden Umgebungen; ausserhalb ist nichts zugesicher
 reicht `config.resume_from` jetzt explizit an den Checkpoint-Loader weiter.
 Existenzpruefung und tatsaechlich geladene Datei bezeichnen damit denselben Pfad.
 Manager- und Runner-Regressionstests decken einen Checkpoint ausserhalb des
-aktuellen `output_dir` mit abweichender Epoche und `global_step` ab. Die
+aktuellen `output_dir` mit abweichender Epoche und `global_step` ab, auch wenn
+im `output_dir` bereits ein eigener Resume-Checkpoint liegt (der fruehere
+Fehlerfall: dieser wurde still geladen). Eine fehlende `resume_from`-Datei
+fuehrt weiterhin nur zu einer Warnung und einem Start bei Epoche 0. Die
 Trust-/`weights_only`-Semantik bleibt unveraendert. Der isolierte Fix ersetzt
 den entsprechenden Teil des aelteren Sammel-PR #20.
 
@@ -81,13 +84,13 @@ python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/wh
 python scripts/engine_gate.py                                  # 47 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 168 Unit-Tests + Coverage-Gate
+python -m coverage report                                      # 169 Unit-Tests + Coverage-Gate
 ```
 
 CI (`.github/workflows/ci.yml`), beide Jobs **blocking**:
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + 168 Toolkit-Unit-Tests unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + 169 Toolkit-Unit-Tests unter Branch-Coverage.
 
 ## Struktur
 

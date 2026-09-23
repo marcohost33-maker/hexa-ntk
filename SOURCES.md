@@ -60,4 +60,4 @@
 | B8BE0568BB7AF782 | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #31 explicit resume path: checkpoint_integration_hex_v3.py |
 | 749CE5BA397FCD1D | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #31 explicit resume path: runner_hex_v3.py |
 | 00AC58F5C9B3E19F | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #31 regression tests: test_checkpoint_integration_hex_v3.py |
-| E7F1CCEF86878A56 | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #31 regression tests: test_runner_hex_v3.py |
+| 77E6056F9F5D9EDE | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #31 regression tests (+ own-checkpoint-present case, F31-1): test_runner_hex_v3.py |
