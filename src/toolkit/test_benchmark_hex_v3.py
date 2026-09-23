@@ -446,6 +446,19 @@ class TestH1PrecisionAndMemory(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertTrue(all(math.isfinite(v) for v in result[key]))
 
+    def test_unnormalized_h1_skips_unused_target_gradient(self) -> None:
+        """H1 RMSE needs one stencil per step; target norm is only for H1 nRMSE."""
+        target = make_target()
+        pred = make_pred_close(target)
+        neighbors = make_hex_neighbors()
+        with mock.patch.object(
+            benchmark,
+            "_hex_gradient_magnitude_prepared",
+            wraps=benchmark._hex_gradient_magnitude_prepared,
+        ) as kernel:
+            compute_h1_rmse_per_step(pred, target, neighbors, h=1.0)
+        self.assertEqual(kernel.call_count, T)
+
     def test_h1_kernel_processes_one_timestep_at_a_time(self) -> None:
         """Peak temporaries must not scale with T (main looped over t).
 
