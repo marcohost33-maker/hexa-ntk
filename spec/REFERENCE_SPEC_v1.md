@@ -152,6 +152,7 @@ Requires all of:
 - code verification is `pass`;
 - spatial, temporal, and iterative solution-verification checks are each either
   `pass` or justified `not_applicable`;
+- **at least one** of those solution-verification axes is an actual `pass`;
 - each applicable spatial/temporal `pass` has a matching refinement study with
   at least three levels;
 - numerical uncertainty is present.
