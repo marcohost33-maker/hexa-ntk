@@ -127,26 +127,30 @@ def _compute_degradation_details(
     baseline_error: Any,
     *,
     floor: Any,
-) -> tuple[float, bool]:
-    """Return finite ratio plus a flag when IEEE-754 saturation was required."""
+) -> tuple[float, bool, bool]:
+    """Return finite ratio plus overflow/underflow clamp flags."""
     shifted = _finite_nonnegative(shifted_error, name="shifted_error")
     baseline = _finite_nonnegative(baseline_error, name="baseline_error")
     eps = _positive_finite(floor, name="floor")
 
     if shifted == 0.0 and baseline == 0.0:
-        return 1.0, False
+        return 1.0, False, False
     if shifted == 0.0:
-        return 0.0, False
+        return 0.0, False, False
 
     denominator = max(baseline, eps)
     ratio = shifted / denominator
-    if math.isfinite(ratio):
-        return ratio, False
+    if math.isfinite(ratio) and ratio > 0.0:
+        return ratio, False, False
+    if ratio == 0.0:
+        # Preserve the semantic distinction between an exact zero shifted error
+        # and a positive mathematical ratio that underflows binary64.
+        return math.nextafter(0.0, math.inf), False, True
 
     # Finite inputs can still overflow their ratio, e.g. baseline=0 and a
     # subnormal floor. Preserve a finite sortable value and expose saturation
     # explicitly rather than silently returning +inf.
-    return sys.float_info.max, True
+    return sys.float_info.max, True, False
 
 
 def compute_degradation_factor(
@@ -161,7 +165,7 @@ def compute_degradation_factor(
     StressCaseResult.degradation_saturated records that condition when reports
     are built through evaluate_stress_cases.
     """
-    factor, _ = _compute_degradation_details(
+    factor, _, _ = _compute_degradation_details(
         shifted_error,
         baseline_error,
         floor=floor,
@@ -208,6 +212,7 @@ class StressCaseResult:
     error_value: float
     degradation_factor: float
     degradation_saturated: bool = False
+    degradation_underflowed: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -232,6 +237,13 @@ class StressCaseResult:
         )
         if not isinstance(self.degradation_saturated, bool):
             raise TypeError("degradation_saturated must be bool")
+        if not isinstance(self.degradation_underflowed, bool):
+            raise TypeError("degradation_underflowed must be bool")
+        if self.degradation_saturated and self.degradation_underflowed:
+            raise ValueError(
+                "degradation_saturated and degradation_underflowed "
+                "cannot both be true"
+            )
         object.__setattr__(
             self,
             "metadata",
@@ -286,7 +298,7 @@ class StressReport:
             )
 
         for case in self.cases:
-            expected, saturated = _compute_degradation_details(
+            expected, saturated, underflowed = _compute_degradation_details(
                 case.error_value,
                 baseline,
                 floor=floor,
@@ -295,6 +307,11 @@ class StressReport:
                 raise ValueError(
                     f"case {case.case_id!r} has inconsistent "
                     "degradation_saturated"
+                )
+            if case.degradation_underflowed != underflowed:
+                raise ValueError(
+                    f"case {case.case_id!r} has inconsistent "
+                    "degradation_underflowed"
                 )
             if case.degradation_factor != expected and not math.isclose(
                 case.degradation_factor,
@@ -328,6 +345,7 @@ class StressReport:
                     "error_value": case.error_value,
                     "degradation_factor": case.degradation_factor,
                     "degradation_saturated": case.degradation_saturated,
+                    "degradation_underflowed": case.degradation_underflowed,
                     "metadata": _thaw_metadata_value(case.metadata),
                 }
                 for case in self.cases
@@ -367,7 +385,7 @@ def evaluate_stress_cases(
 
     results = []
     for case in case_list:
-        factor, saturated = _compute_degradation_details(
+        factor, saturated, underflowed = _compute_degradation_details(
             case.error_value,
             baseline,
             floor=floor,
@@ -380,6 +398,7 @@ def evaluate_stress_cases(
                 error_value=case.error_value,
                 degradation_factor=factor,
                 degradation_saturated=saturated,
+                degradation_underflowed=underflowed,
                 metadata=case.metadata,
             )
         )
