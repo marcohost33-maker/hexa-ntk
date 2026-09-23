@@ -51,3 +51,11 @@
 > `mtime` = Erstellzeit im Repo.
 
 | 8890E69A5CC1AA6B | 2026-07-03 03:51 | src/toolkit | in-repo erstellt, Branch claude/code-analysis-optimization-ajgyce: test_dataset_split_hex_v3.py |
+
+## src/toolkit/ — Ergaenzung 2026-09-23 (append-only)
+
+> Neue Stress-/Shift-Vertragsdateien, in-repo erstellt. Die SHA-Pins werden vom
+> fail-closed Provenance-Gate gegen die aktuellen Repo-Bytes verifiziert.
+
+| 0000000000000000 | 2026-09-23 00:21 | src/toolkit | in-repo erstellt, PR #32: stress_hex_v3.py |
+| 0000000000000000 | 2026-09-23 00:21 | src/toolkit | in-repo erstellt, PR #32: test_stress_hex_v3.py |
