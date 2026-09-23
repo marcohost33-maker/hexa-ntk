@@ -152,6 +152,27 @@ class TestReferenceClaimCeiling(unittest.TestCase):
             3,
         )
 
+    def test_all_solution_axes_not_applicable_is_not_promoted(self) -> None:
+        reference = ReferenceSpec(
+            reference_id="solver/all-na",
+            kind=ReferenceKind.NUMERICAL,
+            context_of_use="algebraic reference comparison",
+            quantity_of_interest="drag_coefficient",
+            code_verification=pass_check("results/code.log"),
+            spatial_verification=na_check("no spatial discretization"),
+            temporal_verification=na_check("steady algebraic problem"),
+            iterative_verification=na_check("closed-form linear solve"),
+            numerical_uncertainty=UncertaintyStatement(
+                UncertaintyKind.ABSOLUTE,
+                0.001,
+                "results/u.json",
+            ),
+        )
+        self.assertEqual(
+            reference.claim_ceiling(),
+            ClaimCeiling.COMPARISON_ONLY,
+        )
+
     def test_passed_spatial_check_without_study_is_not_promoted(self) -> None:
         reference = ReferenceSpec(
             reference_id="solver/no-study",
