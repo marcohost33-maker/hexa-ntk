@@ -91,8 +91,10 @@ def _validate_positive_finite(value: Any, *, name: str) -> float:
 
 
 def _validate_nonnegative_finite(value: Any, *, name: str) -> float:
-    result = _coerce_real_scalar(value, name=name)
-    if result < 0.0:
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise TypeError(f"{name} must be a real scalar")
+    result = float(value)
+    if not math.isfinite(result) or result < 0.0:
         raise ValueError(f"{name} must be finite and >= 0")
     return result
 
