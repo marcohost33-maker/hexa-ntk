@@ -27,7 +27,7 @@
 > mit `python scripts/verify_sources.py` (rechnet die SHA-256 der Repo-Dateien gegen diese Tabelle).
 > Die 8 NICHT als "in-repo modifiziert" markierten Module sind byte-identisch zum 04-06-Snapshot.
 
-| 7D48D5B659D08A05 | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\benchmark_hex_v3.py (in-repo modifiziert, Commit 0865915) |
+| E8E187647A73F025 | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\benchmark_hex_v3.py (in-repo modifiziert, Commit 0865915; H1-Semantik + fail-closed Benchmark-Haertung, PR #30) |
 | 2BBFD0218DEBBF0F | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\checkpoint_integration_hex_v3.py (in-repo modifiziert, Commit 5b88d29) |
 | A8ACCD446EC287D6 | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\dataloader_utils_hex_v3.py (in-repo modifiziert, Commit 0865915) |
 | DF201FDE60688DAF | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\dataset_split_hex_v3.py |
@@ -36,7 +36,7 @@
 | D0192688CE5222F1 | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\operator_adapter_hex_v3.py |
 | BB8B7E456C1B7DEB | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\resume_utils_hex_v3.py |
 | 8B1886090583A412 | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\runner_hex_v3.py (in-repo modifiziert, Commit 0865915) |
-| DE5B1FE6EA89314D | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_benchmark_hex_v3.py (in-repo modifiziert, Commit 0865915) |
+| 158119CBF5D02B92 | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_benchmark_hex_v3.py (in-repo modifiziert, Commit 0865915; H1-/Negativ-Regressionstests, PR #30) |
 | E18BF23374494EE9 | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_checkpoint_integration_hex_v3.py (in-repo modifiziert, Commit c6628d8) |
 | 54FE8C5313B45824 | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_dataloader_utils_hex_v3.py |
 | 574B8851CE411016 | 2026-04-06 22:50 | src/toolkit | G:\<staging-drive>\0Archiv Snapshots\Hex-HexaNTK\3HexaNTK\test_ema_hex_v3.py |
