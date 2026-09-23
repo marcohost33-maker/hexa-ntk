@@ -59,4 +59,4 @@
 > SHA values are filled from the fail-closed provenance gate.
 
 | 5869AE0D45938022 | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #30 H1/benchmark hardening: benchmark_hex_v3.py |
-| 8B444A0DA0B577C3 | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #30 regression tests: test_benchmark_hex_v3.py |
+| 51CE2470825D2CEA | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #30 regression tests (+ exact-gradient H1 oracle, F30-1): test_benchmark_hex_v3.py |

@@ -5,6 +5,7 @@ Tests for canonical benchmark metrics.
 """
 from __future__ import annotations
 
+import math
 import tempfile
 import unittest
 from unittest import mock
@@ -164,6 +165,88 @@ class TestH1Metrics(unittest.TestCase):
         # Old implementation compared |grad(pred)| with |grad(target)| and
         # therefore cancelled this case.  H¹ must use grad(pred-target).
         self.assertGreater(h1.item(), l2.item())
+
+
+def make_star_patch(h: float) -> tuple[list[tuple[float, float]], torch.Tensor]:
+    """Regular hex patch: centre with a full six-ring at distance ``h``.
+
+    Ring nodes list ONLY the centre as neighbour. For a linear field
+    ``f(x) = g . x`` this makes the discrete gradient proxy an exact oracle
+    (derivation in TestH1GradientScaling).
+    """
+    angles = [k * math.pi / 3.0 for k in range(6)]
+    points = [(0.0, 0.0)] + [
+        (h * math.cos(a), h * math.sin(a)) for a in angles
+    ]
+    neighbors = torch.full((7, 6), -1, dtype=torch.long)
+    neighbors[0] = torch.tensor([1, 2, 3, 4, 5, 6])
+    neighbors[1:, 0] = 0
+    return points, neighbors
+
+
+def linear_field(
+    points: list[tuple[float, float]], gx: float, gy: float
+) -> torch.Tensor:
+    """Field ``g . x`` on ``points`` as a [1, N, 1] float64 rollout."""
+    values = [gx * x + gy * y for x, y in points]
+    return torch.tensor(values, dtype=torch.float64).reshape(1, len(points), 1)
+
+
+class TestH1GradientScaling(unittest.TestCase):
+    """Exact-magnitude oracle for the hex gradient proxy (PR #30, F30-1).
+
+    For six neighbours at distance h in directions u_k (60 deg apart) and a
+    linear field, each difference is h * (g . u_k) and
+    sum_k (g . u_k)^2 = 3 |g|^2. The proxy (2 / h^2) * sum / n_valid therefore
+    gives exactly |g|^2 at the centre. Each ring node sees only the centre:
+    (2 / h^2) * h^2 (g . u_i)^2 = 2 (g . u_i)^2, which sums to 6 |g|^2 over
+    the ring. The node-RMS of the gradient over all 7 nodes is thus exactly
+    |g| -- independent of h. The pre-PR scaling 2 / (3 h^2) yields |g| / sqrt(3);
+    a wrong h power (e.g. 2 / h) yields an h-dependent value. Both must fail.
+    """
+
+    GRADIENTS = ((3.0, -4.0), (0.0, 2.5), (-1.25, 0.75))
+
+    def test_centre_gradient_magnitude_is_exact_for_linear_field(self) -> None:
+        for h in (0.5, 2.0):
+            points, neighbors = make_star_patch(h)
+            for gx, gy in self.GRADIENTS:
+                with self.subTest(h=h, g=(gx, gy)):
+                    field = linear_field(points, gx, gy)[0]
+                    grad = benchmark._hex_gradient_magnitude(field, neighbors, h)
+                    self.assertAlmostEqual(
+                        grad[0, 0].item(), math.hypot(gx, gy), places=12
+                    )
+
+    def test_h1_error_uses_exact_gradient_magnitude(self) -> None:
+        for h in (0.5, 2.0):
+            points, neighbors = make_star_patch(h)
+            for gx, gy in self.GRADIENTS:
+                with self.subTest(h=h, g=(gx, gy)):
+                    target = linear_field(points, 1.0, 2.0) + 0.5
+                    error = linear_field(points, gx, gy)
+                    pred = target + error
+                    l2 = torch.sqrt(torch.mean(error ** 2)).item()
+                    expected = math.sqrt(l2 ** 2 + gx ** 2 + gy ** 2)
+                    h1 = compute_h1_rmse_per_step(pred, target, neighbors, h=h)
+                    self.assertEqual(tuple(h1.shape), (1,))
+                    self.assertAlmostEqual(h1.item(), expected, places=12)
+
+    def test_h1_nrmse_uses_exact_gradient_magnitude(self) -> None:
+        h = 0.5
+        points, neighbors = make_star_patch(h)
+        target = linear_field(points, 1.0, 2.0) + 0.5
+        error = linear_field(points, 3.0, -4.0)
+        pred = target + error
+        l2_err = torch.sqrt(torch.mean(error ** 2)).item()
+        l2_tgt = torch.sqrt(torch.mean(target ** 2)).item()
+        eps = 1e-8
+        # |grad target| = |(1, 2)| -> squared 5; |grad error| squared 25.
+        expected = math.sqrt(l2_err ** 2 + 25.0) / (
+            math.sqrt(l2_tgt ** 2 + 5.0) + eps
+        )
+        h1n = compute_h1_nrmse_per_step(pred, target, neighbors, h=h, eps=eps)
+        self.assertAlmostEqual(h1n.item(), expected, places=12)
 
 
 class TestDivergenceStep(unittest.TestCase):
