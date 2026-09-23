@@ -1,48 +1,63 @@
 #!/usr/bin/env python3
 """verify_sources.py — fail-closed Provenance-Gate fuer SOURCES.md.
 
-Prueft, dass die in SOURCES.md fuer ``src/toolkit`` UND ``spec`` eingetragenen
-SHA-256-Praefixe mit den AKTUELLEN Repo-Dateien uebereinstimmen UND dass JEDE
-Datei dieser Ziele einen Eintrag hat:
+Vertrag (AGENTS.md "Provenance"): JEDE Datei unter ``src/toolkit/`` und ``spec/``
+braucht in SOURCES.md eine Zeile mit dem 16-hex SHA-256-Prefix ihrer aktuellen,
+LF-normalisierten Bytes. Mehrere Zeilen fuer denselben Dateinamen sind Lineage
+(append-only); massgeblich ist die LETZTE.
 
-* ``src/toolkit``: jedes ``*.py`` ausser ``__init__.py``;
-* ``spec``: jedes ``*.md`` (Vertrags-Quelle laut AGENTS.md "Specs in spec/ sind
-  Vertrags-Quelle; Code folgt der Spec" — ein ungepinnter Vertrag war vorher
-  fuer dieses Gate unsichtbar, PR #32 F32-2).
+Welche Dateien zaehlen (PR #32, E7 — vorher Endungsfilter *.py / *.md, womit z.B.
+eine ungepinnte ``spec/schema.json`` still PASS ergab):
 
-Damit ist SOURCES.md kein statischer Text mehr, sondern ein re-verifizierbarer
-Integritaets-Vertrag (AGENTS.md: "SOURCES.md ist die Integritaets-Wahrheit";
-SLSA-Praxis: Artefakt-Digest gegen Manifest pruefen). Mehrere Zeilen fuer
-denselben Dateinamen sind Lineage (append-only); massgeblich ist die LETZTE.
+* In einem Git-Arbeitsbaum: ``git ls-files --cached --others --exclude-standard``
+  fuer beide Verzeichnisse, also alle getrackten Dateien JEDER Endung plus
+  ungetrackte, nicht ignorierte Dateien (eine neue Datei faellt schon vor
+  ``git add`` auf).
+* Ohne Git (z.B. entpacktes Archiv): alle Dateien im Dateisystem, jede Endung.
+
+Dokumentierte Ausnahmen (und NUR diese):
+  - ``src/toolkit/__init__.py`` (leerer Paket-Marker, falls vorhanden);
+  - Verzeichnisse ``__pycache__`` (nur im Dateisystem-Modus relevant; im Git-Modus
+    ohnehin per .gitignore ausgeschlossen).
+
+Fail-closed statt still ungeprueft:
+  - Datei in einem Unterordner  -> Luecke (SOURCES-Zeilen tragen nur den Dateinamen);
+  - symbolischer Link (Git-Modus 120000 oder Dateisystem-Symlink) -> Luecke
+    (der Pin wuerde fremde Bytes beglaubigen);
+  - Dateiname ohne Endung oder mit Leerzeichen -> Luecke (in einer Zeile nicht
+    ausdrueckbar);
+  - Gross-/Kleinschreibung: Zeile und Datei muessen exakt uebereinstimmen, sonst
+    Luecke (unabhaengig davon, ob das Dateisystem Gross/Klein unterscheidet).
 
 Nicht geprueft (bewusst): Ziele ``src`` (Engine) und ``results`` — deren Zeilen
-sind Import-Locatoren des Originals, keine Pins der aktuellen Repo-Bytes.
-
-SHA-Konvention (identisch zu SOURCES.md): ``sha256(<repo-Datei>)[:16].upper()``,
-LF-normalisiert.
+sind Import-Locatoren des Originals.
 
 Deterministisch + offline. Exit-Codes:
   0  alle Dateien erfasst und SHA stimmt
   1  Drift (SHA mismatch) oder Eintrag ohne Datei
-  2  Datei ohne SOURCES.md-Eintrag (Luecke)
-  3  SOURCES.md fehlt / nicht parsebar / keine src/toolkit-Eintraege
+  2  Datei ohne gueltigen SOURCES.md-Eintrag (Luecke)
+  3  SOURCES.md fehlt / nicht parsebar / keine src/toolkit-Eintraege / git-Fehler
 
 Lauf: python scripts/verify_sources.py   (aus dem Repo-Root)
 """
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import re
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-# Ziel-Spalte -> (Verzeichnis relativ zum Repo-Root, Dateiendung, ausgenommen)
-TARGETS: dict[str, tuple[str, str, frozenset[str]]] = {
-    "src/toolkit": ("src/toolkit", ".py", frozenset({"__init__.py"})),
-    "spec": ("spec", ".md", frozenset()),
+# Ziel-Spalte in SOURCES.md -> Verzeichnis relativ zum Repo-Root
+TARGETS: dict[str, str] = {
+    "src/toolkit": "src/toolkit",
+    "spec": "spec",
 }
+# Dokumentierte Ausnahmen (repo-relative POSIX-Pfade).
+EXCLUDED: frozenset[str] = frozenset({"src/toolkit/__init__.py"})
 
 # Zeilen der Form: | <SHA16> | <mtime> | <ziel> | ...\<datei>[ (...)] |
 ROW = re.compile(
@@ -54,6 +69,10 @@ FILENAME = re.compile(r"([^\\/ ]+\.[A-Za-z0-9]+)(?:\s*\(.*\))?\s*$")
 
 class SourcesParseError(Exception):
     """SOURCES.md row that names a target but no usable file name."""
+
+
+class EnumerationError(Exception):
+    """The set of files under a target could not be determined."""
 
 
 def sha16(path: pathlib.Path) -> str:
@@ -70,12 +89,10 @@ def parse_rows(text: str) -> dict[str, dict[str, str]]:
         if not m:
             continue
         sha, target, src = m.group(1).upper(), m.group(2), m.group(3)
-        suffix = TARGETS[target][1]
         fn = FILENAME.search(src)
-        if not fn or not fn.group(1).endswith(suffix):
+        if not fn:
             raise SourcesParseError(
-                f"SOURCES-Zeile ({target}) ohne erkennbaren {suffix}-Dateinamen: "
-                f"{line.strip()}"
+                f"SOURCES-Zeile ({target}) ohne erkennbaren Dateinamen: {line.strip()}"
             )
         out[target][fn.group(1)] = sha
     return out
@@ -84,6 +101,68 @@ def parse_rows(text: str) -> dict[str, dict[str, str]]:
 def parse_toolkit_rows(text: str) -> dict[str, str]:
     """filename -> erwarteter SHA16 (nur src/toolkit-Zeilen; Rueckwaerts-API)."""
     return parse_rows(text)["src/toolkit"]
+
+
+def _git(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    # stdin=DEVNULL: an inherited, invalid stdin handle (e.g. under pytest on
+    # Windows) otherwise makes Popen fail with OSError before git even runs.
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        stdin=subprocess.DEVNULL, capture_output=True, check=False,
+    )
+
+
+def _is_git_worktree(root: pathlib.Path) -> bool:
+    try:
+        probe = _git(root, "rev-parse", "--show-toplevel")
+    except FileNotFoundError:  # git binary missing
+        return False
+    if probe.returncode != 0:
+        return False
+    top = pathlib.Path(probe.stdout.decode("utf-8").strip())
+    return top.resolve() == root.resolve()
+
+
+def enumerate_files(root: pathlib.Path) -> tuple[str, dict[str, bool]]:
+    """Return (mode, {repo-relative POSIX path -> is_symlink}) for all targets."""
+    dirs = list(TARGETS.values())
+    if _is_git_worktree(root):
+        files: dict[str, bool] = {}
+        staged = _git(root, "ls-files", "-s", "-z", "--", *dirs)
+        if staged.returncode != 0:
+            raise EnumerationError(staged.stderr.decode("utf-8", "replace").strip())
+        for entry in staged.stdout.split(b"\0"):
+            if not entry:
+                continue
+            meta, _, path = entry.partition(b"\t")
+            files[path.decode("utf-8")] = meta.split(b" ")[0] == b"120000"
+        others = _git(
+            root, "ls-files", "--others", "--exclude-standard", "-z", "--", *dirs
+        )
+        if others.returncode != 0:
+            raise EnumerationError(others.stderr.decode("utf-8", "replace").strip())
+        for path in others.stdout.split(b"\0"):
+            if path:
+                rel = path.decode("utf-8")
+                files.setdefault(rel, os.path.islink(root / rel))
+        return "git", files
+
+    files = {}
+    for rel_dir in dirs:
+        base = root / rel_dir
+        if not base.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            here = pathlib.Path(dirpath)
+            for d in list(dirnames):
+                if (here / d).is_symlink():  # directory symlink: report, do not follow
+                    files[(here / d).relative_to(root).as_posix()] = True
+                    dirnames.remove(d)
+            for name in filenames:
+                p = here / name
+                files[p.relative_to(root).as_posix()] = p.is_symlink()
+    return "filesystem", files
 
 
 def main(root: pathlib.Path = ROOT) -> int:
@@ -99,50 +178,62 @@ def main(root: pathlib.Path = ROOT) -> int:
     if not expected["src/toolkit"]:
         print("[FAIL] keine src/toolkit-Eintraege in SOURCES.md gefunden")
         return 3
+    try:
+        mode, files = enumerate_files(root)
+    except EnumerationError as exc:
+        print(f"[FAIL] Dateiliste nicht bestimmbar (git): {exc}")
+        return 3
 
-    # 1) Luecke: Datei ohne Eintrag (alle Ziele pruefen, dann gesammelt melden).
+    # 1) Luecke: jede Datei der Ziele braucht einen gueltigen, exakt passenden Eintrag.
     gap = False
-    for target, (rel_dir, suffix, excluded) in TARGETS.items():
-        directory = root / rel_dir
-        actual = {
-            p.name
-            for p in directory.glob(f"*{suffix}")
-            if p.is_file() and p.name not in excluded
-        }
-        for fn in sorted(actual - expected[target].keys()):
-            print(f"[GAP ] {target}/{fn}: Datei ohne SOURCES.md-Eintrag")
+    for rel, is_link in sorted(files.items()):
+        if rel in EXCLUDED:
+            continue
+        target = next(
+            (t for t, d in TARGETS.items() if rel.startswith(d + "/")), None
+        )
+        if target is None:  # defensive: git returned a path outside the targets
+            print(f"[GAP ] {rel}: ausserhalb der Ziele gelistet")
             gap = True
-        # SOURCES-Zeilen tragen nur den Dateinamen: eine Datei in einem
-        # Unterordner waere fuer dieses Gate unsichtbar -> fail-closed melden
-        # statt still ungeprueft lassen.
-        for p in sorted(directory.rglob(f"*{suffix}")):
-            if p.is_file() and p.parent != directory and "__pycache__" not in p.parts:
-                rel = p.relative_to(root).as_posix()
-                print(f"[GAP ] {rel}: verschachtelte Datei, vom Gate nicht abgedeckt")
-                gap = True
+            continue
+        name = rel[len(TARGETS[target]) + 1:]
+        if "/" in name:
+            print(f"[GAP ] {rel}: verschachtelte Datei, vom Gate nicht abgedeckt")
+            gap = True
+        elif is_link:
+            print(f"[GAP ] {rel}: symbolischer Link, nicht pinnbar")
+            gap = True
+        elif not FILENAME.fullmatch(name):
+            print(f"[GAP ] {rel}: Dateiname in SOURCES.md nicht ausdrueckbar")
+            gap = True
+        elif name not in expected[target]:
+            print(f"[GAP ] {rel}: Datei ohne SOURCES.md-Eintrag")
+            gap = True
     if gap:
         return 2
 
-    # 2) Drift: Eintrag ohne Datei oder SHA mismatch.
+    # 2) Drift: Eintrag ohne (exakt benannte) Datei oder SHA mismatch.
+    listed = {rel for rel in files}
     drift = False
-    for target, (rel_dir, _suffix, _excluded) in TARGETS.items():
+    for target, rel_dir in TARGETS.items():
         for fn, exp in sorted(expected[target].items()):
-            path = root / rel_dir / fn
-            if not path.is_file():
-                print(f"[FAIL] SOURCES-Eintrag {target}/{fn}: Datei fehlt im Repo")
+            rel = f"{rel_dir}/{fn}"
+            path = root / rel
+            if rel not in listed or not path.is_file():
+                print(f"[FAIL] SOURCES-Eintrag {rel}: Datei fehlt im Repo")
                 drift = True
                 continue
             got = sha16(path)
             if got != exp:
-                print(f"[FAIL] {target}/{fn}: SHA {got} != SOURCES {exp}")
+                print(f"[FAIL] {rel}: SHA {got} != SOURCES {exp}")
                 drift = True
             else:
-                print(f"[ OK ] {target}/{fn}: {got}")
+                print(f"[ OK ] {rel}: {got}")
 
     print(
         f"\n[VERIFY-SOURCES] {len(expected['src/toolkit'])} Toolkit-Eintraege + "
-        f"{len(expected['spec'])} Spec-Eintraege | "
-        f"{'FAIL' if drift else 'PASS'}"
+        f"{len(expected['spec'])} Spec-Eintraege | Dateiliste: {mode} "
+        f"({len(files)} Dateien) | {'FAIL' if drift else 'PASS'}"
     )
     return 1 if drift else 0
 

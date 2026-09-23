@@ -89,3 +89,11 @@
 | 23EA1FBDA46C5E5A | 2026-09-23 10:47 | src/toolkit | in-repo derived, PR #32 direction-preserving floor: stress_hex_v3.py |
 | 4FE5220068122DCE | 2026-09-23 10:56 | src/toolkit | in-repo derived, PR #32 floor/underflow regression tests: test_stress_hex_v3.py |
 | C4E4199FE420E0D6 | 2026-09-23 10:51 | src/toolkit | in-repo erstellt, PR #32 spec-target gate tests: test_verify_sources_gate.py |
+
+## src/toolkit/ — Gate covers every file type 2026-09-23 (append-only, PR #32, E7)
+
+> scripts/verify_sources.py now enumerates all files under src/toolkit/ and spec/
+> (git ls-files, any extension); the gate tests below probe type, case,
+> sub-directory and symlink. Prior rows remain as lineage.
+
+| 84B550E7AECC05BC | 2026-09-23 12:17 | src/toolkit | in-repo derived, PR #32 E7 all-file-type gate tests: test_verify_sources_gate.py |
