@@ -34,6 +34,7 @@ __all__ = [
 ]
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -44,6 +45,92 @@ import torch
 # ------------------------------------------------------------------
 # Core metric functions
 # ------------------------------------------------------------------
+
+
+def _validate_rollout_pair(pred: torch.Tensor, target: torch.Tensor) -> None:
+    """Fail closed on rollout tensors that cannot yield meaningful real metrics."""
+    if not torch.is_tensor(pred) or not torch.is_tensor(target):
+        raise TypeError("pred and target must be torch.Tensor instances")
+    if pred.shape != target.shape:
+        raise ValueError(
+            f"Shape mismatch: pred {pred.shape} vs target {target.shape}"
+        )
+    if pred.ndim not in {3, 4}:
+        raise ValueError(
+            "pred and target must have shape [T, N, C] or [T, B, N, C]"
+        )
+    if any(dim <= 0 for dim in pred.shape):
+        raise ValueError("pred and target dimensions must all be non-empty")
+    if pred.device != target.device:
+        raise ValueError("pred and target must be on the same device")
+    if not pred.is_floating_point() or not target.is_floating_point():
+        raise TypeError(
+            "benchmark metrics currently support real floating tensors only; "
+            "complex-valued fields require an explicit complex-field metric"
+        )
+    if not torch.isfinite(pred).all() or not torch.isfinite(target).all():
+        raise ValueError("pred and target must contain only finite values")
+
+
+def _validate_positive_finite(value: float, *, name: str) -> None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise TypeError(f"{name} must be a real scalar")
+    if not math.isfinite(float(value)) or float(value) <= 0.0:
+        raise ValueError(f"{name} must be finite and > 0")
+
+
+def _validate_nonnegative_metric_vector(
+    metric_per_step: torch.Tensor,
+    *,
+    name: str,
+) -> None:
+    if not torch.is_tensor(metric_per_step):
+        raise TypeError(f"{name} must be a torch.Tensor")
+    if metric_per_step.ndim != 1 or metric_per_step.numel() == 0:
+        raise ValueError(f"{name} must be a non-empty 1D tensor")
+    if not metric_per_step.is_floating_point():
+        raise TypeError(f"{name} must use a floating dtype")
+    if not torch.isfinite(metric_per_step).all():
+        raise ValueError(f"{name} must contain only finite values")
+    if torch.any(metric_per_step < 0):
+        raise ValueError(f"{name} must be non-negative")
+
+
+def _validate_hex_neighbors(
+    field: torch.Tensor,
+    hex_neighbors: torch.Tensor,
+    h: float,
+) -> torch.Tensor:
+    """Validate and normalize a regular six-neighbour hex topology."""
+    _validate_positive_finite(h, name="h")
+    if not torch.is_tensor(hex_neighbors):
+        raise TypeError("hex_neighbors must be a torch.Tensor")
+
+    n_nodes = field.shape[-2]
+    if hex_neighbors.shape != (n_nodes, 6):
+        raise ValueError(
+            f"hex_neighbors must have shape [{n_nodes}, 6], "
+            f"got {tuple(hex_neighbors.shape)}"
+        )
+    if hex_neighbors.dtype not in {torch.int32, torch.int64}:
+        raise TypeError("hex_neighbors must use torch.int32 or torch.int64")
+
+    neighbors = hex_neighbors.to(device=field.device, dtype=torch.long)
+    if torch.any(neighbors < -1) or torch.any(neighbors >= n_nodes):
+        raise ValueError("hex_neighbors entries must be -1 or valid node indices")
+
+    # Duplicate/self edges silently distort directional norms, so reject them.
+    rows = neighbors.detach().cpu().tolist()
+    for node_idx, row in enumerate(rows):
+        valid = [idx for idx in row if idx >= 0]
+        if not valid:
+            raise ValueError(f"hex node {node_idx} has no valid neighbours")
+        if node_idx in valid:
+            raise ValueError(f"hex node {node_idx} contains a self-neighbour")
+        if len(valid) != len(set(valid)):
+            raise ValueError(f"hex node {node_idx} contains duplicate neighbours")
+
+    return neighbors
 
 
 def compute_rmse_per_step(
@@ -65,10 +152,7 @@ def compute_rmse_per_step(
     torch.Tensor : shape [T]
         RMSE for each timestep, averaged over batch/nodes/channels.
     """
-    if pred.shape != target.shape:
-        raise ValueError(
-            f"Shape mismatch: pred {pred.shape} vs target {target.shape}"
-        )
+    _validate_rollout_pair(pred, target)
 
     diff = pred - target
     # Flatten all dims except T
@@ -100,10 +184,8 @@ def compute_nrmse_per_step(
     -------
     torch.Tensor : shape [T]
     """
-    if pred.shape != target.shape:
-        raise ValueError(
-            f"Shape mismatch: pred {pred.shape} vs target {target.shape}"
-        )
+    _validate_rollout_pair(pred, target)
+    _validate_positive_finite(eps, name="eps")
 
     T = pred.shape[0]
     diff_flat = (pred - target).reshape(T, -1)
@@ -148,13 +230,21 @@ def _hex_gradient_magnitude(
     torch.Tensor : shape [..., N, C]
         Approximate gradient magnitude at each node.
     """
+    if not torch.is_tensor(field):
+        raise TypeError("field must be a torch.Tensor")
+    if field.ndim < 2 or not field.is_floating_point():
+        raise TypeError("field must be a real floating tensor with node/channel axes")
+    if not torch.isfinite(field).all():
+        raise ValueError("field must contain only finite values")
+
     N = field.shape[-2]
     C = field.shape[-1]
+    neighbors = _validate_hex_neighbors(field, hex_neighbors, h)
 
     # Gather neighbor values: [..., N, 6, C]
     # Clamp -1 indices to 0, then mask
-    valid_mask = hex_neighbors >= 0  # [N, 6]
-    safe_idx = hex_neighbors.clamp(min=0)  # [N, 6]
+    valid_mask = neighbors >= 0  # [N, 6]
+    safe_idx = neighbors.clamp(min=0)  # [N, 6]
 
     # field has shape [..., N, C], gather along N dimension
     batch_shape = field.shape[:-2]
@@ -268,6 +358,7 @@ def compute_h1_nrmse_per_step(
     -------
     torch.Tensor : shape [T]
     """
+    _validate_positive_finite(eps, name="eps")
     h1_rmse = compute_h1_rmse_per_step(pred, target, hex_neighbors, h)
 
     # Compute H¹ norm of target
@@ -306,6 +397,12 @@ def compute_divergence_step(
         First timestep index where nRMSE > threshold.
         Returns T (total steps) if no divergence detected.
     """
+    _validate_nonnegative_metric_vector(nrmse_per_step, name="nrmse_per_step")
+    if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
+        raise TypeError("threshold must be a real scalar")
+    if not math.isfinite(float(threshold)) or float(threshold) < 0.0:
+        raise ValueError("threshold must be finite and >= 0")
+
     exceeded = (nrmse_per_step > threshold).nonzero(as_tuple=False)
     if exceeded.numel() == 0:
         return int(nrmse_per_step.shape[0])
@@ -331,8 +428,11 @@ def aggregate_over_time(
     -------
     float
     """
+    _validate_nonnegative_metric_vector(metric_per_step, name="metric_per_step")
+
     if method == "geometric_mean":
-        # geometric mean = exp(mean(log(x)))
+        # APEBench Eq.32 uses log aggregation. Exact zeros make log undefined;
+        # clamp only those valid zero values to a documented numerical floor.
         log_vals = torch.log(metric_per_step.clamp(min=1e-12))
         return float(torch.exp(torch.mean(log_vals)).item())
     elif method == "arithmetic_mean":
