@@ -38,6 +38,15 @@ class TestDegradationFactor(unittest.TestCase):
         self.assertEqual(value, sys.float_info.max)
         self.assertTrue(math.isfinite(value))
 
+    def test_positive_ratio_underflow_is_not_reported_as_zero(self) -> None:
+        value = compute_degradation_factor(
+            5e-324,
+            sys.float_info.max,
+            floor=1e-12,
+        )
+        self.assertGreater(value, 0.0)
+        self.assertEqual(value, math.nextafter(0.0, math.inf))
+
     def test_invalid_values_fail_closed(self) -> None:
         for value in (-1.0, float("nan"), float("inf")):
             with self.subTest(value=value):
@@ -164,6 +173,28 @@ class TestStressReport(unittest.TestCase):
         self.assertEqual(case.degradation_factor, sys.float_info.max)
         self.assertTrue(case.degradation_saturated)
         self.assertTrue(report.to_dict()["cases"][0]["degradation_saturated"])
+
+    def test_underflow_is_explicit_in_generated_report(self) -> None:
+        report = evaluate_stress_cases(
+            error_metric_name="nrmse",
+            baseline_case_id="base",
+            baseline_error=sys.float_info.max,
+            cases=[
+                StressCase(
+                    "tiny-positive",
+                    ShiftAxis.NOISE,
+                    ShiftRegime.OOD,
+                    5e-324,
+                )
+            ],
+        )
+        case = report.cases[0]
+        self.assertGreater(case.degradation_factor, 0.0)
+        self.assertTrue(case.degradation_underflowed)
+        self.assertFalse(case.degradation_saturated)
+        self.assertTrue(
+            report.to_dict()["cases"][0]["degradation_underflowed"]
+        )
 
     def test_manual_report_rejects_inconsistent_factor(self) -> None:
         bad_case = StressCaseResult(
