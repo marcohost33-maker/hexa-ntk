@@ -43,9 +43,9 @@ class TestDegradationFactor(unittest.TestCase):
 class TestStressReport(unittest.TestCase):
     def test_axes_remain_separate(self) -> None:
         report = evaluate_stress_cases(
-            metric_name="nrmse",
+            error_metric_name="nrmse",
             baseline_case_id="id/base",
-            baseline_value=0.05,
+            baseline_error=0.05,
             cases=[
                 StressCase(
                     "bc/dirichlet",
@@ -73,6 +73,10 @@ class TestStressReport(unittest.TestCase):
 
         payload = report.to_dict()
         self.assertNotIn("overall_score", payload)
+        self.assertEqual(
+            payload["metric_semantics"],
+            "nonnegative_error_lower_is_better",
+        )
         self.assertEqual(payload["cases"][0]["axis"], "boundary_condition")
         self.assertEqual(payload["cases"][0]["regime"], "ood")
 
@@ -83,18 +87,18 @@ class TestStressReport(unittest.TestCase):
         ]
         with self.assertRaisesRegex(ValueError, "duplicate"):
             evaluate_stress_cases(
-                metric_name="nrmse",
+                error_metric_name="nrmse",
                 baseline_case_id="base",
-                baseline_value=0.05,
+                baseline_error=0.05,
                 cases=cases,
             )
 
     def test_baseline_id_cannot_be_reused(self) -> None:
         with self.assertRaisesRegex(ValueError, "baseline_case_id"):
             evaluate_stress_cases(
-                metric_name="nrmse",
+                error_metric_name="nrmse",
                 baseline_case_id="base",
-                baseline_value=0.05,
+                baseline_error=0.05,
                 cases=[
                     StressCase("base", ShiftAxis.PARAMETER, ShiftRegime.ID, 0.05)
                 ],
@@ -126,9 +130,9 @@ class TestStressReport(unittest.TestCase):
 
     def test_factors_are_finite_for_valid_positive_floor(self) -> None:
         report = evaluate_stress_cases(
-            metric_name="h1_nrmse",
+            error_metric_name="h1_nrmse",
             baseline_case_id="base",
-            baseline_value=0.0,
+            baseline_error=0.0,
             degradation_floor=1e-8,
             cases=[
                 StressCase(
@@ -144,9 +148,9 @@ class TestStressReport(unittest.TestCase):
     def test_non_case_input_fails_closed(self) -> None:
         with self.assertRaisesRegex(TypeError, "StressCase"):
             evaluate_stress_cases(
-                metric_name="nrmse",
+                error_metric_name="nrmse",
                 baseline_case_id="base",
-                baseline_value=0.1,
+                baseline_error=0.1,
                 cases=[object()],
             )
 
