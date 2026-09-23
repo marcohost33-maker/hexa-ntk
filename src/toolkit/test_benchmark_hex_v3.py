@@ -338,6 +338,122 @@ class TestEvaluateRollout(unittest.TestCase):
         self.assertLess(result["divergence_step"], T)
 
 
+class TestH1PrecisionAndMemory(unittest.TestCase):
+    """PR #30 round 2 (Codex on 44b0e30): fp16 overflow, T-scaling, re-validation."""
+
+    @staticmethod
+    def _fp16_case() -> tuple[torch.Tensor, torch.Tensor]:
+        # Neighbouring error values +130 / -130: every input and the pointwise
+        # squares (16900) are finite in fp16, the stencil difference 260 is
+        # too, but 260**2 = 67600 exceeds the fp16 maximum 65504.
+        target = torch.ones(2, N, 1, dtype=torch.float16)
+        pred = target.clone()
+        pred[:, 0, 0] += 130.0
+        pred[:, 1, 0] -= 130.0
+        return pred, target
+
+    def test_fp16_h1_is_finite_and_matches_float64_reference(self) -> None:
+        pred, target = self._fp16_case()
+        neighbors = make_hex_neighbors()
+
+        h1_half = compute_h1_rmse_per_step(pred, target, neighbors, h=1.0)
+        h1_ref = compute_h1_rmse_per_step(
+            pred.double(), target.double(), neighbors, h=1.0
+        )
+        h1n_half = compute_h1_nrmse_per_step(pred, target, neighbors, h=1.0)
+        h1n_ref = compute_h1_nrmse_per_step(
+            pred.double(), target.double(), neighbors, h=1.0
+        )
+
+        self.assertTrue(torch.isfinite(h1_half).all(), h1_half)
+        self.assertEqual(h1_half.dtype, torch.float32)
+        # The fp16 inputs are exact integers, so the only difference to the
+        # float64 reference is float32 rounding in a handful of operations
+        # (float32 eps ~ 1.2e-7); rtol 1e-6 leaves a margin of ~8 ulps.
+        torch.testing.assert_close(
+            h1_half.double(), h1_ref, rtol=1e-6, atol=0.0
+        )
+        torch.testing.assert_close(
+            h1n_half.double(), h1n_ref, rtol=1e-6, atol=0.0
+        )
+
+    def test_fp16_pointwise_metrics_accumulate_in_float32(self) -> None:
+        # Error 300: finite in fp16, its square 90000 is not.
+        target = torch.ones(2, N, 1, dtype=torch.float16)
+        pred = target.clone()
+        pred[:, 0, 0] += 300.0
+        for fn in (compute_rmse_per_step, compute_nrmse_per_step):
+            with self.subTest(metric=fn.__name__):
+                half = fn(pred, target)
+                ref = fn(pred.double(), target.double())
+                self.assertTrue(torch.isfinite(half).all(), half)
+                torch.testing.assert_close(
+                    half.double(), ref, rtol=1e-6, atol=0.0
+                )
+
+    def test_fp16_evaluate_rollout_does_not_raise(self) -> None:
+        pred, target = self._fp16_case()
+        try:
+            result = evaluate_rollout(
+                pred, target, hex_neighbors=make_hex_neighbors(), h=1.0
+            )
+        except ValueError as exc:  # pre-fix: "metric_per_step must be finite"
+            self.fail(f"fp16 evaluate_rollout raised on finite input: {exc}")
+        for key in ("h1_rmse_per_step", "h1_nrmse_per_step", "nrmse_per_step"):
+            with self.subTest(key=key):
+                self.assertTrue(all(math.isfinite(v) for v in result[key]))
+
+    def test_h1_kernel_processes_one_timestep_at_a_time(self) -> None:
+        """Peak temporaries must not scale with T (main looped over t).
+
+        Measured quantity: the shape of every field handed to the gradient
+        kernel, whose neighbour gather is [prod(batch), N, 6, C]. A vectorised
+        call over the whole rollout would pass [T, ...] and gather T times
+        more memory.
+        """
+        neighbors = make_hex_neighbors()
+        for shape in ((T, N, C), (T, 3, N, C)):
+            with self.subTest(shape=shape):
+                torch.manual_seed(0)
+                target = torch.randn(*shape)
+                pred = target + 0.1 * torch.randn(*shape)
+                with mock.patch.object(
+                    benchmark,
+                    "_hex_gradient_magnitude_prepared",
+                    wraps=benchmark._hex_gradient_magnitude_prepared,
+                ) as kernel:
+                    compute_h1_nrmse_per_step(pred, target, neighbors, h=1.0)
+                seen = {tuple(c.args[0].shape) for c in kernel.call_args_list}
+                self.assertEqual(seen, {tuple(shape[1:])})
+                self.assertEqual(kernel.call_count, 2 * T)
+
+    def test_evaluate_rollout_validates_rollout_once(self) -> None:
+        target = make_target()
+        pred = make_pred_close(target)
+        with mock.patch.object(
+            benchmark,
+            "_validate_rollout_pair",
+            wraps=benchmark._validate_rollout_pair,
+        ) as pair, mock.patch.object(
+            benchmark,
+            "_validate_real_field",
+            wraps=benchmark._validate_real_field,
+        ) as field:
+            evaluate_rollout(pred, target, hex_neighbors=make_hex_neighbors())
+        self.assertEqual(pair.call_count, 1)
+        self.assertEqual(field.call_count, 0)
+
+    def test_evaluate_rollout_still_rejects_nonfinite(self) -> None:
+        target = make_target()
+        pred = target.clone()
+        pred[3, 2, 1] = float("inf")
+        # Must fail at the rollout boundary, not later via a metric vector.
+        with self.assertRaisesRegex(
+            ValueError, "pred and target must contain only finite values"
+        ):
+            evaluate_rollout(pred, target, hex_neighbors=make_hex_neighbors())
+
+
 class TestBenchmarkInputValidation(unittest.TestCase):
     def test_nonfinite_rollout_fails_closed(self) -> None:
         target = make_target()

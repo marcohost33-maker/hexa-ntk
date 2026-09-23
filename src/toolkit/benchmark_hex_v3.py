@@ -140,9 +140,17 @@ def _prepare_hex_topology(
     field: torch.Tensor,
     hex_neighbors: torch.Tensor,
     h: Any,
+    *,
+    validate_field: bool = True,
 ) -> _PreparedHexTopology:
-    """Validate/normalize a regular six-neighbour topology exactly once."""
-    _validate_real_field(field)
+    """Validate/normalize a regular six-neighbour topology exactly once.
+
+    ``validate_field=False`` is only for callers that already ran
+    ``_validate_rollout_pair`` on this exact tensor (evaluate_rollout); it
+    skips a redundant full-tensor finiteness scan, not the topology checks.
+    """
+    if validate_field:
+        _validate_real_field(field)
     h_value = _validate_positive_finite(h, name="h")
     if not torch.is_tensor(hex_neighbors):
         raise TypeError("hex_neighbors must be a torch.Tensor")
@@ -209,8 +217,19 @@ def compute_rmse_per_step(
         RMSE for each timestep, averaged over batch/nodes/channels.
     """
     _validate_rollout_pair(pred, target)
+    return _rmse_per_step_unchecked(pred, target)
 
-    diff = pred - target
+
+def _rmse_per_step_unchecked(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+) -> torch.Tensor:
+    """RMSE kernel for callers that already validated the rollout pair.
+
+    Half-precision inputs are accumulated in float32 (``_accumulation_dtype``).
+    """
+    acc_dtype = _accumulation_dtype(pred.dtype)
+    diff = pred.to(acc_dtype) - target.to(acc_dtype)
     # Flatten all dims except T
     T = diff.shape[0]
     diff_flat = diff.reshape(T, -1)
@@ -242,7 +261,22 @@ def compute_nrmse_per_step(
     """
     _validate_rollout_pair(pred, target)
     eps_value = _validate_positive_finite(eps, name="eps")
+    return _nrmse_per_step_unchecked(pred, target, eps_value)
 
+
+def _nrmse_per_step_unchecked(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    eps_value: float,
+) -> torch.Tensor:
+    """nRMSE kernel for callers that already validated pair and eps.
+
+    Half-precision inputs are accumulated in float32 (``_accumulation_dtype``);
+    in fp16 the default eps=1e-8 would itself round to zero.
+    """
+    acc_dtype = _accumulation_dtype(pred.dtype)
+    pred = pred.to(acc_dtype)
+    target = target.to(acc_dtype)
     T = pred.shape[0]
     diff_flat = (pred - target).reshape(T, -1)
     target_flat = target.reshape(T, -1)
@@ -253,31 +287,45 @@ def compute_nrmse_per_step(
     return numerator / denominator
 
 
+def _accumulation_dtype(dtype: torch.dtype) -> torch.dtype:
+    """float16/bfloat16 -> float32, float32/float64 unchanged.
+
+    Same policy as torch.autocast, which runs sum/pow/norm/mse_loss in
+    float32 because the half-precision range (fp16 max 65504) is too small
+    for sums of squares.
+    """
+    return torch.promote_types(dtype, torch.float32)
+
+
 def _hex_gradient_magnitude_prepared(
     field: torch.Tensor,
     topology: _PreparedHexTopology,
 ) -> torch.Tensor:
-    """Compute the directional gradient proxy using prevalidated topology."""
+    """Directional gradient proxy using prevalidated topology.
+
+    The stencil is accumulated in ``_accumulation_dtype(field.dtype)``: a
+    neighbour difference of 260 is representable in fp16, its square is not.
+    The result keeps the accumulation dtype (float32 for half inputs).
+    """
     if field.shape[-2] != topology.n_nodes:
         raise ValueError(
             f"field has {field.shape[-2]} nodes but topology has "
             f"{topology.n_nodes}"
         )
 
+    acc_dtype = _accumulation_dtype(field.dtype)
     n_nodes = topology.n_nodes
     n_channels = field.shape[-1]
     batch_shape = field.shape[:-2]
-    field_flat = field.reshape(-1, n_nodes, n_channels)
+    field_flat = field.reshape(-1, n_nodes, n_channels).to(acc_dtype)
 
     neighbor_vals = field_flat[:, topology.safe_idx, :]
     center_vals = field_flat.unsqueeze(2)
     diffs = neighbor_vals - center_vals
 
-    mask = topology.valid_mask.unsqueeze(0).unsqueeze(-1).to(field_flat.dtype)
+    mask = topology.valid_mask.unsqueeze(0).unsqueeze(-1).to(acc_dtype)
     diffs = diffs * mask
-    n_valid = (
-        topology.n_valid.unsqueeze(0).unsqueeze(-1).to(field_flat.dtype)
-    )
+    n_valid = topology.n_valid.unsqueeze(0).unsqueeze(-1).to(acc_dtype)
 
     grad_sq = (
         (2.0 / (topology.h * topology.h))
@@ -307,28 +355,34 @@ def _compute_h1_terms_prepared(
     target: torch.Tensor,
     topology: _PreparedHexTopology,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return H1 error and target norm using one reusable topology."""
-    t_steps = pred.shape[0]
+    """Return per-step H1 error and target norm, one timestep at a time.
 
-    error = pred - target
-    l2_error = torch.sqrt(
-        torch.mean(error.reshape(t_steps, -1) ** 2, dim=-1)
-    )
-    grad_error = _hex_gradient_magnitude_prepared(error, topology)
-    grad_error_rmse = torch.sqrt(
-        torch.mean(grad_error.reshape(t_steps, -1) ** 2, dim=-1)
-    )
-    h1_error = torch.sqrt(l2_error ** 2 + grad_error_rmse ** 2)
+    The neighbour gather materialises [B, N, 6, C] temporaries; looping over
+    the rollout axis keeps that peak independent of T (as on main before the
+    H1 rework) instead of [T*B, N, 6, C]. Accumulation dtype as in
+    ``_accumulation_dtype``; the returned [T] tensors use it as well.
+    """
+    acc_dtype = _accumulation_dtype(pred.dtype)
+    h1_error_steps = []
+    h1_target_steps = []
+    for t in range(pred.shape[0]):
+        pred_t = pred[t].to(acc_dtype)
+        target_t = target[t].to(acc_dtype)
+        error_t = pred_t - target_t
 
-    target_flat = target.reshape(t_steps, -1)
-    l2_target = torch.sqrt(torch.mean(target_flat ** 2, dim=-1))
-    grad_target = _hex_gradient_magnitude_prepared(target, topology)
-    grad_target_rmse = torch.sqrt(
-        torch.mean(grad_target.reshape(t_steps, -1) ** 2, dim=-1)
-    )
-    h1_target = torch.sqrt(l2_target ** 2 + grad_target_rmse ** 2)
+        l2_error = torch.sqrt(torch.mean(error_t ** 2))
+        grad_error = _hex_gradient_magnitude_prepared(error_t, topology)
+        grad_error_rmse = torch.sqrt(torch.mean(grad_error ** 2))
+        h1_error_steps.append(torch.sqrt(l2_error ** 2 + grad_error_rmse ** 2))
 
-    return h1_error, h1_target
+        l2_target = torch.sqrt(torch.mean(target_t ** 2))
+        grad_target = _hex_gradient_magnitude_prepared(target_t, topology)
+        grad_target_rmse = torch.sqrt(torch.mean(grad_target ** 2))
+        h1_target_steps.append(
+            torch.sqrt(l2_target ** 2 + grad_target_rmse ** 2)
+        )
+
+    return torch.stack(h1_error_steps), torch.stack(h1_target_steps)
 
 
 def compute_h1_rmse_per_step(
@@ -339,15 +393,10 @@ def compute_h1_rmse_per_step(
 ) -> torch.Tensor:
     """Compute the discrete H1 error proxy per rollout timestep."""
     _validate_rollout_pair(pred, target)
-
-    t_steps = pred.shape[0]
-    l2_rmse = torch.sqrt(
-        torch.mean((pred - target).reshape(t_steps, -1) ** 2, dim=-1)
-    )
     if hex_neighbors is None:
-        return l2_rmse
+        return _rmse_per_step_unchecked(pred, target)
 
-    topology = _prepare_hex_topology(pred, hex_neighbors, h)
+    topology = _prepare_hex_topology(pred, hex_neighbors, h, validate_field=False)
     h1_error, _ = _compute_h1_terms_prepared(pred, target, topology)
     return h1_error
 
@@ -362,18 +411,11 @@ def compute_h1_nrmse_per_step(
     """Compute normalized discrete H1 error per rollout timestep."""
     _validate_rollout_pair(pred, target)
     eps_value = _validate_positive_finite(eps, name="eps")
-    t_steps = pred.shape[0]
 
     if hex_neighbors is None:
-        error = torch.sqrt(
-            torch.mean((pred - target).reshape(t_steps, -1) ** 2, dim=-1)
-        )
-        target_norm = torch.sqrt(
-            torch.mean(target.reshape(t_steps, -1) ** 2, dim=-1)
-        )
-        return error / (target_norm + eps_value)
+        return _nrmse_per_step_unchecked(pred, target, eps_value)
 
-    topology = _prepare_hex_topology(pred, hex_neighbors, h)
+    topology = _prepare_hex_topology(pred, hex_neighbors, h, validate_field=False)
     h1_error, h1_target = _compute_h1_terms_prepared(pred, target, topology)
     return h1_error / (h1_target + eps_value)
 
@@ -487,8 +529,11 @@ def evaluate_rollout(
         divergence_threshold,
         name="divergence_threshold",
     )
-    nrmse = compute_nrmse_per_step(pred, target, eps=eps_value)
-    rmse = compute_rmse_per_step(pred, target)
+    # Validate the rollout pair ONCE (full-tensor finiteness scans cost a
+    # device sync each); every kernel below reuses the validated tensors.
+    _validate_rollout_pair(pred, target)
+    nrmse = _nrmse_per_step_unchecked(pred, target, eps_value)
+    rmse = _rmse_per_step_unchecked(pred, target)
 
     result: Dict[str, Any] = {
         "nrmse_per_step": nrmse.tolist(),
@@ -507,7 +552,9 @@ def evaluate_rollout(
     if hex_neighbors is not None:
         # Prepare/validate the topology once for the whole rollout and reuse it
         # for both error and target-gradient terms.
-        topology = _prepare_hex_topology(pred, hex_neighbors, h)
+        topology = _prepare_hex_topology(
+            pred, hex_neighbors, h, validate_field=False
+        )
         h1_rmse, h1_target = _compute_h1_terms_prepared(
             pred,
             target,
