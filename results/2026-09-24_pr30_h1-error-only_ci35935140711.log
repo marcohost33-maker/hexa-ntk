@@ -1,0 +1,39 @@
+HexaNTK PR #30 final-gate evidence — 2026-09-24
+================================================
+
+Subject head SHA: 61c8b3934a21b56b27b87249fbb212ce35e22cb4
+GitHub Actions run: 35935140711
+Workflow: ci
+Conclusion: success
+
+gate job
+--------
+job_id: 107430373240
+conclusion: success
+ruff: success
+compile: success
+provenance (SOURCES.md): success
+observed provenance summary:
+[VERIFY-SOURCES] 17 Toolkit-Eintraege | PASS
+current derived pins:
+benchmark_hex_v3.py: 0392725750BAF4D9
+test_benchmark_hex_v3.py: B6B1E9916FD640A4
+
+tests (cpu) job
+---------------
+job_id: 107430372995
+conclusion: success
+Ran 191 tests in 2.112s
+OK
+target-gradient regression:
+test_unnormalized_h1_skips_unused_target_gradient ... ok
+coverage total: 82%
+
+Scope note
+----------
+This run directly verifies the functional head 61c8b3934a21, including:
+- error-only H1 path for unnormalised H1 RMSE;
+- one-stencil-per-timestep regression;
+- append-only SOURCES pins.
+The commit that adds this log is evidence-only; it does not alter src/,
+scripts/ or SOURCES.md.
