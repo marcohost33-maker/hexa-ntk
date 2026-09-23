@@ -97,7 +97,7 @@ class StressCase:
     case_id: str
     axis: ShiftAxis
     regime: ShiftRegime
-    metric_value: float
+    error_value: float
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -109,8 +109,8 @@ class StressCase:
             raise TypeError("regime must be a ShiftRegime")
         object.__setattr__(
             self,
-            "metric_value",
-            _finite_nonnegative(self.metric_value, name="metric_value"),
+            "error_value",
+            _finite_nonnegative(self.error_value, name="error_value"),
         )
         if not isinstance(self.metadata, dict):
             raise TypeError("metadata must be a dict")
@@ -121,31 +121,51 @@ class StressCaseResult:
     case_id: str
     axis: ShiftAxis
     regime: ShiftRegime
-    metric_value: float
+    error_value: float
     degradation_factor: float
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.case_id, str) or not self.case_id.strip():
+            raise ValueError("case_id must be a non-empty string")
+        if not isinstance(self.axis, ShiftAxis):
+            raise TypeError("axis must be a ShiftAxis")
+        if not isinstance(self.regime, ShiftRegime):
+            raise TypeError("regime must be a ShiftRegime")
+        _finite_nonnegative(self.error_value, name="error_value")
+        _finite_nonnegative(
+            self.degradation_factor,
+            name="degradation_factor",
+        )
+        if not isinstance(self.metadata, dict):
+            raise TypeError("metadata must be a dict")
 
 
 @dataclass(frozen=True)
 class StressReport:
     """Axis-preserving stress evidence; deliberately no overall score."""
 
-    metric_name: str
+    error_metric_name: str
     baseline_case_id: str
-    baseline_value: float
+    baseline_error: float
     cases: tuple[StressCaseResult, ...]
     degradation_floor: float
 
     def __post_init__(self) -> None:
-        if not isinstance(self.metric_name, str) or not self.metric_name.strip():
-            raise ValueError("metric_name must be a non-empty string")
+        if not isinstance(self.error_metric_name, str) or not self.error_metric_name.strip():
+            raise ValueError("error_metric_name must be a non-empty string")
         if (
             not isinstance(self.baseline_case_id, str)
             or not self.baseline_case_id.strip()
         ):
             raise ValueError("baseline_case_id must be a non-empty string")
-        _finite_nonnegative(self.baseline_value, name="baseline_value")
+        _finite_nonnegative(self.baseline_error, name="baseline_error")
         _positive_finite(self.degradation_floor, name="degradation_floor")
+
+        if not isinstance(self.cases, tuple):
+            raise TypeError("cases must be a tuple of StressCaseResult values")
+        if not all(isinstance(case, StressCaseResult) for case in self.cases):
+            raise TypeError("cases must contain only StressCaseResult values")
 
         case_ids = [case.case_id for case in self.cases]
         if len(case_ids) != len(set(case_ids)):
@@ -161,6 +181,7 @@ class StressReport:
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
+        payload["metric_semantics"] = "nonnegative_error_lower_is_better"
         for case in payload["cases"]:
             case["axis"] = case["axis"].value
             case["regime"] = case["regime"].value
@@ -169,20 +190,20 @@ class StressReport:
 
 def evaluate_stress_cases(
     *,
-    metric_name: str,
+    error_metric_name: str,
     baseline_case_id: str,
-    baseline_value: float,
+    baseline_error: float,
     cases: Iterable[StressCase],
     degradation_floor: float = 1e-12,
 ) -> StressReport:
-    """Build an axis-preserving report from precomputed error-like metrics."""
+    """Build an axis-preserving report from non-negative lower-is-better errors."""
 
-    if not isinstance(metric_name, str) or not metric_name.strip():
-        raise ValueError("metric_name must be a non-empty string")
+    if not isinstance(error_metric_name, str) or not error_metric_name.strip():
+        raise ValueError("error_metric_name must be a non-empty string")
     if not isinstance(baseline_case_id, str) or not baseline_case_id.strip():
         raise ValueError("baseline_case_id must be a non-empty string")
 
-    baseline = _finite_nonnegative(baseline_value, name="baseline_value")
+    baseline = _finite_nonnegative(baseline_error, name="baseline_error")
     floor = _positive_finite(degradation_floor, name="degradation_floor")
     case_list = list(cases)
 
@@ -200,9 +221,9 @@ def evaluate_stress_cases(
             case_id=case.case_id,
             axis=case.axis,
             regime=case.regime,
-            metric_value=case.metric_value,
+            error_value=case.error_value,
             degradation_factor=compute_degradation_factor(
-                case.metric_value,
+                case.error_value,
                 baseline,
                 floor=floor,
             ),
@@ -212,9 +233,9 @@ def evaluate_stress_cases(
     )
 
     return StressReport(
-        metric_name=metric_name,
+        error_metric_name=error_metric_name,
         baseline_case_id=baseline_case_id,
-        baseline_value=baseline,
+        baseline_error=baseline,
         cases=results,
         degradation_floor=floor,
     )
