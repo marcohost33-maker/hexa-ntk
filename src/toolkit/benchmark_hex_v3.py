@@ -228,7 +228,7 @@ def _rmse_per_step_unchecked(
 
     Half-precision inputs are accumulated in float32 (``_accumulation_dtype``).
     """
-    acc_dtype = _accumulation_dtype(pred.dtype)
+    acc_dtype = _accumulation_dtype(pred.dtype, target.dtype)
     diff = pred.to(acc_dtype) - target.to(acc_dtype)
     # Flatten all dims except T
     T = diff.shape[0]
@@ -274,7 +274,7 @@ def _nrmse_per_step_unchecked(
     Half-precision inputs are accumulated in float32 (``_accumulation_dtype``);
     in fp16 the default eps=1e-8 would itself round to zero.
     """
-    acc_dtype = _accumulation_dtype(pred.dtype)
+    acc_dtype = _accumulation_dtype(pred.dtype, target.dtype)
     pred = pred.to(acc_dtype)
     target = target.to(acc_dtype)
     T = pred.shape[0]
@@ -287,14 +287,19 @@ def _nrmse_per_step_unchecked(
     return numerator / denominator
 
 
-def _accumulation_dtype(dtype: torch.dtype) -> torch.dtype:
-    """float16/bfloat16 -> float32, float32/float64 unchanged.
+def _accumulation_dtype(*dtypes: torch.dtype) -> torch.dtype:
+    """Widest of all input dtypes, but at least float32.
 
-    Same policy as torch.autocast, which runs sum/pow/norm/mse_loss in
-    float32 because the half-precision range (fp16 max 65504) is too small
-    for sums of squares.
+    float16/bfloat16 -> float32 (same policy as torch.autocast, which runs
+    sum/pow/norm/mse_loss in float32 because the half-precision range, fp16
+    max 65504, is too small for sums of squares). Mixed inputs promote to the
+    widest one, so a float64 target is never rounded down to a float32
+    prediction's precision before the subtraction (Codex on 8b51cda).
     """
-    return torch.promote_types(dtype, torch.float32)
+    result = torch.float32
+    for dtype in dtypes:
+        result = torch.promote_types(result, dtype)
+    return result
 
 
 def _hex_gradient_magnitude_prepared(
@@ -362,7 +367,7 @@ def _compute_h1_terms_prepared(
     H1 rework) instead of [T*B, N, 6, C]. Accumulation dtype as in
     ``_accumulation_dtype``; the returned [T] tensors use it as well.
     """
-    acc_dtype = _accumulation_dtype(pred.dtype)
+    acc_dtype = _accumulation_dtype(pred.dtype, target.dtype)
     h1_error_steps = []
     h1_target_steps = []
     for t in range(pred.shape[0]):

@@ -58,5 +58,5 @@
 > the current in-repo derived bytes for the H1/benchmark hardening; the final
 > SHA values are filled from the fail-closed provenance gate.
 
-| 976AA785CCF6060E | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #30 H1/benchmark hardening (+ float32 accumulation, per-step H1 loop, single validation): benchmark_hex_v3.py |
-| 43BC98A9C5183F60 | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #30 regression tests (+ exact-gradient H1 oracle, F30-1; fp16/memory/validation, round 2): test_benchmark_hex_v3.py |
+| 97339519C3A96F28 | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #30 H1/benchmark hardening (+ float32 accumulation, per-step H1 loop, single validation): benchmark_hex_v3.py |
+| 2466DB271C4DAE8D | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #30 regression tests (+ exact-gradient H1 oracle, F30-1; fp16/memory/validation, round 2): test_benchmark_hex_v3.py |

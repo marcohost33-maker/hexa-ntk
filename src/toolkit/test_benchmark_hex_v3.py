@@ -391,6 +391,49 @@ class TestH1PrecisionAndMemory(unittest.TestCase):
                     half.double(), ref, rtol=1e-6, atol=0.0
                 )
 
+    def test_mixed_dtype_repro_f32_pred_f64_target_is_not_zero(self) -> None:
+        """Codex on 8b51cda: accumulating in pred's dtype rounded the float64
+        target 1 + 1e-10 to the float32 prediction 1 and reported 0 error."""
+        pred = torch.ones(1, N, 1, dtype=torch.float32)
+        target = torch.full((1, N, 1), 1.0 + 1e-10, dtype=torch.float64)
+        rmse = compute_rmse_per_step(pred, target)
+        self.assertEqual(rmse.dtype, torch.float64)
+        self.assertNotEqual(rmse.item(), 0.0)
+        self.assertAlmostEqual(rmse.item(), 1e-10, delta=1e-16)
+
+    def test_mixed_dtypes_accumulate_in_widest_dtype(self) -> None:
+        neighbors = make_hex_neighbors()
+        pairs = (
+            (torch.float32, torch.float64, torch.float64),
+            (torch.float64, torch.float32, torch.float64),
+            (torch.float16, torch.float64, torch.float64),
+            (torch.bfloat16, torch.float32, torch.float32),
+            (torch.float16, torch.bfloat16, torch.float32),
+            (torch.float16, torch.float16, torch.float32),
+            (torch.bfloat16, torch.bfloat16, torch.float32),
+        )
+        torch.manual_seed(7)
+        base_p = torch.randn(3, N, 2)
+        base_t = torch.randn(3, N, 2)
+        for p_dtype, t_dtype, acc in pairs:
+            pred, target = base_p.to(p_dtype), base_t.to(t_dtype)
+            # Oracle: both inputs explicitly cast to the expected dtype first.
+            ref_p, ref_t = pred.to(acc), target.to(acc)
+            cases = {
+                "rmse": (compute_rmse_per_step(pred, target),
+                         compute_rmse_per_step(ref_p, ref_t)),
+                "nrmse": (compute_nrmse_per_step(pred, target),
+                          compute_nrmse_per_step(ref_p, ref_t)),
+                "h1": (compute_h1_rmse_per_step(pred, target, neighbors),
+                       compute_h1_rmse_per_step(ref_p, ref_t, neighbors)),
+                "h1n": (compute_h1_nrmse_per_step(pred, target, neighbors),
+                        compute_h1_nrmse_per_step(ref_p, ref_t, neighbors)),
+            }
+            for name, (got, ref) in cases.items():
+                with self.subTest(pred=p_dtype, target=t_dtype, metric=name):
+                    self.assertEqual(got.dtype, acc)
+                    torch.testing.assert_close(got, ref, rtol=0.0, atol=0.0)
+
     def test_fp16_evaluate_rollout_does_not_raise(self) -> None:
         pred, target = self._fp16_case()
         try:
