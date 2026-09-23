@@ -97,3 +97,11 @@
 > sub-directory and symlink. Prior rows remain as lineage.
 
 | 84B550E7AECC05BC | 2026-09-23 12:17 | src/toolkit | in-repo derived, PR #32 E7 all-file-type gate tests: test_verify_sources_gate.py |
+
+## src/toolkit/ — Git-mode exclusion regression 2026-09-24 (append-only, PR #32)
+
+> The documented __pycache__/ exception is now enforced in Git mode too;
+> a tracked cache artifact does not become a provenance source merely because
+> it is present in the index.
+
+| 0C8B6BD519D34E81 | 2026-09-24 00:00 | src/toolkit | in-repo derived, PR #32 tracked-pycache regression: test_verify_sources_gate.py |
