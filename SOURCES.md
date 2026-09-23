@@ -59,3 +59,11 @@
 
 | 7074616F72C9870D | 2026-09-23 00:21 | src/toolkit | in-repo erstellt, PR #32: stress_hex_v3.py |
 | 736E7595EDAAF3AC | 2026-09-23 00:21 | src/toolkit | in-repo erstellt, PR #32: test_stress_hex_v3.py |
+
+## src/toolkit/ — Review-hardening derived forms 2026-09-23 (append-only, PR #32)
+
+> The original PR #32 creation rows above are retained as lineage. These rows
+> pin the post-review immutable/self-consistent stress evidence implementation.
+
+| 34C92C112A40BE46 | 2026-09-23 00:49 | src/toolkit | in-repo derived, PR #32 review-hardening: stress_hex_v3.py |
+| 75AEA74A3CF101F0 | 2026-09-23 00:49 | src/toolkit | in-repo derived, PR #32 review-hardening tests: test_stress_hex_v3.py |
