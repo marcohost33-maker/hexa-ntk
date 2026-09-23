@@ -548,15 +548,39 @@ class TestResume(unittest.TestCase):
             runner = _make_runner(Path(tmpdir))
             self.assertIsNone(runner.maybe_resume())
 
-    def test_maybe_resume_nonexistent_path_returns_none(self) -> None:
+    def test_maybe_resume_nonexistent_path_fails_closed(self) -> None:
+        """A configured but missing resume_from must raise, not retrain.
+
+        Formerly this test expected None + start_epoch 0 (pinned by the
+        coverage ratchet 65f765b), which legalised a silent full retraining
+        on a mistyped resume path.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            missing = out / "does_not_exist.pt"
+            cfg = RunnerConfig(output_dir=str(out), resume_from=str(missing))
+            runner = _make_runner(out, config=cfg)
+            with self.assertRaises(Exception) as ctx:
+                runner.maybe_resume()
+            self.assertIsInstance(ctx.exception, FileNotFoundError)
+            self.assertIn("does_not_exist.pt", str(ctx.exception))
+            self.assertEqual(runner.start_epoch, 0)
+            self.assertEqual(runner.global_step, 0)
+
+    def test_run_with_missing_resume_from_does_not_train(self) -> None:
+        """run() must propagate the error before any epoch is trained."""
         with tempfile.TemporaryDirectory() as tmpdir:
             out = Path(tmpdir)
             cfg = RunnerConfig(
-                output_dir=str(out), resume_from=str(out / "does_not_exist.pt")
+                output_dir=str(out),
+                num_epochs=1,
+                resume_from=str(out / "typo.pt"),
             )
             runner = _make_runner(out, config=cfg)
-            self.assertIsNone(runner.maybe_resume())
-            self.assertEqual(runner.start_epoch, 0)
+            with self.assertRaises(FileNotFoundError):
+                runner.run()
+            self.assertEqual(runner.train_losses, [])
+            self.assertFalse(Path(runner.ckpt_mgr.resume_path).exists())
 
     def test_maybe_resume_restores_epoch_and_step(self) -> None:
         """End-to-end resume: run, then a fresh runner over the SAME run dir

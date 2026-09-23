@@ -299,31 +299,39 @@ class HexTrainingRunner:
     # ------------------------------------------------------------------
 
     def maybe_resume(self) -> Optional[Dict[str, Any]]:
-        """Resume from checkpoint if configured."""
-        if self.config.resume_from is not None:
-            resume_path = Path(self.config.resume_from)
-            if resume_path.exists():
-                report = self.ckpt_mgr.load_resume(
-                    model=self.model,
-                    optimizer=self.optimizer,
-                    scheduler=self.scheduler,
-                    grad_scaler=self.grad_scaler,
-                    map_location=self.device,
-                    trusted=self.config.resume_trusted,
-                    path=resume_path,
-                )
-                self.start_epoch = report["epoch"] + 1
-                if report.get("global_step") is not None:
-                    self.global_step = report["global_step"]
-                logger.info(
-                    "Resumed from epoch %d, step %d",
-                    self.start_epoch,
-                    self.global_step,
-                )
-                return report
-            else:
-                logger.warning("Resume path not found: %s", resume_path)
-        return None
+        """Resume from ``config.resume_from`` if configured.
+
+        Returns None only when no resume path is configured. A configured but
+        missing path raises FileNotFoundError (fail-closed): silently starting
+        at epoch 0 would turn a typo in the resume path into an unnoticed
+        full retraining that overwrites the run directory.
+        """
+        if self.config.resume_from is None:
+            return None
+        resume_path = Path(self.config.resume_from)
+        if not resume_path.exists():
+            raise FileNotFoundError(
+                f"resume_from is set but the checkpoint does not exist: "
+                f"{resume_path}"
+            )
+        report = self.ckpt_mgr.load_resume(
+            model=self.model,
+            optimizer=self.optimizer,
+            scheduler=self.scheduler,
+            grad_scaler=self.grad_scaler,
+            map_location=self.device,
+            trusted=self.config.resume_trusted,
+            path=resume_path,
+        )
+        self.start_epoch = report["epoch"] + 1
+        if report.get("global_step") is not None:
+            self.global_step = report["global_step"]
+        logger.info(
+            "Resumed from epoch %d, step %d",
+            self.start_epoch,
+            self.global_step,
+        )
+        return report
 
     # ------------------------------------------------------------------
     # Single training step
