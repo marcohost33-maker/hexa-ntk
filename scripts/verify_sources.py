@@ -17,8 +17,8 @@ eine ungepinnte ``spec/schema.json`` still PASS ergab):
 
 Dokumentierte Ausnahmen (und NUR diese):
   - ``src/toolkit/__init__.py`` (leerer Paket-Marker, falls vorhanden);
-  - Verzeichnisse ``__pycache__`` (nur im Dateisystem-Modus relevant; im Git-Modus
-    ohnehin per .gitignore ausgeschlossen).
+  - Verzeichnisse ``__pycache__`` (in beiden Modi; auch absichtlich/getrackt
+    aufgenommene Cache-Artefakte sind keine Provenance-Quellen).
 
 Fail-closed statt still ungeprueft:
   - Datei in einem Unterordner  -> Luecke (SOURCES-Zeilen tragen nur den Dateinamen);
@@ -187,7 +187,9 @@ def main(root: pathlib.Path = ROOT) -> int:
     # 1) Luecke: jede Datei der Ziele braucht einen gueltigen, exakt passenden Eintrag.
     gap = False
     for rel, is_link in sorted(files.items()):
-        if rel in EXCLUDED:
+        # Die dokumentierte Verzeichnis-Ausnahme gilt in beiden Modi. Ein
+        # force-getracktes __pycache__ darf nicht zur Provenance-Quelle werden.
+        if rel in EXCLUDED or "__pycache__" in pathlib.PurePosixPath(rel).parts:
             continue
         target = next(
             (t for t, d in TARGETS.items() if rel.startswith(d + "/")), None
