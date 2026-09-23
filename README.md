@@ -81,13 +81,13 @@ python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/wh
 python scripts/engine_gate.py                                  # 47 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 166 Unit-Tests + Coverage-Gate
+python -m coverage report                                      # 168 Unit-Tests + Coverage-Gate
 ```
 
 CI (`.github/workflows/ci.yml`), beide Jobs **blocking**:
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + 166 Toolkit-Unit-Tests unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + 168 Toolkit-Unit-Tests unter Branch-Coverage.
 
 ## Struktur
 
