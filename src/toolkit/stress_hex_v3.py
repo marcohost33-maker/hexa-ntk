@@ -162,8 +162,9 @@ def compute_degradation_factor(
     """Return a finite lower-is-better error ratio.
 
     Ratios that exceed IEEE-754 binary64 range saturate at sys.float_info.max.
-    StressCaseResult.degradation_saturated records that condition when reports
-    are built through evaluate_stress_cases.
+    Positive ratios that underflow to zero clamp to the smallest positive
+    representable float. StressCaseResult records both conditions explicitly
+    when reports are built through evaluate_stress_cases.
     """
     factor, _, _ = _compute_degradation_details(
         shifted_error,
