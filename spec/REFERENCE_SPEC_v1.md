@@ -79,8 +79,20 @@ computed from two grids, but recommends three levels to estimate observed order
 accurately and assess the asymptotic range.
 
 If an observed order is recorded, it MUST be finite and positive.
-If a reported fine-grid uncertainty/error band is recorded, it MUST be finite
-and non-negative.
+A reported `fine_grid_relative_error_estimate` is a non-negative **fraction**
+(not percent) associated with the finest level.
+
+For an applicable spatial/temporal axis to support the
+`verified_numerical_reference` ceiling, the matching refinement study MUST
+contain all of:
+
+- at least three levels;
+- a finite positive observed order;
+- `asymptotic_range_checked = true`;
+- a finite non-negative `fine_grid_relative_error_estimate`.
+
+Three raw levels without these assessments remain useful refinement evidence but
+do not by themselves constitute high-credibility solution verification.
 
 ## 6. Iterative convergence
 
@@ -153,8 +165,8 @@ Requires all of:
 - spatial, temporal, and iterative solution-verification checks are each either
   `pass` or justified `not_applicable`;
 - **at least one** of those solution-verification axes is an actual `pass`;
-- each applicable spatial/temporal `pass` has a matching refinement study with
-  at least three levels;
+- each applicable spatial/temporal `pass` has a matching refinement study that
+  satisfies the full high-credibility criteria in Section 5;
 - numerical uncertainty is present.
 
 A failed or not-assessed required check keeps the reference at
