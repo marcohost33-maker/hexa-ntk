@@ -57,5 +57,5 @@
 > Neue Stress-/Shift-Vertragsdateien, in-repo erstellt. Die SHA-Pins werden vom
 > fail-closed Provenance-Gate gegen die aktuellen Repo-Bytes verifiziert.
 
-| E57D326F2038727C | 2026-09-23 00:21 | src/toolkit | in-repo erstellt, PR #32: stress_hex_v3.py |
-| 19E5D850A58DF3F9 | 2026-09-23 00:21 | src/toolkit | in-repo erstellt, PR #32: test_stress_hex_v3.py |
+| 7074616F72C9870D | 2026-09-23 00:21 | src/toolkit | in-repo erstellt, PR #32: stress_hex_v3.py |
+| 736E7595EDAAF3AC | 2026-09-23 00:21 | src/toolkit | in-repo erstellt, PR #32: test_stress_hex_v3.py |
