@@ -225,6 +225,13 @@ class TestVerifySourcesGit(_GateLayout):
         self.assertEqual(rc, 2, out)
         self.assertIn("src/toolkit/sub/extra.py: verschachtelte Datei", out)
 
+    def test_tracked_pycache_is_documented_exception(self) -> None:
+        """A tracked cache file remains excluded in Git mode."""
+        self._add("src/toolkit/__pycache__/mod.cpython-312.pyc", b"\\x00")
+        rc, out = self._run()
+        self.assertEqual(rc, 0, out)
+
+
 
 if __name__ == "__main__":
     unittest.main()
