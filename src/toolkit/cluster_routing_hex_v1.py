@@ -193,7 +193,14 @@ def adjudicate_router_proposal(
     registry = _registry(experts)
     reasons: list[str] = []
 
-    if not isfinite(proposal.confidence) or not 0.0 <= proposal.confidence <= 1.0:
+    try:
+        confidence_valid = (
+            isfinite(proposal.confidence)
+            and 0.0 <= proposal.confidence <= 1.0
+        )
+    except (TypeError, ValueError):
+        confidence_valid = False
+    if not confidence_valid:
         return RouteDecision(
             RouteStatus.BLOCK, (), (), ("INVALID_ROUTER_CONFIDENCE",), 0.0
         )
