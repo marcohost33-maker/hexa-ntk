@@ -55,10 +55,10 @@ class TestBundledSeedCorpus(unittest.TestCase):
             {"MODEL_REVIEWED_SEED"},
         )
 
-    def test_abstain_cases_have_no_reference_route(self) -> None:
+    def test_abstain_cases_have_no_acceptable_compute_route(self) -> None:
         for case in self.cases:
             if case.expected_action is ExpectedAction.ABSTAIN:
-                self.assertEqual(case.reference_compute_ids, frozenset())
+                self.assertEqual(case.acceptable_compute_sets, ())
 
     def test_capability_only_smoke_baseline_is_well_defined(self) -> None:
         predictions = run_capability_only_baseline(
@@ -66,7 +66,9 @@ class TestBundledSeedCorpus(unittest.TestCase):
         )
         metrics = evaluate_corpus_predictions(self.cases, predictions)
         self.assertEqual(metrics.n_cases, 9)
+        self.assertEqual(metrics.matched_prediction_count, 9)
         self.assertEqual(metrics.missing_prediction_count, 0)
+        self.assertEqual(metrics.unknown_prediction_count, 0)
         # This is a plumbing sanity check: labels were seeded from the same
         # capability vocabulary. It is NOT evidence that the architecture works.
         self.assertEqual(metrics.action_accuracy, 1.0)
@@ -75,7 +77,10 @@ class TestBundledSeedCorpus(unittest.TestCase):
         self.assertEqual(metrics.unsupported_abstention_rate, 1.0)
         self.assertEqual(metrics.unsupported_overroute_rate, 0.0)
         self.assertEqual(
-            metrics.mean_reference_recall_on_supported_accepts, 1.0
+            metrics.mean_best_reference_recall_on_supported_accepts, 1.0
+        )
+        self.assertEqual(
+            metrics.exact_reference_set_match_rate_on_supported_accepts, 1.0
         )
 
 
@@ -90,7 +95,7 @@ class TestCorpusSchema(unittest.TestCase):
             "required_capabilities": ["open_system_dynamics"],
             "required_assurance_capabilities": ["audit"],
             "expected_action": "ACCEPT",
-            "reference_compute_ids": ["liouscope"],
+            "acceptable_compute_sets": [["liouscope"]],
             "annotation_status": "MODEL_REVIEWED_SEED",
             "requires_human_review": True,
             "tags": ["physics"],
@@ -109,14 +114,20 @@ class TestCorpusSchema(unittest.TestCase):
             BenchmarkCase.from_mapping(raw)
 
         raw = self.base_raw()
-        raw["reference_compute_ids"] = []
+        raw["acceptable_compute_sets"] = []
         with self.assertRaises(ValueError):
             BenchmarkCase.from_mapping(raw)
 
-    def test_abstain_rejects_reference_route(self) -> None:
+    def test_abstain_rejects_acceptable_routes(self) -> None:
         raw = self.base_raw()
         raw["support_class"] = "UNSUPPORTED"
         raw["expected_action"] = "ABSTAIN"
+        with self.assertRaises(ValueError):
+            BenchmarkCase.from_mapping(raw)
+
+    def test_duplicate_acceptable_routes_are_rejected(self) -> None:
+        raw = self.base_raw()
+        raw["acceptable_compute_sets"] = [["liouscope"], ["liouscope"]]
         with self.assertRaises(ValueError):
             BenchmarkCase.from_mapping(raw)
 
@@ -144,46 +155,103 @@ class TestCorpusSchema(unittest.TestCase):
 
 
 class TestPredictionMetrics(unittest.TestCase):
+    def base_case_raw(self) -> dict[str, object]:
+        return {
+            "case_id": "case",
+            "source_title": "source.md",
+            "source_date": "2026-09-24",
+            "domain": "open_quantum",
+            "support_class": "SUPPORTED",
+            "required_capabilities": ["open_system_dynamics"],
+            "required_assurance_capabilities": [],
+            "expected_action": "ACCEPT",
+            "acceptable_compute_sets": [["liouscope"]],
+            "annotation_status": "MODEL_REVIEWED_SEED",
+            "requires_human_review": True,
+            "tags": [],
+        }
+
     def test_missing_predictions_are_not_counted_as_wrong_actions(self) -> None:
-        case = BenchmarkCase.from_mapping(
-            {
-                "case_id": "case",
-                "source_title": "source.md",
-                "source_date": "2026-09-24",
-                "domain": "open_quantum",
-                "support_class": "SUPPORTED",
-                "required_capabilities": ["open_system_dynamics"],
-                "required_assurance_capabilities": [],
-                "expected_action": "ACCEPT",
-                "reference_compute_ids": ["liouscope"],
-                "annotation_status": "MODEL_REVIEWED_SEED",
-                "requires_human_review": True,
-                "tags": [],
-            }
-        )
+        case = BenchmarkCase.from_mapping(self.base_case_raw())
         metrics = evaluate_corpus_predictions((case,), {})
         self.assertEqual(metrics.n_cases, 1)
         self.assertEqual(metrics.n_predictions, 0)
+        self.assertEqual(metrics.matched_prediction_count, 0)
         self.assertEqual(metrics.missing_prediction_count, 1)
+        self.assertEqual(metrics.unknown_prediction_count, 0)
         self.assertIsNone(metrics.action_accuracy)
 
-    def test_unsupported_accept_counts_as_overroute(self) -> None:
-        case = BenchmarkCase.from_mapping(
-            {
-                "case_id": "ood",
-                "source_title": "ood.md",
-                "source_date": "2026-09-24",
-                "domain": "browser_security",
-                "support_class": "UNSUPPORTED",
-                "required_capabilities": ["browser_sandbox"],
-                "required_assurance_capabilities": [],
-                "expected_action": "ABSTAIN",
-                "reference_compute_ids": [],
-                "annotation_status": "MODEL_REVIEWED_SEED",
-                "requires_human_review": True,
-                "tags": ["ood"],
-            }
+    def test_block_is_not_counted_as_correct_abstention(self) -> None:
+        raw = self.base_case_raw()
+        raw["case_id"] = "blocked"
+        raw["domain"] = "browser_security"
+        raw["support_class"] = "UNSUPPORTED"
+        raw["required_capabilities"] = ["browser_sandbox"]
+        raw["expected_action"] = "ABSTAIN"
+        raw["acceptable_compute_sets"] = []
+        raw["tags"] = ["ood"]
+        case = BenchmarkCase.from_mapping(raw)
+        decision = RouteDecision(
+            status=RouteStatus.BLOCK,
+            selected_compute_ids=(),
+            assurance_candidate_ids=(),
+            reason_codes=("INVALID_ROUTER_CONFIDENCE",),
+            total_estimated_cost=0.0,
         )
+        metrics = evaluate_corpus_predictions((case,), {"blocked": decision})
+        self.assertEqual(metrics.action_accuracy, 0.0)
+        self.assertEqual(metrics.unsupported_abstention_rate, 0.0)
+        self.assertEqual(metrics.unsupported_overroute_rate, 0.0)
+
+    def test_unknown_prediction_ids_are_counted_separately(self) -> None:
+        case = BenchmarkCase.from_mapping(self.base_case_raw())
+        decision = RouteDecision(
+            status=RouteStatus.ACCEPT,
+            selected_compute_ids=("liouscope",),
+            assurance_candidate_ids=(),
+            reason_codes=(),
+            total_estimated_cost=1.0,
+        )
+        metrics = evaluate_corpus_predictions(
+            (case,), {"case": decision, "extra": decision}
+        )
+        self.assertEqual(metrics.n_predictions, 2)
+        self.assertEqual(metrics.matched_prediction_count, 1)
+        self.assertEqual(metrics.missing_prediction_count, 0)
+        self.assertEqual(metrics.unknown_prediction_count, 1)
+
+    def test_multiple_acceptable_routes_use_best_recall_and_exact_match(self) -> None:
+        raw = self.base_case_raw()
+        raw["acceptable_compute_sets"] = [
+            ["liouscope"],
+            ["liouscope", "pade"],
+        ]
+        case = BenchmarkCase.from_mapping(raw)
+        decision = RouteDecision(
+            status=RouteStatus.ACCEPT,
+            selected_compute_ids=("liouscope", "pade"),
+            assurance_candidate_ids=(),
+            reason_codes=(),
+            total_estimated_cost=2.0,
+        )
+        metrics = evaluate_corpus_predictions((case,), {"case": decision})
+        self.assertEqual(
+            metrics.mean_best_reference_recall_on_supported_accepts, 1.0
+        )
+        self.assertEqual(
+            metrics.exact_reference_set_match_rate_on_supported_accepts, 1.0
+        )
+
+    def test_unsupported_accept_counts_as_overroute(self) -> None:
+        raw = self.base_case_raw()
+        raw["case_id"] = "ood"
+        raw["domain"] = "browser_security"
+        raw["support_class"] = "UNSUPPORTED"
+        raw["required_capabilities"] = ["browser_sandbox"]
+        raw["expected_action"] = "ABSTAIN"
+        raw["acceptable_compute_sets"] = []
+        raw["tags"] = ["ood"]
+        case = BenchmarkCase.from_mapping(raw)
         decision = RouteDecision(
             status=RouteStatus.ACCEPT,
             selected_compute_ids=("qforge",),
