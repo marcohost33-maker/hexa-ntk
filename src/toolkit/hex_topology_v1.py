@@ -219,7 +219,13 @@ class HexExpertTopology:
         if kind is FlowKind.LOCAL_STATE:
             if target is None:
                 raise ValueError("LOCAL_STATE requires a project target")
-            path = self.shortest_local_path(source, target)
+            self.coord(target)
+            if source != target and target not in self.neighbors(source):
+                raise ValueError(
+                    "LOCAL_STATE is one semantic hop only; use explicit update rounds "
+                    "or GLOBAL_SUMMARY for non-neighbour context"
+                )
+            path = (source,) if source == target else (source, target)
             return FlowPlan(kind, path, "bounded-delta-or-feature", True)
 
         if kind is FlowKind.GLOBAL_SUMMARY:
