@@ -36,6 +36,7 @@ def envelope(
         ttl_hops=ttl_hops,
         payload_digest=sha256_payload(payload),
         payload_bytes=len(payload),
+        causation_source=None,
         causation_id=None,
     )
     defaults.update(kwargs)
@@ -62,9 +63,28 @@ class TestEnvelopeValidation(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     envelope(**{field: value})
 
+    def test_incomplete_causation_identity_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            envelope(causation_id="parent")
+
     def test_self_causation_rejected(self) -> None:
         with self.assertRaises(ValueError):
-            envelope(message_id="same", causation_id="same")
+            envelope(
+                message_id="same",
+                causation_source="ade",
+                causation_id="same",
+            )
+
+    def test_cross_producer_same_local_id_is_not_self_causation(self) -> None:
+        msg = envelope(
+            message_id="same",
+            causation_source="other-producer",
+            causation_id="same",
+        )
+        self.assertEqual(
+            (msg.causation_source, msg.causation_id),
+            ("other-producer", "same"),
+        )
 
     def test_consume_hop_is_immutable(self) -> None:
         msg = envelope(ttl_hops=2)
