@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _GATE = Path(__file__).resolve().parents[2] / "scripts" / "verify_sources.py"
 _spec = importlib.util.spec_from_file_location("verify_sources_gate", _GATE)
@@ -165,6 +166,38 @@ class TestVerifySourcesFilesystem(_GateLayout):
         rc, out = self._run(self._row("spec", CONTRACT, "LINK.md"))
         self.assertEqual(rc, 2, out)
         self.assertIn("[GAP ] spec/LINK.md: symbolischer Link", out)
+    def test_filesystem_target_root_symlink_is_a_gap(self) -> None:
+        with tempfile.TemporaryDirectory() as outside_tmp:
+            outside = Path(outside_tmp)
+            (outside / "CONTRACT_v1.md").write_bytes(CONTRACT)
+            shutil.rmtree(self.root / "spec")
+            try:
+                (self.root / "spec").symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"directory symlink creation not permitted: {exc}")
+            rc, out = self._run()
+            self.assertEqual(rc, 2, out)
+            self.assertIn("spec: Zielverzeichnis ist symbolischer Link", out)
+
+    def test_filesystem_walk_error_fails_closed(self) -> None:
+        def broken_walk(*_args, **kwargs):
+            onerror = kwargs.get("onerror")
+            assert onerror is not None
+            onerror(PermissionError("blocked subtree"))
+            return []
+
+        with mock.patch.object(gate.os, "walk", side_effect=broken_walk):
+            rc, out = self._run()
+        self.assertEqual(rc, 3, out)
+        self.assertIn("filesystem traversal failed", out)
+
+    def test_corrupt_git_marker_does_not_fall_back_to_filesystem(self) -> None:
+        (self.root / ".git").write_text(
+            "gitdir: definitely-missing-target\n", encoding="utf-8"
+        )
+        rc, out = self._run()
+        self.assertEqual(rc, 3, out)
+        self.assertIn("git metadata present but rev-parse failed", out)
 
     # --- dimension: upper/lower case --------------------------------------
     def test_case_mismatch_between_row_and_file_is_not_accepted(self) -> None:
