@@ -78,6 +78,7 @@ def axial_to_cartesian(coord: HexCoord, h: float = 1.0) -> tuple[float, float]:
     y = h * (sqrt(3.0) / 2.0) * coord.r
     return x, y
 
+
 def physical_neighbors(coord: HexCoord) -> tuple[HexCoord, ...]:
     """The six nearest neighbours of a physical hex-lattice site."""
     return tuple(coord + direction for direction in HEX_DIRECTIONS)
