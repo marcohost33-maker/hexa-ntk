@@ -50,12 +50,19 @@ independent merely because their project names or implementation-family labels d
 
 ### TaskSpec
 - task/domain
-- required compute capabilities
+- required compute capabilities, satisfied collectively by the selected compute set
 - minimum/maximum expert count
 - maximum total estimated cost
 - minimum acceptable router confidence
 - optional requirement for independent implementation families
 - mandatory assurance capabilities
+
+Compute capability semantics:
+- each proposed compute expert must be enabled, in-domain and contribute at least one
+  required capability (unless the task has no capability requirement);
+- the selected compute set must cover the full required-capability union;
+- complementary specialists are therefore valid (for example LiouScope=dynamics plus
+  PADE=rational approximation), while irrelevant experts remain fail-closed.
 
 ### RouterProposal
 - ordered compute-expert IDs
