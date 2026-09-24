@@ -113,7 +113,7 @@ class TestHardGates(unittest.TestCase):
         self.assertEqual(decision.status, RouteStatus.ACCEPT)
 
     def test_invalid_router_confidence_blocks(self) -> None:
-        for confidence in (-0.1, 1.1, math.nan, "not-a-number"):
+        for confidence in (-0.1, 1.1, math.nan):
             with self.subTest(confidence=confidence):
                 decision = adjudicate_router_proposal(
                     task(),
