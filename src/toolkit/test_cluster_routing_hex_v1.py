@@ -315,6 +315,80 @@ class TestAssurancePlane(unittest.TestCase):
         self.assertEqual(decision.status, RouteStatus.BLOCK)
         self.assertEqual(decision.reason_codes, ("MISSING_REQUIRED_ASSURANCE",))
 
+    def test_no_assurance_requirement_returns_no_assurance_selection(self) -> None:
+        ark = expert(
+            "ark",
+            capabilities=("audit",),
+            plane=ExpertPlane.ASSURANCE,
+        )
+        decision = adjudicate_router_proposal(
+            task(),
+            [expert("pade"), ark],
+            RouterProposal(("pade",), confidence=0.9),
+        )
+        self.assertEqual(decision.status, RouteStatus.ACCEPT)
+        self.assertEqual(decision.assurance_candidate_ids, ())
+
+    def test_assurance_capabilities_can_be_composed_across_experts(self) -> None:
+        ark = expert(
+            "ark",
+            capabilities=("audit",),
+            plane=ExpertPlane.ASSURANCE,
+            cost=1.0,
+        )
+        usk = expert(
+            "usk",
+            capabilities=("stability",),
+            plane=ExpertPlane.ASSURANCE,
+            cost=1.0,
+        )
+        decision = adjudicate_router_proposal(
+            task(
+                required_assurance_capabilities=frozenset(
+                    {"audit", "stability"}
+                )
+            ),
+            [expert("pade"), ark, usk],
+            RouterProposal(("pade",), confidence=0.9),
+        )
+        self.assertEqual(decision.status, RouteStatus.ACCEPT)
+        self.assertEqual(
+            decision.assurance_candidate_ids, ("ark", "usk")
+        )
+
+    def test_assurance_set_prefers_minimum_cardinality_then_cost(self) -> None:
+        combined = expert(
+            "combined",
+            capabilities=("audit", "stability"),
+            plane=ExpertPlane.ASSURANCE,
+            cost=5.0,
+        )
+        cheap_a = expert(
+            "cheap-a",
+            capabilities=("audit",),
+            plane=ExpertPlane.ASSURANCE,
+            cost=0.1,
+        )
+        cheap_b = expert(
+            "cheap-b",
+            capabilities=("stability",),
+            plane=ExpertPlane.ASSURANCE,
+            cost=0.1,
+        )
+        decision = adjudicate_router_proposal(
+            task(
+                required_assurance_capabilities=frozenset(
+                    {"audit", "stability"}
+                )
+            ),
+            [expert("pade"), combined, cheap_a, cheap_b],
+            RouterProposal(("pade",), confidence=0.9),
+        )
+        self.assertEqual(decision.status, RouteStatus.ACCEPT)
+        self.assertEqual(
+            decision.assurance_candidate_ids, ("combined",)
+        )
+
     def test_assurance_candidates_returned_separately(self) -> None:
         ark = expert(
             "ark",
