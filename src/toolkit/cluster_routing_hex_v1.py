@@ -92,6 +92,7 @@ class TaskSpec:
 class RouterProposal:
     ranked_expert_ids: tuple[str, ...]
     confidence: float
+    requested_expert_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -134,19 +135,6 @@ def _registry(experts: Iterable[ExpertSpec]) -> dict[str, ExpertSpec]:
     return registry
 
 
-def _within_budget(
-    chosen: Sequence[ExpertSpec],
-    candidate: ExpertSpec,
-    max_total_cost: float | None,
-) -> bool:
-    if max_total_cost is None:
-        return True
-    return (
-        sum(item.estimated_cost for item in chosen) + candidate.estimated_cost
-        <= max_total_cost
-    )
-
-
 def _pair_is_independent(left: ExpertSpec, right: ExpertSpec) -> bool:
     """Conservative pairwise independence check from governance metadata."""
     return (
@@ -174,16 +162,25 @@ def _subset_within_budget(
 def _select_ranked(
     candidates: Sequence[ExpertSpec],
     task: TaskSpec,
+    requested_expert_count: int | None,
 ) -> tuple[ExpertSpec, ...]:
-    """Choose the largest feasible ranked subset without greedy budget traps.
+    """Choose a feasible ranked subset without greedy budget traps.
 
-    Candidate order remains the router preference. We search subsets by decreasing
-    cardinality and, within a cardinality, lexicographic index order. This preserves
-    the earliest-ranked feasible combination while avoiding the classic greedy
-    failure where an expensive first choice prevents a valid cheaper combination.
+    New routers SHOULD provide requested_expert_count so cardinality is an explicit
+    routing decision instead of "use as many experts as possible". For backward
+    compatibility, a missing count keeps the v1 behavior of using the largest
+    feasible cardinality within task bounds.
+
+    Within a fixed cardinality, candidate order remains the router preference and
+    we choose the lexicographically earliest feasible index combination.
     """
     max_size = min(len(candidates), task.max_experts)
-    for size in range(max_size, task.min_experts - 1, -1):
+    if requested_expert_count is not None:
+        sizes = (requested_expert_count,)
+    else:
+        sizes = range(max_size, task.min_experts - 1, -1)
+
+    for size in sizes:
         for indices in combinations(range(len(candidates)), size):
             chosen = tuple(candidates[index] for index in indices)
             if not _subset_within_budget(chosen, task.max_total_cost):
@@ -213,6 +210,19 @@ def adjudicate_router_proposal(
         return RouteDecision(
             RouteStatus.BLOCK, (), (), ("INVALID_ROUTER_CONFIDENCE",), 0.0
         )
+
+    requested_count = proposal.requested_expert_count
+    if requested_count is not None:
+        if (
+            isinstance(requested_count, bool)
+            or not isinstance(requested_count, int)
+            or requested_count < task.min_experts
+            or requested_count > task.max_experts
+            or requested_count > len(proposal.ranked_expert_ids)
+        ):
+            return RouteDecision(
+                RouteStatus.BLOCK, (), (), ("INVALID_EXPERT_COUNT",), 0.0
+            )
 
     assurance_candidates = tuple(
         expert
@@ -271,7 +281,9 @@ def adjudicate_router_proposal(
             )
         proposed.append(expert)
 
-    selected = _select_ranked(proposed, task)
+    selected = _select_ranked(
+        proposed, task, proposal.requested_expert_count
+    )
     if len(selected) < task.min_experts:
         reasons.append("INSUFFICIENT_BUDGET_OR_EXPERTS")
     if task.require_independent_compute and not _has_independent_pair(selected):
