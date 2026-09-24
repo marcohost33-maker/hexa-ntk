@@ -55,7 +55,8 @@ compute ring.
 
 ### LOCAL_STATE
 - project-to-project only;
-- shortest path over physical ring adjacency;
+- exactly one semantic hop to a directly adjacent project;
+- multi-hop influence requires explicit sequential update rounds, never transparent tunnelling;
 - high-frequency, bounded delta/features;
 - may mutate compute state;
 - must have hop/size budgets before production use.
@@ -160,9 +161,10 @@ Before a learned HexaRouter can affect execution:
 3. report ACCEPT/ABSTAIN/BLOCK separately;
 4. report expert utilization and concentration;
 5. report cost and latency;
-6. report agreement with reviewed routing as agreement, not truth;
-7. add OOD/calibration tests;
-8. activate only bounded in-distribution task classes after review.
+6. separate reference-case acceptance coverage from agreement among accepted routes;
+7. report reviewed-route recall/agreement as agreement, not truth;
+8. add OOD/calibration tests;
+9. activate only bounded in-distribution task classes after review.
 
 ## 10. Research anchors
 
