@@ -5,7 +5,9 @@ hex_topology_v1.py
 Deterministic topology and information-flow primitives for HexaNTK cluster cells.
 
 Two different geometries are deliberately separated:
-1. physical hex lattice: every interior lattice site has six nearest neighbours;
+1. physical hex-centre point lattice (triangular Bravais lattice): every interior
+   site has six equidistant nearest neighbours; this is not the degree-3 honeycomb
+   vertex graph;
 2. six-project expert cell: six project experts occupy the radius-1 ring around a
    *virtual* centre. Each project therefore has two project neighbours; the centre
    is not a seventh expert and may only be used as a typed relay/control endpoint.
@@ -17,6 +19,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
+from math import sqrt
 from typing import Iterable, Mapping
 
 
@@ -38,14 +41,15 @@ class HexCoord:
         return HexCoord(self.q * factor, self.r * factor)
 
 
-# Pointy-top axial convention, clockwise from east.
+# Axial basis used by axial_to_cartesian below. With Cartesian +y upward,
+# this tuple runs clockwise: E, SE, SW, W, NW, NE.
 HEX_DIRECTIONS: tuple[HexCoord, ...] = (
-    HexCoord(+1, 0),   # E
-    HexCoord(+1, -1),  # NE
-    HexCoord(0, -1),   # NW
-    HexCoord(-1, 0),   # W
-    HexCoord(-1, +1),  # SW
-    HexCoord(0, +1),   # SE
+    HexCoord(+1, 0),
+    HexCoord(+1, -1),
+    HexCoord(0, -1),
+    HexCoord(-1, 0),
+    HexCoord(-1, +1),
+    HexCoord(0, +1),
 )
 
 ORIGIN = HexCoord(0, 0)
@@ -61,6 +65,18 @@ def hex_distance(a: HexCoord, b: HexCoord) -> int:
     ds = a.s - b.s
     return max(abs(dq), abs(dr), abs(ds))
 
+
+def axial_to_cartesian(coord: HexCoord, h: float = 1.0) -> tuple[float, float]:
+    """Map axial lattice coordinates to Cartesian coordinates.
+
+    ``h`` is the nearest-neighbour centre spacing, matching the spacing used by
+    the canonical 7-point hex-grid Laplacian in ``src/hexantk_v3.py``.
+    """
+    if h <= 0:
+        raise ValueError("h must be > 0")
+    x = h * (coord.q + 0.5 * coord.r)
+    y = h * (sqrt(3.0) / 2.0) * coord.r
+    return x, y
 
 def physical_neighbors(coord: HexCoord) -> tuple[HexCoord, ...]:
     """The six nearest neighbours of a physical hex-lattice site."""
