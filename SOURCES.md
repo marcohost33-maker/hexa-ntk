@@ -98,3 +98,17 @@
 | E60163049656A5E7 | 2026-09-24 10:17 | src/toolkit | in-repo derived: test_hex_topology_v1.py |
 | 23B7F28F27D71110 | 2026-09-24 10:17 | src/toolkit | in-repo created: message_envelope_hex_v1.py |
 | 2AA8827DF4DCD60E | 2026-09-24 10:17 | src/toolkit | in-repo created: test_message_envelope_hex_v1.py |
+
+
+## src/toolkit/ — Final routing/messaging hardening derived forms 2026-09-24
+
+> Append-only derived bytes after feasible-subset routing, shared-risk independence,
+> explicit cardinality/calibration contracts, assurance set-cover, precise lattice
+> coordinates and producer-scoped causal message identity.
+
+| B119CE30543A9D9F | 2026-09-24 10:17 | src/toolkit | in-repo derived: cluster_routing_hex_v1.py |
+| 395316F68FA13818 | 2026-09-24 10:17 | src/toolkit | in-repo derived: test_cluster_routing_hex_v1.py |
+| 67B3E28B85C80EA4 | 2026-09-24 10:17 | src/toolkit | in-repo derived: hex_topology_v1.py |
+| E60163049656A5E7 | 2026-09-24 10:17 | src/toolkit | in-repo derived: test_hex_topology_v1.py |
+| F019FAFDC70AEEA3 | 2026-09-24 10:17 | src/toolkit | in-repo derived: message_envelope_hex_v1.py |
+| F729849DF2C702B9 | 2026-09-24 10:17 | src/toolkit | in-repo derived: test_message_envelope_hex_v1.py |
