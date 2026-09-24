@@ -58,9 +58,15 @@ class ShiftRegime(str, Enum):
 def _finite_nonnegative(value: Any, *, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise TypeError(f"{name} must be a real scalar")
-    result = float(value)
-    if not math.isfinite(result) or result < 0.0:
+    # Check the exact/extended-precision Real before binary64 conversion.
+    # Otherwise Fraction(-1, 10**1000) becomes -0.0 and crosses the sign gate.
+    if value < 0:
         raise ValueError(f"{name} must be finite and >= 0")
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{name} must be finite and >= 0")
+    if result == 0.0 and value != 0:
+        raise ValueError(f"{name} is nonzero but underflows binary64")
     return result
 
 
