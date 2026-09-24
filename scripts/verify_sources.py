@@ -113,14 +113,42 @@ def _git(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess[bytes]:
 
 
 def _is_git_worktree(root: pathlib.Path) -> bool:
+    """Detect Git mode without silently downgrading a broken checkout.
+
+    A genuine archive has no .git marker and may use filesystem enumeration.
+    If a marker is present, inability to query Git is an integrity failure:
+    filesystem walking cannot account for indexed-but-missing paths.
+    """
+    git_marker = os.path.lexists(root / ".git")
     try:
         probe = _git(root, "rev-parse", "--show-toplevel")
-    except FileNotFoundError:  # git binary missing
+    except FileNotFoundError as exc:
+        if git_marker:
+            raise EnumerationError(
+                "git metadata present but git executable is unavailable"
+            ) from exc
         return False
     if probe.returncode != 0:
+        if git_marker:
+            detail = probe.stderr.decode("utf-8", "replace").strip()
+            raise EnumerationError(
+                "git metadata present but rev-parse failed"
+                + (f": {detail}" if detail else "")
+            )
         return False
-    top = pathlib.Path(probe.stdout.decode("utf-8").strip())
-    return top.resolve() == root.resolve()
+    top_text = probe.stdout.decode("utf-8", "replace").strip()
+    if not top_text:
+        if git_marker:
+            raise EnumerationError("git rev-parse returned an empty toplevel")
+        return False
+    top = pathlib.Path(top_text)
+    if top.resolve() != root.resolve():
+        if git_marker:
+            raise EnumerationError(
+                f"git toplevel {top} does not match repository root {root}"
+            )
+        return False
+    return True
 
 
 def enumerate_files(root: pathlib.Path) -> tuple[str, dict[str, bool]]:
@@ -148,11 +176,22 @@ def enumerate_files(root: pathlib.Path) -> tuple[str, dict[str, bool]]:
         return "git", files
 
     files = {}
+
+    def _walk_error(exc: OSError) -> None:
+        raise EnumerationError(f"filesystem traversal failed: {exc}") from exc
+
     for rel_dir in dirs:
         base = root / rel_dir
+        if base.is_symlink():
+            # A target-root symlink would otherwise be followed by is_dir()/walk
+            # and could authenticate mutable bytes outside the archive root.
+            files[rel_dir] = True
+            continue
         if not base.is_dir():
             continue
-        for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+        for dirpath, dirnames, filenames in os.walk(
+            base, followlinks=False, onerror=_walk_error
+        ):
             dirnames[:] = [d for d in dirnames if d != "__pycache__"]
             here = pathlib.Path(dirpath)
             for d in list(dirnames):
@@ -181,7 +220,7 @@ def main(root: pathlib.Path = ROOT) -> int:
     try:
         mode, files = enumerate_files(root)
     except EnumerationError as exc:
-        print(f"[FAIL] Dateiliste nicht bestimmbar (git): {exc}")
+        print(f"[FAIL] Dateiliste nicht bestimmbar: {exc}")
         return 3
 
     # 1) Luecke: jede Datei der Ziele braucht einen gueltigen, exakt passenden Eintrag.
@@ -190,6 +229,10 @@ def main(root: pathlib.Path = ROOT) -> int:
         # Die dokumentierte Verzeichnis-Ausnahme gilt in beiden Modi. Ein
         # force-getracktes __pycache__ darf nicht zur Provenance-Quelle werden.
         if rel in EXCLUDED or "__pycache__" in pathlib.PurePosixPath(rel).parts:
+            continue
+        if rel in TARGETS.values() and is_link:
+            print(f"[GAP ] {rel}: Zielverzeichnis ist symbolischer Link")
+            gap = True
             continue
         target = next(
             (t for t, d in TARGETS.items() if rel.startswith(d + "/")), None
