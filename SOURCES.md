@@ -120,3 +120,11 @@
 
 | CB6CDB37B98E0BB9 | 2026-09-24 10:17 | src/toolkit | in-repo derived: cluster_routing_hex_v1.py |
 | 9EFD6F2FF8025823 | 2026-09-24 10:17 | src/toolkit | in-repo derived: test_cluster_routing_hex_v1.py |
+
+
+## src/toolkit/ — Independence-attestation hardening derived forms 2026-09-24
+
+> Append-only derived bytes after fail-closed independence-attestation hardening.
+
+| EBA5AF0E096C3B6E | 2026-09-24 10:17 | src/toolkit | in-repo derived: cluster_routing_hex_v1.py |
+| 45FBED0A7936F2AB | 2026-09-24 10:17 | src/toolkit | in-repo derived: test_cluster_routing_hex_v1.py |
