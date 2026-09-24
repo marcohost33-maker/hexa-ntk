@@ -72,3 +72,16 @@
 | 67EA791411BFD9C5 | 2026-09-24 02:20 | src/toolkit | in-repo erstellt, Branch codex/cluster-fabric-safety-spine-v1: test_hex_topology_v1.py |
 | D32397464F55BF37 | 2026-09-24 02:20 | src/toolkit | in-repo erstellt, Branch codex/cluster-fabric-safety-spine-v1: shadow_routing_hex_v1.py |
 | E83BC132C6291EB2 | 2026-09-24 02:20 | src/toolkit | in-repo erstellt, Branch codex/cluster-fabric-safety-spine-v1: test_shadow_routing_hex_v1.py |
+
+
+## src/toolkit/ — Cluster fabric hardening derived forms 2026-09-24
+
+> Append-only derived bytes after semantic-hop, shadow-metric and malformed-confidence
+> hardening on branch codex/cluster-fabric-safety-spine-v1.
+
+| B8EF5FC32416FB03 | 2026-09-24 02:45 | src/toolkit | in-repo derived: cluster_routing_hex_v1.py |
+| 93F2D4703A840EC3 | 2026-09-24 02:45 | src/toolkit | in-repo derived: test_cluster_routing_hex_v1.py |
+| 6B4E284D12AFEF60 | 2026-09-24 02:45 | src/toolkit | in-repo derived: hex_topology_v1.py |
+| 226C3B0EF0410D28 | 2026-09-24 02:45 | src/toolkit | in-repo derived: test_hex_topology_v1.py |
+| 9A024D35B990FB25 | 2026-09-24 02:45 | src/toolkit | in-repo derived: shadow_routing_hex_v1.py |
+| B15BA18DC4C8B54B | 2026-09-24 02:45 | src/toolkit | in-repo derived: test_shadow_routing_hex_v1.py |
