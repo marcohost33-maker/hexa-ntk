@@ -42,6 +42,7 @@ class MessageEnvelope:
     ttl_hops: int
     payload_digest: str
     payload_bytes: int
+    causation_source: str | None = None
     causation_id: str | None = None
 
     def __post_init__(self) -> None:
@@ -72,10 +73,24 @@ class MessageEnvelope:
             self.payload_digest
         ):
             raise ValueError("payload_digest must be a lowercase 64-hex SHA-256")
-        if self.causation_id is not None:
-            if not isinstance(self.causation_id, str) or not self.causation_id.strip():
-                raise ValueError("causation_id must be None or a non-empty string")
-            if self.causation_id == self.message_id:
+        if (self.causation_source is None) != (self.causation_id is None):
+            raise ValueError(
+                "causation_source and causation_id must be provided together"
+            )
+        if self.causation_source is not None and self.causation_id is not None:
+            if (
+                not isinstance(self.causation_source, str)
+                or not self.causation_source.strip()
+                or not isinstance(self.causation_id, str)
+                or not self.causation_id.strip()
+            ):
+                raise ValueError(
+                    "causation_source and causation_id must be non-empty strings"
+                )
+            if (
+                self.causation_source == self.source
+                and self.causation_id == self.message_id
+            ):
                 raise ValueError("message cannot cause itself")
 
     @property
