@@ -105,3 +105,14 @@
 > it is present in the index.
 
 | 0C8B6BD519D34E81 | 2026-09-24 00:00 | src/toolkit | in-repo derived, PR #32 tracked-pycache regression: test_verify_sources_gate.py |
+
+## src/toolkit/ — Final-review fail-closed hardening 2026-09-24 (append-only, PR #32)
+
+> Final re-review hardening: filesystem target-root symlinks, traversal errors
+> and broken Git metadata no longer downgrade to a passing archive scan; exact
+> Real values are sign-checked before binary64 conversion and nonzero values
+> that underflow to zero are refused. Prior rows remain lineage.
+
+| 0E7E5F55A8F6DEC9 | 2026-09-24 00:15 | src/toolkit | in-repo derived, PR #32 exact-Real numeric boundary: stress_hex_v3.py |
+| A76CB45A01242259 | 2026-09-24 00:15 | src/toolkit | in-repo derived, PR #32 exact-Real regressions: test_stress_hex_v3.py |
+| 8051560D9B84B2F8 | 2026-09-24 00:15 | src/toolkit | in-repo derived, PR #32 archive/git traversal regressions: test_verify_sources_gate.py |
