@@ -61,3 +61,14 @@
 
 | 7FC19156DC55C6B8 | 2026-09-24 01:47 | src/toolkit | in-repo erstellt, Branch codex/cluster-fabric-safety-spine-v1: cluster_routing_hex_v1.py |
 | DF10E18049BE07DD | 2026-09-24 01:47 | src/toolkit | in-repo erstellt, Branch codex/cluster-fabric-safety-spine-v1: test_cluster_routing_hex_v1.py |
+
+
+## src/toolkit/ — Hex grid fabric + shadow routing 2026-09-24
+
+> Neue Dateien, in-repo erstellt. Die Topologie trennt physisches Hex-Lattice von
+> logischem 6-Projekt-Ring; der Shadow-Benchmark fuehrt keine geroutete Aufgabe aus.
+
+| 3D1313BE66A29CF1 | 2026-09-24 02:20 | src/toolkit | in-repo erstellt, Branch codex/cluster-fabric-safety-spine-v1: hex_topology_v1.py |
+| 67EA791411BFD9C5 | 2026-09-24 02:20 | src/toolkit | in-repo erstellt, Branch codex/cluster-fabric-safety-spine-v1: test_hex_topology_v1.py |
+| D32397464F55BF37 | 2026-09-24 02:20 | src/toolkit | in-repo erstellt, Branch codex/cluster-fabric-safety-spine-v1: shadow_routing_hex_v1.py |
+| E83BC132C6291EB2 | 2026-09-24 02:20 | src/toolkit | in-repo erstellt, Branch codex/cluster-fabric-safety-spine-v1: test_shadow_routing_hex_v1.py |
