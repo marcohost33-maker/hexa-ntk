@@ -112,3 +112,11 @@
 | E60163049656A5E7 | 2026-09-24 10:17 | src/toolkit | in-repo derived: test_hex_topology_v1.py |
 | F019FAFDC70AEEA3 | 2026-09-24 10:17 | src/toolkit | in-repo derived: message_envelope_hex_v1.py |
 | F729849DF2C702B9 | 2026-09-24 10:17 | src/toolkit | in-repo derived: test_message_envelope_hex_v1.py |
+
+
+## src/toolkit/ — Complementary compute coverage derived forms 2026-09-24
+
+> Append-only derived bytes after collective compute-capability coverage hardening.
+
+| CB6CDB37B98E0BB9 | 2026-09-24 10:17 | src/toolkit | in-repo derived: cluster_routing_hex_v1.py |
+| 9EFD6F2FF8025823 | 2026-09-24 10:17 | src/toolkit | in-repo derived: test_cluster_routing_hex_v1.py |
