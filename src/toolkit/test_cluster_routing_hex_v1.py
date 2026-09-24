@@ -150,16 +150,22 @@ class TestHardGates(unittest.TestCase):
         )
         self.assertEqual(decision.status, RouteStatus.ACCEPT)
 
-    def test_blank_calibration_id_blocks(self) -> None:
-        decision = adjudicate_router_proposal(
-            task(),
-            [expert("pade")],
-            RouterProposal(("pade",), confidence=0.9, calibration_id="   "),
-        )
-        self.assertEqual(decision.status, RouteStatus.BLOCK)
-        self.assertEqual(
-            decision.reason_codes, ("INVALID_CALIBRATION_ID",)
-        )
+    def test_blank_or_nonstring_calibration_id_blocks(self) -> None:
+        for calibration_id in ("   ", 123):
+            with self.subTest(calibration_id=calibration_id):
+                decision = adjudicate_router_proposal(
+                    task(),
+                    [expert("pade")],
+                    RouterProposal(
+                        ("pade",),
+                        confidence=0.9,
+                        calibration_id=calibration_id,
+                    ),
+                )
+                self.assertEqual(decision.status, RouteStatus.BLOCK)
+                self.assertEqual(
+                    decision.reason_codes, ("INVALID_CALIBRATION_ID",)
+                )
 
     def test_low_confidence_abstains(self) -> None:
         decision = adjudicate_router_proposal(
@@ -422,6 +428,25 @@ class TestSpecValidation(unittest.TestCase):
     def test_empty_shared_risk_group_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             expert("bad-risk", risks=("",))
+
+    def test_malformed_task_numeric_fields_are_rejected(self) -> None:
+        bad_cases = (
+            {"min_experts": True},
+            {"max_experts": 1.5},
+            {"min_router_confidence": "high"},
+            {"max_total_cost": True},
+            {"max_total_cost": "cheap"},
+        )
+        for kwargs in bad_cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    task(**kwargs)
+
+    def test_boolean_or_non_numeric_expert_cost_is_rejected(self) -> None:
+        for value in (True, "cheap"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    expert("bad-cost", cost=value)
 
     def test_negative_expert_cost_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
