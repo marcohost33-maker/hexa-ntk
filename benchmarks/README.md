@@ -3,7 +3,7 @@
 ## Seed v1
 
 File: `hexafabric_seed_v1.jsonl`  
-SHA-256 prefix (LF-normalized): `84445CB8574204C8`  
+SHA-256 prefix (LF-normalized): `DA33D0248A57B8AE`  
 Created: 2026-09-24
 
 The seed contains only derived routing metadata from historical 007acc2 task documents.
