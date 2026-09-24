@@ -104,15 +104,22 @@ class TestInformationFlow(unittest.TestCase):
     def setUp(self) -> None:
         self.topology = HexExpertTopology.canonical_six(IDS)
 
-    def test_local_state_stays_on_project_edges(self) -> None:
+    def test_local_state_is_exactly_one_semantic_hop(self) -> None:
         plan = self.topology.plan_flow(
-            "ade", kind=FlowKind.LOCAL_STATE, target="pade"
+            "ade", kind=FlowKind.LOCAL_STATE, target="sciforge"
         )
         self.assertEqual(plan.kind, FlowKind.LOCAL_STATE)
-        self.assertEqual(plan.hop_count, 3)
+        self.assertEqual(plan.path, ("ade", "sciforge"))
+        self.assertEqual(plan.hop_count, 1)
         self.assertNotIn(VIRTUAL_RELAY, plan.path)
         self.assertNotIn(VIRTUAL_CONTROL, plan.path)
         self.assertTrue(plan.may_mutate_compute_state)
+
+    def test_local_state_rejects_hidden_multihop_tunnelling(self) -> None:
+        with self.assertRaisesRegex(ValueError, "one semantic hop"):
+            self.topology.plan_flow(
+                "ade", kind=FlowKind.LOCAL_STATE, target="pade"
+            )
 
     def test_global_summary_uses_virtual_relay(self) -> None:
         plan = self.topology.plan_flow(
