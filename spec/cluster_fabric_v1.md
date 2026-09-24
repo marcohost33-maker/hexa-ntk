@@ -61,6 +61,7 @@ independent merely because their project names or implementation-family labels d
 - ordered compute-expert IDs
 - router admission score ("confidence"; not a probability unless separately calibrated)
 - optional requested expert cardinality k
+- optional calibration ID identifying the calibration artefact/model/version
 
 New learned routers SHOULD set k explicitly. The adjudicator must not assume that using
 more experts is better merely because budget remains. A missing k is retained only as a
@@ -125,6 +126,11 @@ specified by this contract. Values require shadow data and ablation.
 - manual/heuristic ordered proposals;
 - synthetic negative tests;
 - compute/assurance separation.
+
+### Calibration rule
+A task may require calibrated confidence. In that case a proposal without a non-empty
+calibration ID must ABSTAIN. The ID is provenance, not proof: evaluation must still verify
+coverage/calibration on the relevant task distribution. OOD support remains a separate gate.
 
 ### Phase B — shadow learned router
 - learned proposals are logged but do not affect execution;
