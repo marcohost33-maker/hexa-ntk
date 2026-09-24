@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import sys
 import unittest
+from fractions import Fraction
 
 from stress_hex_v3 import (
     ShiftAxis,
@@ -126,6 +127,17 @@ class TestDegradationFactor(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             compute_degradation_factor(0.1, 0.1, floor=0.0)
+    def test_extended_real_underflow_cannot_cross_numeric_contract(self) -> None:
+        tiny = Fraction(1, 10**1000)
+        with self.assertRaisesRegex(ValueError, "finite and >= 0"):
+            compute_degradation_factor(-tiny, Fraction(1, 10))
+        with self.assertRaisesRegex(ValueError, "underflows binary64"):
+            StressCase(
+                "tiny",
+                ShiftAxis.NOISE,
+                ShiftRegime.OOD,
+                tiny,
+            )
 
 
 class TestStressReport(unittest.TestCase):
