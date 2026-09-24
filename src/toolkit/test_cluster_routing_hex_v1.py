@@ -98,6 +98,46 @@ class TestHardGates(unittest.TestCase):
         self.assertEqual(decision.status, RouteStatus.BLOCK)
         self.assertEqual(decision.reason_codes, ("INELIGIBLE_COMPUTE_EXPERT",))
 
+    def test_complementary_experts_cover_task_collectively(self) -> None:
+        decision = adjudicate_router_proposal(
+            task(
+                required_capabilities=frozenset(
+                    {"dynamics", "rational_approx"}
+                ),
+                min_experts=2,
+                max_experts=2,
+            ),
+            [
+                expert("liouscope", capabilities=("dynamics",)),
+                expert("pade", capabilities=("rational_approx",)),
+            ],
+            RouterProposal(
+                ("liouscope", "pade"),
+                confidence=0.9,
+                requested_expert_count=2,
+            ),
+        )
+        self.assertEqual(decision.status, RouteStatus.ACCEPT)
+        self.assertEqual(
+            decision.selected_compute_ids, ("liouscope", "pade")
+        )
+
+    def test_missing_collective_compute_coverage_abstains(self) -> None:
+        decision = adjudicate_router_proposal(
+            task(
+                required_capabilities=frozenset(
+                    {"dynamics", "rational_approx"}
+                )
+            ),
+            [expert("liouscope", capabilities=("dynamics",))],
+            RouterProposal(("liouscope",), confidence=0.9),
+        )
+        self.assertEqual(decision.status, RouteStatus.ABSTAIN)
+        self.assertIn(
+            "MISSING_COMPUTE_CAPABILITY_COVERAGE",
+            decision.reason_codes,
+        )
+
     def test_domain_mismatch_blocks(self) -> None:
         decision = adjudicate_router_proposal(
             task(domain="mrt"),
