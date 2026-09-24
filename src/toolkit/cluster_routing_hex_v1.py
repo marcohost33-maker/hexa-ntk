@@ -39,6 +39,7 @@ class ExpertSpec:
     domains: frozenset[str]
     implementation_family: str
     shared_risk_groups: frozenset[str] = frozenset()
+    independence_metadata_complete: bool = False
     plane: ExpertPlane = ExpertPlane.COMPUTE
     estimated_cost: float = 1.0
     enabled: bool = True
@@ -52,6 +53,8 @@ class ExpertSpec:
             raise ValueError("implementation_family must be non-empty")
         if any(not item for item in self.shared_risk_groups):
             raise ValueError("shared_risk_groups entries must be non-empty")
+        if not isinstance(self.independence_metadata_complete, bool):
+            raise ValueError("independence_metadata_complete must be boolean")
         if isinstance(self.estimated_cost, bool):
             raise ValueError("estimated_cost must be a finite number >= 0")
         try:
@@ -229,7 +232,9 @@ def _registry(experts: Iterable[ExpertSpec]) -> dict[str, ExpertSpec]:
 def _pair_is_independent(left: ExpertSpec, right: ExpertSpec) -> bool:
     """Conservative pairwise independence check from governance metadata."""
     return (
-        left.implementation_family != right.implementation_family
+        left.independence_metadata_complete
+        and right.independence_metadata_complete
+        and left.implementation_family != right.implementation_family
         and left.shared_risk_groups.isdisjoint(right.shared_risk_groups)
     )
 
