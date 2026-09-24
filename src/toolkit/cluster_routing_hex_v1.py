@@ -65,6 +65,7 @@ class TaskSpec:
     max_experts: int = 2
     max_total_cost: float | None = None
     min_router_confidence: float = 0.0
+    require_calibrated_confidence: bool = False
     require_independent_compute: bool = False
     required_assurance_capabilities: frozenset[str] = frozenset()
 
@@ -93,6 +94,7 @@ class RouterProposal:
     ranked_expert_ids: tuple[str, ...]
     confidence: float
     requested_expert_count: int | None = None
+    calibration_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -209,6 +211,15 @@ def adjudicate_router_proposal(
     if not confidence_valid:
         return RouteDecision(
             RouteStatus.BLOCK, (), (), ("INVALID_ROUTER_CONFIDENCE",), 0.0
+        )
+
+    if proposal.calibration_id is not None and not proposal.calibration_id.strip():
+        return RouteDecision(
+            RouteStatus.BLOCK, (), (), ("INVALID_CALIBRATION_ID",), 0.0
+        )
+    if task.require_calibrated_confidence and proposal.calibration_id is None:
+        return RouteDecision(
+            RouteStatus.ABSTAIN, (), (), ("UNCALIBRATED_ROUTER_SCORE",), 0.0
         )
 
     requested_count = proposal.requested_expert_count
