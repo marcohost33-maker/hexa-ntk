@@ -58,7 +58,9 @@ class ShadowMetrics:
     utilization: dict[str, int]
     utilization_concentration: float | None
     n_reference_cases: int
-    mean_reference_recall: float | None
+    n_reference_accepted_cases: int
+    reference_acceptance_rate: float | None
+    mean_reference_recall_on_accepts: float | None
 
 
 def _reference_recall(
@@ -104,11 +106,13 @@ def evaluate_shadow_cases(
         if decision.status is RouteStatus.ACCEPT:
             utilization.update(decision.selected_compute_ids)
             accepted_costs.append(decision.total_estimated_cost)
-        recall = _reference_recall(
-            decision.selected_compute_ids, case.reference_compute_ids
-        )
-        if recall is not None:
-            reference_recalls.append(recall)
+        recall = None
+        if case.reference_compute_ids and decision.status is RouteStatus.ACCEPT:
+            recall = _reference_recall(
+                decision.selected_compute_ids, case.reference_compute_ids
+            )
+            if recall is not None:
+                reference_recalls.append(recall)
         records.append(
             ShadowRecord(
                 case_id=case.case_id,
@@ -123,6 +127,8 @@ def evaluate_shadow_cases(
     n_abstain = status_counts[RouteStatus.ABSTAIN]
     n_block = status_counts[RouteStatus.BLOCK]
     denominator = n_cases or 1
+    n_reference_cases = sum(bool(case.reference_compute_ids) for case in case_tuple)
+    n_reference_accepted_cases = len(reference_recalls)
     metrics = ShadowMetrics(
         n_cases=n_cases,
         n_accept=n_accept,
@@ -134,8 +140,14 @@ def evaluate_shadow_cases(
         mean_accepted_cost=fmean(accepted_costs) if accepted_costs else None,
         utilization=dict(sorted(utilization.items())),
         utilization_concentration=_concentration(utilization),
-        n_reference_cases=len(reference_recalls),
-        mean_reference_recall=(
+        n_reference_cases=n_reference_cases,
+        n_reference_accepted_cases=n_reference_accepted_cases,
+        reference_acceptance_rate=(
+            n_reference_accepted_cases / n_reference_cases
+            if n_reference_cases
+            else None
+        ),
+        mean_reference_recall_on_accepts=(
             fmean(reference_recalls) if reference_recalls else None
         ),
     )
