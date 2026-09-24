@@ -127,6 +127,40 @@ class TestHardGates(unittest.TestCase):
                     decision.reason_codes, ("INVALID_ROUTER_CONFIDENCE",)
                 )
 
+    def test_required_calibration_missing_abstains(self) -> None:
+        decision = adjudicate_router_proposal(
+            task(require_calibrated_confidence=True),
+            [expert("pade")],
+            RouterProposal(("pade",), confidence=0.9),
+        )
+        self.assertEqual(decision.status, RouteStatus.ABSTAIN)
+        self.assertEqual(
+            decision.reason_codes, ("UNCALIBRATED_ROUTER_SCORE",)
+        )
+
+    def test_required_calibration_id_allows_routing(self) -> None:
+        decision = adjudicate_router_proposal(
+            task(require_calibrated_confidence=True),
+            [expert("pade")],
+            RouterProposal(
+                ("pade",),
+                confidence=0.9,
+                calibration_id="cal-2026-09-shadow-v1",
+            ),
+        )
+        self.assertEqual(decision.status, RouteStatus.ACCEPT)
+
+    def test_blank_calibration_id_blocks(self) -> None:
+        decision = adjudicate_router_proposal(
+            task(),
+            [expert("pade")],
+            RouterProposal(("pade",), confidence=0.9, calibration_id="   "),
+        )
+        self.assertEqual(decision.status, RouteStatus.BLOCK)
+        self.assertEqual(
+            decision.reason_codes, ("INVALID_CALIBRATION_ID",)
+        )
+
     def test_low_confidence_abstains(self) -> None:
         decision = adjudicate_router_proposal(
             task(min_router_confidence=0.8),
