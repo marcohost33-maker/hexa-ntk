@@ -7,12 +7,24 @@ router, no GINO/GINOT/GAOT implementation and no scientific-validity claim.
 
 ## 1. Two hexagonal meanings must remain separate
 
-### Physical Hex Lattice
-For field/PDE/operator learning, axial coordinates (q,r) represent a regular hex lattice,
-with implicit cube coordinate s=-q-r. Every interior lattice site has six nearest
-neighbours. A future graph neural operator must treat coordinates and quadrature/area
-weights as part of the operator discretization contract; index-only message passing is not
-sufficient for mesh/discretization consistency.
+### Physical hex-centre point lattice
+For field/PDE/operator learning, axial coordinates (q,r) represent the regular point
+lattice formed by hex-cell centres, equivalently a triangular Bravais lattice, with
+implicit cube coordinate s=-q-r. Every interior site has six equidistant nearest
+neighbours. This must not be confused with the degree-3 honeycomb vertex graph.
+
+The canonical Cartesian embedding used by the toolkit is
+
+    x = h (q + r/2)
+    y = h (sqrt(3)/2) r
+
+where h is the nearest-neighbour centre spacing. This is the same spacing convention used
+by the existing 7-point stencil
+    Delta_h u0 = 2/(3 h^2) sum_j (u_j - u0).
+
+A future graph neural operator must treat coordinates and quadrature/area weights as part
+of the operator discretization contract; index-only message passing is not sufficient for
+mesh/discretization consistency.
 
 ### Six-project Expert Cell
 A six-project expert cell places six compute experts on the radius-1 ring around the
@@ -100,7 +112,29 @@ geometry-aware kernels belong in the numerical operator contract. On irregular m
 quadrature-aware graph neural operator formulations should be preferred over assuming six
 equal neighbours.
 
-## 5. Why local-only propagation is insufficient
+## 5. Physical-operator branch: numerical contract
+
+The expert-routing graph and the physical neural-operator graph must remain separate
+packages/contracts.
+
+For a regular physical lattice, the existing 7-point Laplacian is a useful mechanistic
+oracle/baseline. For irregular/adaptive meshes, do not reuse equal-neighbour weights:
+supply geometry, cell/point measure, boundary-condition metadata and quadrature weights
+to the operator layer.
+
+A physical HexOperator benchmark SHOULD include:
+- resolution transfer with fixed underlying continuum problem;
+- rotated/reflected cases only when the PDE/boundary conditions possess the symmetry;
+- boundary and interior error reported separately;
+- mechanistic residual/invariant checks in addition to field RMSE;
+- comparison against non-neural numerical baselines;
+- OOD shifts in coefficients, forcing, geometry and resolution as separate slices.
+
+D6 equivariance is therefore an optional inductive bias, not a universal requirement:
+the regular hex neighbourhood has D6 symmetry, but boundary conditions, material tensors
+or forcing may break it.
+
+## 6. Why local-only propagation is insufficient
 
 Modern GNN research consistently identifies long-range information bottlenecks
 (oversquashing), oversmoothing and underreaching in deep local message passing. Current
@@ -114,7 +148,7 @@ mitigations include:
 The v1 virtual relay therefore acts as a semantic placeholder for long-range exchange.
 For larger systems it must NOT become a single finite-dimensional bottleneck.
 
-## 6. Scaling beyond one six-project cell
+## 7. Scaling beyond one six-project cell
 
 Recommended hierarchy:
 
@@ -132,7 +166,7 @@ A macro cell exports only a ClusterEnvelope/summary, not every internal message.
 For scaled systems, use multiple relay slots or hierarchical relay pools rather than one
 global vector. The number of relay slots is an empirical capacity parameter.
 
-## 7. Information-flow cadence
+## 8. Information-flow cadence
 
 Do not synchronize every node after every action.
 
@@ -145,7 +179,7 @@ Preferred event classes:
 Future scheduling should include sequence numbers, TTL/hop budget, payload byte limits,
 deduplication IDs and backpressure.
 
-## 8. Opposite and adjacent semantics
+## 9. Opposite and adjacent semantics
 
 Adjacency should encode frequent collaboration, not similarity alone. The proposed ring
 creates the high-frequency workflow chain above.
@@ -153,7 +187,7 @@ creates the high-frequency workflow chain above.
 Opposite nodes are not automatically independent validators. Independence requires
 separate lineage/solver/training/backend metadata from the cluster-fabric contract.
 
-## 9. Shadow-routing development protocol
+## 10. Shadow-routing development protocol
 
 Before a learned HexaRouter can affect execution:
 1. collect historical task -> reviewed-route cases;
@@ -166,7 +200,20 @@ Before a learned HexaRouter can affect execution:
 8. add OOD/calibration tests;
 9. activate only bounded in-distribution task classes after review.
 
-## 10. Research anchors
+## 11. Topology ablation requirement
+
+Do not promote the ring topology merely because it is geometrically elegant. Under the
+same total compute/tool budget, compare at least:
+- single expert / no collaboration;
+- centralized orchestration;
+- sparse decentralized graph;
+- six-node ring;
+- all-to-all where feasible.
+
+Report message count, bytes, wall time, redundant work and error propagation. Architecture
+selection is part of the experiment.
+
+## 12. Research anchors
 
 - Li et al., Geometry-Informed Neural Operator, NeurIPS 2023.
 - Berner et al., Principled approaches for extending neural architectures to function
@@ -182,7 +229,7 @@ Before a learned HexaRouter can affect execution:
   Computational Science 2026.
 - Expert Choice Routing / Switch Transformers for sparse expert-routing baselines.
 
-## 11. Non-goals
+## 13. Non-goals
 
 - no claim that an expert ring is a biological neural network;
 - no claim that physical-neighbour weights apply to project experts;
