@@ -174,6 +174,36 @@ class TestBudgetAndIndependence(unittest.TestCase):
         self.assertEqual(decision.selected_compute_ids, ("cheap-a", "cheap-b"))
         self.assertAlmostEqual(decision.total_estimated_cost, 2.0)
 
+    def test_explicit_router_cardinality_prevents_unneeded_extra_experts(self) -> None:
+        decision = adjudicate_router_proposal(
+            task(min_experts=1, max_experts=3, max_total_cost=10.0),
+            [expert("a"), expert("b"), expert("c")],
+            RouterProposal(
+                ("a", "b", "c"),
+                confidence=0.9,
+                requested_expert_count=1,
+            ),
+        )
+        self.assertEqual(decision.status, RouteStatus.ACCEPT)
+        self.assertEqual(decision.selected_compute_ids, ("a",))
+
+    def test_invalid_requested_expert_count_blocks(self) -> None:
+        for count in (0, 4, True, 1.5):
+            with self.subTest(count=count):
+                decision = adjudicate_router_proposal(
+                    task(min_experts=1, max_experts=3),
+                    [expert("a"), expert("b"), expert("c")],
+                    RouterProposal(
+                        ("a", "b", "c"),
+                        confidence=0.9,
+                        requested_expert_count=count,
+                    ),
+                )
+                self.assertEqual(decision.status, RouteStatus.BLOCK)
+                self.assertEqual(
+                    decision.reason_codes, ("INVALID_EXPERT_COUNT",)
+                )
+
     def test_budget_failure_abstains(self) -> None:
         decision = adjudicate_router_proposal(
             task(max_total_cost=0.5),
