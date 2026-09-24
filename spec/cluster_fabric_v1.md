@@ -38,9 +38,14 @@ Likewise, a learned score cannot replace:
 - capabilities
 - supported domains (wildcard allowed explicitly)
 - compute vs assurance plane
-- implementation family
+- implementation family / independence group
 - estimated cost
 - enabled state
+
+The independence metadata is governance-owned registry data, not a self-assertion by the
+expert being routed. Two experts sharing the same solver core, training labels, checkpoint
+lineage or dominant backend must not be treated as independent merely because their
+project names differ.
 
 ### TaskSpec
 - task/domain
