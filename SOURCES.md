@@ -128,3 +128,14 @@
 
 | EBA5AF0E096C3B6E | 2026-09-24 10:17 | src/toolkit | in-repo derived: cluster_routing_hex_v1.py |
 | 45FBED0A7936F2AB | 2026-09-24 10:17 | src/toolkit | in-repo derived: test_cluster_routing_hex_v1.py |
+
+
+## src/toolkit/ — HexaFabric benchmark corpus and topology baselines 2026-09-24
+
+> New benchmark schema/evaluator and structural topology baselines. Historical task
+> content is not copied into toolkit modules; the seed corpus is separately versioned.
+
+| 81E91832F4B29644 | 2026-09-24 11:39 | src/toolkit | in-repo created: benchmark_corpus_hex_v1.py |
+| C031AB097F61EC5E | 2026-09-24 11:39 | src/toolkit | in-repo created: test_benchmark_corpus_hex_v1.py |
+| 2631E7DAA2F9DD3F | 2026-09-24 11:39 | src/toolkit | in-repo created: coordination_topology_hex_v1.py |
+| B2661C99ADF1F5D4 | 2026-09-24 11:39 | src/toolkit | in-repo created: test_coordination_topology_hex_v1.py |
