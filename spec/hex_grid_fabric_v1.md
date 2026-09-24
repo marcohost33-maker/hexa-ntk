@@ -177,13 +177,14 @@ Every transportable message SHOULD use an immutable envelope containing at least
 - per-producer sequence number;
 - hop TTL;
 - payload SHA-256 and payload byte length;
-- optional causation ID.
+- optional producer-scoped causation pair (causation_source + causation_id).
 
 The design follows the robust ideas behind CloudEvents event identity and W3C distributed
 trace propagation without claiming protocol-level conformance.
 
 Required invariants:
 - source + message_id identifies a duplicate/retry of the same logical event;
+- causation references use the same producer-scoped identity pair, never an ID alone;
 - sequence_no orders messages only within a producer/task stream, not globally;
 - TTL must cover the planned path before dispatch;
 - payload bytes must match both digest and declared size;
