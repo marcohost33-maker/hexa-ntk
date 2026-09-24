@@ -52,8 +52,14 @@ class ExpertSpec:
             raise ValueError("implementation_family must be non-empty")
         if any(not item for item in self.shared_risk_groups):
             raise ValueError("shared_risk_groups entries must be non-empty")
-        if not isfinite(self.estimated_cost) or self.estimated_cost < 0:
-            raise ValueError("estimated_cost must be finite and >= 0")
+        if isinstance(self.estimated_cost, bool):
+            raise ValueError("estimated_cost must be a finite number >= 0")
+        try:
+            cost_valid = isfinite(self.estimated_cost) and self.estimated_cost >= 0
+        except (TypeError, ValueError):
+            cost_valid = False
+        if not cost_valid:
+            raise ValueError("estimated_cost must be a finite number >= 0")
 
 
 @dataclass(frozen=True)
@@ -74,18 +80,42 @@ class TaskSpec:
             raise ValueError("task_id must be non-empty")
         if not self.domain:
             raise ValueError("domain must be non-empty")
-        if self.min_experts < 1:
-            raise ValueError("min_experts must be >= 1")
-        if self.max_experts < self.min_experts:
-            raise ValueError("max_experts must be >= min_experts")
+        if (
+            isinstance(self.min_experts, bool)
+            or not isinstance(self.min_experts, int)
+            or self.min_experts < 1
+        ):
+            raise ValueError("min_experts must be an integer >= 1")
+        if (
+            isinstance(self.max_experts, bool)
+            or not isinstance(self.max_experts, int)
+            or self.max_experts < self.min_experts
+        ):
+            raise ValueError("max_experts must be an integer >= min_experts")
         if self.require_independent_compute and self.min_experts < 2:
             raise ValueError(
                 "require_independent_compute requires min_experts >= 2"
             )
-        if not 0.0 <= self.min_router_confidence <= 1.0:
+        try:
+            confidence_valid = (
+                not isinstance(self.min_router_confidence, bool)
+                and isfinite(self.min_router_confidence)
+                and 0.0 <= self.min_router_confidence <= 1.0
+            )
+        except (TypeError, ValueError):
+            confidence_valid = False
+        if not confidence_valid:
             raise ValueError("min_router_confidence must be within [0, 1]")
         if self.max_total_cost is not None:
-            if not isfinite(self.max_total_cost) or self.max_total_cost < 0:
+            try:
+                budget_valid = (
+                    not isinstance(self.max_total_cost, bool)
+                    and isfinite(self.max_total_cost)
+                    and self.max_total_cost >= 0
+                )
+            except (TypeError, ValueError):
+                budget_valid = False
+            if not budget_valid:
                 raise ValueError("max_total_cost must be finite and >= 0")
 
 
@@ -259,10 +289,14 @@ def adjudicate_router_proposal(
             RouteStatus.BLOCK, (), (), ("INVALID_ROUTER_CONFIDENCE",), 0.0
         )
 
-    if proposal.calibration_id is not None and not proposal.calibration_id.strip():
-        return RouteDecision(
-            RouteStatus.BLOCK, (), (), ("INVALID_CALIBRATION_ID",), 0.0
-        )
+    if proposal.calibration_id is not None:
+        if (
+            not isinstance(proposal.calibration_id, str)
+            or not proposal.calibration_id.strip()
+        ):
+            return RouteDecision(
+                RouteStatus.BLOCK, (), (), ("INVALID_CALIBRATION_ID",), 0.0
+            )
     if task.require_calibrated_confidence and proposal.calibration_id is None:
         return RouteDecision(
             RouteStatus.ABSTAIN, (), (), ("UNCALIBRATED_ROUTER_SCORE",), 0.0
