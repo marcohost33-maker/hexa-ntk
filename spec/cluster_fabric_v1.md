@@ -48,6 +48,11 @@ expert being routed. Two experts sharing the same solver core, training labels, 
 lineage, dominant backend or another declared shared-risk group must not be treated as
 independent merely because their project names or implementation-family labels differ.
 
+Independence is **fail-closed**: a pair counts as independent only when both experts have
+an explicit governance attestation that the relevant independence metadata is complete.
+Missing/unknown lineage metadata therefore means "independence not established", not
+"independent by default".
+
 ### TaskSpec
 - task/domain
 - required compute capabilities, satisfied collectively by the selected compute set
