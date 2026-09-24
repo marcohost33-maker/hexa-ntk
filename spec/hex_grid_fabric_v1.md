@@ -194,6 +194,13 @@ Required invariants:
 Payload content should remain out-of-band for large artefacts: send immutable references
 plus digests rather than duplicating full result objects through every node.
 
+
+Security boundary: SHA-256 binds bytes to the declared digest and detects accidental or
+adversarial modification, but it does **not** authenticate the producer and does not grant
+authorization. Messages crossing a trust boundary require authenticated transport and/or
+cryptographic message authentication/signatures plus key management. Those mechanisms are
+outside v1 and must not be inferred from a matching payload digest.
+
 ## 9. Information-flow cadence
 
 Do not synchronize every node after every action.
