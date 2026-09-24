@@ -51,3 +51,13 @@
 > `mtime` = Erstellzeit im Repo.
 
 | 8890E69A5CC1AA6B | 2026-07-03 03:51 | src/toolkit | in-repo erstellt, Branch claude/code-analysis-optimization-ajgyce: test_dataset_split_hex_v3.py |
+
+
+## src/toolkit/ — Cluster Fabric safety spine 2026-09-24
+
+> Neue Dateien, **in-repo erstellt**. Der Router selbst ist bewusst nicht gelernt:
+> er adjudiziert nur Vorschlaege eines spaeteren learned/heuristic Routers gegen
+> harte Capability-, Plane-, Budget-, Confidence- und Independence-Vertraege.
+
+| 7FC19156DC55C6B8 | 2026-09-24 01:47 | src/toolkit | in-repo erstellt, Branch codex/cluster-fabric-safety-spine-v1: cluster_routing_hex_v1.py |
+| DF10E18049BE07DD | 2026-09-24 01:47 | src/toolkit | in-repo erstellt, Branch codex/cluster-fabric-safety-spine-v1: test_cluster_routing_hex_v1.py |
