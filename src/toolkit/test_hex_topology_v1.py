@@ -11,6 +11,7 @@ from hex_topology_v1 import (
     VIRTUAL_RELAY,
     FlowKind,
     HexCoord,
+    axial_to_cartesian,
     HexExpertTopology,
     hex_distance,
     hex_ring,
@@ -31,6 +32,18 @@ class TestHexGeometry(unittest.TestCase):
         self.assertEqual(len(set(HEX_DIRECTIONS)), 6)
         for direction in HEX_DIRECTIONS:
             self.assertEqual(hex_distance(ORIGIN, direction), 1)
+
+    def test_axial_cartesian_mapping_preserves_neighbour_spacing(self) -> None:
+        h = 2.5
+        x0, y0 = axial_to_cartesian(ORIGIN, h)
+        for direction in HEX_DIRECTIONS:
+            x, y = axial_to_cartesian(direction, h)
+            distance = ((x - x0) ** 2 + (y - y0) ** 2) ** 0.5
+            self.assertAlmostEqual(distance, h)
+
+    def test_axial_cartesian_rejects_nonpositive_spacing(self) -> None:
+        with self.assertRaises(ValueError):
+            axial_to_cartesian(ORIGIN, 0.0)
 
     def test_physical_site_has_six_neighbours(self) -> None:
         neighbours = physical_neighbors(HexCoord(4, -2))
