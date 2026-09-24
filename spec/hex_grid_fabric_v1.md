@@ -166,7 +166,34 @@ A macro cell exports only a ClusterEnvelope/summary, not every internal message.
 For scaled systems, use multiple relay slots or hierarchical relay pools rather than one
 global vector. The number of relay slots is an empirical capacity parameter.
 
-## 8. Information-flow cadence
+## 8. Message envelope and replay contract
+
+Every transportable message SHOULD use an immutable envelope containing at least:
+- producer-scoped message ID;
+- task ID and trace ID;
+- source and target;
+- FlowKind;
+- schema version;
+- per-producer sequence number;
+- hop TTL;
+- payload SHA-256 and payload byte length;
+- optional causation ID.
+
+The design follows the robust ideas behind CloudEvents event identity and W3C distributed
+trace propagation without claiming protocol-level conformance.
+
+Required invariants:
+- source + message_id identifies a duplicate/retry of the same logical event;
+- sequence_no orders messages only within a producer/task stream, not globally;
+- TTL must cover the planned path before dispatch;
+- payload bytes must match both digest and declared size;
+- FlowKind/source/target must match the precomputed FlowPlan;
+- transport integrity never implies scientific validity.
+
+Payload content should remain out-of-band for large artefacts: send immutable references
+plus digests rather than duplicating full result objects through every node.
+
+## 9. Information-flow cadence
 
 Do not synchronize every node after every action.
 
@@ -179,7 +206,7 @@ Preferred event classes:
 Future scheduling should include sequence numbers, TTL/hop budget, payload byte limits,
 deduplication IDs and backpressure.
 
-## 9. Opposite and adjacent semantics
+## 10. Opposite and adjacent semantics
 
 Adjacency should encode frequent collaboration, not similarity alone. The proposed ring
 creates the high-frequency workflow chain above.
@@ -187,7 +214,7 @@ creates the high-frequency workflow chain above.
 Opposite nodes are not automatically independent validators. Independence requires
 separate lineage/solver/training/backend metadata from the cluster-fabric contract.
 
-## 10. Shadow-routing development protocol
+## 11. Shadow-routing development protocol
 
 Before a learned HexaRouter can affect execution:
 1. collect historical task -> reviewed-route cases;
@@ -200,7 +227,7 @@ Before a learned HexaRouter can affect execution:
 8. add OOD/calibration tests;
 9. activate only bounded in-distribution task classes after review.
 
-## 11. Topology ablation requirement
+## 12. Topology ablation requirement
 
 Do not promote the ring topology merely because it is geometrically elegant. Under the
 same total compute/tool budget, compare at least:
@@ -213,7 +240,7 @@ same total compute/tool budget, compare at least:
 Report message count, bytes, wall time, redundant work and error propagation. Architecture
 selection is part of the experiment.
 
-## 12. Research anchors
+## 13. Research anchors
 
 - Li et al., Geometry-Informed Neural Operator, NeurIPS 2023.
 - Berner et al., Principled approaches for extending neural architectures to function
@@ -229,7 +256,7 @@ selection is part of the experiment.
   Computational Science 2026.
 - Expert Choice Routing / Switch Transformers for sparse expert-routing baselines.
 
-## 13. Non-goals
+## 14. Non-goals
 
 - no claim that an expert ring is a biological neural network;
 - no claim that physical-neighbour weights apply to project experts;
