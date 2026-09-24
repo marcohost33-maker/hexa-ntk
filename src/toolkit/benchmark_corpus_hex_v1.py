@@ -55,7 +55,7 @@ class BenchmarkCase:
     required_capabilities: frozenset[str]
     required_assurance_capabilities: frozenset[str]
     expected_action: ExpectedAction
-    reference_compute_ids: frozenset[str]
+    acceptable_compute_sets: tuple[frozenset[str], ...]
     annotation_status: str
     requires_human_review: bool
     tags: frozenset[str]
@@ -75,17 +75,24 @@ class BenchmarkCase:
             raise ValueError(
                 "required_assurance_capabilities entries must be non-empty"
             )
-        if any(not item for item in self.reference_compute_ids):
-            raise ValueError("reference_compute_ids entries must be non-empty")
+        if any(
+            any(not item for item in route)
+            for route in self.acceptable_compute_sets
+        ):
+            raise ValueError("acceptable_compute_sets entries must be non-empty")
+        if len(set(self.acceptable_compute_sets)) != len(self.acceptable_compute_sets):
+            raise ValueError("acceptable_compute_sets must not contain duplicates")
         if any(not item for item in self.tags):
             raise ValueError("tags entries must be non-empty")
         if self.expected_action is ExpectedAction.ACCEPT:
             if self.support_class is not SupportClass.SUPPORTED:
                 raise ValueError("only SUPPORTED seed cases may expect ACCEPT")
-            if not self.reference_compute_ids:
-                raise ValueError("ACCEPT cases require reference_compute_ids")
-        elif self.reference_compute_ids:
-            raise ValueError("ABSTAIN cases must not define reference_compute_ids")
+            if not self.acceptable_compute_sets:
+                raise ValueError("ACCEPT cases require acceptable_compute_sets")
+            if any(not route for route in self.acceptable_compute_sets):
+                raise ValueError("acceptable compute routes must be non-empty")
+        elif self.acceptable_compute_sets:
+            raise ValueError("ABSTAIN cases must not define acceptable_compute_sets")
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, object]) -> "BenchmarkCase":
@@ -98,7 +105,7 @@ class BenchmarkCase:
             "required_capabilities",
             "required_assurance_capabilities",
             "expected_action",
-            "reference_compute_ids",
+            "acceptable_compute_sets",
             "annotation_status",
             "requires_human_review",
             "tags",
@@ -124,6 +131,20 @@ class BenchmarkCase:
                 raise ValueError(f"{name} must be a JSON string array")
             return frozenset(value)
 
+        def _route_sets(value: object) -> tuple[frozenset[str], ...]:
+            if not isinstance(value, list):
+                raise ValueError("acceptable_compute_sets must be a JSON array")
+            routes: list[frozenset[str]] = []
+            for route in value:
+                if not isinstance(route, list) or any(
+                    not isinstance(item, str) for item in route
+                ):
+                    raise ValueError(
+                        "acceptable_compute_sets must contain string arrays"
+                    )
+                routes.append(frozenset(route))
+            return tuple(routes)
+
         human_review = raw["requires_human_review"]
         if not isinstance(human_review, bool):
             raise ValueError("requires_human_review must be boolean")
@@ -139,7 +160,7 @@ class BenchmarkCase:
                 "required_assurance_capabilities"
             ),
             expected_action=expected_action,
-            reference_compute_ids=string_set("reference_compute_ids"),
+            acceptable_compute_sets=_route_sets(raw["acceptable_compute_sets"]),
             annotation_status=str(raw["annotation_status"]),
             requires_human_review=human_review,
             tags=string_set("tags"),
@@ -160,13 +181,16 @@ class BenchmarkCase:
 class CorpusMetrics:
     n_cases: int
     n_predictions: int
+    matched_prediction_count: int
     missing_prediction_count: int
+    unknown_prediction_count: int
     action_accuracy: float | None
     supported_accept_rate: float | None
     partial_abstention_rate: float | None
     unsupported_abstention_rate: float | None
     unsupported_overroute_rate: float | None
-    mean_reference_recall_on_supported_accepts: float | None
+    mean_best_reference_recall_on_supported_accepts: float | None
+    exact_reference_set_match_rate_on_supported_accepts: float | None
 
 
 def load_jsonl_corpus(path: str | Path) -> tuple[BenchmarkCase, ...]:
@@ -296,22 +320,31 @@ def evaluate_corpus_predictions(
     unsupported_hits: list[float] = []
     unsupported_overroutes: list[float] = []
     reference_recalls: list[float] = []
+    exact_reference_matches: list[float] = []
 
     for case in case_tuple:
         decision = predictions.get(case.case_id)
         if decision is None:
             continue
-        expected_accept = case.expected_action is ExpectedAction.ACCEPT
+        expected_status = (
+            RouteStatus.ACCEPT
+            if case.expected_action is ExpectedAction.ACCEPT
+            else RouteStatus.ABSTAIN
+        )
         actual_accept = decision.status is RouteStatus.ACCEPT
-        action_hits.append(float(expected_accept == actual_accept))
+        action_hits.append(float(decision.status is expected_status))
 
         if case.support_class is SupportClass.SUPPORTED:
             supported_hits.append(float(actual_accept))
-            if actual_accept and case.reference_compute_ids:
-                selected = set(decision.selected_compute_ids)
-                reference_recalls.append(
-                    len(selected & case.reference_compute_ids)
-                    / len(case.reference_compute_ids)
+            if actual_accept and case.acceptable_compute_sets:
+                selected = frozenset(decision.selected_compute_ids)
+                recalls = [
+                    len(selected & route) / len(route)
+                    for route in case.acceptable_compute_sets
+                ]
+                reference_recalls.append(max(recalls))
+                exact_reference_matches.append(
+                    float(selected in case.acceptable_compute_sets)
                 )
         elif case.support_class is SupportClass.PARTIAL:
             partial_hits.append(float(decision.status is RouteStatus.ABSTAIN))
@@ -323,19 +356,24 @@ def evaluate_corpus_predictions(
     def mean_or_none(values: list[float]) -> float | None:
         return fmean(values) if values else None
 
+    case_ids = {case.case_id for case in case_tuple}
+    prediction_ids = set(predictions)
     return CorpusMetrics(
         n_cases=len(case_tuple),
         n_predictions=len(predictions),
-        missing_prediction_count=sum(
-            case.case_id not in predictions for case in case_tuple
-        ),
+        matched_prediction_count=len(case_ids & prediction_ids),
+        missing_prediction_count=len(case_ids - prediction_ids),
+        unknown_prediction_count=len(prediction_ids - case_ids),
         action_accuracy=mean_or_none(action_hits),
         supported_accept_rate=mean_or_none(supported_hits),
         partial_abstention_rate=mean_or_none(partial_hits),
         unsupported_abstention_rate=mean_or_none(unsupported_hits),
         unsupported_overroute_rate=mean_or_none(unsupported_overroutes),
-        mean_reference_recall_on_supported_accepts=mean_or_none(
+        mean_best_reference_recall_on_supported_accepts=mean_or_none(
             reference_recalls
+        ),
+        exact_reference_set_match_rate_on_supported_accepts=mean_or_none(
+            exact_reference_matches
         ),
     )
 
