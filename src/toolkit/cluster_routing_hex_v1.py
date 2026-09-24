@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from itertools import combinations
 from math import isfinite
 from typing import Iterable, Sequence
 
@@ -37,6 +38,7 @@ class ExpertSpec:
     capabilities: frozenset[str]
     domains: frozenset[str]
     implementation_family: str
+    shared_risk_groups: frozenset[str] = frozenset()
     plane: ExpertPlane = ExpertPlane.COMPUTE
     estimated_cost: float = 1.0
     enabled: bool = True
@@ -48,6 +50,8 @@ class ExpertSpec:
             raise ValueError("domains must be non-empty; use {'*'} for a wildcard")
         if not self.implementation_family:
             raise ValueError("implementation_family must be non-empty")
+        if any(not item for item in self.shared_risk_groups):
+            raise ValueError("shared_risk_groups entries must be non-empty")
         if not isfinite(self.estimated_cost) or self.estimated_cost < 0:
             raise ValueError("estimated_cost must be finite and >= 0")
 
@@ -143,46 +147,51 @@ def _within_budget(
     )
 
 
+def _pair_is_independent(left: ExpertSpec, right: ExpertSpec) -> bool:
+    """Conservative pairwise independence check from governance metadata."""
+    return (
+        left.implementation_family != right.implementation_family
+        and left.shared_risk_groups.isdisjoint(right.shared_risk_groups)
+    )
+
+
+def _has_independent_pair(chosen: Sequence[ExpertSpec]) -> bool:
+    return any(
+        _pair_is_independent(left, right)
+        for left, right in combinations(chosen, 2)
+    )
+
+
+def _subset_within_budget(
+    chosen: Sequence[ExpertSpec],
+    max_total_cost: float | None,
+) -> bool:
+    if max_total_cost is None:
+        return True
+    return sum(item.estimated_cost for item in chosen) <= max_total_cost
+
+
 def _select_ranked(
     candidates: Sequence[ExpertSpec],
     task: TaskSpec,
 ) -> tuple[ExpertSpec, ...]:
-    """Select budget-feasible experts while preserving router preference.
+    """Choose the largest feasible ranked subset without greedy budget traps.
 
-    If independence is required, find the earliest feasible pair from distinct
-    implementation families before filling remaining capacity.
+    Candidate order remains the router preference. We search subsets by decreasing
+    cardinality and, within a cardinality, lexicographic index order. This preserves
+    the earliest-ranked feasible combination while avoiding the classic greedy
+    failure where an expensive first choice prevents a valid cheaper combination.
     """
-    if not candidates:
-        return ()
-
-    if task.require_independent_compute:
-        for first_idx, first in enumerate(candidates):
-            if not _within_budget((), first, task.max_total_cost):
+    max_size = min(len(candidates), task.max_experts)
+    for size in range(max_size, task.min_experts - 1, -1):
+        for indices in combinations(range(len(candidates)), size):
+            chosen = tuple(candidates[index] for index in indices)
+            if not _subset_within_budget(chosen, task.max_total_cost):
                 continue
-            for second in candidates[first_idx + 1 :]:
-                if second.implementation_family == first.implementation_family:
-                    continue
-                if not _within_budget((first,), second, task.max_total_cost):
-                    continue
-                chosen = [first, second]
-                for candidate in candidates:
-                    if candidate in chosen:
-                        continue
-                    if len(chosen) >= task.max_experts:
-                        break
-                    if _within_budget(chosen, candidate, task.max_total_cost):
-                        chosen.append(candidate)
-                return tuple(chosen)
-        return ()
-
-    chosen: list[ExpertSpec] = []
-    for candidate in candidates:
-        if len(chosen) >= task.max_experts:
-            break
-        if _within_budget(chosen, candidate, task.max_total_cost):
-            chosen.append(candidate)
-    return tuple(chosen)
-
+            if task.require_independent_compute and not _has_independent_pair(chosen):
+                continue
+            return chosen
+    return ()
 
 def adjudicate_router_proposal(
     task: TaskSpec,
@@ -265,9 +274,7 @@ def adjudicate_router_proposal(
     selected = _select_ranked(proposed, task)
     if len(selected) < task.min_experts:
         reasons.append("INSUFFICIENT_BUDGET_OR_EXPERTS")
-    if task.require_independent_compute and len(
-        {item.implementation_family for item in selected}
-    ) < 2:
+    if task.require_independent_compute and not _has_independent_pair(selected):
         reasons.append("NO_INDEPENDENT_COMPUTE_PAIR")
 
     if reasons:
