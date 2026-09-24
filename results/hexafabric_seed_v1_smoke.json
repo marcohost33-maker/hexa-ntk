@@ -5,26 +5,32 @@
   "performance_claim": false,
   "corpus": {
     "file": "benchmarks/hexafabric_seed_v1.jsonl",
-    "sha256_prefix_lf": "84445CB8574204C8",
+    "sha256_prefix_lf": "DA33D0248A57B8AE",
     "n_cases": 9,
     "annotation_status": "MODEL_REVIEWED_SEED",
     "requires_human_review": true
   },
   "capability_only_baseline": {
+    "matched_prediction_count": 9,
+    "missing_prediction_count": 0,
+    "unknown_prediction_count": 0,
     "action_accuracy": 1,
     "supported_accept_rate": 1,
     "partial_abstention_rate": 1,
     "unsupported_abstention_rate": 1,
     "unsupported_overroute_rate": 0,
-    "mean_reference_recall_on_supported_accepts": 1,
-    "interpretation": "Pipeline sanity only: seed labels and capability baseline share the same capability vocabulary."
+    "mean_best_reference_recall_on_supported_accepts": 1,
+    "exact_reference_set_match_rate_on_supported_accepts": 1,
+    "interpretation": "Pipeline sanity only: seed labels and capability baseline share the same capability vocabulary. These values are not an independent performance estimate."
   },
   "topology_structural_baselines": {
     "independent": {
+      "transport_nodes": 6,
       "transport_edges": 0,
       "expert_pair_connected_fraction": 0,
       "mean_expert_pair_distance": null,
-      "diameter": null
+      "diameter": null,
+      "max_transport_degree": 0
     },
     "centralized": {
       "transport_nodes": 7,
@@ -50,16 +56,16 @@
       "diameter": 1,
       "max_transport_degree": 5
     },
-    "interpretation": "Structural descriptors only; no topology quality ranking."
+    "interpretation": "Structural descriptors only; no topology quality ranking or task-performance claim."
   },
   "ci_anchor": {
-    "run_number": 182,
-    "head_sha": "8aac5740efcd671fbbbb24b1a3c6982efac22262",
+    "run_number": 189,
+    "head_sha": "ccce5962c135fda51e8d27c5b12019c1948c7321",
     "gate": "PASS",
     "engine_doctests": "47/47 PASS",
     "engine_selftests": "26/26 PASS",
-    "toolkit_tests": "277 PASS",
+    "toolkit_tests": "281 PASS",
     "branch_coverage": "87%"
   },
-  "next_gate": "Independent human annotation of seed cases before any training or active routing."
+  "next_gate": "Independent human annotation of seed cases before training, topology performance claims, or active routing."
 }
