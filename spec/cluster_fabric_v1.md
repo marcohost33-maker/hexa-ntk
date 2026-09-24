@@ -38,14 +38,15 @@ Likewise, a learned score cannot replace:
 - capabilities
 - supported domains (wildcard allowed explicitly)
 - compute vs assurance plane
-- implementation family / independence group
+- implementation family
+- shared risk groups / lineage-correlation tags
 - estimated cost
 - enabled state
 
 The independence metadata is governance-owned registry data, not a self-assertion by the
 expert being routed. Two experts sharing the same solver core, training labels, checkpoint
-lineage or dominant backend must not be treated as independent merely because their
-project names differ.
+lineage, dominant backend or another declared shared-risk group must not be treated as
+independent merely because their project names or implementation-family labels differ.
 
 ### TaskSpec
 - task/domain
@@ -58,7 +59,12 @@ project names differ.
 
 ### RouterProposal
 - ordered compute-expert IDs
-- router confidence
+- router admission score ("confidence"; not a probability unless separately calibrated)
+- optional requested expert cardinality k
+
+New learned routers SHOULD set k explicitly. The adjudicator must not assume that using
+more experts is better merely because budget remains. A missing k is retained only as a
+backward-compatible v1 baseline behavior.
 
 ### RouteDecision
 - ACCEPT / ABSTAIN / BLOCK
@@ -80,36 +86,37 @@ The deterministic adjudicator MUST:
 8. BLOCK when mandatory assurance capabilities have no eligible assurance expert.
 9. Never convert a BLOCK/ABSTAIN into a scientific PASS.
 
-## 5. Reference six-project cell
+## 5. Reference six-compute cell + external assurance
 
 A sensible **pilot profile**, not a hard-coded product topology:
 
 - ADE — adaptive candidate generation / decision support
 - SciForge — workflow/experiment compilation
-- LiouScope — open-system/dynamical diagnostics
-- PADE — rational approximation / pole-residue diagnostics
+- Q-Forge — controlled execution/orchestration contracts
 - MRT — inverse-problem / measurement-domain expert
-- ARK — assurance/provenance plane
+- PADE — rational approximation / pole-residue diagnostics
+- LiouScope — open-system/dynamical diagnostics
 
-Important: ADE/SciForge/LiouScope/PADE/MRT are not assumed to share one mathematical state
-space. Cross-domain transfer requires an explicit adapter and held-out evidence. ARK stays
-outside the learned reward loop.
+ARK / USK / QVAR are **not** the sixth compute node. They remain outside the learned
+compute ring on the Assurance Plane.
+
+Important: the compute projects are not assumed to share one mathematical state space.
+Cross-domain transfer requires explicit adapters and held-out evidence. The proposed
+ring order is a hypothesis and must be ablated against other coordination topologies.
 
 ## 6. Future learned router objective — not implemented in v1
 
-A later router should optimize a constrained multi-objective target rather than raw task
-loss alone, for example:
+Do **not** soften safety, applicability, assurance or claim-validity constraints into one
+weighted reward. Use a constrained/lexicographic decision structure:
 
-    J = task_loss
-        + lambda_cost * cost
-        + lambda_balance * load_penalty
-        + lambda_ood * ood_risk
-        + lambda_tail * tail_risk
+1. construct the feasible set with deterministic capability/domain/policy/assurance gates;
+2. abstain when OOD/calibration policy says the task is unsupported;
+3. inside the feasible set, select expert cardinality and subset using measured expected
+   utility, cost, latency and coordination-risk trade-offs;
+4. keep scientific evidence promotion outside the learned objective.
 
-subject to the deterministic constraints above.
-
-No lambda value is specified by this contract. These weights require measured pilot data
-and ablation studies.
+A research loss may still contain soft efficiency/load terms, but no numeric lambda is
+specified by this contract. Values require shadow data and ablation.
 
 ## 7. Evaluation protocol before learned routing may affect execution
 
@@ -147,7 +154,24 @@ Do not reduce evaluation to mean task score. Record:
 - disagreement rate between independent implementation families;
 - calibration/coverage metrics when uncertainty is emitted.
 
-## 9. External design anchors
+## 9. Architecture-selection baseline
+
+The six-node ring is an experimental topology, not an assumed optimum. Controlled
+evaluation SHOULD compare, under matched total compute/tool budgets:
+
+- single-expert / no-collaboration baseline;
+- capability-only deterministic routing;
+- centralized orchestrator/relay;
+- sparse decentralized peer graph;
+- six-node ring;
+- all-to-all only where its quadratic communication cost is acceptable.
+
+Track coordination overhead, message density/redundancy and error amplification in
+addition to final task quality. A 2026 controlled multi-agent study found architecture
+benefits strongly task-dependent and observed substantial degradation on some sequential
+tasks, so "more agents" is not a valid default assumption.
+
+## 10. External design anchors
 
 - Fedus, Zoph, Shazeer (2022), Switch Transformers, JMLR — sparse routing,
   load/capacity and routing stability.
@@ -162,7 +186,7 @@ Do not reduce evaluation to mean task score. Record:
   consistency and uncertainty separately; do not infer reliability from in-distribution
   mean error alone.
 
-## 10. Non-goals
+## 11. Non-goals
 
 - no claim that six project nodes form a biological/neural hexagon;
 - no learned router implementation in v1;
