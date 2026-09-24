@@ -20,6 +20,7 @@ def expert(
     capabilities: tuple[str, ...] = ("solve",),
     domains: tuple[str, ...] = ("physics",),
     family: str | None = None,
+    risks: tuple[str, ...] = (),
     plane: ExpertPlane = ExpertPlane.COMPUTE,
     cost: float = 1.0,
     enabled: bool = True,
@@ -29,6 +30,7 @@ def expert(
         capabilities=frozenset(capabilities),
         domains=frozenset(domains),
         implementation_family=family or expert_id,
+        shared_risk_groups=frozenset(risks),
         plane=plane,
         estimated_cost=cost,
         enabled=enabled,
@@ -158,6 +160,20 @@ class TestBudgetAndIndependence(unittest.TestCase):
         self.assertEqual(decision.selected_compute_ids, ("a", "b"))
         self.assertAlmostEqual(decision.total_estimated_cost, 2.0)
 
+    def test_budget_search_avoids_greedy_false_abstention(self) -> None:
+        decision = adjudicate_router_proposal(
+            task(min_experts=2, max_experts=2, max_total_cost=2.0),
+            [
+                expert("expensive", cost=2.0),
+                expert("cheap-a", cost=1.0),
+                expert("cheap-b", cost=1.0),
+            ],
+            RouterProposal(("expensive", "cheap-a", "cheap-b"), confidence=0.9),
+        )
+        self.assertEqual(decision.status, RouteStatus.ACCEPT)
+        self.assertEqual(decision.selected_compute_ids, ("cheap-a", "cheap-b"))
+        self.assertAlmostEqual(decision.total_estimated_cost, 2.0)
+
     def test_budget_failure_abstains(self) -> None:
         decision = adjudicate_router_proposal(
             task(max_total_cost=0.5),
@@ -183,6 +199,30 @@ class TestBudgetAndIndependence(unittest.TestCase):
         )
         self.assertEqual(decision.status, RouteStatus.ACCEPT)
         self.assertEqual(decision.selected_compute_ids, ("l1", "pade"))
+
+    def test_shared_risk_group_blocks_false_independence(self) -> None:
+        decision = adjudicate_router_proposal(
+            task(
+                min_experts=2,
+                max_experts=2,
+                require_independent_compute=True,
+            ),
+            [
+                expert(
+                    "solver-a",
+                    family="family-a",
+                    risks=("solver-core:shared",),
+                ),
+                expert(
+                    "solver-b",
+                    family="family-b",
+                    risks=("solver-core:shared",),
+                ),
+            ],
+            RouterProposal(("solver-a", "solver-b"), confidence=0.9),
+        )
+        self.assertEqual(decision.status, RouteStatus.ABSTAIN)
+        self.assertIn("NO_INDEPENDENT_COMPUTE_PAIR", decision.reason_codes)
 
     def test_missing_independent_pair_abstains(self) -> None:
         decision = adjudicate_router_proposal(
@@ -240,6 +280,10 @@ class TestSpecValidation(unittest.TestCase):
     def test_independence_requires_at_least_two_experts(self) -> None:
         with self.assertRaises(ValueError):
             task(require_independent_compute=True, min_experts=1)
+
+    def test_empty_shared_risk_group_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            expert("bad-risk", risks=("",))
 
     def test_negative_expert_cost_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
