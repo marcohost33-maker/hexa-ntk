@@ -119,13 +119,58 @@ def _supports_compute_task(expert: ExpertSpec, task: TaskSpec) -> bool:
     )
 
 
-def _supports_assurance_task(expert: ExpertSpec, task: TaskSpec) -> bool:
+def _eligible_assurance_expert(expert: ExpertSpec, task: TaskSpec) -> bool:
     return (
         expert.enabled
         and expert.plane is ExpertPlane.ASSURANCE
         and _domain_matches(expert, task)
-        and task.required_assurance_capabilities.issubset(expert.capabilities)
+        and bool(expert.capabilities & task.required_assurance_capabilities)
     )
+
+
+def _select_assurance_set(
+    registry: dict[str, ExpertSpec],
+    task: TaskSpec,
+) -> tuple[ExpertSpec, ...]:
+    """Find a deterministic minimum-cardinality assurance set cover.
+
+    Assurance selection is not learned. Among covers with the same cardinality,
+    prefer lower estimated total cost, then stable expert-id ordering.
+    """
+    required = task.required_assurance_capabilities
+    if not required:
+        return ()
+
+    eligible = tuple(
+        sorted(
+            (
+                expert
+                for expert in registry.values()
+                if _eligible_assurance_expert(expert, task)
+            ),
+            key=lambda item: item.expert_id,
+        )
+    )
+    best: tuple[ExpertSpec, ...] | None = None
+    best_key: tuple[int, float, tuple[str, ...]] | None = None
+    for size in range(1, len(eligible) + 1):
+        for subset in combinations(eligible, size):
+            covered = frozenset().union(
+                *(expert.capabilities for expert in subset)
+            )
+            if not required.issubset(covered):
+                continue
+            key = (
+                size,
+                sum(expert.estimated_cost for expert in subset),
+                tuple(expert.expert_id for expert in subset),
+            )
+            if best_key is None or key < best_key:
+                best = subset
+                best_key = key
+        if best is not None:
+            break
+    return best or ()
 
 
 def _registry(experts: Iterable[ExpertSpec]) -> dict[str, ExpertSpec]:
@@ -192,6 +237,7 @@ def _select_ranked(
             return chosen
     return ()
 
+
 def adjudicate_router_proposal(
     task: TaskSpec,
     experts: Iterable[ExpertSpec],
@@ -235,19 +281,17 @@ def adjudicate_router_proposal(
                 RouteStatus.BLOCK, (), (), ("INVALID_EXPERT_COUNT",), 0.0
             )
 
-    assurance_candidates = tuple(
-        expert
-        for expert in sorted(
-            registry.values(), key=lambda item: (item.estimated_cost, item.expert_id)
-        )
-        if _supports_assurance_task(expert, task)
-    )
+    assurance_candidates = _select_assurance_set(registry, task)
     assurance_ids = tuple(item.expert_id for item in assurance_candidates)
 
-    if task.required_assurance_capabilities and not assurance_candidates:
-        return RouteDecision(
-            RouteStatus.BLOCK, (), (), ("MISSING_REQUIRED_ASSURANCE",), 0.0
+    if task.required_assurance_capabilities:
+        covered_assurance = frozenset().union(
+            *(expert.capabilities for expert in assurance_candidates)
         )
+        if not task.required_assurance_capabilities.issubset(covered_assurance):
+            return RouteDecision(
+                RouteStatus.BLOCK, (), (), ("MISSING_REQUIRED_ASSURANCE",), 0.0
+            )
 
     if proposal.confidence < task.min_router_confidence:
         return RouteDecision(
