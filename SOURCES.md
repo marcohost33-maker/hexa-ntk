@@ -139,3 +139,12 @@
 | C031AB097F61EC5E | 2026-09-24 11:39 | src/toolkit | in-repo created: test_benchmark_corpus_hex_v1.py |
 | 2631E7DAA2F9DD3F | 2026-09-24 11:39 | src/toolkit | in-repo created: coordination_topology_hex_v1.py |
 | B2661C99ADF1F5D4 | 2026-09-24 11:39 | src/toolkit | in-repo created: test_coordination_topology_hex_v1.py |
+
+
+## src/toolkit/ — Benchmark exact-action/multi-route hardening 2026-09-24
+
+> Append-only derived bytes after BLOCK-vs-ABSTAIN correction, multiple acceptable
+> route support, and missing/unknown prediction accounting.
+
+| 292F979C2DAAA4BF | 2026-09-24 11:39 | src/toolkit | in-repo derived: benchmark_corpus_hex_v1.py |
+| D5965044A28FE700 | 2026-09-24 11:39 | src/toolkit | in-repo derived: test_benchmark_corpus_hex_v1.py |
