@@ -100,7 +100,9 @@ class TestShadowRouting(unittest.TestCase):
         self.assertEqual(records[0].reference_recall, 1.0)
         self.assertEqual(records[1].reference_recall, 0.5)
         self.assertEqual(metrics.n_reference_cases, 2)
-        self.assertAlmostEqual(metrics.mean_reference_recall, 0.75)
+        self.assertEqual(metrics.n_reference_accepted_cases, 2)
+        self.assertAlmostEqual(metrics.reference_acceptance_rate, 1.0)
+        self.assertAlmostEqual(metrics.mean_reference_recall_on_accepts, 0.75)
 
     def test_utilization_and_cost_are_reported(self) -> None:
         cases = (
@@ -125,6 +127,21 @@ class TestShadowRouting(unittest.TestCase):
         self.assertEqual(metrics.utilization, {})
         self.assertIsNone(metrics.utilization_concentration)
 
+    def test_reference_agreement_does_not_penalize_safe_abstention(self) -> None:
+        case = ShadowCase(
+            "abstain-ref",
+            task(min_router_confidence=0.8),
+            RouterProposal(("pade",), 0.7),
+            frozenset({"pade"}),
+        )
+        records, metrics = evaluate_shadow_cases((case,), self.experts)
+        self.assertEqual(records[0].decision.status, RouteStatus.ABSTAIN)
+        self.assertIsNone(records[0].reference_recall)
+        self.assertEqual(metrics.n_reference_cases, 1)
+        self.assertEqual(metrics.n_reference_accepted_cases, 0)
+        self.assertEqual(metrics.reference_acceptance_rate, 0.0)
+        self.assertIsNone(metrics.mean_reference_recall_on_accepts)
+
     def test_duplicate_case_ids_rejected(self) -> None:
         case = ShadowCase("same", task(), RouterProposal(("pade",), 0.9))
         with self.assertRaises(ValueError):
@@ -139,8 +156,11 @@ class TestShadowRouting(unittest.TestCase):
         )
         records, metrics = evaluate_shadow_cases((case,), self.experts)
         self.assertEqual(records[0].decision.status, RouteStatus.BLOCK)
-        self.assertEqual(records[0].reference_recall, 0.0)
-        self.assertEqual(metrics.mean_reference_recall, 0.0)
+        self.assertIsNone(records[0].reference_recall)
+        self.assertEqual(metrics.n_reference_cases, 1)
+        self.assertEqual(metrics.n_reference_accepted_cases, 0)
+        self.assertAlmostEqual(metrics.reference_acceptance_rate, 0.0)
+        self.assertIsNone(metrics.mean_reference_recall_on_accepts)
 
 
 if __name__ == "__main__":
