@@ -140,13 +140,27 @@ def _domain_matches(expert: ExpertSpec, task: TaskSpec) -> bool:
     return "*" in expert.domains or task.domain in expert.domains
 
 
-def _supports_compute_task(expert: ExpertSpec, task: TaskSpec) -> bool:
+def _eligible_compute_expert(expert: ExpertSpec, task: TaskSpec) -> bool:
+    """Return whether an expert is admissible and contributes to the task."""
     return (
         expert.enabled
         and expert.plane is ExpertPlane.COMPUTE
         and _domain_matches(expert, task)
-        and task.required_capabilities.issubset(expert.capabilities)
+        and (
+            not task.required_capabilities
+            or bool(expert.capabilities & task.required_capabilities)
+        )
     )
+
+
+def _compute_capabilities_cover(
+    chosen: Sequence[ExpertSpec],
+    task: TaskSpec,
+) -> bool:
+    if not task.required_capabilities:
+        return True
+    covered = frozenset().union(*(expert.capabilities for expert in chosen))
+    return task.required_capabilities.issubset(covered)
 
 
 def _eligible_assurance_expert(expert: ExpertSpec, task: TaskSpec) -> bool:
@@ -262,6 +276,8 @@ def _select_ranked(
             chosen = tuple(candidates[index] for index in indices)
             if not _subset_within_budget(chosen, task.max_total_cost):
                 continue
+            if not _compute_capabilities_cover(chosen, task):
+                continue
             if task.require_independent_compute and not _has_independent_pair(chosen):
                 continue
             return chosen
@@ -360,7 +376,7 @@ def adjudicate_router_proposal(
                 ("ASSURANCE_IN_COMPUTE_ROUTE",),
                 0.0,
             )
-        if not _supports_compute_task(expert, task):
+        if not _eligible_compute_expert(expert, task):
             return RouteDecision(
                 RouteStatus.BLOCK,
                 (),
@@ -373,7 +389,10 @@ def adjudicate_router_proposal(
     selected = _select_ranked(
         proposed, task, proposal.requested_expert_count
     )
-    if len(selected) < task.min_experts:
+    proposed_cover = _compute_capabilities_cover(proposed, task)
+    if not proposed_cover:
+        reasons.append("MISSING_COMPUTE_CAPABILITY_COVERAGE")
+    elif len(selected) < task.min_experts:
         reasons.append("INSUFFICIENT_BUDGET_OR_EXPERTS")
     if task.require_independent_compute and not _has_independent_pair(selected):
         reasons.append("NO_INDEPENDENT_COMPUTE_PAIR")
