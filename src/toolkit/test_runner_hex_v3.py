@@ -20,6 +20,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
+from resume_utils_hex_v3 import save_resume_checkpoint
 from runner_hex_v3 import (
     HexTrainingRunner,
     RunnerConfig,
@@ -547,21 +548,44 @@ class TestResume(unittest.TestCase):
             runner = _make_runner(Path(tmpdir))
             self.assertIsNone(runner.maybe_resume())
 
-    def test_maybe_resume_nonexistent_path_returns_none(self) -> None:
+    def test_maybe_resume_nonexistent_path_fails_closed(self) -> None:
+        """A configured but missing resume_from must raise, not retrain.
+
+        Formerly this test expected None + start_epoch 0 (pinned by the
+        coverage ratchet 65f765b), which legalised a silent full retraining
+        on a mistyped resume path.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            missing = out / "does_not_exist.pt"
+            cfg = RunnerConfig(output_dir=str(out), resume_from=str(missing))
+            runner = _make_runner(out, config=cfg)
+            with self.assertRaises(Exception) as ctx:
+                runner.maybe_resume()
+            self.assertIsInstance(ctx.exception, FileNotFoundError)
+            self.assertIn("does_not_exist.pt", str(ctx.exception))
+            self.assertEqual(runner.start_epoch, 0)
+            self.assertEqual(runner.global_step, 0)
+
+    def test_run_with_missing_resume_from_does_not_train(self) -> None:
+        """run() must propagate the error before any epoch is trained."""
         with tempfile.TemporaryDirectory() as tmpdir:
             out = Path(tmpdir)
             cfg = RunnerConfig(
-                output_dir=str(out), resume_from=str(out / "does_not_exist.pt")
+                output_dir=str(out),
+                num_epochs=1,
+                resume_from=str(out / "typo.pt"),
             )
             runner = _make_runner(out, config=cfg)
-            self.assertIsNone(runner.maybe_resume())
-            self.assertEqual(runner.start_epoch, 0)
+            with self.assertRaises(FileNotFoundError):
+                runner.run()
+            self.assertEqual(runner.train_losses, [])
+            self.assertFalse(Path(runner.ckpt_mgr.resume_path).exists())
 
     def test_maybe_resume_restores_epoch_and_step(self) -> None:
         """End-to-end resume: run, then a fresh runner over the SAME run dir
         resumes from the written resume checkpoint and advances start_epoch past
-        the saved epoch. (The runner loads via ckpt_mgr.resume_path in its own
-        output_dir; resume_from acts as the existence gate.)"""
+        the saved epoch. The runner loads exactly resume_from."""
         with tempfile.TemporaryDirectory() as tmpdir:
             out = Path(tmpdir)
             # 1. Produce a resume checkpoint via a real run.
@@ -582,6 +606,100 @@ class TestResume(unittest.TestCase):
             report = runner2.maybe_resume()
             self.assertIsNotNone(report)
             self.assertEqual(runner2.start_epoch, report["epoch"] + 1)
+
+    def test_maybe_resume_loads_named_foreign_checkpoint(self) -> None:
+        """resume_from must not silently load output_dir/checkpoints/resume_last.pt."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "run"
+            foreign = Path(tmpdir) / "elsewhere" / "resume.pt"
+
+            torch.manual_seed(0)
+            src_model = _TinyModel()
+            src_optimizer = torch.optim.SGD(src_model.parameters(), lr=0.1)
+            save_resume_checkpoint(
+                foreign,
+                model=src_model,
+                optimizer=src_optimizer,
+                epoch=7,
+                global_step=42,
+                include_python_rng=False,
+                include_numpy_rng=False,
+            )
+
+            cfg = RunnerConfig(output_dir=str(out), resume_from=str(foreign))
+            runner = _make_runner(out, config=cfg)
+            report = runner.maybe_resume()
+
+            self.assertIsNotNone(report)
+            self.assertEqual(report["checkpoint_path"], str(foreign))
+            self.assertEqual(runner.start_epoch, 8)
+            self.assertEqual(runner.global_step, 42)
+            for key, value in src_model.state_dict().items():
+                self.assertTrue(
+                    torch.equal(value, runner.model.state_dict()[key]),
+                    msg=f"Mismatch in {key}",
+                )
+
+    def test_maybe_resume_prefers_resume_from_over_own_checkpoint(self) -> None:
+        """F31-1: the pre-fix failure mode. output_dir already holds the
+        runner's OWN resume checkpoint (different epoch/step/weights) and
+        resume_from names a foreign one. The foreign file must be loaded;
+        silently loading output_dir/checkpoints/resume_last.pt is the bug."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "run"
+            foreign = Path(tmpdir) / "elsewhere" / "resume.pt"
+
+            torch.manual_seed(0)
+            src_model = _TinyModel()
+            src_optimizer = torch.optim.SGD(src_model.parameters(), lr=0.1)
+            save_resume_checkpoint(
+                foreign,
+                model=src_model,
+                optimizer=src_optimizer,
+                epoch=7,
+                global_step=42,
+                include_python_rng=False,
+                include_numpy_rng=False,
+            )
+
+            cfg = RunnerConfig(output_dir=str(out), resume_from=str(foreign))
+            runner = _make_runner(out, config=cfg)
+
+            # Own checkpoint in output_dir with distinct epoch/step/weights.
+            torch.manual_seed(123)
+            own_model = _TinyModel()
+            own_optimizer = torch.optim.SGD(own_model.parameters(), lr=0.1)
+            runner.ckpt_mgr.save_resume(
+                model=own_model,
+                optimizer=own_optimizer,
+                epoch=1,
+                global_step=5,
+                include_python_rng=False,
+                include_numpy_rng=False,
+            )
+            own_path = Path(runner.ckpt_mgr.resume_path)
+            self.assertTrue(own_path.exists())
+            self.assertNotEqual(own_path.resolve(), foreign.resolve())
+            self.assertFalse(
+                all(
+                    torch.equal(v, own_model.state_dict()[k])
+                    for k, v in src_model.state_dict().items()
+                ),
+                msg="precondition: own and foreign weights must differ",
+            )
+
+            report = runner.maybe_resume()
+
+            self.assertIsNotNone(report)
+            self.assertEqual(report["checkpoint_path"], str(foreign))
+            self.assertEqual(report["epoch"], 7)
+            self.assertEqual(runner.start_epoch, 8)
+            self.assertEqual(runner.global_step, 42)
+            for key, value in src_model.state_dict().items():
+                self.assertTrue(
+                    torch.equal(value, runner.model.state_dict()[key]),
+                    msg=f"Mismatch in {key}",
+                )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,31 @@
+HexaNTK PR #31 — Explicit resume_from Path Evidence
+Date: 2026-09-23
+Repository: marcohost33-maker/hexa-ntk
+Branch: fix/resume-from-explicit-path-20260923
+Verified implementation commit: 841a3602b713fbeb801b03df63e72e7506793841
+GitHub Actions run: #87 (35803977950)
+
+RESULT
+gate: PASS
+tests (cpu): PASS
+
+REVIEW-HARDENING REGRESSIONS
+- config.resume_from is forwarded to the checkpoint loader
+- a checkpoint outside output_dir restores its own epoch/global_step/model state
+- manager-owned resume_path remains the backward-compatible default
+- checkpoint trust / restricted-load semantics are unchanged
+- README no longer documents the fixed defect as current behavior
+- imported-original SOURCES rows are preserved; derived forms are appended
+
+TEST SNAPSHOT
+- Toolkit unit tests: 168
+- Result: OK
+- Coverage report total: 83%
+
+CLAIM BOUNDARY
+This evidence covers checkpoint-path correctness and reproducibility plumbing.
+It is not evidence of model accuracy or physics validity.
+
+SOURCE
+Generated from completed GitHub Actions run #87 logs. GitHub remains the
+authoritative raw CI source.

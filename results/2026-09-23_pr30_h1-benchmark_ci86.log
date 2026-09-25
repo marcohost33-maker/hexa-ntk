@@ -1,0 +1,33 @@
+HexaNTK PR #30 — H1/Benchmark Review-Hardening Evidence
+Date: 2026-09-23
+Repository: marcohost33-maker/hexa-ntk
+Branch: fix/h1-error-seminorm-20260923
+Verified implementation commit: 6ad090ee08c01bc53db9cd8c9f3bed8980c30230
+GitHub Actions run: #86 (35803972673)
+
+RESULT
+gate: PASS
+tests (cpu): PASS
+
+REVIEW-HARDENING REGRESSIONS
+- identical zero fields retain exact H1 error = 0
+- identical zero fields retain exact H1 nRMSE = 0
+- H1 error uses grad(pred-target), so opposite gradients do not cancel
+- topology validation/preparation executes once per evaluate_rollout call
+- NumPy Real scalars are accepted for h/eps/threshold
+- invalid topology and non-finite metric inputs fail closed
+- imported-original SOURCES rows are retained; current derived forms are appended
+
+TEST SNAPSHOT
+- Toolkit unit tests: 179
+- Result: OK
+- Coverage report total: 81%
+
+CLAIM BOUNDARY
+The H1 quantity remains a discrete directional hex-grid proxy at incomplete
+boundaries. This evidence does not establish a continuum Sobolev certificate,
+neural-operator accuracy, or physics validity.
+
+SOURCE
+Generated from completed GitHub Actions run #86 logs. GitHub remains the
+authoritative raw CI source.

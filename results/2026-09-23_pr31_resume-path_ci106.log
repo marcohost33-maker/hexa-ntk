@@ -1,0 +1,73 @@
+HexaNTK PR #31 — explicit resume_from path + fail-closed missing checkpoint (CI evidence)
+Date: 2026-09-23
+Repository: marcohost33-maker/hexa-ntk
+Branch: fix/resume-from-explicit-path-20260923
+Verified implementation commit: 592114e025a0c3218c82613cc0e30c9c84d27ee0
+GitHub Actions workflow: ci | Run: #106 | Run ID: 35842876887 | event: pull_request | attempt: 1
+Run created: 2026-09-23T09:25:44Z | updated: 2026-09-23T09:26:26Z | conclusion: success
+
+SCOPE OF THIS LOG
+This log is committed in the commit AFTER the verified one. That commit changes only
+results/ (this file); src/, scripts/, spec/ and SOURCES.md are byte-identical.
+Check: the git tree/blob ids below must equal `git rev-parse <landing-commit>:<path>`.
+  src: 316b2923b697a14bdf32206eca2ccdee85cc870f
+  scripts: 88884e57e4892b3abd0b7e3520d12975950a7d64
+  spec: 07d240daedd4ec226fce6a937991aafd464fae48
+  SOURCES.md: 447bdf1bb0077d03ce533a52032e5214f26d8d29
+The landing commit's own CI run is NOT part of this file (it cannot exist before the push).
+
+JOBS
+- tests (cpu): conclusion=success runner_id=1000033657 job_id=107121907239
+    step 1: Set up job = success
+    step 2: Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 = success
+    step 3: Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 = success
+    step 4: install (cpu-only torch) = success
+    step 5: engine doctests + selftests = success
+    step 6: toolkit unit tests + coverage = success
+    step 11: Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 = success
+    step 12: Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 = success
+    step 13: Complete job = success
+- gate: conclusion=success runner_id=1000033658 job_id=107121907502
+    step 1: Set up job = success
+    step 2: Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 = success
+    step 3: Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 = success
+    step 4: install = success
+    step 5: ruff = success
+    step 6: compile = success
+    step 7: provenance (SOURCES.md) = success
+    step 13: Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 = success
+    step 14: Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 = success
+    step 15: Complete job = success
+
+GATE: ruff
+  All checks passed!
+
+GATE: provenance (scripts/verify_sources.py)
+  [ OK ] benchmark_hex_v3.py: 7D48D5B659D08A05
+  [ OK ] checkpoint_integration_hex_v3.py: B8BE0568BB7AF782
+  [ OK ] dataloader_utils_hex_v3.py: A8ACCD446EC287D6
+  [ OK ] dataset_split_hex_v3.py: DF201FDE60688DAF
+  [ OK ] ema_hex_v3.py: 72019F9045DF105D
+  [ OK ] failure_signature_hex_v3.py: 4C0BC9B6D6233180
+  [ OK ] operator_adapter_hex_v3.py: D0192688CE5222F1
+  [ OK ] resume_utils_hex_v3.py: BB8B7E456C1B7DEB
+  [ OK ] runner_hex_v3.py: 0A917FA7C56F2222
+  [ OK ] test_benchmark_hex_v3.py: DE5B1FE6EA89314D
+  [ OK ] test_checkpoint_integration_hex_v3.py: 00AC58F5C9B3E19F
+  [ OK ] test_dataloader_utils_hex_v3.py: 54FE8C5313B45824
+  [ OK ] test_dataset_split_hex_v3.py: 8890E69A5CC1AA6B
+  [ OK ] test_ema_hex_v3.py: 574B8851CE411016
+  [ OK ] test_operator_adapter_hex_v3.py: C0EAD8D722BCE4D4
+  [ OK ] test_runner_hex_v3.py: 385A6A2DC36E4AC9
+  [ OK ] warmstart_utils_hex_v3.py: 1FAB88FF9CCA6627
+  [VERIFY-SOURCES] 17 Toolkit-Eintraege | PASS
+
+TESTS (cpu): engine gate
+  [ENGINE-GATE] doctests 47/47 | selftests_ok=True | overall=PASS
+
+TESTS (cpu): toolkit unittest + coverage
+  Ran 170 tests in 2.015s
+  OK
+  TOTAL                                           1062    153    398     64    83%
+
+Every line under GATE/TESTS is copied verbatim from `gh run view 35842876887 --log`.
