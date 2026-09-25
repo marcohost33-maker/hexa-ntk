@@ -24,8 +24,10 @@ __all__ = [
     "summarize_group_split",
 ]
 
+import numbers
 import random
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import torch
@@ -144,6 +146,31 @@ def _normalize_dt_value(
     return round(float(dt), dt_round_ndigits)
 
 
+def _extract_trajectory_id(value: Any) -> int:
+    """Return ``value`` as an exact int group id, or raise ValueError.
+
+    int() alone raised OverflowError for inf and silently truncated
+    non-integral reals (1.5 and 1.7 both became group 1, merging two
+    trajectories). Exact int-convertible values keep their former key.
+    """
+    if torch.is_tensor(value):
+        if value.numel() != 1:
+            raise ValueError("Sample 'trajectory_id' tensor must be scalar-like")
+        value = value.item()
+
+    message = f"Sample 'trajectory_id' must be a finite integer, got {value!r}"
+    try:
+        trajectory_id = int(value)
+    except (OverflowError, ValueError) as exc:
+        # int(inf) -> OverflowError, int(nan) -> ValueError.
+        raise ValueError(message) from exc
+
+    # Exact comparison (no float round-trip), so 10**400 stays accepted.
+    if isinstance(value, (numbers.Real, Decimal)) and trajectory_id != value:
+        raise ValueError(message)
+    return trajectory_id
+
+
 def _extract_group_key(
     sample: Mapping[str, Any],
     *,
@@ -153,7 +180,7 @@ def _extract_group_key(
     if "trajectory_id" not in sample:
         raise KeyError("Sample is missing required key 'trajectory_id'")
 
-    trajectory_id = int(sample["trajectory_id"])
+    trajectory_id = _extract_trajectory_id(sample["trajectory_id"])
     dt = _extract_dt_value(sample) if group_by_dt else None
     dt = _normalize_dt_value(dt, dt_round_ndigits)
 

@@ -712,6 +712,16 @@ class TestBestMetricContract(unittest.TestCase):
                 epoch=0,
             )
         self.assertIsNone(mgr.best_metric_value)
+        # A valid improvement is still tracked (not saved) on this rank.
+        report = mgr.save_best_model_checkpoint(
+            model=build_test_model(),
+            metric_value=0.5,
+            metric_name="val_loss",
+            epoch=1,
+        )
+        self.assertEqual(report["reason"], "not_main_process")
+        self.assertEqual(mgr.best_metric_value, 0.5)
+        self.assertFalse(Path(mgr.best_model_path).exists())
 
     def test_invalid_epoch_leaves_best_unchanged(self) -> None:
         mgr = self._make_manager()

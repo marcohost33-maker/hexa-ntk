@@ -17,6 +17,7 @@ Integrates:
 Best practices applied:
 - GradScaler.unscale_ BEFORE clip_grad_norm_ (PyTorch AMP requirement)
 - torch.isfinite check on loss BEFORE backward (skip update on NaN)
+- NaN/Inf validation metric never becomes the best checkpoint (skip + record)
 - set_to_none=True in zero_grad for memory efficiency
 - Moving median for spike detection (robust vs regime changes)
 - Replay capsule includes model state_dict (not just batch)
@@ -38,6 +39,7 @@ __all__ = [
 import collections
 import gc
 import logging
+import math
 import statistics
 import uuid
 from dataclasses import dataclass
@@ -56,6 +58,18 @@ from failure_signature_hex_v3 import FailureSignature
 from operator_adapter_hex_v3 import OperatorAdapterV3
 
 logger = logging.getLogger(__name__)
+
+
+def _is_non_finite_metric(value: Any) -> bool:
+    """True for a NaN/+-inf metric.
+
+    Values math.isfinite() cannot judge (10**400, non-numeric, multi-element
+    tensors) return False, so the checkpoint manager's contract rejects them.
+    """
+    try:
+        return not math.isfinite(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 # ------------------------------------------------------------------
@@ -686,6 +700,35 @@ class HexTrainingRunner:
     # Checkpoint orchestration
     # ------------------------------------------------------------------
 
+    def _skip_non_finite_best_metric(
+        self, epoch: int, metric_value: Any
+    ) -> Dict[str, Any]:
+        """Record a NaN/inf best metric instead of saving a best checkpoint."""
+        metric_name = self.config.best_metric_name
+        logger.error(
+            "Non-finite %s=%s at epoch %d; best checkpoint not updated",
+            metric_name,
+            metric_value,
+            epoch,
+        )
+        signature_path = FailureSignature(
+            kind="NaN_or_Inf_Metric",
+            step=self.global_step,
+            locus="save_checkpoints_best_metric",
+            observable=f"{metric_name}={metric_value}",
+            extra={"epoch": epoch, "metric_name": metric_name},
+        ).register(self.output_dir / "failures")
+        return {
+            "saved": False,
+            "reason": "non_finite_metric",
+            "checkpoint_semantics": "best_model",
+            "metric_name": metric_name,
+            "metric_value": metric_value,
+            "best_metric_value": self.ckpt_mgr.best_metric_value,
+            "path": self.ckpt_mgr.best_model_path,
+            "failure_signature": signature_path,
+        }
+
     def _save_checkpoints(
         self,
         epoch: int,
@@ -707,19 +750,24 @@ class HexTrainingRunner:
                 for k, v in self.ema_model.module.state_dict().items()
             }
 
-        # Best model
-        best_report = self.ckpt_mgr.save_best_model_checkpoint(
-            model=self.model,
-            metric_value=metric_value,
-            metric_name=self.config.best_metric_name,
-            epoch=epoch,
-            global_step=self.global_step,
-            ema_model_state=ema_state,
-            extra={
-                "train_loss": train_report["mean_loss"],
-                "val_report": val_report,
-            },
-        )
+        # Best model. A NaN/inf metric is never promoted: the manager would
+        # reject it with ValueError; the runner records it and keeps training
+        # (same policy as a NaN train loss: skip, record, continue).
+        if _is_non_finite_metric(metric_value):
+            best_report = self._skip_non_finite_best_metric(epoch, metric_value)
+        else:
+            best_report = self.ckpt_mgr.save_best_model_checkpoint(
+                model=self.model,
+                metric_value=metric_value,
+                metric_name=self.config.best_metric_name,
+                epoch=epoch,
+                global_step=self.global_step,
+                ema_model_state=ema_state,
+                extra={
+                    "train_loss": train_report["mean_loss"],
+                    "val_report": val_report,
+                },
+            )
         reports["best"] = best_report
 
         # Last model

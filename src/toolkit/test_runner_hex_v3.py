@@ -580,6 +580,23 @@ class TestNonFiniteValidationMetric(unittest.TestCase):
                 self.assertEqual(record["locus"], "save_checkpoints_best_metric")
                 self.assertEqual(record["extra"], {"epoch": 0, "metric_name": "val_nrmse"})
 
+    def test_unrepresentable_metric_reaches_manager_contract(self) -> None:
+        # Only NaN/inf are skipped; a value math.isfinite() cannot judge is
+        # not masked as "non-finite" but rejected by the manager's contract.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner = _make_runner(out)
+            with self.assertRaisesRegex(
+                ValueError, r"^metric_value must be a finite real number"
+            ):
+                runner._save_checkpoints(
+                    epoch=0,
+                    val_report=self._val_report(10**400),
+                    train_report={"mean_loss": 1.0},
+                )
+            self.assertFalse((out / "failures").exists())
+            self.assertIsNone(runner.ckpt_mgr.best_metric_value)
+
     def test_run_continues_past_nan_validation_and_later_saves_best(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             out = Path(tmpdir)
