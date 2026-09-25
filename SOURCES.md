@@ -78,3 +78,67 @@
 
 | 0392725750BAF4D9 | 2026-09-24 00:00 | src/toolkit | in-repo derived, PR #30 error-only H1 path: benchmark_hex_v3.py |
 | B6B1E9916FD640A4 | 2026-09-24 00:00 | src/toolkit | in-repo derived, PR #30 error-only H1 regression: test_benchmark_hex_v3.py |
+## src/toolkit/ — Ergaenzung 2026-09-23 (append-only)
+
+> Neue Stress-/Shift-Vertragsdateien, in-repo erstellt. Die SHA-Pins werden vom
+> fail-closed Provenance-Gate gegen die aktuellen Repo-Bytes verifiziert.
+
+| 7074616F72C9870D | 2026-09-23 00:21 | src/toolkit | in-repo erstellt, PR #32: stress_hex_v3.py |
+| 736E7595EDAAF3AC | 2026-09-23 00:21 | src/toolkit | in-repo erstellt, PR #32: test_stress_hex_v3.py |
+
+## src/toolkit/ — Review-hardening derived forms 2026-09-23 (append-only, PR #32)
+
+> The original PR #32 creation rows above are retained as lineage. These rows
+> pin the post-review immutable/self-consistent stress evidence implementation.
+
+| 34C92C112A40BE46 | 2026-09-23 00:49 | src/toolkit | in-repo derived, PR #32 review-hardening: stress_hex_v3.py |
+| 75AEA74A3CF101F0 | 2026-09-23 00:49 | src/toolkit | in-repo derived, PR #32 review-hardening tests: test_stress_hex_v3.py |
+
+## spec/ + src/toolkit/ — Second-review hardening 2026-09-23 (append-only, PR #32)
+
+> The authoritative stress contract itself is now SHA-indexed. Prior toolkit
+> rows remain as lineage; the following rows pin the current underflow-hardened
+> implementation and tests.
+
+| A9EB2FEE22AB4A97 | 2026-09-23 01:00 | spec | in-repo created/updated, PR #32: STRESS_SHIFT_CONTRACT_v1.md |
+| 34876C4B56EFACA1 | 2026-09-23 01:00 | src/toolkit | in-repo derived, PR #32 underflow hardening: stress_hex_v3.py |
+| 4A0685F445D0A679 | 2026-09-23 01:00 | src/toolkit | in-repo derived, PR #32 underflow regression tests: test_stress_hex_v3.py |
+
+## spec/ + src/toolkit/ — Third-review hardening 2026-09-23 (append-only, PR #32)
+
+> Equalita F32-1/F32-2: direction-preserving degradation floor
+> (`max(E_s, eps) / max(E_0, eps)` + `degradation_floored`) and the spec/ target
+> in `scripts/verify_sources.py` (the spec pin is now gate-checked). Prior rows
+> remain as lineage; the gate reads the last row per file name.
+
+| 95100B4D8B668153 | 2026-09-23 10:49 | spec | in-repo updated, PR #32 direction-preserving floor: STRESS_SHIFT_CONTRACT_v1.md |
+| 23EA1FBDA46C5E5A | 2026-09-23 10:47 | src/toolkit | in-repo derived, PR #32 direction-preserving floor: stress_hex_v3.py |
+| 4FE5220068122DCE | 2026-09-23 10:56 | src/toolkit | in-repo derived, PR #32 floor/underflow regression tests: test_stress_hex_v3.py |
+| C4E4199FE420E0D6 | 2026-09-23 10:51 | src/toolkit | in-repo erstellt, PR #32 spec-target gate tests: test_verify_sources_gate.py |
+
+## src/toolkit/ — Gate covers every file type 2026-09-23 (append-only, PR #32, E7)
+
+> scripts/verify_sources.py now enumerates all files under src/toolkit/ and spec/
+> (git ls-files, any extension); the gate tests below probe type, case,
+> sub-directory and symlink. Prior rows remain as lineage.
+
+| 84B550E7AECC05BC | 2026-09-23 12:17 | src/toolkit | in-repo derived, PR #32 E7 all-file-type gate tests: test_verify_sources_gate.py |
+
+## src/toolkit/ — Git-mode exclusion regression 2026-09-24 (append-only, PR #32)
+
+> The documented __pycache__/ exception is now enforced in Git mode too;
+> a tracked cache artifact does not become a provenance source merely because
+> it is present in the index.
+
+| 0C8B6BD519D34E81 | 2026-09-24 00:00 | src/toolkit | in-repo derived, PR #32 tracked-pycache regression: test_verify_sources_gate.py |
+
+## src/toolkit/ — Final-review fail-closed hardening 2026-09-24 (append-only, PR #32)
+
+> Final re-review hardening: filesystem target-root symlinks, traversal errors
+> and broken Git metadata no longer downgrade to a passing archive scan; exact
+> Real values are sign-checked before binary64 conversion and nonzero values
+> that underflow to zero are refused. Prior rows remain lineage.
+
+| 0E7E5F55A8F6DEC9 | 2026-09-24 00:15 | src/toolkit | in-repo derived, PR #32 exact-Real numeric boundary: stress_hex_v3.py |
+| A76CB45A01242259 | 2026-09-24 00:15 | src/toolkit | in-repo derived, PR #32 exact-Real regressions: test_stress_hex_v3.py |
+| 8051560D9B84B2F8 | 2026-09-24 00:15 | src/toolkit | in-repo derived, PR #32 archive/git traversal regressions: test_verify_sources_gate.py |

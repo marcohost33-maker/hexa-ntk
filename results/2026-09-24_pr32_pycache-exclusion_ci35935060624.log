@@ -1,0 +1,38 @@
+HexaNTK PR #32 final-gate evidence — 2026-09-24
+================================================
+
+Subject head SHA: f889ce0b655ad39674e15b3c0d745ffb29823e1a
+GitHub Actions run: 35935060624
+Workflow: ci
+Conclusion: success
+
+gate job
+--------
+job_id: 107430125329
+conclusion: success
+ruff: success
+compile: success
+provenance (SOURCES.md): success
+observed provenance summary:
+[VERIFY-SOURCES] 20 Toolkit-Eintraege + 2 Spec-Eintraege | Dateiliste: git (22 Dateien) | PASS
+current regression pin:
+src/toolkit/test_verify_sources_gate.py: 0C8B6BD519D34E81
+
+tests (cpu) job
+---------------
+job_id: 107430125604
+conclusion: success
+Ran 211 tests in 2.159s
+OK
+tracked-cache regression:
+test_tracked_pycache_is_documented_exception ... ok
+coverage total: 82%
+
+Scope note
+----------
+This run directly verifies the functional head f889ce0b655a, including:
+- Git-mode __pycache__ documented-exception fix;
+- tracked-cache regression;
+- append-only SOURCES pin.
+The commit that adds this log is evidence-only; it does not alter src/, spec/,
+scripts/ or SOURCES.md.

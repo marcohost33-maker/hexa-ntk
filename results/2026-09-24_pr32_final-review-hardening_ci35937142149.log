@@ -1,0 +1,48 @@
+HexaNTK PR #32 final-review hardening evidence — 2026-09-24
+================================================================
+
+Subject functional head SHA: 3afe13b117db56c463066165f32e9190283603a6
+GitHub Actions run: 35937142149
+Workflow: ci
+Conclusion: success
+
+gate job
+--------
+job_id: 107436600660
+conclusion: success
+ruff: success
+compile: success
+provenance (SOURCES.md): success
+observed provenance summary:
+[VERIFY-SOURCES] 20 Toolkit-Eintraege + 2 Spec-Eintraege | Dateiliste: git (22 Dateien) | PASS
+
+tests (cpu) job
+---------------
+job_id: 107436600888
+conclusion: success
+Ran 215 tests in 2.350s
+OK
+coverage total: 82%
+
+Final-review regressions observed green:
+- test_filesystem_target_root_symlink_is_a_gap
+- test_corrupt_git_marker_does_not_fall_back_to_filesystem
+- test_filesystem_walk_error_fails_closed
+- test_extended_real_underflow_cannot_cross_numeric_contract
+
+Current derived provenance pins:
+- stress_hex_v3.py: 0E7E5F55A8F6DEC9
+- test_stress_hex_v3.py: A76CB45A01242259
+- test_verify_sources_gate.py: 8051560D9B84B2F8
+
+Scope note
+----------
+This run directly verifies the functional head 3afe13b117db, including all four
+P2 findings from the re-review of 28737c6306:
+- filesystem target-root symlink refusal;
+- fail-closed Git metadata detection;
+- filesystem traversal error propagation;
+- exact-Real sign/underflow validation before binary64 semantic use.
+
+The commit that adds this evidence file is evidence-only and must not alter
+src/, spec/, scripts/ or SOURCES.md.

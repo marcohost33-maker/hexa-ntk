@@ -1,0 +1,60 @@
+HexaNTK PR #32 — Stress/Shift Contract Review-Hardening Evidence
+Date: 2026-09-23
+Repository: marcohost33-maker/hexa-ntk
+Branch: feat/stress-shift-contract-20260923
+Verified implementation commit: 0990e66d4b6511e58a19677c6a80ff49a6a8134b
+GitHub Actions workflow: ci
+Run: #85
+Run ID: 35803930168
+
+RESULT
+gate: PASS
+tests (cpu): PASS
+
+GATE COMPONENTS
+- ruff: PASS
+- compile: PASS
+- provenance (SOURCES.md): PASS
+
+PROVENANCE SNAPSHOT
+[ OK ] benchmark_hex_v3.py: 7D48D5B659D08A05
+[ OK ] checkpoint_integration_hex_v3.py: 2BBFD0218DEBBF0F
+[ OK ] dataloader_utils_hex_v3.py: A8ACCD446EC287D6
+[ OK ] dataset_split_hex_v3.py: DF201FDE60688DAF
+[ OK ] ema_hex_v3.py: 72019F9045DF105D
+[ OK ] failure_signature_hex_v3.py: 4C0BC9B6D6233180
+[ OK ] operator_adapter_hex_v3.py: D0192688CE5222F1
+[ OK ] resume_utils_hex_v3.py: BB8B7E456C1B7DEB
+[ OK ] runner_hex_v3.py: 8B1886090583A412
+[ OK ] stress_hex_v3.py: 34C92C112A40BE46
+[ OK ] test_benchmark_hex_v3.py: DE5B1FE6EA89314D
+[ OK ] test_checkpoint_integration_hex_v3.py: E18BF23374494EE9
+[ OK ] test_dataloader_utils_hex_v3.py: 54FE8C5313B45824
+[ OK ] test_dataset_split_hex_v3.py: 8890E69A5CC1AA6B
+[ OK ] test_ema_hex_v3.py: 574B8851CE411016
+[ OK ] test_operator_adapter_hex_v3.py: C0EAD8D722BCE4D4
+[ OK ] test_runner_hex_v3.py: AB14B563E7D9EA9C
+[ OK ] test_stress_hex_v3.py: 75AEA74A3CF101F0
+[ OK ] warmstart_utils_hex_v3.py: 1FAB88FF9CCA6627
+[VERIFY-SOURCES] 19 Toolkit-Eintraege | PASS
+
+TEST SNAPSHOT
+- Toolkit unit tests: 181 tests
+- Result: OK
+- Branch coverage report total: 82%
+- Review-hardening regressions passing include:
+  - degradation overflow saturates instead of returning inf
+  - generated report exposes saturation explicitly
+  - manually inconsistent degradation factors are rejected
+  - inconsistent saturation flags are rejected
+  - nested metadata is snapshot-immutable
+  - axis-specific report semantics remain separate
+
+CLAIM BOUNDARY
+This evidence verifies the software/spec/provenance gates for the stress/shift
+contract. It is not evidence of neural-operator accuracy, physics validity,
+discretization invariance, or OOD performance of a trained model.
+
+SOURCE
+Generated from GitHub Actions run #85 job logs after completion. This file is
+an in-repo evidence snapshot; GitHub remains the authoritative raw CI log source.

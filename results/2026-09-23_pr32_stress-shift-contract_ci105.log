@@ -1,0 +1,79 @@
+HexaNTK PR #32 — Stress/Shift Contract: direction-preserving floor + spec gate (CI evidence)
+Date: 2026-09-23
+Repository: marcohost33-maker/hexa-ntk
+Branch: feat/stress-shift-contract-20260923
+Verified implementation commit: a5fd60c63948f871b9e5621b9e5b3fcbba6ecdc3
+GitHub Actions workflow: ci | Run: #105 | Run ID: 35840381050 | event: pull_request | attempt: 1
+Run created: 2026-09-23T09:00:26Z | updated: 2026-09-23T09:01:12Z | conclusion: success
+
+SCOPE OF THIS LOG
+This log is committed in the commit AFTER the verified one. That commit changes only
+AGENTS.md and results/ (this file); src/, scripts/, spec/ and SOURCES.md are byte-identical.
+Check: the git tree/blob ids below must equal `git rev-parse <landing-commit>:<path>`.
+  src: b8b4b3d293f25292123009f21d03766f992f353d
+  scripts: 4a58e69d9f1dcc3c7c7849dd009ef1c022ed05d5
+  spec: 3d4ce08412f4cdd002866b42bbac7e71c8d864ff
+  SOURCES.md: cf86894458528ac55b444657745a31b17813b5a4
+The landing commit's own CI run is NOT part of this file (it cannot exist before the push).
+
+JOBS
+- tests (cpu): conclusion=success runner_id=1000033637 job_id=107113759052
+    step 1: Set up job = success
+    step 2: Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 = success
+    step 3: Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 = success
+    step 4: install (cpu-only torch) = success
+    step 5: engine doctests + selftests = success
+    step 6: toolkit unit tests + coverage = success
+    step 11: Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 = success
+    step 12: Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 = success
+    step 13: Complete job = success
+- gate: conclusion=success runner_id=1000033638 job_id=107113759425
+    step 1: Set up job = success
+    step 2: Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 = success
+    step 3: Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 = success
+    step 4: install = success
+    step 5: ruff = success
+    step 6: compile = success
+    step 7: provenance (SOURCES.md) = success
+    step 13: Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 = success
+    step 14: Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 = success
+    step 15: Complete job = success
+
+GATE: ruff
+  All checks passed!
+
+GATE: provenance (scripts/verify_sources.py)
+  [ OK ] src/toolkit/benchmark_hex_v3.py: 7D48D5B659D08A05
+  [ OK ] src/toolkit/checkpoint_integration_hex_v3.py: 2BBFD0218DEBBF0F
+  [ OK ] src/toolkit/dataloader_utils_hex_v3.py: A8ACCD446EC287D6
+  [ OK ] src/toolkit/dataset_split_hex_v3.py: DF201FDE60688DAF
+  [ OK ] src/toolkit/ema_hex_v3.py: 72019F9045DF105D
+  [ OK ] src/toolkit/failure_signature_hex_v3.py: 4C0BC9B6D6233180
+  [ OK ] src/toolkit/operator_adapter_hex_v3.py: D0192688CE5222F1
+  [ OK ] src/toolkit/resume_utils_hex_v3.py: BB8B7E456C1B7DEB
+  [ OK ] src/toolkit/runner_hex_v3.py: 8B1886090583A412
+  [ OK ] src/toolkit/stress_hex_v3.py: 23EA1FBDA46C5E5A
+  [ OK ] src/toolkit/test_benchmark_hex_v3.py: DE5B1FE6EA89314D
+  [ OK ] src/toolkit/test_checkpoint_integration_hex_v3.py: E18BF23374494EE9
+  [ OK ] src/toolkit/test_dataloader_utils_hex_v3.py: 54FE8C5313B45824
+  [ OK ] src/toolkit/test_dataset_split_hex_v3.py: 8890E69A5CC1AA6B
+  [ OK ] src/toolkit/test_ema_hex_v3.py: 574B8851CE411016
+  [ OK ] src/toolkit/test_operator_adapter_hex_v3.py: C0EAD8D722BCE4D4
+  [ OK ] src/toolkit/test_runner_hex_v3.py: AB14B563E7D9EA9C
+  [ OK ] src/toolkit/test_stress_hex_v3.py: 4FE5220068122DCE
+  [ OK ] src/toolkit/test_verify_sources_gate.py: C4E4199FE420E0D6
+  [ OK ] src/toolkit/warmstart_utils_hex_v3.py: 1FAB88FF9CCA6627
+  [ OK ] spec/HexaNTK_Review_Gehaertet.md: 234106F54BFF22FD
+  [ OK ] spec/STRESS_SHIFT_CONTRACT_v1.md: 95100B4D8B668153
+  [VERIFY-SOURCES] 20 Toolkit-Eintraege + 2 Spec-Eintraege | PASS
+
+TESTS (cpu): engine gate
+  [ENGINE-GATE] doctests 47/47 | selftests_ok=True | overall=PASS
+
+TESTS (cpu): toolkit unittest + coverage
+  Ran 198 tests in 2.060s
+  OK
+  src/toolkit/stress_hex_v3.py                     197     28     88     23    81%
+  TOTAL                                           1258    187    486     89    82%
+
+Every line under GATE/TESTS is copied verbatim from `gh run view 35840381050 --log`.
