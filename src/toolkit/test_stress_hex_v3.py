@@ -575,6 +575,21 @@ class TestBinary64OverflowContract(unittest.TestCase):
             ),
             "metadata.scale contains a non-finite numeric value",
         )
+        # The metadata path must keep the original OverflowError as cause
+        # (raise ... from exc), just like _finite_nonnegative.
+        with self.assertRaises(ValueError) as ctx:
+            StressCase(
+                "meta",
+                ShiftAxis.NOISE,
+                ShiftRegime.OOD,
+                0.2,
+                {"nested": [{"scale": Fraction(10**400)}]},
+            )
+        self.assertRegex(
+            str(ctx.exception),
+            r"metadata\.nested\[0\]\.scale contains a non-finite numeric value",
+        )
+        self.assertIsInstance(ctx.exception.__cause__, OverflowError)
         case = StressCase(
             "meta-edge",
             ShiftAxis.NOISE,

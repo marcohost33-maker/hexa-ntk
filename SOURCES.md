@@ -165,3 +165,11 @@
 | 4C18ACC89FDB92A9 | 2026-09-25 11:51 | src/toolkit | in-repo derived, PR #35 E2 overflow regressions: test_benchmark_hex_v3.py |
 | 51FBAC90CF50961F | 2026-09-25 11:51 | src/toolkit | in-repo derived, PR #35 E2 dt binary64 overflow: dataset_split_hex_v3.py |
 | 331CA34CF4FEA7E8 | 2026-09-25 11:51 | src/toolkit | in-repo derived, PR #35 E2 dt overflow regressions: test_dataset_split_hex_v3.py |
+
+## src/toolkit/ — metadata overflow cause assert 2026-09-25 (append-only, PR #35 P3-2)
+
+> Review finding P3-2: the `from exc` chain in the stress metadata path was
+> untested (mutant `from None` stayed green). Test-only change; prior rows
+> remain lineage.
+
+| EE8D734CA0F9567A | 2026-09-25 12:22 | src/toolkit | in-repo derived, PR #35 P3-2 metadata cause assert: test_stress_hex_v3.py |
