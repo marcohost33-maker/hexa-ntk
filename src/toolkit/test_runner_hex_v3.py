@@ -11,6 +11,7 @@ Focuses on testable units without requiring GPU or full model:
 """
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -535,6 +536,66 @@ class TestFullRun(unittest.TestCase):
             self.assertTrue((ckpt_dir / "best.pt").exists())
             self.assertTrue((ckpt_dir / "last.pt").exists())
             self.assertTrue((ckpt_dir / "resume_last.pt").exists())
+
+
+class TestNonFiniteValidationMetric(unittest.TestCase):
+    """A NaN/inf validation metric never becomes the best checkpoint (#37).
+
+    The checkpoint manager rejects it with ValueError; the runner is the
+    policy layer and skips the best-model save with a FailureSignature
+    instead of aborting the run (last/resume checkpoints are still written).
+    """
+
+    @staticmethod
+    def _val_report(value: float) -> dict:
+        return {
+            "epoch": 0,
+            "val_loss": value,
+            "val_nrmse": value,
+            "n_batches": 2,
+            "used_ema": True,
+        }
+
+    def test_save_checkpoints_skips_best_and_records_failure(self) -> None:
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as tmpdir:
+                out = Path(tmpdir)
+                runner = _make_runner(out)
+                reports = runner._save_checkpoints(
+                    epoch=0,
+                    val_report=self._val_report(value),
+                    train_report={"mean_loss": 1.0},
+                )
+                self.assertFalse(reports["best"]["saved"])
+                self.assertEqual(reports["best"]["reason"], "non_finite_metric")
+                self.assertEqual(reports["best"]["checkpoint_semantics"], "best_model")
+                self.assertIsNone(runner.ckpt_mgr.best_metric_value)
+                self.assertFalse(Path(runner.ckpt_mgr.best_model_path).exists())
+                self.assertTrue(reports["last"]["saved"])
+                self.assertTrue(reports["resume"]["saved"])
+                signatures = sorted((out / "failures").glob("*NaN_or_Inf_Metric*.json"))
+                self.assertEqual(len(signatures), 1)
+                record = json.loads(signatures[0].read_text(encoding="utf-8"))
+                self.assertEqual(record["kind"], "NaN_or_Inf_Metric")
+                self.assertEqual(record["locus"], "save_checkpoints_best_metric")
+                self.assertEqual(record["extra"], {"epoch": 0, "metric_name": "val_nrmse"})
+
+    def test_run_continues_past_nan_validation_and_later_saves_best(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            cfg = RunnerConfig(output_dir=str(out), num_epochs=2)
+            runner = _make_runner(out, config=cfg)
+            reports = iter([self._val_report(float("nan")), self._val_report(0.5)])
+            with mock.patch.object(
+                runner, "_validate", side_effect=lambda epoch: next(reports)
+            ):
+                summary = runner.run()
+            best_reports = [c["best"] for c in summary["history"]["checkpoints"]]
+            self.assertEqual(
+                [(r["saved"], r["reason"]) for r in best_reports],
+                [(False, "non_finite_metric"), (True, "improved")],
+            )
+            self.assertEqual(runner.ckpt_mgr.best_metric_value, 0.5)
 
 
 # ------------------------------------------------------------------

@@ -22,8 +22,10 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import torch
 import torch.nn as nn
@@ -593,6 +595,181 @@ class TestCheckpointIntegrationManager(unittest.TestCase):
         self.assertEqual(best_report["checkpoint_semantics"], "best_model")
         self.assertEqual(last_report["checkpoint_semantics"], "last_model_only")
         self.assertEqual(resume_report["checkpoint_semantics"], "resume_full")
+
+
+# ------------------------------------------------------------------
+# Tests: best-metric input contract + state ordering (issue #37)
+# ------------------------------------------------------------------
+
+
+class TestBestMetricContract(unittest.TestCase):
+    """save_best_model_checkpoint validates before it changes any state.
+
+    Formerly a NaN metric was saved as the best model (saved=True) and then
+    blocked every later improvement (NaN comparisons are always False), and
+    best_metric_value was assigned before float()/int() conversion and before
+    the write, so a rejected or failed save still moved the best value.
+    """
+
+    METRIC_MESSAGE = r"^metric_value must be a finite real number, got "
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmpdir.name) / "checkpoints"
+
+    def tearDown(self) -> None:
+        self.tmpdir.cleanup()
+
+    def _make_manager(self, **kwargs: Any) -> CheckpointIntegrationManager:
+        return CheckpointIntegrationManager(self.root, **kwargs)
+
+    def _saved_metric(self, mgr: CheckpointIntegrationManager) -> float:
+        payload = torch.load(mgr.best_model_path, weights_only=True)
+        return payload["extra"]["metric_value"]
+
+    def test_non_finite_metric_is_rejected_before_any_state_change(self) -> None:
+        for mode in ("min", "max"):
+            for case, metric in enumerate(
+                (
+                    float("nan"),
+                    float("inf"),
+                    float("-inf"),
+                    torch.tensor(float("nan")),
+                )
+            ):
+                with self.subTest(mode=mode, metric=repr(metric)):
+                    mgr = CheckpointIntegrationManager(
+                        self.root / f"{mode}_{case}",
+                        best_policy=BestCheckpointPolicy(mode=mode),
+                    )
+                    # Capture any exception and check its exact type, so the
+                    # pre-fix saved=True return is an assertion failure.
+                    with self.assertRaises(Exception) as ctx:
+                        mgr.save_best_model_checkpoint(
+                            model=build_test_model(),
+                            metric_value=metric,
+                            metric_name="val_loss",
+                            epoch=0,
+                        )
+                    exc = ctx.exception
+                    self.assertIs(
+                        type(exc),
+                        ValueError,
+                        f"expected ValueError, got {type(exc).__name__}: {exc}",
+                    )
+                    self.assertRegex(str(exc), self.METRIC_MESSAGE)
+                    self.assertIsNone(mgr.best_metric_value)
+                    self.assertFalse(Path(mgr.best_model_path).exists())
+
+    def test_nan_first_metric_does_not_block_later_best(self) -> None:
+        mgr = self._make_manager()
+        model = build_test_model()
+        with self.assertRaises(ValueError):
+            mgr.save_best_model_checkpoint(
+                model=model, metric_value=float("nan"), metric_name="val_loss", epoch=0
+            )
+        report = mgr.save_best_model_checkpoint(
+            model=model, metric_value=1.0, metric_name="val_loss", epoch=1
+        )
+        self.assertTrue(report["saved"])
+        self.assertEqual(mgr.best_metric_value, 1.0)
+        self.assertEqual(self._saved_metric(mgr), 1.0)
+
+    def test_metric_beyond_binary64_leaves_best_unchanged(self) -> None:
+        # mode="max": 10**400 compares as an improvement over 0.5, so the
+        # pre-fix code assigned it as best before float() overflowed.
+        for metric in (10**400, Fraction(10**400)):
+            with self.subTest(metric_bits=int(metric).bit_length(), kind=type(metric).__name__):
+                mgr = self._make_manager(best_policy=BestCheckpointPolicy(mode="max"))
+                model = build_test_model()
+                mgr.save_best_model_checkpoint(
+                    model=model, metric_value=0.5, metric_name="score", epoch=0
+                )
+                with self.assertRaises(Exception) as ctx:
+                    mgr.save_best_model_checkpoint(
+                        model=model, metric_value=metric, metric_name="score", epoch=1
+                    )
+                exc = ctx.exception
+                self.assertIs(
+                    type(exc),
+                    ValueError,
+                    f"expected ValueError, got {type(exc).__name__}: {exc}",
+                )
+                self.assertRegex(str(exc), self.METRIC_MESSAGE)
+                self.assertIsInstance(exc.__cause__, OverflowError)
+                self.assertEqual(mgr.best_metric_value, 0.5)
+                self.assertEqual(self._saved_metric(mgr), 0.5)
+
+    def test_non_main_process_rejects_non_finite_metric(self) -> None:
+        # Every DDP rank must apply the same contract, otherwise rank 0 and
+        # the other ranks disagree on the best value.
+        mgr = self._make_manager(is_main_process=False)
+        with self.assertRaises(ValueError):
+            mgr.save_best_model_checkpoint(
+                model=build_test_model(),
+                metric_value=float("nan"),
+                metric_name="val_loss",
+                epoch=0,
+            )
+        self.assertIsNone(mgr.best_metric_value)
+
+    def test_invalid_epoch_leaves_best_unchanged(self) -> None:
+        mgr = self._make_manager()
+        model = build_test_model()
+        mgr.save_best_model_checkpoint(
+            model=model, metric_value=1.0, metric_name="val_loss", epoch=0
+        )
+        with self.assertRaises(TypeError):
+            mgr.save_best_model_checkpoint(
+                model=model, metric_value=0.5, metric_name="val_loss", epoch=None
+            )
+        self.assertEqual(mgr.best_metric_value, 1.0)
+        self.assertEqual(self._saved_metric(mgr), 1.0)
+
+    def test_failed_write_leaves_best_unchanged(self) -> None:
+        mgr = self._make_manager()
+        model = build_test_model()
+        mgr.save_best_model_checkpoint(
+            model=model, metric_value=1.0, metric_name="val_loss", epoch=0
+        )
+        with mock.patch.object(
+            AtomicCheckpointWriter,
+            "save_model_state_dict_atomic",
+            side_effect=OSError("disk full"),
+        ):
+            with self.assertRaises(OSError):
+                mgr.save_best_model_checkpoint(
+                    model=model, metric_value=0.5, metric_name="val_loss", epoch=1
+                )
+        self.assertEqual(mgr.best_metric_value, 1.0)
+        self.assertEqual(self._saved_metric(mgr), 1.0)
+        # The same improvement is accepted once the write succeeds.
+        report = mgr.save_best_model_checkpoint(
+            model=model, metric_value=0.5, metric_name="val_loss", epoch=2
+        )
+        self.assertTrue(report["saved"])
+        self.assertEqual(mgr.best_metric_value, 0.5)
+
+    def test_valid_metric_types_are_normalized_to_float(self) -> None:
+        for metric, expected in (
+            (0.25, 0.25),
+            (3, 3.0),
+            (Fraction(1, 4), 0.25),
+            (torch.tensor(0.25), 0.25),
+        ):
+            with self.subTest(metric=repr(metric)):
+                root = self.root / type(metric).__name__
+                mgr = CheckpointIntegrationManager(root)
+                report = mgr.save_best_model_checkpoint(
+                    model=build_test_model(),
+                    metric_value=metric,
+                    metric_name="val_loss",
+                    epoch=0,
+                )
+                self.assertTrue(report["saved"])
+                self.assertIs(type(mgr.best_metric_value), float)
+                self.assertEqual(mgr.best_metric_value, expected)
+                self.assertEqual(report["best_metric_value"], expected)
 
 
 # ------------------------------------------------------------------
