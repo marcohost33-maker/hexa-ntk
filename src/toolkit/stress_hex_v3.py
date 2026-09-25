@@ -62,7 +62,12 @@ def _finite_nonnegative(value: Any, *, name: str) -> float:
     # Otherwise Fraction(-1, 10**1000) becomes -0.0 and crosses the sign gate.
     if value < 0:
         raise ValueError(f"{name} must be finite and >= 0")
-    result = float(value)
+    # Exact Reals beyond binary64 range (Fraction(10**400), 10**400) raise
+    # OverflowError here instead of returning inf; keep the ValueError contract.
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be finite and >= 0") from exc
     if not math.isfinite(result):
         raise ValueError(f"{name} must be finite and >= 0")
     if result == 0.0 and value != 0:
@@ -82,7 +87,13 @@ def _freeze_metadata_value(value: Any, *, path: str) -> Any:
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, numbers.Real):
-        result = float(value)
+        # Same binary64 overflow class as _finite_nonnegative (Fraction(10**400)).
+        try:
+            result = float(value)
+        except OverflowError as exc:
+            raise ValueError(
+                f"{path} contains a non-finite numeric value"
+            ) from exc
         if not math.isfinite(result):
             raise ValueError(f"{path} contains a non-finite numeric value")
         return result
