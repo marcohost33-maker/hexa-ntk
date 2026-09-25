@@ -9,11 +9,14 @@ subset wrapper.
 """
 from __future__ import annotations
 
+import sys
 import unittest
 from typing import Any, Dict, List
 
 import torch
 from torch.utils.data import Dataset
+
+import dataset_split_hex_v3 as dataset_split
 
 from dataset_split_hex_v3 import (
     SampleSubsetDataset,
@@ -174,6 +177,61 @@ class TestSplitValidation(unittest.TestCase):
             split_dataset_by_trajectory(
                 ds, val_fraction=0.5, seed=0, group_by_dt=True
             )
+
+    # Smallest int that float() rounds past binary64 max (tie -> 2**1024).
+    FIRST_OVERFLOWING_INT = 2**1024 - 2**970
+
+    def test_int_dt_beyond_binary64_raises_value_error(self) -> None:
+        for dt in (10**400, 2**1024, self.FIRST_OVERFLOWING_INT):
+            with self.subTest(bits=dt.bit_length()):
+                ds = FakeTrajectoryDataset(
+                    [
+                        {"trajectory_id": 0, "dt": dt},
+                        {"trajectory_id": 1, "dt": 0.1},
+                    ]
+                )
+                # Capture any exception and check its exact type, so the
+                # pre-fix OverflowError is an assertion failure.
+                with self.assertRaises(Exception) as ctx:
+                    split_dataset_by_trajectory(
+                        ds, val_fraction=0.5, seed=0, group_by_dt=True
+                    )
+                exc = ctx.exception
+                self.assertIs(
+                    type(exc),
+                    ValueError,
+                    f"expected ValueError, got {type(exc).__name__}: {exc}",
+                )
+                self.assertRegex(str(exc), "^Sample 'dt' must fit in a finite float$")
+                self.assertIsInstance(exc.__cause__, OverflowError)
+
+    def test_int_dt_at_or_just_below_binary64_max_is_accepted(self) -> None:
+        max_float = sys.float_info.max
+        for dt in (int(max_float), self.FIRST_OVERFLOWING_INT - 1):
+            with self.subTest(bits=dt.bit_length()):
+                value = dataset_split._extract_dt_value({"dt": dt})
+                self.assertEqual(value, max_float)
+                self.assertIs(type(value), float)
+                ds = FakeTrajectoryDataset(
+                    [
+                        {"trajectory_id": 0, "dt": dt},
+                        {"trajectory_id": 1, "dt": dt},
+                    ]
+                )
+                train, val = split_dataset_by_trajectory(
+                    ds, val_fraction=0.5, seed=0, group_by_dt=True
+                )
+                self.assertEqual(len(train) + len(val), 2)
+
+    def test_huge_dt_is_ignored_without_group_by_dt(self) -> None:
+        ds = FakeTrajectoryDataset(
+            [
+                {"trajectory_id": 0, "dt": 10**400},
+                {"trajectory_id": 1, "dt": 10**400},
+            ]
+        )
+        train, val = split_dataset_by_trajectory(ds, val_fraction=0.5, seed=0)
+        self.assertEqual(len(train) + len(val), 2)
 
 
 # ------------------------------------------------------------------
