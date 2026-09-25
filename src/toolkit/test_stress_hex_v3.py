@@ -460,5 +460,145 @@ class TestStressReport(unittest.TestCase):
             )
 
 
+class TestBinary64OverflowContract(unittest.TestCase):
+    """Exact Reals beyond binary64 range must fail with the contract ValueError.
+
+    float(Fraction(10**400)) and float(10**400) raise OverflowError, which is
+    not a ValueError subclass. The checks below capture any exception and
+    assert its exact type, so a regression shows up as an assertion failure
+    rather than as an unrelated error.
+    """
+
+    # Smallest integer that float() rounds past binary64 max: max + half an
+    # ulp is a tie, and round-half-to-even goes to 2**1024, i.e. overflow.
+    FIRST_OVERFLOWING_INT = 2**1024 - 2**970
+
+    def assert_contract_value_error(self, call, pattern: str) -> None:
+        with self.assertRaises(Exception) as ctx:
+            call()
+        exc = ctx.exception
+        self.assertIs(
+            type(exc),
+            ValueError,
+            f"expected contract ValueError, got {type(exc).__name__}: {exc}",
+        )
+        self.assertRegex(str(exc), pattern)
+
+    def test_huge_exact_reals_raise_contract_value_error(self) -> None:
+        huge_values = (
+            Fraction(10**400),
+            10**400,
+            2**1024,
+            self.FIRST_OVERFLOWING_INT,
+        )
+        for value in huge_values:
+            with self.subTest(
+                value_type=type(value).__name__,
+                bits=int(value).bit_length(),
+            ):
+                self.assert_contract_value_error(
+                    lambda: compute_degradation_factor(value, 0.1),
+                    "shifted_error must be finite and >= 0",
+                )
+                self.assert_contract_value_error(
+                    lambda: compute_degradation_factor(0.1, value),
+                    "baseline_error must be finite and >= 0",
+                )
+                self.assert_contract_value_error(
+                    lambda: compute_degradation_factor(0.1, 0.1, floor=value),
+                    "floor must be finite and >= 0",
+                )
+                self.assert_contract_value_error(
+                    lambda: StressCase(
+                        "huge", ShiftAxis.NOISE, ShiftRegime.OOD, value
+                    ),
+                    "error_value must be finite and >= 0",
+                )
+                self.assert_contract_value_error(
+                    lambda: evaluate_stress_cases(
+                        error_metric_name="nrmse",
+                        baseline_case_id="base",
+                        baseline_error=value,
+                        cases=[],
+                    ),
+                    "baseline_error must be finite and >= 0",
+                )
+
+    def test_overflow_keeps_original_exception_as_cause(self) -> None:
+        with self.assertRaises(Exception) as ctx:
+            compute_degradation_factor(Fraction(10**400), 0.1)
+        self.assertIs(type(ctx.exception), ValueError)
+        self.assertIsInstance(ctx.exception.__cause__, OverflowError)
+
+    def test_huge_negative_exact_real_keeps_sign_error(self) -> None:
+        for value in (-Fraction(10**400), -(10**400)):
+            with self.subTest(value_type=type(value).__name__):
+                self.assert_contract_value_error(
+                    lambda: compute_degradation_factor(value, 0.1),
+                    "shifted_error must be finite and >= 0",
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    compute_degradation_factor(value, 0.1)
+                # The sign gate fires before any binary64 conversion.
+                self.assertIsNone(ctx.exception.__cause__)
+
+    def test_values_at_or_just_below_binary64_max_are_accepted(self) -> None:
+        max_float = sys.float_info.max
+        just_below_threshold = self.FIRST_OVERFLOWING_INT - 1
+        for value in (
+            max_float,
+            Fraction(max_float),
+            int(max_float),
+            just_below_threshold,
+            Fraction(just_below_threshold),
+        ):
+            with self.subTest(value_type=type(value).__name__):
+                case = StressCase(
+                    "edge", ShiftAxis.NOISE, ShiftRegime.OOD, value
+                )
+                self.assertEqual(case.error_value, max_float)
+                self.assertIs(type(case.error_value), float)
+                self.assertEqual(compute_degradation_factor(value, value), 1.0)
+        self.assertEqual(
+            compute_degradation_factor(Fraction(max_float), 1.0),
+            max_float,
+        )
+
+    def test_huge_exact_metadata_value_raises_contract_value_error(self) -> None:
+        self.assert_contract_value_error(
+            lambda: StressCase(
+                "meta",
+                ShiftAxis.NOISE,
+                ShiftRegime.OOD,
+                0.2,
+                {"scale": Fraction(10**400)},
+            ),
+            "metadata.scale contains a non-finite numeric value",
+        )
+        # The metadata path must keep the original OverflowError as cause
+        # (raise ... from exc), just like _finite_nonnegative.
+        with self.assertRaises(ValueError) as ctx:
+            StressCase(
+                "meta",
+                ShiftAxis.NOISE,
+                ShiftRegime.OOD,
+                0.2,
+                {"nested": [{"scale": Fraction(10**400)}]},
+            )
+        self.assertRegex(
+            str(ctx.exception),
+            r"metadata\.nested\[0\]\.scale contains a non-finite numeric value",
+        )
+        self.assertIsInstance(ctx.exception.__cause__, OverflowError)
+        case = StressCase(
+            "meta-edge",
+            ShiftAxis.NOISE,
+            ShiftRegime.OOD,
+            0.2,
+            {"scale": Fraction(sys.float_info.max)},
+        )
+        self.assertEqual(case.metadata["scale"], sys.float_info.max)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,8 +6,10 @@ Tests for canonical benchmark metrics.
 from __future__ import annotations
 
 import math
+import sys
 import tempfile
 import unittest
+from fractions import Fraction
 from unittest import mock
 
 import numpy as np
@@ -620,6 +622,97 @@ class TestBenchmarkReport(unittest.TestCase):
         s = report.summary()
         self.assertIn("test", s)
         self.assertIn("0.0500", s)
+
+
+class TestBinary64OverflowContract(unittest.TestCase):
+    """Exact Reals beyond binary64 range must fail with the contract ValueError.
+
+    float(Fraction(10**400)) and float(10**400) raise OverflowError, which is
+    not a ValueError subclass. Every check captures any exception and asserts
+    its exact type, so a regression is an assertion failure, not an error.
+    """
+
+    # Smallest integer that float() rounds past binary64 max (half-ulp tie
+    # rounds to even, i.e. to 2**1024).
+    FIRST_OVERFLOWING_INT = 2**1024 - 2**970
+    HUGE_VALUES = (Fraction(10**400), 10**400, 2**1024, FIRST_OVERFLOWING_INT)
+
+    def assert_contract_value_error(self, call, pattern: str) -> None:
+        with self.assertRaises(Exception) as ctx:
+            call()
+        exc = ctx.exception
+        self.assertIs(
+            type(exc),
+            ValueError,
+            f"expected contract ValueError, got {type(exc).__name__}: {exc}",
+        )
+        self.assertRegex(str(exc), pattern)
+        self.assertIsInstance(exc.__cause__, OverflowError)
+
+    def test_coerce_real_scalar_and_positive_path(self) -> None:
+        target = make_target()
+        neighbors = make_hex_neighbors()
+        for value in self.HUGE_VALUES:
+            with self.subTest(
+                value_type=type(value).__name__,
+                bits=int(value).bit_length(),
+            ):
+                self.assert_contract_value_error(
+                    lambda: benchmark._coerce_real_scalar(value, name="x"),
+                    "^x must be finite$",
+                )
+                self.assert_contract_value_error(
+                    lambda: compute_h1_rmse_per_step(
+                        target, target, neighbors, h=value
+                    ),
+                    "^h must be finite$",
+                )
+                self.assert_contract_value_error(
+                    lambda: compute_nrmse_per_step(target, target, eps=value),
+                    "^eps must be finite$",
+                )
+
+    def test_nonnegative_path(self) -> None:
+        nrmse = torch.full((T,), 0.1)
+        for value in self.HUGE_VALUES + (-Fraction(10**400), -(10**400)):
+            with self.subTest(
+                value_type=type(value).__name__,
+                bits=int(value).bit_length(),
+                negative=value < 0,
+            ):
+                self.assert_contract_value_error(
+                    lambda: benchmark._validate_nonnegative_finite(
+                        value, name="threshold"
+                    ),
+                    "^threshold must be finite and >= 0$",
+                )
+                self.assert_contract_value_error(
+                    lambda: compute_divergence_step(nrmse, threshold=value),
+                    "^threshold must be finite and >= 0$",
+                )
+
+    def test_values_at_or_just_below_binary64_max_are_accepted(self) -> None:
+        max_float = sys.float_info.max
+        nrmse = torch.full((T,), 0.1)
+        for value in (
+            max_float,
+            Fraction(max_float),
+            int(max_float),
+            self.FIRST_OVERFLOWING_INT - 1,
+            Fraction(self.FIRST_OVERFLOWING_INT - 1),
+        ):
+            with self.subTest(value_type=type(value).__name__):
+                for helper in (
+                    benchmark._coerce_real_scalar,
+                    benchmark._validate_positive_finite,
+                    benchmark._validate_nonnegative_finite,
+                ):
+                    result = helper(value, name="x")
+                    self.assertEqual(result, max_float)
+                    self.assertIs(type(result), float)
+                self.assertEqual(
+                    compute_divergence_step(nrmse, threshold=value), T
+                )
 
 
 if __name__ == "__main__":

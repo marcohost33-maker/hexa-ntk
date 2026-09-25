@@ -77,7 +77,12 @@ def _coerce_real_scalar(value: Any, *, name: str) -> float:
     """Normalize Python/NumPy real scalars without accepting booleans."""
     if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise TypeError(f"{name} must be a real scalar")
-    result = float(value)
+    # Exact Reals beyond binary64 range (Fraction(10**400), 10**400) raise
+    # OverflowError instead of returning inf; keep the ValueError contract.
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be finite") from exc
     if not math.isfinite(result):
         raise ValueError(f"{name} must be finite")
     return result
@@ -93,7 +98,10 @@ def _validate_positive_finite(value: Any, *, name: str) -> float:
 def _validate_nonnegative_finite(value: Any, *, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise TypeError(f"{name} must be a real scalar")
-    result = float(value)
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must be finite and >= 0") from exc
     if not math.isfinite(result) or result < 0.0:
         raise ValueError(f"{name} must be finite and >= 0")
     return result
