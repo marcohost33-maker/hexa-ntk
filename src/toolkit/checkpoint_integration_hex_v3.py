@@ -511,6 +511,7 @@ class CheckpointIntegrationManager:
         restore_rng: bool = True,
         strict: bool = True,
         trusted: bool = False,
+        path: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
         """
         Load a resume checkpoint.
@@ -518,9 +519,15 @@ class CheckpointIntegrationManager:
         Delegates to load_resume_checkpoint from resume_utils_hex_v3.py
         which handles the correct restore order:
         1. model, 2. optimizer, 3. scheduler, 4. grad_scaler, 5. RNG
+
+        path explicitly selects the resume checkpoint. If omitted, the
+        manager-owned resume_path is used. Callers that expose a configurable
+        resume path MUST forward it here so the file checked for existence is
+        also the file that is actually loaded.
         """
+        checkpoint_path = Path(path) if path is not None else self.resume_path
         return load_resume_checkpoint(
-            self.resume_path,
+            checkpoint_path,
             model=model,
             optimizer=optimizer,
             scheduler=scheduler,

@@ -52,6 +52,15 @@
 
 | 8890E69A5CC1AA6B | 2026-07-03 03:51 | src/toolkit | in-repo erstellt, Branch claude/code-analysis-optimization-ajgyce: test_dataset_split_hex_v3.py |
 
+## src/toolkit/ — Derived forms 2026-09-23 (append-only, PR #31)
+
+> Imported-original locators above remain immutable. These rows record the
+> current derived bytes for the explicit resume_from path fix and its tests.
+
+| B8BE0568BB7AF782 | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #31 explicit resume path: checkpoint_integration_hex_v3.py |
+| 0A917FA7C56F2222 | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #31 explicit resume path + fail-closed missing resume_from: runner_hex_v3.py |
+| 00AC58F5C9B3E19F | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #31 regression tests: test_checkpoint_integration_hex_v3.py |
+| 385A6A2DC36E4AC9 | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #31 regression tests (+ own-checkpoint-present case, F31-1; missing resume_from fails closed): test_runner_hex_v3.py |
 ## src/toolkit/ — Derived forms 2026-09-23 (append-only, PR #30)
 
 > The imported-original rows above remain immutable. These additional rows pin
