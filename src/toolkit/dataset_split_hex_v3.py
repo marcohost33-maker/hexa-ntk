@@ -118,7 +118,12 @@ def _extract_dt_value(sample: Mapping[str, Any]) -> Optional[float]:
     dt = sample["dt"]
 
     if isinstance(dt, (float, int)):
-        return float(dt)
+        # An int beyond binary64 range (10**400) raises OverflowError here;
+        # report it as an invalid value rather than an arithmetic crash.
+        try:
+            return float(dt)
+        except OverflowError as exc:
+            raise ValueError("Sample 'dt' must fit in a finite float") from exc
 
     if torch.is_tensor(dt):
         if dt.numel() != 1:
