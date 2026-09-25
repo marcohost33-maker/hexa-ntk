@@ -5,12 +5,17 @@ Tests for canonical benchmark metrics.
 """
 from __future__ import annotations
 
+import math
 import tempfile
 import unittest
+from unittest import mock
+
+import numpy as np
 from pathlib import Path
 
 import torch
 
+import benchmark_hex_v3 as benchmark
 from benchmark_hex_v3 import (
     BenchmarkReport,
     aggregate_over_time,
@@ -124,6 +129,125 @@ class TestH1Metrics(unittest.TestCase):
         self.assertTrue(torch.all(h1_nrmse >= 0))
         self.assertTrue(torch.all(h1_nrmse < 1.0))  # Close predictions
 
+    def test_h1_constant_offset_has_zero_gradient_error(self) -> None:
+        target = make_target()
+        pred = target + 3.0
+        neighbors = make_hex_neighbors()
+        l2 = compute_rmse_per_step(pred, target)
+        h1 = compute_h1_rmse_per_step(pred, target, neighbors, h=1.0)
+        # A spatially constant error has zero H¹ seminorm contribution.
+        self.assertTrue(torch.allclose(h1, l2, atol=1e-6))
+
+    def test_identical_zero_field_has_exact_zero_h1_error(self) -> None:
+        target = torch.zeros(T, N, 1)
+        neighbors = make_hex_neighbors()
+
+        h1 = compute_h1_rmse_per_step(target, target, neighbors, h=1.0)
+        h1_nrmse = compute_h1_nrmse_per_step(
+            target,
+            target,
+            neighbors,
+            h=1.0,
+        )
+
+        self.assertTrue(torch.equal(h1, torch.zeros_like(h1)))
+        self.assertTrue(torch.equal(h1_nrmse, torch.zeros_like(h1_nrmse)))
+
+    def test_h1_opposite_gradient_not_lost_by_magnitude_cancellation(self) -> None:
+        neighbors = make_hex_neighbors()
+        target = torch.zeros(1, N, 1)
+        target[0, 1:, 0] = torch.tensor([1.0, 2.0, 1.0, -1.0, -2.0, -1.0])
+        pred = -target
+
+        l2 = compute_rmse_per_step(pred, target)
+        h1 = compute_h1_rmse_per_step(pred, target, neighbors, h=1.0)
+
+        # Old implementation compared |grad(pred)| with |grad(target)| and
+        # therefore cancelled this case.  H¹ must use grad(pred-target).
+        self.assertGreater(h1.item(), l2.item())
+
+
+def make_star_patch(h: float) -> tuple[list[tuple[float, float]], torch.Tensor]:
+    """Regular hex patch: centre with a full six-ring at distance ``h``.
+
+    Ring nodes list ONLY the centre as neighbour. For a linear field
+    ``f(x) = g . x`` this makes the discrete gradient proxy an exact oracle
+    (derivation in TestH1GradientScaling).
+    """
+    angles = [k * math.pi / 3.0 for k in range(6)]
+    points = [(0.0, 0.0)] + [
+        (h * math.cos(a), h * math.sin(a)) for a in angles
+    ]
+    neighbors = torch.full((7, 6), -1, dtype=torch.long)
+    neighbors[0] = torch.tensor([1, 2, 3, 4, 5, 6])
+    neighbors[1:, 0] = 0
+    return points, neighbors
+
+
+def linear_field(
+    points: list[tuple[float, float]], gx: float, gy: float
+) -> torch.Tensor:
+    """Field ``g . x`` on ``points`` as a [1, N, 1] float64 rollout."""
+    values = [gx * x + gy * y for x, y in points]
+    return torch.tensor(values, dtype=torch.float64).reshape(1, len(points), 1)
+
+
+class TestH1GradientScaling(unittest.TestCase):
+    """Exact-magnitude oracle for the hex gradient proxy (PR #30, F30-1).
+
+    For six neighbours at distance h in directions u_k (60 deg apart) and a
+    linear field, each difference is h * (g . u_k) and
+    sum_k (g . u_k)^2 = 3 |g|^2. The proxy (2 / h^2) * sum / n_valid therefore
+    gives exactly |g|^2 at the centre. Each ring node sees only the centre:
+    (2 / h^2) * h^2 (g . u_i)^2 = 2 (g . u_i)^2, which sums to 6 |g|^2 over
+    the ring. The node-RMS of the gradient over all 7 nodes is thus exactly
+    |g| -- independent of h. The pre-PR scaling 2 / (3 h^2) yields |g| / sqrt(3);
+    a wrong h power (e.g. 2 / h) yields an h-dependent value. Both must fail.
+    """
+
+    GRADIENTS = ((3.0, -4.0), (0.0, 2.5), (-1.25, 0.75))
+
+    def test_centre_gradient_magnitude_is_exact_for_linear_field(self) -> None:
+        for h in (0.5, 2.0):
+            points, neighbors = make_star_patch(h)
+            for gx, gy in self.GRADIENTS:
+                with self.subTest(h=h, g=(gx, gy)):
+                    field = linear_field(points, gx, gy)[0]
+                    grad = benchmark._hex_gradient_magnitude(field, neighbors, h)
+                    self.assertAlmostEqual(
+                        grad[0, 0].item(), math.hypot(gx, gy), places=12
+                    )
+
+    def test_h1_error_uses_exact_gradient_magnitude(self) -> None:
+        for h in (0.5, 2.0):
+            points, neighbors = make_star_patch(h)
+            for gx, gy in self.GRADIENTS:
+                with self.subTest(h=h, g=(gx, gy)):
+                    target = linear_field(points, 1.0, 2.0) + 0.5
+                    error = linear_field(points, gx, gy)
+                    pred = target + error
+                    l2 = torch.sqrt(torch.mean(error ** 2)).item()
+                    expected = math.sqrt(l2 ** 2 + gx ** 2 + gy ** 2)
+                    h1 = compute_h1_rmse_per_step(pred, target, neighbors, h=h)
+                    self.assertEqual(tuple(h1.shape), (1,))
+                    self.assertAlmostEqual(h1.item(), expected, places=12)
+
+    def test_h1_nrmse_uses_exact_gradient_magnitude(self) -> None:
+        h = 0.5
+        points, neighbors = make_star_patch(h)
+        target = linear_field(points, 1.0, 2.0) + 0.5
+        error = linear_field(points, 3.0, -4.0)
+        pred = target + error
+        l2_err = torch.sqrt(torch.mean(error ** 2)).item()
+        l2_tgt = torch.sqrt(torch.mean(target ** 2)).item()
+        eps = 1e-8
+        # |grad target| = |(1, 2)| -> squared 5; |grad error| squared 25.
+        expected = math.sqrt(l2_err ** 2 + 25.0) / (
+            math.sqrt(l2_tgt ** 2 + 5.0) + eps
+        )
+        h1n = compute_h1_nrmse_per_step(pred, target, neighbors, h=h, eps=eps)
+        self.assertAlmostEqual(h1n.item(), expected, places=12)
+
 
 class TestDivergenceStep(unittest.TestCase):
     def test_no_divergence_returns_T(self) -> None:
@@ -192,12 +316,270 @@ class TestEvaluateRollout(unittest.TestCase):
         self.assertIn("h1_nrmse_mean", result)
         self.assertEqual(len(result["h1_rmse_per_step"]), T)
 
+    def test_hex_topology_is_prepared_once_per_evaluate_rollout(self) -> None:
+        target = make_target()
+        pred = make_pred_close(target)
+        neighbors = make_hex_neighbors()
+
+        with mock.patch.object(
+            benchmark,
+            "_prepare_hex_topology",
+            wraps=benchmark._prepare_hex_topology,
+        ) as prepare:
+            evaluate_rollout(pred, target, hex_neighbors=neighbors, h=1.0)
+
+        self.assertEqual(prepare.call_count, 1)
+
     def test_diverging_rollout_detects_divergence(self) -> None:
         target = make_target()
         pred = make_pred_diverging(target)
         result = evaluate_rollout(pred, target, divergence_threshold=0.5)
 
         self.assertLess(result["divergence_step"], T)
+
+
+class TestH1PrecisionAndMemory(unittest.TestCase):
+    """PR #30 round 2 (Codex on 44b0e30): fp16 overflow, T-scaling, re-validation."""
+
+    @staticmethod
+    def _fp16_case() -> tuple[torch.Tensor, torch.Tensor]:
+        # Neighbouring error values +130 / -130: every input and the pointwise
+        # squares (16900) are finite in fp16, the stencil difference 260 is
+        # too, but 260**2 = 67600 exceeds the fp16 maximum 65504.
+        target = torch.ones(2, N, 1, dtype=torch.float16)
+        pred = target.clone()
+        pred[:, 0, 0] += 130.0
+        pred[:, 1, 0] -= 130.0
+        return pred, target
+
+    def test_fp16_h1_is_finite_and_matches_float64_reference(self) -> None:
+        pred, target = self._fp16_case()
+        neighbors = make_hex_neighbors()
+
+        h1_half = compute_h1_rmse_per_step(pred, target, neighbors, h=1.0)
+        h1_ref = compute_h1_rmse_per_step(
+            pred.double(), target.double(), neighbors, h=1.0
+        )
+        h1n_half = compute_h1_nrmse_per_step(pred, target, neighbors, h=1.0)
+        h1n_ref = compute_h1_nrmse_per_step(
+            pred.double(), target.double(), neighbors, h=1.0
+        )
+
+        self.assertTrue(torch.isfinite(h1_half).all(), h1_half)
+        self.assertEqual(h1_half.dtype, torch.float32)
+        # The fp16 inputs are exact integers, so the only difference to the
+        # float64 reference is float32 rounding in a handful of operations
+        # (float32 eps ~ 1.2e-7); rtol 1e-6 leaves a margin of ~8 ulps.
+        torch.testing.assert_close(
+            h1_half.double(), h1_ref, rtol=1e-6, atol=0.0
+        )
+        torch.testing.assert_close(
+            h1n_half.double(), h1n_ref, rtol=1e-6, atol=0.0
+        )
+
+    def test_fp16_pointwise_metrics_accumulate_in_float32(self) -> None:
+        # Error 300: finite in fp16, its square 90000 is not.
+        target = torch.ones(2, N, 1, dtype=torch.float16)
+        pred = target.clone()
+        pred[:, 0, 0] += 300.0
+        for fn in (compute_rmse_per_step, compute_nrmse_per_step):
+            with self.subTest(metric=fn.__name__):
+                half = fn(pred, target)
+                ref = fn(pred.double(), target.double())
+                self.assertTrue(torch.isfinite(half).all(), half)
+                torch.testing.assert_close(
+                    half.double(), ref, rtol=1e-6, atol=0.0
+                )
+
+    def test_mixed_dtype_repro_f32_pred_f64_target_is_not_zero(self) -> None:
+        """Codex on 8b51cda: accumulating in pred's dtype rounded the float64
+        target 1 + 1e-10 to the float32 prediction 1 and reported 0 error."""
+        pred = torch.ones(1, N, 1, dtype=torch.float32)
+        target = torch.full((1, N, 1), 1.0 + 1e-10, dtype=torch.float64)
+        rmse = compute_rmse_per_step(pred, target)
+        self.assertEqual(rmse.dtype, torch.float64)
+        self.assertNotEqual(rmse.item(), 0.0)
+        self.assertAlmostEqual(rmse.item(), 1e-10, delta=1e-16)
+
+    def test_mixed_dtypes_accumulate_in_widest_dtype(self) -> None:
+        neighbors = make_hex_neighbors()
+        pairs = (
+            (torch.float32, torch.float64, torch.float64),
+            (torch.float64, torch.float32, torch.float64),
+            (torch.float16, torch.float64, torch.float64),
+            (torch.bfloat16, torch.float32, torch.float32),
+            (torch.float16, torch.bfloat16, torch.float32),
+            (torch.float16, torch.float16, torch.float32),
+            (torch.bfloat16, torch.bfloat16, torch.float32),
+        )
+        torch.manual_seed(7)
+        base_p = torch.randn(3, N, 2)
+        base_t = torch.randn(3, N, 2)
+        for p_dtype, t_dtype, acc in pairs:
+            pred, target = base_p.to(p_dtype), base_t.to(t_dtype)
+            # Oracle: both inputs explicitly cast to the expected dtype first.
+            ref_p, ref_t = pred.to(acc), target.to(acc)
+            cases = {
+                "rmse": (compute_rmse_per_step(pred, target),
+                         compute_rmse_per_step(ref_p, ref_t)),
+                "nrmse": (compute_nrmse_per_step(pred, target),
+                          compute_nrmse_per_step(ref_p, ref_t)),
+                "h1": (compute_h1_rmse_per_step(pred, target, neighbors),
+                       compute_h1_rmse_per_step(ref_p, ref_t, neighbors)),
+                "h1n": (compute_h1_nrmse_per_step(pred, target, neighbors),
+                        compute_h1_nrmse_per_step(ref_p, ref_t, neighbors)),
+            }
+            for name, (got, ref) in cases.items():
+                with self.subTest(pred=p_dtype, target=t_dtype, metric=name):
+                    self.assertEqual(got.dtype, acc)
+                    torch.testing.assert_close(got, ref, rtol=0.0, atol=0.0)
+
+    def test_fp16_evaluate_rollout_does_not_raise(self) -> None:
+        pred, target = self._fp16_case()
+        try:
+            result = evaluate_rollout(
+                pred, target, hex_neighbors=make_hex_neighbors(), h=1.0
+            )
+        except ValueError as exc:  # pre-fix: "metric_per_step must be finite"
+            self.fail(f"fp16 evaluate_rollout raised on finite input: {exc}")
+        for key in ("h1_rmse_per_step", "h1_nrmse_per_step", "nrmse_per_step"):
+            with self.subTest(key=key):
+                self.assertTrue(all(math.isfinite(v) for v in result[key]))
+
+    def test_unnormalized_h1_skips_unused_target_gradient(self) -> None:
+        """H1 RMSE needs one stencil per step; target norm is only for H1 nRMSE."""
+        target = make_target()
+        pred = make_pred_close(target)
+        neighbors = make_hex_neighbors()
+        with mock.patch.object(
+            benchmark,
+            "_hex_gradient_magnitude_prepared",
+            wraps=benchmark._hex_gradient_magnitude_prepared,
+        ) as kernel:
+            compute_h1_rmse_per_step(pred, target, neighbors, h=1.0)
+        self.assertEqual(kernel.call_count, T)
+
+    def test_h1_kernel_processes_one_timestep_at_a_time(self) -> None:
+        """Peak temporaries must not scale with T (main looped over t).
+
+        Measured quantity: the shape of every field handed to the gradient
+        kernel, whose neighbour gather is [prod(batch), N, 6, C]. A vectorised
+        call over the whole rollout would pass [T, ...] and gather T times
+        more memory.
+        """
+        neighbors = make_hex_neighbors()
+        for shape in ((T, N, C), (T, 3, N, C)):
+            with self.subTest(shape=shape):
+                torch.manual_seed(0)
+                target = torch.randn(*shape)
+                pred = target + 0.1 * torch.randn(*shape)
+                with mock.patch.object(
+                    benchmark,
+                    "_hex_gradient_magnitude_prepared",
+                    wraps=benchmark._hex_gradient_magnitude_prepared,
+                ) as kernel:
+                    compute_h1_nrmse_per_step(pred, target, neighbors, h=1.0)
+                seen = {tuple(c.args[0].shape) for c in kernel.call_args_list}
+                self.assertEqual(seen, {tuple(shape[1:])})
+                self.assertEqual(kernel.call_count, 2 * T)
+
+    def test_evaluate_rollout_validates_rollout_once(self) -> None:
+        target = make_target()
+        pred = make_pred_close(target)
+        with mock.patch.object(
+            benchmark,
+            "_validate_rollout_pair",
+            wraps=benchmark._validate_rollout_pair,
+        ) as pair, mock.patch.object(
+            benchmark,
+            "_validate_real_field",
+            wraps=benchmark._validate_real_field,
+        ) as field:
+            evaluate_rollout(pred, target, hex_neighbors=make_hex_neighbors())
+        self.assertEqual(pair.call_count, 1)
+        self.assertEqual(field.call_count, 0)
+
+    def test_evaluate_rollout_still_rejects_nonfinite(self) -> None:
+        target = make_target()
+        pred = target.clone()
+        pred[3, 2, 1] = float("inf")
+        # Must fail at the rollout boundary, not later via a metric vector.
+        with self.assertRaisesRegex(
+            ValueError, "pred and target must contain only finite values"
+        ):
+            evaluate_rollout(pred, target, hex_neighbors=make_hex_neighbors())
+
+
+class TestBenchmarkInputValidation(unittest.TestCase):
+    def test_nonfinite_rollout_fails_closed(self) -> None:
+        target = make_target()
+        pred = target.clone()
+        pred[0, 0, 0] = float("nan")
+        with self.assertRaisesRegex(ValueError, "finite"):
+            compute_nrmse_per_step(pred, target)
+
+    def test_complex_rollout_requires_explicit_metric(self) -> None:
+        target = make_target().to(torch.complex64)
+        with self.assertRaisesRegex(TypeError, "real floating"):
+            compute_rmse_per_step(target, target)
+
+    def test_numpy_real_scalars_are_accepted(self) -> None:
+        target = make_target()
+        neighbors = make_hex_neighbors()
+
+        compute_nrmse_per_step(target, target, eps=np.float32(1e-6))
+        compute_h1_rmse_per_step(
+            target,
+            target,
+            neighbors,
+            h=np.float32(1.0),
+        )
+        step = compute_divergence_step(
+            torch.full((T,), 0.1),
+            threshold=np.float32(1.0),
+        )
+        self.assertEqual(step, T)
+
+    def test_nonpositive_h_fails_closed(self) -> None:
+        target = make_target()
+        neighbors = make_hex_neighbors()
+        with self.assertRaisesRegex(ValueError, "h must be finite and > 0"):
+            compute_h1_rmse_per_step(target, target, neighbors, h=0.0)
+
+    def test_out_of_range_neighbor_fails_closed(self) -> None:
+        target = make_target()
+        neighbors = make_hex_neighbors()
+        neighbors[0, 0] = N
+        with self.assertRaisesRegex(ValueError, "valid node indices"):
+            compute_h1_rmse_per_step(target, target, neighbors, h=1.0)
+
+    def test_duplicate_neighbor_fails_closed(self) -> None:
+        target = make_target()
+        neighbors = make_hex_neighbors()
+        neighbors[0, 1] = neighbors[0, 0]
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            compute_h1_rmse_per_step(target, target, neighbors, h=1.0)
+
+    def test_self_neighbor_fails_closed(self) -> None:
+        target = make_target()
+        neighbors = make_hex_neighbors()
+        neighbors[0, 0] = 0
+        with self.assertRaisesRegex(ValueError, "self-neighbour"):
+            compute_h1_rmse_per_step(target, target, neighbors, h=1.0)
+
+    def test_invalid_geometric_metric_not_silently_clamped(self) -> None:
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            aggregate_over_time(torch.tensor([0.1, -0.2, 0.3]), "geometric_mean")
+        with self.assertRaisesRegex(ValueError, "finite"):
+            aggregate_over_time(
+                torch.tensor([0.1, float("nan"), 0.3]),
+                "geometric_mean",
+            )
+
+    def test_invalid_divergence_threshold_fails_closed(self) -> None:
+        nrmse = torch.full((T,), 0.1)
+        with self.assertRaisesRegex(ValueError, "finite and >= 0"):
+            compute_divergence_step(nrmse, threshold=float("nan"))
 
 
 class TestBenchmarkReport(unittest.TestCase):

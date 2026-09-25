@@ -61,3 +61,20 @@
 | 0A917FA7C56F2222 | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #31 explicit resume path + fail-closed missing resume_from: runner_hex_v3.py |
 | 00AC58F5C9B3E19F | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #31 regression tests: test_checkpoint_integration_hex_v3.py |
 | 385A6A2DC36E4AC9 | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #31 regression tests (+ own-checkpoint-present case, F31-1; missing resume_from fails closed): test_runner_hex_v3.py |
+## src/toolkit/ — Derived forms 2026-09-23 (append-only, PR #30)
+
+> The imported-original rows above remain immutable. These additional rows pin
+> the current in-repo derived bytes for the H1/benchmark hardening; the final
+> SHA values are filled from the fail-closed provenance gate.
+
+| 97339519C3A96F28 | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #30 H1/benchmark hardening (+ float32 accumulation, per-step H1 loop, single validation): benchmark_hex_v3.py |
+| 2466DB271C4DAE8D | 2026-09-23 00:00 | src/toolkit | in-repo derived, PR #30 regression tests (+ exact-gradient H1 oracle, F30-1; fp16/memory/validation, round 2): test_benchmark_hex_v3.py |
+
+## src/toolkit/ — H1 error-only path 2026-09-24 (append-only, PR #30)
+
+> The unnormalised H1 RMSE path no longer computes the target gradient that
+> only the normalised metric needs. The regression binds one stencil call per
+> rollout step while H1 nRMSE keeps both error and target terms.
+
+| 0392725750BAF4D9 | 2026-09-24 00:00 | src/toolkit | in-repo derived, PR #30 error-only H1 path: benchmark_hex_v3.py |
+| B6B1E9916FD640A4 | 2026-09-24 00:00 | src/toolkit | in-repo derived, PR #30 error-only H1 regression: test_benchmark_hex_v3.py |
