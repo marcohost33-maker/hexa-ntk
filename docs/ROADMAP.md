@@ -5,6 +5,17 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Endlichkeitsvertrag `dt` beim Gruppieren (Issue #39, 2026-09-26).**
+  `dataset_split_hex_v3`: mit `group_by_dt=True` wurde ein NaN-`dt` Teil des Gruppenschluessels;
+  NaN != NaN, also bildete jedes Sample mit frischem NaN (`tensor.item()`, Arithmetik) eine
+  eigene Gruppe und eine Trajektorie landete in Train UND Val (Repro auf `cdb81b2`: 50/50 Seeds).
+  `_extract_dt_value` wirft jetzt fuer NaN/±inf (float, numpy float64, Skalar-Tensor) den
+  Vertrags-`ValueError` `Sample 'dt' must be finite, got ...`, bevor der Schluessel gruppiert
+  wird; ohne `group_by_dt` wird `dt` weiterhin nicht gelesen. Ein geteiltes NaN-Objekt verdeckt
+  den Fehler (Identitaetsvergleich im Tupel) - die Tests erzeugen deshalb je Sample ein neues.
+  _Evidenz: Rot 3 Methoden failures=36 -> 275/275 OK (skipped=2), Diskriminierung 8/8,
+  `results/2026-09-26_issue39_local-gate.log`._
+
 - [x] **Eingabevertrag `trajectory_id` + Zustandsreihenfolge Best-Checkpoint (Issues #36, #37,
   2026-09-25).** `dataset_split_hex_v3`: `int(trajectory_id)` warf fuer `inf` einen rohen
   `OverflowError` und schnitt nicht-ganzzahlige IDs still ab (1.5 und 1.7 → Gruppe 1, zwei
@@ -75,6 +86,15 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   `resume_utils_hex_v3.py` werfen fuer `float('inf')` einen rohen `OverflowError` statt eines
   Vertrags-Fehlers. Schleifenzaehler, kein Datensatz-Metadatum; kein Zustand wird vorher
   veraendert. _Quelle: `results/2026-09-25_issues36-37_local-gate.log` [6/6]._
+- [ ] **Nachbarn im Split-Modul (P3, bewusst nicht in #39).** (a) `group_by_dt=True`
+  schluesselt nach exaktem `dt`: mischt eine Trajektorie `0.1` (float) und `tensor(0.1)`
+  (float32 -> 0.10000000149...), zerfaellt sie in zwei Gruppen und landet in beiden Splits
+  (gemessen 41/50 Seeds; mit `dt_round_ndigits=6` 0/50). Das ist dieselbe Mechanik wie
+  `test_group_by_dt_separates_dt_variants` (mehrere `dt` je Trajektorie = gewollt getrennt) und
+  widerspricht dem Modul-Docstring "No trajectory appears in both" - Produktentscheid offen.
+  (b) `_normalize_dt_value`: `round(dt, negative ndigits)` nahe binary64-Max wirft rohen
+  `OverflowError`; `dt_round_ndigits` wird nicht validiert (1.5 -> roher `TypeError`).
+  _Quelle: `results/2026-09-26_issue39_local-gate.log` [5/5]._
 
 ## Zurueckgestellt (bewusst, mit Begruendung)
 

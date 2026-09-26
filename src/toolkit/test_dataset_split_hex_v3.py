@@ -9,12 +9,14 @@ subset wrapper.
 """
 from __future__ import annotations
 
+import random
 import sys
 import unittest
 from decimal import Decimal
 from fractions import Fraction
 from typing import Any, Dict, List
 
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 
@@ -235,6 +237,116 @@ class TestSplitValidation(unittest.TestCase):
         train, val = split_dataset_by_trajectory(ds, val_fraction=0.5, seed=0)
         self.assertEqual(len(train) + len(val), 2)
 
+    # --- dt finiteness contract (issue #39) ---
+
+    DT_NON_FINITE_MESSAGE = r"^Sample 'dt' must be finite, got "
+
+    # Each factory returns a FRESH object per call. Python compares tuple
+    # members by identity first, so one shared nan object still forms a
+    # single group and hides the bug; real metadata (tensor.item(),
+    # arithmetic, deserialization) yields a new nan per sample, and
+    # nan != nan then made every sample its own group (the #39 leak).
+    NON_FINITE_DT_FACTORIES = (
+        ("nan", lambda: float("nan")),
+        ("+inf", lambda: float("inf")),
+        ("-inf", lambda: float("-inf")),
+        ("tensor nan", lambda: torch.tensor(float("nan"))),
+        ("tensor +inf", lambda: torch.tensor(float("inf"))),
+        ("float64 tensor -inf", lambda: torch.tensor(float("-inf"), dtype=torch.float64)),
+        ("numpy float64 nan", lambda: np.float64("nan")),
+    )
+
+    def _assert_dt_contract_error(self, ds: Dataset, **kwargs: Any) -> None:
+        # Capture any exception and check its exact type; before the fix the
+        # split succeeded, so "not raised" is the pre-fix assertion failure.
+        with self.assertRaises(Exception) as ctx:
+            split_dataset_by_trajectory(
+                ds, val_fraction=0.5, seed=0, group_by_dt=True, **kwargs
+            )
+        exc = ctx.exception
+        self.assertIs(
+            type(exc),
+            ValueError,
+            f"expected ValueError, got {type(exc).__name__}: {exc}",
+        )
+        self.assertRegex(str(exc), self.DT_NON_FINITE_MESSAGE)
+
+    def test_non_finite_dt_raises_value_error(self) -> None:
+        for label, make_dt in self.NON_FINITE_DT_FACTORIES:
+            for ndigits in (None, 6):
+                with self.subTest(dt=label, dt_round_ndigits=ndigits):
+                    ds = FakeTrajectoryDataset(
+                        [
+                            {"trajectory_id": tid, "dt": make_dt(), "step": s}
+                            for tid in range(3)
+                            for s in range(3)
+                        ]
+                    )
+                    self._assert_dt_contract_error(ds, dt_round_ndigits=ndigits)
+
+    def test_single_non_finite_dt_in_valid_trajectory_raises(self) -> None:
+        # One bad sample inside an otherwise valid trajectory formerly became
+        # an extra group of that trajectory. Positions: first, middle, last.
+        for label, make_dt in self.NON_FINITE_DT_FACTORIES:
+            for bad_index in (0, 4, 8):
+                with self.subTest(dt=label, bad_index=bad_index):
+                    samples = [
+                        {"trajectory_id": tid, "dt": 0.1, "step": s}
+                        for tid in range(3)
+                        for s in range(3)
+                    ]
+                    samples[bad_index]["dt"] = make_dt()
+                    ds = FakeTrajectoryDataset(samples)
+                    self._assert_dt_contract_error(ds)
+
+    def test_non_finite_dt_raises_in_summary(self) -> None:
+        # summarize_group_split groups through the same path; with fresh nan
+        # objects it formerly reported zero overlap for a leaking split.
+        ds = FakeTrajectoryDataset(
+            [
+                {"trajectory_id": tid, "dt": float("nan"), "step": s}
+                for tid in range(2)
+                for s in range(2)
+            ]
+        )
+        train, val = split_dataset_by_trajectory(ds, val_fraction=0.5, seed=0)
+        with self.assertRaises(ValueError) as ctx:
+            summarize_group_split(train, val, group_by_dt=True)
+        self.assertRegex(str(ctx.exception), self.DT_NON_FINITE_MESSAGE)
+
+    def test_non_finite_dt_is_ignored_without_group_by_dt(self) -> None:
+        # Same scope as the 10**400 case above: dt is read only when it is
+        # part of the group key.
+        ds = FakeTrajectoryDataset(
+            [
+                {"trajectory_id": 0, "dt": float("nan")},
+                {"trajectory_id": 1, "dt": float("inf")},
+            ]
+        )
+        train, val = split_dataset_by_trajectory(ds, val_fraction=0.5, seed=0)
+        self.assertEqual(len(train) + len(val), 2)
+
+    def test_finite_zero_and_negative_dt_are_valid_group_keys(self) -> None:
+        # The splitter uses dt only as a group key; sign and zero are not
+        # its contract. Signed zeros compare and hash equal -> one group.
+        for dt_values in ((0.0, -0.0), (-0.05, -0.05), (5e-324, 5e-324)):
+            with self.subTest(dt=dt_values):
+                ds = FakeTrajectoryDataset(
+                    [
+                        {"trajectory_id": 0, "dt": dt_values[0]},
+                        {"trajectory_id": 0, "dt": dt_values[1]},
+                        {"trajectory_id": 1, "dt": dt_values[0]},
+                    ]
+                )
+                train, val = split_dataset_by_trajectory(
+                    ds, val_fraction=0.5, seed=0, group_by_dt=True
+                )
+                self.assertEqual(
+                    {s["trajectory_id"] for s in train.samples}
+                    & {s["trajectory_id"] for s in val.samples},
+                    set(),
+                )
+
     # --- trajectory_id contract (issue #36) ---
 
     TRAJECTORY_ID_MESSAGE = r"^Sample 'trajectory_id' must be a finite integer, got "
@@ -335,6 +447,57 @@ class TestSplitBehavior(unittest.TestCase):
         self.assertEqual(
             self._trajectory_ids(train) & self._trajectory_ids(val), set()
         )
+
+    def test_no_trajectory_leakage_invariant_across_seeds(self) -> None:
+        # Invariant (module docstring): no trajectory_id in both train and
+        # val, and train/val partition all indices. Checked for both
+        # grouping modes, with and without rounding, over 50 seeded random
+        # datasets with ONE finite dt per trajectory (zero, signed zero,
+        # negative, subnormal and huge included; float and float64-tensor
+        # values, fresh objects per sample). Several dt values inside one
+        # trajectory are split by design under group_by_dt (see
+        # test_group_by_dt_separates_dt_variants) and are not covered here.
+        dt_pool = (0.1, 0.2, 1e-3, 0.0, -0.05, 1e300, 5e-324)
+        for seed in range(50):
+            rng = random.Random(seed)
+            samples: List[Dict[str, Any]] = []
+            for tid in range(rng.randint(2, 12)):
+                dt = rng.choice(dt_pool)
+                for step in range(rng.randint(1, 5)):
+                    value: Any = -dt if (dt == 0.0 and step % 2) else float(dt)
+                    if rng.random() < 0.5:
+                        value = torch.tensor(value, dtype=torch.float64)
+                    samples.append({"trajectory_id": tid, "dt": value, "step": step})
+            ds = FakeTrajectoryDataset(samples)
+            val_fraction = rng.choice((0.1, 0.25, 0.5))
+            for group_by_dt in (False, True):
+                for ndigits in (None, 6):
+                    with self.subTest(
+                        seed=seed, group_by_dt=group_by_dt, dt_round_ndigits=ndigits
+                    ):
+                        train, val = split_dataset_by_trajectory(
+                            ds,
+                            val_fraction=val_fraction,
+                            seed=seed,
+                            group_by_dt=group_by_dt,
+                            dt_round_ndigits=ndigits,
+                        )
+                        self.assertEqual(
+                            self._trajectory_ids(train) & self._trajectory_ids(val),
+                            set(),
+                        )
+                        train_idx = set(train.sample_indices)
+                        val_idx = set(val.sample_indices)
+                        self.assertEqual(train_idx & val_idx, set())
+                        self.assertEqual(train_idx | val_idx, set(range(len(ds))))
+                        summary = summarize_group_split(
+                            train,
+                            val,
+                            group_by_dt=group_by_dt,
+                            dt_round_ndigits=ndigits,
+                        )
+                        self.assertEqual(summary["overlap_trajectory_ids"], [])
+                        self.assertEqual(summary["num_overlap_groups"], 0)
 
     def test_partition_is_complete_and_disjoint(self) -> None:
         ds = make_dataset(10, samples_per_trajectory=4)
