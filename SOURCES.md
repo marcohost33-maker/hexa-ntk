@@ -232,3 +232,14 @@
 | 73FD547141374BD6 | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 hardening: HEXAROUTER_V05_CONTRACT.md |
 | 1BACA0A08D6DA78D | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 hardening: hexarouter_v05.py |
 | 06F58828AC55A203 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 hardening tests: test_hexarouter_v05.py |
+
+
+## spec/ + src/toolkit/ — HexaRouter/HCM v0.5 audit-identity hardening 2026-09-27
+
+> Decision identity now binds the static registry fingerprint and the dynamic
+> eligible-candidate evidence snapshot (policy version, validator, reliability,
+> runtime freshness/latency/load). Prior v0.5 rows remain append-only lineage.
+
+| BEFC638F9AA7AAB1 | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 audit identity: HEXAROUTER_V05_CONTRACT.md |
+| 0DCF6B8969BB5076 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 audit identity: hexarouter_v05.py |
+| EC0F79DF985D38A9 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 audit identity tests: test_hexarouter_v05.py |
