@@ -22,9 +22,14 @@ vorbereitet ist. Der Engine-Header sagt das woertlich:
 > the rest of our infrastructure (dataset split, checkpoint semantics, OperatorAdapter) is
 > GAOT-ready." — `src/hexantk_v3.py:717-720`
 
-Hex-spezifisch im engeren Sinn sind zwei verifizierte Formeln:
-`hex_laplacian_stencil_weight` (7-Punkt-FV-Gewicht `2/(3h^2)`, `src/hexantk_v3.py:562`)
-und `hex_cfl_max_dt` (Stabilitaets-Schranke `dt <= h^2/(3 D)`, `src/hexantk_v3.py:578`).
+Hex-spezifisch im engeren Sinn sind drei getrennte numerische Aussagen implementiert:
+`hex_laplacian_stencil_weight` (7-Punkt-FV-Gewicht `2/(3h^2)`),
+`hex_cfl_max_dt` (scharfe spektrale/L2-Forward-Euler-Grenze
+`dt <= h^2/(3 D)`) und `hex_positivity_max_dt` (scharfe
+Positivitaets-/DMP-/Monotonie-Grenze dieses regulaeren linearen Schemas
+`dt <= h^2/(4 D)`). Der historische `hex_cfl_max_dt`-Default
+`safety=0.85` bleibt aus Kompatibilitaetsgruenden erhalten, ist aber fuer
+nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 
 ## Was das ausdruecklich NICHT ist
 
