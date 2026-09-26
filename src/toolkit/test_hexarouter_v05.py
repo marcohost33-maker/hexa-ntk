@@ -183,6 +183,7 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(decision.status, "ROUTE")
         self.assertEqual(decision.provider_id, "a")
         self.assertEqual(decision.policy_version, "hexrouter.lexicographic.v1")
+        self.assertEqual(len(decision.registry_fingerprint), 64)
         self.assertEqual(decision.eligible_count, 2)
         self.assertEqual(len(decision.eligible_snapshot), 2)
 
@@ -403,6 +404,11 @@ class PlannerTests(unittest.TestCase):
         p1 = provider("a", code_sha="sha-a")
         p2 = provider("b", code_sha="sha-b")
         planner = DeterministicPlanner([CAP], [p2, p1])
+        planner_reordered = DeterministicPlanner([CAP], [p1, p2])
+        self.assertEqual(
+            planner.registry_fingerprint,
+            planner_reordered.registry_fingerprint,
+        )
         decision = planner.plan(
             task(),
             runtime={
