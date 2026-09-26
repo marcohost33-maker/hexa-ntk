@@ -13,7 +13,7 @@ import math
 import sqlite3
 from collections import deque
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Sequence
 
