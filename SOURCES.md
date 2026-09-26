@@ -193,3 +193,15 @@
 | BC73D943B9725297 | 2026-09-25 22:26 | src/toolkit | in-repo derived, #37 non-finite validation metric skip: runner_hex_v3.py |
 | 9D4C04AE428D1952 | 2026-09-25 22:26 | src/toolkit | in-repo derived, #37 runner regressions: test_runner_hex_v3.py |
 | 6D2F401A0C197440 | 2026-09-25 22:26 | src/toolkit | in-repo derived, #37 NaN_or_Inf_Metric kind documented: failure_signature_hex_v3.py |
+
+## src/toolkit/ — dt finiteness contract 2026-09-26 (append-only, issue #39)
+
+> #39: with group_by_dt=True a non-finite dt became part of the group key;
+> nan != nan, so every sample with a fresh nan formed its own group and one
+> trajectory could land in both train and val (reproduced 50/50 seeds).
+> _extract_dt_value now raises the contract ValueError for nan/inf/-inf
+> (float incl. numpy float64, scalar tensor) before the key is grouped; dt is
+> still read only under group_by_dt. Prior rows remain lineage.
+
+| 626F935200206F98 | 2026-09-26 11:23 | src/toolkit | in-repo derived, #39 dt finiteness contract: dataset_split_hex_v3.py |
+| 8860CF78DF346255 | 2026-09-26 11:23 | src/toolkit | in-repo derived, #39 non-finite dt regressions + leakage invariant: test_dataset_split_hex_v3.py |

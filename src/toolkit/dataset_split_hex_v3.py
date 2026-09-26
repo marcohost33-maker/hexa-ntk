@@ -24,6 +24,7 @@ __all__ = [
     "summarize_group_split",
 ]
 
+import math
 import numbers
 import random
 from dataclasses import dataclass
@@ -114,6 +115,13 @@ class SampleSubsetDataset(Dataset):
 
 
 def _extract_dt_value(sample: Mapping[str, Any]) -> Optional[float]:
+    """Return ``sample["dt"]`` as a finite float, None if absent, or raise.
+
+    A non-finite dt is a contract violation (#39): nan != nan, so every
+    sample with a fresh nan formed its own (trajectory_id, dt) group and one
+    trajectory could land in both train and val. inf/-inf are rejected by
+    the same rule. The check runs per sample, before the key is grouped.
+    """
     if "dt" not in sample:
         return None
 
@@ -123,16 +131,19 @@ def _extract_dt_value(sample: Mapping[str, Any]) -> Optional[float]:
         # An int beyond binary64 range (10**400) raises OverflowError here;
         # report it as an invalid value rather than an arithmetic crash.
         try:
-            return float(dt)
+            value = float(dt)
         except OverflowError as exc:
             raise ValueError("Sample 'dt' must fit in a finite float") from exc
-
-    if torch.is_tensor(dt):
+    elif torch.is_tensor(dt):
         if dt.numel() != 1:
             raise ValueError("Sample 'dt' tensor must be scalar-like")
-        return float(dt.item())
+        value = float(dt.item())
+    else:
+        raise TypeError(f"Unsupported dt type: {type(dt)}")
 
-    raise TypeError(f"Unsupported dt type: {type(dt)}")
+    if not math.isfinite(value):
+        raise ValueError(f"Sample 'dt' must be finite, got {value!r}")
+    return value
 
 
 def _normalize_dt_value(
