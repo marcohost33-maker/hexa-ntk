@@ -1,0 +1,78 @@
+==================================================================
+HexaNTK Gate-Run -- Issue #39 (non-finite dt under group_by_dt)
+Datum:    2026-09-26
+Branch:   fix/issue39-nan-dt-leakage
+Basis:    origin/main cdb81b2 (Merge PR #38)
+Rot:      d083d8c test(dataset_split): regressions for non-finite dt ... (#39)
+Fix:      08916da fix(dataset_split): reject non-finite dt before grouping (#39)
+Umgebung: Windows 11 | Python 3.12.10 | torch 2.6.0+cpu (CPU-Index wie CI) |
+          numpy 2.5.3 | ruff 0.16.4 | coverage 7.15.4 (Pins aus requirements-dev.txt)
+Scope:    lokaler Lauf (Windows). CI-Beleg folgt separat nach dem Push.
+          2 Symlink-Tests skippen unter Windows (WinError 1314), wie auf main.
+==================================================================
+
+### [0/5] Baseline vor jeder Aenderung (origin/main cdb81b2) ###
+python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+Ran 269 tests -- OK (skipped=2) | coverage TOTAL 83%, dataset_split_hex_v3 95% (fail_under 79)
+Repro (4 Trajektorien x 3 Samples, val_fraction 0.25, group_by_dt=True, Seeds 0..49):
+  frisches NaN je Sample (float / tensor / numpy float64)   Leak 50/50 je Variante
+  EIN geteiltes NaN-Objekt fuer alle Samples               Leak  0/50 (Identitaet im Tupel)
+  einzelnes NaN in sonst gueltiger Trajektorie             Leak 16/50
+  +inf / -inf ueberall                                     Leak  0/50, aber still akzeptiert
+  Kontrolle dt=0.1                                         Leak  0/50
+
+### [1/5] Rot-Lauf: neue Tests gegen unveraenderten Code (Commit d083d8c) ###
+python -m unittest test_dataset_split_hex_v3   (cwd src/toolkit)
+Ran 47 tests -- FAILED (failures=36), 0 errors (Assertion-rot, kein Absturz)
+  test_non_finite_dt_raises_value_error                  14 Untertests (7 Werte x Rundung an/aus)
+  test_single_non_finite_dt_in_valid_trajectory_raises   21 Untertests (7 Werte x Position 0/4/8)
+  test_non_finite_dt_raises_in_summary                    1
+Schon vor dem Fix gruen (Invarianten/Doku): Leakage-Invariante 50 Seeds x
+group_by_dt an/aus x Rundung an/aus; nan/inf ohne group_by_dt ignoriert;
+dt 0.0/-0.0/-0.05/5e-324 als gueltige Gruppenschluessel.
+
+### [2/5] Gruen-Lauf + CI-Kette nach Fix (Commit 08916da) ###
+ruff check src scripts                          All checks passed!  exit 0
+python -m compileall src                        exit 0
+python scripts/verify_sources.py                20 Toolkit + 2 Spec | PASS  exit 0
+python scripts/engine_gate.py                   doctests 47/47 | selftests_ok=True | PASS  exit 0
+python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" -v
+                                                Ran 275 tests -- OK (skipped=2)  exit 0
+python -m coverage report                       TOTAL 83%, dataset_split_hex_v3 95%  exit 0
+Repro nach Fix: jede nicht-endliche Variante 50/50 ValueError, Leak 0/50;
+Kontrolle dt=0.1 unveraendert 0 Fehler, 0 Leaks.
+
+### [3/5] Diskriminierung (Vero Tools/diskriminierung.py, Laeufer unittest) ###
+Spec spec_disk_main.json (sha256 34d6e1af3ceb...), HEAD 08916da, provenienz VOLL
+F1 Guard aus -> test_non_finite_dt_raises_value_error              DISKRIMINIERT
+F2 Guard aus -> test_single_non_finite_dt_in_valid_trajectory_raises DISKRIMINIERT
+F3 Guard aus -> test_non_finite_dt_raises_in_summary               DISKRIMINIERT
+F4 Guard nur NaN (inf passiert) -> test_non_finite_dt_raises_value_error DISKRIMINIERT
+F5 Guard nur inf (NaN passiert) -> test_non_finite_dt_raises_value_error DISKRIMINIERT
+F6 Guard nur inf -> test_single_non_finite_dt_in_valid_trajectory_raises DISKRIMINIERT
+F7 falsche Meldung -> Vertrags-Regex                                DISKRIMINIERT
+P1 Positivkontrolle #36 Ganzzahl-Guard aus -> bestehender #36-Test  DISKRIMINIERT
+Lauf DK-20260926T093256-4bcc5e1c52d8: 8/8.
+Vorlauf DK-20260926T092931-4a16c58b643f: 7/8, F1 "ROT (Art unbestimmt)" -- rot,
+aber ohne lesbare Zusicherungs-Marke. Derselbe Mutant 15/15 manuell: exit 1,
+14 AssertionError, identische Ausgabe. Ursache des Einzelausreissers nicht
+ermittelt (das Werkzeug speichert die Ausgabe nicht).
+Negativkontrolle spec_disk_negkontrolle.json, Lauf DK-20260926T093500-d6c490b04f81:
+N1 Guard aus -> Leakage-Invariante (nur endliche dt)   BLIND (erwartet)
+N2 Guard aus -> nan/inf ohne group_by_dt ignoriert      BLIND (erwartet)
+
+### [4/5] Warum die Tests frische NaN-Objekte erzeugen ###
+Tupel-Vergleich prueft Identitaet vor Gleichheit, und hash(nan) haengt ab
+Python 3.10 an der Objekt-Identitaet. Ein Test mit EINEM geteilten NaN-Objekt
+bildet deshalb weiterhin eine Gruppe und haette das Leck verdeckt ([0/5]).
+
+### [5/5] Nachbarn im selben Modul (bewusst NICHT geaendert) ###
+(a) group_by_dt=True schluesselt nach exaktem dt. Trajektorie mit 0.1 (float)
+    und tensor(0.1) (float32) -> zwei Gruppen, Leak 41/50 Seeds; mit
+    dt_round_ndigits=6 0/50. Gleiche Mechanik wie der bestehende Test
+    test_group_by_dt_separates_dt_variants (mehrere dt je Trajektorie werden
+    gewollt getrennt) -- widerspricht aber dem Modul-Docstring. Produktentscheid.
+(b) _normalize_dt_value: round(1.7976931348623157e308, -308) -> roher
+    OverflowError; dt_round_ndigits=1.5 -> roher TypeError (nicht validiert).
+(c) Sortierschluessel im Shuffle-Pfad (g.dt direkt): mit NaN nicht total
+    geordnet -- nach dem Fix unerreichbar, keine Aenderung noetig.
