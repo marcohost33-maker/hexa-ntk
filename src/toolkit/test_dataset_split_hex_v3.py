@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import sys
 import unittest
+from decimal import Decimal
+from fractions import Fraction
 from typing import Any, Dict, List
 
 import torch
@@ -232,6 +234,90 @@ class TestSplitValidation(unittest.TestCase):
         )
         train, val = split_dataset_by_trajectory(ds, val_fraction=0.5, seed=0)
         self.assertEqual(len(train) + len(val), 2)
+
+    # --- trajectory_id contract (issue #36) ---
+
+    TRAJECTORY_ID_MESSAGE = r"^Sample 'trajectory_id' must be a finite integer, got "
+
+    def _split_with_trajectory_id(self, trajectory_id: Any) -> None:
+        ds = FakeTrajectoryDataset(
+            [
+                {"trajectory_id": trajectory_id, "dt": 0.1},
+                {"trajectory_id": 1, "dt": 0.1},
+            ]
+        )
+        split_dataset_by_trajectory(ds, val_fraction=0.5, seed=0)
+
+    def test_non_finite_trajectory_id_raises_value_error(self) -> None:
+        # int(inf) raises OverflowError, int(nan) ValueError with an
+        # unrelated message; both must surface as the contract ValueError.
+        cases = [
+            (float("inf"), OverflowError),
+            (float("-inf"), OverflowError),
+            (float("nan"), ValueError),
+            (torch.tensor(float("inf")), OverflowError),
+            (Decimal("Infinity"), OverflowError),
+            (Decimal("NaN"), ValueError),
+        ]
+        for trajectory_id, cause_type in cases:
+            with self.subTest(trajectory_id=repr(trajectory_id)):
+                # Capture any exception and check its exact type, so the
+                # pre-fix OverflowError is an assertion failure.
+                with self.assertRaises(Exception) as ctx:
+                    self._split_with_trajectory_id(trajectory_id)
+                exc = ctx.exception
+                self.assertIs(
+                    type(exc),
+                    ValueError,
+                    f"expected ValueError, got {type(exc).__name__}: {exc}",
+                )
+                self.assertRegex(str(exc), self.TRAJECTORY_ID_MESSAGE)
+                self.assertIsInstance(exc.__cause__, cause_type)
+
+    def test_non_integral_trajectory_id_raises_value_error(self) -> None:
+        # Formerly int() truncated silently: 1.5 and 1.7 both became group 1,
+        # merging two distinct trajectories into one split group.
+        for trajectory_id in (
+            1.5,
+            -0.5,
+            torch.tensor(1.5),
+            Fraction(3, 2),
+            Decimal("1.5"),
+        ):
+            with self.subTest(trajectory_id=repr(trajectory_id)):
+                with self.assertRaises(ValueError) as ctx:
+                    self._split_with_trajectory_id(trajectory_id)
+                self.assertRegex(str(ctx.exception), self.TRAJECTORY_ID_MESSAGE)
+
+    def test_non_scalar_trajectory_id_tensor(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            self._split_with_trajectory_id(torch.tensor([0, 1]))
+        self.assertEqual(
+            str(ctx.exception), "Sample 'trajectory_id' tensor must be scalar-like"
+        )
+
+    def test_integral_trajectory_ids_keep_their_group_key(self) -> None:
+        # Differential against the pre-fix int() path: every accepted value
+        # must yield exactly the key int() produced before.
+        for trajectory_id, expected in (
+            (7, 7),
+            (-3, -3),
+            (7.0, 7),
+            (-0.0, 0),
+            (1e300, int(1e300)),
+            (10**400, 10**400),
+            (Fraction(14, 2), 7),
+            (Decimal("7"), 7),
+            (torch.tensor(7), 7),
+            (torch.tensor(7.0), 7),
+            ("7", 7),
+        ):
+            with self.subTest(trajectory_id=repr(trajectory_id)):
+                key = dataset_split._extract_group_key(
+                    {"trajectory_id": trajectory_id}, group_by_dt=False
+                )
+                self.assertEqual(key.trajectory_id, expected)
+                self.assertIs(type(key.trajectory_id), int)
 
 
 # ------------------------------------------------------------------

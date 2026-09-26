@@ -173,3 +173,23 @@
 > remain lineage.
 
 | EE8D734CA0F9567A | 2026-09-25 12:22 | src/toolkit | in-repo derived, PR #35 P3-2 metadata cause assert: test_stress_hex_v3.py |
+
+## src/toolkit/ — trajectory_id and best-metric contracts 2026-09-25 (append-only, issues #36 #37)
+
+> #36: int(trajectory_id) raised a raw OverflowError for inf and silently
+> truncated non-integral reals (1.5 -> group 1); _extract_trajectory_id now
+> raises the contract ValueError (from exc) and keeps every exact integer key.
+> #37: save_best_model_checkpoint validated the metric after changing state and
+> promoted NaN as best; the metric is now checked first (NaN/inf/10**400 ->
+> ValueError), best_metric_value is committed only after the write succeeds,
+> and the runner skips a NaN/inf validation metric with a FailureSignature
+> (kind NaN_or_Inf_Metric, documented in failure_signature). Prior rows remain
+> lineage.
+
+| F30EF2CE260AA5E1 | 2026-09-25 22:26 | src/toolkit | in-repo derived, #36 trajectory_id finite-integer contract: dataset_split_hex_v3.py |
+| 8292860F737550D6 | 2026-09-25 22:26 | src/toolkit | in-repo derived, #36 trajectory_id regressions: test_dataset_split_hex_v3.py |
+| CB266B033EDD716A | 2026-09-25 22:26 | src/toolkit | in-repo derived, #37 validate-write-commit best metric: checkpoint_integration_hex_v3.py |
+| 133BD71D42FCAEB3 | 2026-09-25 22:26 | src/toolkit | in-repo derived, #37 best-metric regressions: test_checkpoint_integration_hex_v3.py |
+| BC73D943B9725297 | 2026-09-25 22:26 | src/toolkit | in-repo derived, #37 non-finite validation metric skip: runner_hex_v3.py |
+| 9D4C04AE428D1952 | 2026-09-25 22:26 | src/toolkit | in-repo derived, #37 runner regressions: test_runner_hex_v3.py |
+| 6D2F401A0C197440 | 2026-09-25 22:26 | src/toolkit | in-repo derived, #37 NaN_or_Inf_Metric kind documented: failure_signature_hex_v3.py |

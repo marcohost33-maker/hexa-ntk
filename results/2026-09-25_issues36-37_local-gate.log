@@ -1,0 +1,86 @@
+==================================================================
+HexaNTK Gate-Run -- Issues #36 (trajectory_id) + #37 (best-metric state)
+Datum:    2026-09-25
+Branch:   claude/hexantk-next-steps-evu5s1
+Basis:    origin/main e16d89f (Merge PR #35)
+Rot:      6929097 test(toolkit): Regressionstests ... (rot, #36 #37)
+Fix:      ff4041c fix(toolkit): trajectory_id- und Best-Metrik-Vertrag (#36, #37)
+Umgebung: Python 3.12.3 | torch 2.6.0+cu124 (PyPI-Wheel, CPU-Ausfuehrung;
+          download.pytorch.org ist in dieser Umgebung per Netzwerk-Policy
+          gesperrt, CI nutzt das CPU-Wheel 2.6.0) | numpy 2.5.3 |
+          ruff 0.16.4 | coverage 7.15.4 (Pins aus requirements-dev.txt)
+Scope:    lokaler Lauf (Linux). CI-Beleg folgt separat nach dem Push.
+==================================================================
+
+### [0/6] Baseline vor jeder Aenderung (origin/main e16d89f) ###
+ruff: All checks passed! (exit 0) | compileall: exit 0
+[VERIFY-SOURCES] 20 Toolkit-Eintraege + 2 Spec-Eintraege | Dateiliste: git (22 Dateien) | PASS
+[ENGINE-GATE] doctests 47/47 | selftests_ok=True | overall=PASS
+Ran 255 tests -- OK | coverage TOTAL 83% (fail_under 79)
+
+### [1/6] Rot-Lauf: neue Tests gegen unveraenderten Code (Commit 6929097) ###
+python -m unittest test_dataset_split_hex_v3.TestSplitValidation \
+  test_checkpoint_integration_hex_v3.TestBestMetricContract \
+  test_runner_hex_v3.TestNonFiniteValidationMetric
+Ran 25 tests -- FAILED (failures=33), 0 errors (Assertion-rot, kein Absturz)
+  #36: inf/-inf/nan/tensor(inf)/Decimal(Infinity|NaN) -> falscher Typ bzw. Text
+       1.5/-0.5/tensor(1.5)/Fraction(3,2)/Decimal(1.5) -> still abgeschnitten
+       tensor([0,1]) -> falsche Meldung
+  #37: NaN/+-inf/tensor(nan) in min und max -> saved=True statt ValueError
+       NaN zuerst -> spaeteres 1.0 nicht mehr gespeichert (NaN blockiert)
+       10**400 / Fraction(10**400) (mode=max) -> roher OverflowError, Bestwert verschoben
+       epoch=None / OSError im Write -> Bestwert trotzdem verschoben
+       Nicht-Main-Rank: NaN als Bestwert uebernommen
+       Runner: NaN/+-inf Val-Metrik -> als Best gespeichert
+Kontrollen schon vor dem Fix gruen: Differential gueltiger trajectory_ids
+(11 Faelle), gueltige Metrik 0.25.
+
+### [2/6] Gruen-Lauf nach Fix (Commit ff4041c) ###
+dieselben Klassen: Ran 25 tests -- OK (vor Ergaenzung M8/M10)
+nach Ergaenzung (Stand ff4041c): Ran 26 tests -- OK
+
+### [3/6] Mutationsprobe (je Mutant: dieselben drei Testklassen) ###
+M1  trajectory: from exc -> from None                 FAILED (failures=6)   getoetet
+M2  trajectory: Ganzzahligkeitspruefung aus           FAILED (failures=5)   getoetet
+M3  trajectory: NaN nicht umhuellt                    FAILED (failures=2)   getoetet
+M4  trajectory: Tensor-Skalarpruefung aus             FAILED (errors=1)     getoetet
+M5  ckpt: isfinite-Pruefung aus                       FAILED (failures=10)  getoetet
+M6  ckpt: from exc -> from None                       FAILED (failures=2)   getoetet
+M7a ckpt: Commit nach Write entfernt                  FAILED (failures=10)  getoetet
+M7b ckpt: Commit vor den Write verschoben             FAILED (failures=1)   getoetet
+M8  ckpt: Nicht-Main-Rank fuehrt Bestwert nicht mehr  zuerst OK (ueberlebt) -> Test ergaenzt -> FAILED (failures=1)
+M9  runner: Guard aus                                 FAILED (errors=4)     getoetet
+M10 runner: unbeurteilbar -> ueberspringen            zuerst OK (ueberlebt) -> Test ergaenzt -> FAILED (failures=1)
+Ergebnis: 11/11 getoetet (2 erst nach Testergaenzung; beide Ergaenzungen in ff4041c).
+
+### [4/6] Differential alt (origin/main) vs neu ueber gueltige Eingaben ###
+Checkpoint: 400 Zufallssequenzen (Seed 20260925), je Sequenz ein Typ
+(float|int|Fraction|Tensor), mode min/max, min_delta {0, 0.01, 0.5},
+is_main_process 80/20 -> 1783 save_best-Aufrufe, 660 gespeichert.
+Split: 200 Zufallsdatensaetze (IDs int|ganzzahliger float|Tensor, group_by_dt an/aus).
+Ergebnis: 600/600 Faelle bitgleich (saved, reason, best_metric_value; Split-Indizes).
+Nebenbefund: mit gemischten Typen innerhalb einer Sequenz wirft der ALTE Code
+TypeError ('>' zwischen Fraction und Tensor), weil best_metric_value das rohe
+Objekt speicherte; der neue speichert den validierten float.
+
+### [5/6] Volle Gate-Kette nach Fix + SOURCES-Pins ###
+ruff check src scripts: All checks passed! (exit 0)
+python -m compileall src: exit 0
+[VERIFY-SOURCES] 20 Toolkit-Eintraege + 2 Spec-Eintraege | Dateiliste: git (22 Dateien) | PASS
+[ENGINE-GATE] doctests 47/47 | selftests_ok=True | overall=PASS
+Ran 269 tests -- OK
+coverage (Branch):
+  checkpoint_integration_hex_v3.py  89% -> 90%
+  dataset_split_hex_v3.py           95% -> 95%
+  runner_hex_v3.py                  79% -> 80%
+  TOTAL                             83% -> 83% (fail_under 79, exit 0)
+SOURCES.md: 7 Zeilen angehaengt, 0 Zeilen entfernt (git diff origin/main).
+
+### [6/6] Nachbarschaft der Fehlerklasse (gelesen, bewusst NICHT geaendert) ###
+int(epoch) / int(global_step) in checkpoint_integration_hex_v3.py (save_last,
+save_resume) und resume_utils_hex_v3.py werfen fuer float('inf') weiterhin
+einen rohen OverflowError. Schleifenzaehler, kein Datensatz-Metadatum; kein
+Zustand wird vorher veraendert. Als offener Punkt in docs/ROADMAP.md gefuehrt.
+
+Claim ceiling: Software-Integritaet (Eingabevertrag, Zustandsreihenfolge).
+Kein Physik- oder Trainingsergebnis.

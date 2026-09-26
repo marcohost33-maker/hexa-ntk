@@ -28,6 +28,7 @@ __all__ = [
 ]
 
 import logging
+import math
 import os
 import tempfile
 from dataclasses import asdict, dataclass
@@ -49,6 +50,19 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 # Best-model policy
 # ------------------------------------------------------------------
+
+
+def _finite_metric_value(value: Any) -> float:
+    """Return ``value`` as a finite float, or raise ValueError."""
+    message = f"metric_value must be a finite real number, got {value!r}"
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        # Exact Reals beyond binary64 range (10**400, Fraction(10**400)).
+        raise ValueError(message) from exc
+    if not math.isfinite(result):
+        raise ValueError(message)
+    return result
 
 
 @dataclass
@@ -272,8 +286,14 @@ class CheckpointIntegrationManager:
         Save a best-model checkpoint if the metric has improved.
 
         Returns a report dict with saved=True/False.
+
+        Raises ValueError (before any state change) if ``metric_value`` is not
+        a finite real number: NaN compares False against everything, so a NaN
+        best value would block every later improvement. ``best_metric_value``
+        is committed only after the checkpoint write succeeded.
         """
-        improved = self.best_policy.is_improved(metric_value, self.best_metric_value)
+        metric = _finite_metric_value(metric_value)
+        improved = self.best_policy.is_improved(metric, self.best_metric_value)
 
         if not improved:
             return {
@@ -286,26 +306,26 @@ class CheckpointIntegrationManager:
                 "path": self.best_model_path,
             }
 
-        if not self.is_main_process:
-            self.best_metric_value = metric_value
-            return {
-                "saved": False,
-                "reason": "not_main_process",
-                "checkpoint_semantics": "best_model",
-                "metric_value": metric_value,
-            }
-
-        self.best_metric_value = metric_value
-
+        # Build (and thereby validate) the payload on every rank before any
+        # state change, so all DDP ranks accept or reject the same inputs.
         payload_extra = {
             "metric_name": metric_name,
-            "metric_value": float(metric_value),
+            "metric_value": metric,
             "epoch": int(epoch),
             "global_step": int(global_step) if global_step is not None else None,
             "best_policy": asdict(self.best_policy),
         }
         if extra is not None:
             payload_extra["user_extra"] = extra
+
+        if not self.is_main_process:
+            self.best_metric_value = metric
+            return {
+                "saved": False,
+                "reason": "not_main_process",
+                "checkpoint_semantics": "best_model",
+                "metric_value": metric_value,
+            }
 
         AtomicCheckpointWriter.save_model_state_dict_atomic(
             self.best_model_path,
@@ -314,6 +334,9 @@ class CheckpointIntegrationManager:
             ema_model_state=ema_model_state,
             checkpoint_type="best_model",
         )
+        # Commit only after the durable write: a failed save must not move
+        # the best value, or the same improvement would never be saved.
+        self.best_metric_value = metric
 
         return {
             "saved": True,

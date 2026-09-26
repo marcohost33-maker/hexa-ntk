@@ -38,6 +38,7 @@ class FailureSignature:
     kind :
         Failure category. Canonical values:
         - "NaN_or_Inf_Loss"
+        - "NaN_or_Inf_Metric" (validation metric; best checkpoint skipped)
         - "Loss_Spike"
         - "CUDA_OOM"
         - "Runtime_Exception"

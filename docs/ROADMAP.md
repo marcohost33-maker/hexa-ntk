@@ -5,6 +5,18 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Eingabevertrag `trajectory_id` + Zustandsreihenfolge Best-Checkpoint (Issues #36, #37,
+  2026-09-25).** `dataset_split_hex_v3`: `int(trajectory_id)` warf fuer `inf` einen rohen
+  `OverflowError` und schnitt nicht-ganzzahlige IDs still ab (1.5 und 1.7 → Gruppe 1, zwei
+  Trajektorien in einer Split-Gruppe) → Vertrags-`ValueError` (`from exc`), exakte Integer
+  unveraendert. `checkpoint_integration_hex_v3`: NaN wurde als Bestwert gespeichert und
+  blockierte danach jede Verbesserung; `best_metric_value` wurde vor Konversion und Write
+  gesetzt → jetzt validieren (NaN/±inf/10**400 → `ValueError`) → schreiben → committen.
+  `runner_hex_v3` ueberspringt eine NaN/inf-Validierungsmetrik mit FailureSignature
+  `NaN_or_Inf_Metric` statt abzubrechen (Muster Lightning `ModelCheckpoint`: NaN wird nie Best).
+  _Evidenz: Rot 25 Tests failures=33 → 269/269 OK, Mutationsprobe 11/11, Differential alt/neu
+  600/600 bitgleich, `results/2026-09-25_issues36-37_local-gate.log`._
+
 - [x] **SOURCES.md vervollstaendigt + Provenance-Gate CI-enforced** — die 16 (jetzt 17)
   `src/toolkit/`-Eintraege sind erfasst (PR #5, LF-Normalisierung PR #6); `verify_sources.py`
   laeuft seit 2026-07-03 als blocking Step im CI-`gate`-Job (vorher existierte das fail-closed
@@ -54,6 +66,15 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   in Prioritaetsreihenfolge des Nutzens: `runner_hex_v3.py` **25%** (191 Stmts offen — groesster
   Hebel), `warmstart_utils_hex_v3.py` **43%**, `ema_hex_v3.py` **56%**, `resume_utils_hex_v3.py`
   **73%**. Pro geschlossener Luecke `fail_under` in `pyproject.toml` nachziehen.
+  _Nachtrag 2026-09-25 (gemessen, py3.12/torch 2.6.0):_ Ist **83%** gesamt, `fail_under = 79`;
+  `runner_hex_v3.py` 80%, `warmstart_utils_hex_v3.py` **43%**, `ema_hex_v3.py` **56%**,
+  `resume_utils_hex_v3.py` 82%. Groesster Hebel jetzt warmstart/ema; Draft-PR #20 enthaelt
+  einen aelteren Ratchet-Versuch (79→91), der gegen den aktuellen `main` neu zu pruefen ist.
+- [ ] **Nachbarn der float→int-Klasse (P3, bewusst nicht in #36/#37).** `int(epoch)` /
+  `int(global_step)` in `checkpoint_integration_hex_v3.py` (save_last/save_resume) und
+  `resume_utils_hex_v3.py` werfen fuer `float('inf')` einen rohen `OverflowError` statt eines
+  Vertrags-Fehlers. Schleifenzaehler, kein Datensatz-Metadatum; kein Zustand wird vorher
+  veraendert. _Quelle: `results/2026-09-25_issues36-37_local-gate.log` [6/6]._
 
 ## Zurueckgestellt (bewusst, mit Begruendung)
 
