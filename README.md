@@ -57,6 +57,11 @@ Lokale Umgebung dieses Laufs: Python 3.14.4, `torch` 2.12.1+cpu, `numpy` 2.4.6.
 Die CI faehrt dieselbe Kette auf **Python 3.12** mit `torch==2.6.0` (CPU-Wheel).
 Die Zahlen gelten fuer diese beiden Umgebungen; ausserhalb ist nichts zugesichert.
 
+**Branch-Hinweis:** Der Fix `fix/hex-cfl-positivity-contract` fuegt zwei Doctests hinzu
+(49 statt 47 erwartet) und hebt die Engine-Version auf 3.0.1. Die obige Tabelle ist
+bewusst historische Evidenz des Laufs vom 2026-08-26 und wird nicht als neuer Lauf
+umetikettiert; ein neuer PASS wird erst nach CI/Engine-Gate als Evidenz eingetragen.
+
 **Resume-Pfad (in diesem Branch korrigiert):** `HexTrainingRunner.maybe_resume()`
 reicht `config.resume_from` jetzt explizit an den Checkpoint-Loader weiter.
 Existenzpruefung und tatsaechlich geladene Datei bezeichnen damit denselben Pfad.
@@ -87,7 +92,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt                  # zentrale Tool-Pins: ruff/coverage
 python -m pip install numpy
 python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
-python scripts/engine_gate.py                                  # 47 Doctests + 26 Selftests
+python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests (branch expectation)
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
 python -m coverage report                                      # 275 Unit-Tests (2026-09-26) + Coverage-Gate
