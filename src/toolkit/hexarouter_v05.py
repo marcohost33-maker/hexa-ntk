@@ -637,10 +637,7 @@ class DeterministicPlanner:
         provider_id: str | None,
         execution_profile_id: str | None,
         rejections: Sequence[tuple[str, tuple[str, ...]]],
-        eligible_snapshot: tuple[
-            tuple[str, str, float, int, float, int],
-            ...,
-        ],
+        eligible_snapshot: tuple[CandidateSnapshot, ...],
     ) -> PlanDecision:
         status = "ROUTE" if provider_id is not None else "ABSTAIN"
         identity = {
