@@ -14,8 +14,9 @@ The MVP deliberately separates:
 2. ProviderSpec — which implementation provides it.
 3. RuntimeState — current health, load, latency and available resources.
 4. AssuranceAttestation — what an external validator has established.
-5. ReliabilityEstimate — empirical lower-bound evidence for a defined provider build.
-6. TaskContract — what a task requires.
+5. ReliabilityEstimate — empirical lower-bound evidence for a defined provider build, task class and regime.
+6. PolicyDecision — task-scoped authorization for a provider.
+7. TaskContract — what a task requires.
 
 Runtime load and assurance MUST NOT be self-declared inside the static capability spec.
 
@@ -27,10 +28,12 @@ A provider is eligible only if all applicable gates pass:
 - input and output schema identifiers are compatible;
 - requested numeric dtype and unit system are supported;
 - provider identity links to the registered capability;
-- runtime is healthy and resource-feasible;
+- an explicit task-scoped PolicyDecision allows the provider;
+- runtime refers to the current provider code SHA, is healthy, fresh enough and resource-feasible;
 - assurance refers to the provider's current code SHA and reaches the task threshold;
 - an independent validator is present when required;
-- the reliability lower bound reaches the task threshold;
+- reliability refers to the current provider code SHA, task class and regime;
+- the reliability lower bound and independent-sample floor reach the task thresholds;
 - latency and queue ceilings are respected when supplied.
 
 If the feasible set is empty the planner MUST return ABSTAIN. A ranking policy MUST
@@ -68,12 +71,16 @@ alternative execution profiles instead of ambiguous booleans such as `gpu_option
 ## 5. Assurance and reliability
 
 AssuranceAttestation and ReliabilityEstimate MUST bind to the exact provider code SHA.
+ReliabilityEstimate additionally binds to a task class and regime; evidence from an ID
+regime therefore cannot silently satisfy a geometry-OOD task.
 
 Assurance is a separate external statement. It is not a property a provider may grant
-itself.
+itself. PolicyDecision is also separate from capability: a provider can be technically
+capable while still being unauthorized for a task.
 
 Reliability is not scientific truth. The MVP stores a lower bound plus raw and
-independent sample counts. No online learning or decay constant is defined in v0.5.
+independent sample counts. A TaskContract can require a minimum independent-sample
+count. No online learning or decay constant is defined in v0.5.
 
 ## 6. Durable local decision log
 
@@ -81,7 +88,10 @@ The reference store uses SQLite only as a local MVP persistence layer.
 
 A route decision and its outbox event are written in the same SQL transaction.
 The producer operation is idempotent: replaying the same decision/event is a no-op,
-while reusing an identifier with different payload bytes fails closed.
+while reusing an identifier with different payload bytes fails closed. The decision
+identity includes the eligible-candidate snapshot, so adding an eligible but dominated
+provider does not change the chosen provider but does produce a distinct auditable
+decision record.
 
 Inbox processing is keyed by `(consumer_id, event_id)` and is idempotent.
 
@@ -131,9 +141,11 @@ Those are enabled only when an observed requirement justifies them.
 
 The v0.5 core is acceptable only when tests demonstrate at least:
 
-- hard-gate fail-closed behavior;
-- deterministic and candidate-invariant ranking;
-- code-SHA-bound assurance/reliability;
+- hard-gate fail-closed behavior, including task-scoped policy;
+- deterministic and candidate-invariant provider choice with candidate-set-aware audit identity;
+- code-SHA-bound runtime/assurance/reliability;
+- runtime freshness enforcement;
+- task-class/regime-bound reliability and independent-sample floors;
 - resource-profile feasibility;
 - atomic/idempotent decision+outbox recording;
 - idempotent inbox claim;
