@@ -220,3 +220,15 @@
 | BF19A25146F926A2 | 2026-09-27 00:00 | src/toolkit | in-repo created, HexaRouter/HCM v0.5 contract tests: test_hexarouter_v05.py |
 
 | 52E8B9B9FCA754C9 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 lint cleanup: hexarouter_v05.py |
+
+
+## spec/ + src/toolkit/ — HexaRouter/HCM v0.5 hardening 2026-09-27
+
+> Follow-up hardening on the deterministic MVP: task-scoped PolicyDecision,
+> runtime code-SHA/freshness binding, task-class/regime-bound reliability,
+> independent-sample floors, candidate-set-aware audit identity, and stricter
+> numeric/bool contracts. Prior v0.5 rows remain append-only lineage.
+
+| 73FD547141374BD6 | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 hardening: HEXAROUTER_V05_CONTRACT.md |
+| 1BACA0A08D6DA78D | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 hardening: hexarouter_v05.py |
+| 06F58828AC55A203 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 hardening tests: test_hexarouter_v05.py |
