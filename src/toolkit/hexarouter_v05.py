@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import numbers
 import sqlite3
 from collections import deque
 from contextlib import contextmanager
@@ -31,7 +32,21 @@ def _require_nonempty(name: str, value: str) -> str:
     return value
 
 
+def _require_bool(name: str, value: bool) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be bool")
+    return value
+
+
+def _require_int_at_least(name: str, value: int, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ValueError(f"{name} must be an integer >= {minimum}")
+    return value
+
+
 def _finite_nonnegative(name: str, value: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise ValueError(f"{name} must be a real numeric scalar")
     try:
         out = float(value)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -85,6 +100,7 @@ class ExecutionProfile:
             raise ValueError("cpu_cores must be an integer >= 1")
         object.__setattr__(self, "ram_gb", _finite_nonnegative("ram_gb", self.ram_gb))
         object.__setattr__(self, "vram_gb", _finite_nonnegative("vram_gb", self.vram_gb))
+        _require_bool("gpu_required", self.gpu_required)
         if not self.gpu_required and self.vram_gb != 0.0:
             raise ValueError("vram_gb must be 0 when gpu_required is false")
 
@@ -112,7 +128,9 @@ class ProviderSpec:
 @dataclass(frozen=True)
 class RuntimeState:
     provider_id: str
+    code_sha: str
     healthy: bool
+    age_ms: float
     available_cpu_cores: int
     available_ram_gb: float
     available_vram_gb: float
@@ -121,20 +139,25 @@ class RuntimeState:
 
     def __post_init__(self) -> None:
         _require_nonempty("provider_id", self.provider_id)
-        if isinstance(self.available_cpu_cores, bool) or not isinstance(self.available_cpu_cores, int):
-            raise ValueError("available_cpu_cores must be an integer")
-        if self.available_cpu_cores < 0:
-            raise ValueError("available_cpu_cores must be >= 0")
-        if isinstance(self.queue_depth, bool) or not isinstance(self.queue_depth, int) or self.queue_depth < 0:
-            raise ValueError("queue_depth must be an integer >= 0")
+        _require_nonempty("code_sha", self.code_sha)
+        _require_bool("healthy", self.healthy)
+        _require_int_at_least("available_cpu_cores", self.available_cpu_cores, 0)
+        _require_int_at_least("queue_depth", self.queue_depth, 0)
+        object.__setattr__(self, "age_ms", _finite_nonnegative("age_ms", self.age_ms))
         object.__setattr__(
-            self, "available_ram_gb", _finite_nonnegative("available_ram_gb", self.available_ram_gb)
+            self,
+            "available_ram_gb",
+            _finite_nonnegative("available_ram_gb", self.available_ram_gb),
         )
         object.__setattr__(
-            self, "available_vram_gb", _finite_nonnegative("available_vram_gb", self.available_vram_gb)
+            self,
+            "available_vram_gb",
+            _finite_nonnegative("available_vram_gb", self.available_vram_gb),
         )
         object.__setattr__(
-            self, "estimated_latency_ms", _finite_nonnegative("estimated_latency_ms", self.estimated_latency_ms)
+            self,
+            "estimated_latency_ms",
+            _finite_nonnegative("estimated_latency_ms", self.estimated_latency_ms),
         )
 
 
@@ -150,6 +173,7 @@ class AssuranceAttestation:
         _require_nonempty("provider_id", self.provider_id)
         _require_nonempty("code_sha", self.code_sha)
         _require_nonempty("validator_id", self.validator_id)
+        _require_bool("independent_validator", self.independent_validator)
         if self.numerical_validity not in VALIDITY_RANK:
             raise ValueError(f"unknown numerical_validity: {self.numerical_validity!r}")
 
@@ -158,6 +182,8 @@ class AssuranceAttestation:
 class ReliabilityEstimate:
     provider_id: str
     code_sha: str
+    task_class: str
+    regime: str
     lower_bound: float
     n_raw: int
     n_independent: int
@@ -165,19 +191,38 @@ class ReliabilityEstimate:
     def __post_init__(self) -> None:
         _require_nonempty("provider_id", self.provider_id)
         _require_nonempty("code_sha", self.code_sha)
+        _require_nonempty("task_class", self.task_class)
+        _require_nonempty("regime", self.regime)
         object.__setattr__(
-            self, "lower_bound", _finite_unit_interval("lower_bound", self.lower_bound)
+            self,
+            "lower_bound",
+            _finite_unit_interval("lower_bound", self.lower_bound),
         )
-        for name, value in (("n_raw", self.n_raw), ("n_independent", self.n_independent)):
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ValueError(f"{name} must be an integer >= 0")
+        _require_int_at_least("n_raw", self.n_raw, 0)
+        _require_int_at_least("n_independent", self.n_independent, 0)
         if self.n_independent > self.n_raw:
             raise ValueError("n_independent must be <= n_raw")
 
 
 @dataclass(frozen=True)
+class PolicyDecision:
+    provider_id: str
+    task_id: str
+    allowed: bool
+    policy_version: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty("provider_id", self.provider_id)
+        _require_nonempty("task_id", self.task_id)
+        _require_nonempty("policy_version", self.policy_version)
+        _require_bool("allowed", self.allowed)
+
+
+@dataclass(frozen=True)
 class TaskContract:
     task_id: str
+    task_class: str
+    regime: str
     required_functions: frozenset[str]
     input_schema: str
     output_schema: str
@@ -186,40 +231,73 @@ class TaskContract:
     min_numerical_validity: str = "verified"
     independent_validation_required: bool = True
     min_reliability_lower_bound: float = 0.0
+    min_independent_samples: int = 0
     require_gpu: bool = False
     min_ram_gb: float = 0.0
     min_vram_gb: float = 0.0
     max_latency_ms: float | None = None
     max_queue_depth: int | None = None
+    max_runtime_age_ms: float | None = None
 
     def __post_init__(self) -> None:
         _require_nonempty("task_id", self.task_id)
+        _require_nonempty("task_class", self.task_class)
+        _require_nonempty("regime", self.regime)
         if not self.required_functions:
             raise ValueError("required_functions must not be empty")
         _require_nonempty("input_schema", self.input_schema)
         _require_nonempty("output_schema", self.output_schema)
         _require_nonempty("dtype", self.dtype)
         _require_nonempty("unit_system", self.unit_system)
+        _require_bool(
+            "independent_validation_required",
+            self.independent_validation_required,
+        )
+        _require_bool("require_gpu", self.require_gpu)
         if self.min_numerical_validity not in VALIDITY_RANK:
-            raise ValueError(f"unknown min_numerical_validity: {self.min_numerical_validity!r}")
+            raise ValueError(
+                f"unknown min_numerical_validity: {self.min_numerical_validity!r}"
+            )
         object.__setattr__(
             self,
             "min_reliability_lower_bound",
-            _finite_unit_interval("min_reliability_lower_bound", self.min_reliability_lower_bound),
+            _finite_unit_interval(
+                "min_reliability_lower_bound",
+                self.min_reliability_lower_bound,
+            ),
         )
-        object.__setattr__(self, "min_ram_gb", _finite_nonnegative("min_ram_gb", self.min_ram_gb))
-        object.__setattr__(self, "min_vram_gb", _finite_nonnegative("min_vram_gb", self.min_vram_gb))
+        _require_int_at_least(
+            "min_independent_samples",
+            self.min_independent_samples,
+            0,
+        )
+        object.__setattr__(
+            self,
+            "min_ram_gb",
+            _finite_nonnegative("min_ram_gb", self.min_ram_gb),
+        )
+        object.__setattr__(
+            self,
+            "min_vram_gb",
+            _finite_nonnegative("min_vram_gb", self.min_vram_gb),
+        )
         if self.max_latency_ms is not None:
             object.__setattr__(
-                self, "max_latency_ms", _finite_nonnegative("max_latency_ms", self.max_latency_ms)
+                self,
+                "max_latency_ms",
+                _finite_nonnegative("max_latency_ms", self.max_latency_ms),
             )
         if self.max_queue_depth is not None:
-            if (
-                isinstance(self.max_queue_depth, bool)
-                or not isinstance(self.max_queue_depth, int)
-                or self.max_queue_depth < 0
-            ):
-                raise ValueError("max_queue_depth must be an integer >= 0")
+            _require_int_at_least("max_queue_depth", self.max_queue_depth, 0)
+        if self.max_runtime_age_ms is not None:
+            object.__setattr__(
+                self,
+                "max_runtime_age_ms",
+                _finite_nonnegative(
+                    "max_runtime_age_ms",
+                    self.max_runtime_age_ms,
+                ),
+            )
 
 
 @dataclass(frozen=True)
@@ -231,15 +309,24 @@ class PlanDecision:
     execution_profile_id: str | None
     policy_version: str
     eligible_count: int
+    eligible_snapshot: tuple[tuple[str, str, float, int, float, int], ...]
     rejections: tuple[tuple[str, tuple[str, ...]], ...]
 
     def __post_init__(self) -> None:
         if self.status not in {"ROUTE", "ABSTAIN"}:
             raise ValueError("status must be ROUTE or ABSTAIN")
-        if self.status == "ROUTE" and (self.provider_id is None or self.execution_profile_id is None):
+        if self.status == "ROUTE" and (
+            self.provider_id is None or self.execution_profile_id is None
+        ):
             raise ValueError("ROUTE requires provider_id and execution_profile_id")
-        if self.status == "ABSTAIN" and (self.provider_id is not None or self.execution_profile_id is not None):
+        if self.status == "ABSTAIN" and (
+            self.provider_id is not None or self.execution_profile_id is not None
+        ):
             raise ValueError("ABSTAIN must not select a provider")
+        if self.eligible_count != len(self.eligible_snapshot):
+            raise ValueError("eligible_count must match eligible_snapshot")
+
+
 
 
 class DeterministicPlanner:
@@ -268,7 +355,9 @@ class DeterministicPlanner:
             if provider.capability_id not in self._capabilities
         )
         if unknown:
-            raise ValueError(f"providers reference unknown capabilities: {unknown}")
+            raise ValueError(
+                f"providers reference unknown capabilities: {unknown}"
+            )
 
     def plan(
         self,
@@ -276,6 +365,7 @@ class DeterministicPlanner:
         runtime: Mapping[str, RuntimeState],
         assurance: Mapping[str, AssuranceAttestation],
         reliability: Mapping[str, ReliabilityEstimate],
+        policy: Mapping[str, PolicyDecision],
     ) -> PlanDecision:
         eligible: list[
             tuple[ProviderSpec, ExecutionProfile, RuntimeState, ReliabilityEstimate]
@@ -298,34 +388,82 @@ class DeterministicPlanner:
             if task.unit_system not in capability.unit_systems:
                 reasons.append("UNIT_SYSTEM_MISMATCH")
 
+            policy_decision = policy.get(provider_id)
+            if (
+                policy_decision is None
+                or policy_decision.provider_id != provider_id
+                or policy_decision.task_id != task.task_id
+                or not policy_decision.allowed
+            ):
+                reasons.append("POLICY_DENY_OR_MISSING")
+
             state = runtime.get(provider_id)
-            if state is None or state.provider_id != provider_id:
-                reasons.append("RUNTIME_MISSING")
+            if (
+                state is None
+                or state.provider_id != provider_id
+                or state.code_sha != provider.code_sha
+            ):
+                reasons.append("RUNTIME_MISSING_OR_STALE")
             elif not state.healthy:
                 reasons.append("UNHEALTHY")
             else:
-                if task.max_latency_ms is not None and state.estimated_latency_ms > task.max_latency_ms:
+                if (
+                    task.max_runtime_age_ms is not None
+                    and state.age_ms > task.max_runtime_age_ms
+                ):
+                    reasons.append("RUNTIME_TOO_OLD")
+                if (
+                    task.max_latency_ms is not None
+                    and state.estimated_latency_ms > task.max_latency_ms
+                ):
                     reasons.append("LATENCY_LIMIT")
-                if task.max_queue_depth is not None and state.queue_depth > task.max_queue_depth:
+                if (
+                    task.max_queue_depth is not None
+                    and state.queue_depth > task.max_queue_depth
+                ):
                     reasons.append("QUEUE_LIMIT")
 
             att = assurance.get(provider_id)
-            if att is None or att.provider_id != provider_id or att.code_sha != provider.code_sha:
+            if (
+                att is None
+                or att.provider_id != provider_id
+                or att.code_sha != provider.code_sha
+            ):
                 reasons.append("ASSURANCE_MISSING_OR_STALE")
             else:
-                if VALIDITY_RANK[att.numerical_validity] < VALIDITY_RANK[task.min_numerical_validity]:
+                if (
+                    VALIDITY_RANK[att.numerical_validity]
+                    < VALIDITY_RANK[task.min_numerical_validity]
+                ):
                     reasons.append("ASSURANCE_TOO_WEAK")
-                if task.independent_validation_required and not att.independent_validator:
+                if (
+                    task.independent_validation_required
+                    and not att.independent_validator
+                ):
                     reasons.append("INDEPENDENT_ASSURANCE_REQUIRED")
 
             rel = reliability.get(provider_id)
-            if rel is None or rel.provider_id != provider_id or rel.code_sha != provider.code_sha:
+            if (
+                rel is None
+                or rel.provider_id != provider_id
+                or rel.code_sha != provider.code_sha
+                or rel.task_class != task.task_class
+                or rel.regime != task.regime
+            ):
                 reasons.append("RELIABILITY_MISSING_OR_STALE")
-            elif rel.lower_bound < task.min_reliability_lower_bound:
-                reasons.append("RELIABILITY_TOO_LOW")
+            else:
+                if rel.lower_bound < task.min_reliability_lower_bound:
+                    reasons.append("RELIABILITY_TOO_LOW")
+                if rel.n_independent < task.min_independent_samples:
+                    reasons.append("RELIABILITY_INDEPENDENCE_TOO_LOW")
 
             profile = None
-            if state is not None and state.provider_id == provider_id and state.healthy:
+            if (
+                state is not None
+                and state.provider_id == provider_id
+                and state.code_sha == provider.code_sha
+                and state.healthy
+            ):
                 profile = self._choose_profile(task, provider, state)
                 if profile is None:
                     reasons.append("NO_RESOURCE_PROFILE")
@@ -333,7 +471,9 @@ class DeterministicPlanner:
                 reasons.append("NO_RESOURCE_PROFILE")
 
             if reasons:
-                rejected.append((provider_id, tuple(sorted(set(reasons)))))
+                rejected.append(
+                    (provider_id, tuple(sorted(set(reasons))))
+                )
                 continue
 
             assert state is not None
@@ -341,8 +481,28 @@ class DeterministicPlanner:
             assert profile is not None
             eligible.append((provider, profile, state, rel))
 
+        eligible_snapshot = tuple(
+            sorted(
+                (
+                    row[0].provider_id,
+                    row[1].profile_id,
+                    row[3].lower_bound,
+                    row[3].n_independent,
+                    row[2].estimated_latency_ms,
+                    row[2].queue_depth,
+                )
+                for row in eligible
+            )
+        )
+
         if not eligible:
-            return self._decision(task, None, None, rejected)
+            return self._decision(
+                task,
+                None,
+                None,
+                rejected,
+                eligible_snapshot,
+            )
 
         provider, profile, _, _ = min(
             eligible,
@@ -354,7 +514,13 @@ class DeterministicPlanner:
                 row[1].profile_id,
             ),
         )
-        return self._decision(task, provider.provider_id, profile.profile_id, rejected, len(eligible))
+        return self._decision(
+            task,
+            provider.provider_id,
+            profile.profile_id,
+            rejected,
+            eligible_snapshot,
+        )
 
     @staticmethod
     def _choose_profile(
@@ -400,7 +566,10 @@ class DeterministicPlanner:
         provider_id: str | None,
         execution_profile_id: str | None,
         rejections: Sequence[tuple[str, tuple[str, ...]]],
-        eligible_count: int = 0,
+        eligible_snapshot: tuple[
+            tuple[str, str, float, int, float, int],
+            ...,
+        ],
     ) -> PlanDecision:
         status = "ROUTE" if provider_id is not None else "ABSTAIN"
         identity = {
@@ -409,9 +578,12 @@ class DeterministicPlanner:
             "provider_id": provider_id,
             "execution_profile_id": execution_profile_id,
             "policy_version": self.policy_version,
+            "eligible_snapshot": eligible_snapshot,
             "rejections": rejections,
         }
-        decision_id = hashlib.sha256(_canonical_json(identity).encode("utf-8")).hexdigest()
+        decision_id = hashlib.sha256(
+            _canonical_json(identity).encode("utf-8")
+        ).hexdigest()
         return PlanDecision(
             decision_id=decision_id,
             task_id=task.task_id,
@@ -419,14 +591,18 @@ class DeterministicPlanner:
             provider_id=provider_id,
             execution_profile_id=execution_profile_id,
             policy_version=self.policy_version,
-            eligible_count=eligible_count,
+            eligible_count=len(eligible_snapshot),
+            eligible_snapshot=eligible_snapshot,
             rejections=tuple(rejections),
         )
+
 
 
 def _task_payload(task: TaskContract) -> dict[str, Any]:
     return {
         "task_id": task.task_id,
+        "task_class": task.task_class,
+        "regime": task.regime,
         "required_functions": sorted(task.required_functions),
         "input_schema": task.input_schema,
         "output_schema": task.output_schema,
@@ -435,11 +611,13 @@ def _task_payload(task: TaskContract) -> dict[str, Any]:
         "min_numerical_validity": task.min_numerical_validity,
         "independent_validation_required": task.independent_validation_required,
         "min_reliability_lower_bound": task.min_reliability_lower_bound,
+        "min_independent_samples": task.min_independent_samples,
         "require_gpu": task.require_gpu,
         "min_ram_gb": task.min_ram_gb,
         "min_vram_gb": task.min_vram_gb,
         "max_latency_ms": task.max_latency_ms,
         "max_queue_depth": task.max_queue_depth,
+        "max_runtime_age_ms": task.max_runtime_age_ms,
     }
 
 
@@ -452,6 +630,24 @@ def _decision_payload(decision: PlanDecision) -> dict[str, Any]:
         "execution_profile_id": decision.execution_profile_id,
         "policy_version": decision.policy_version,
         "eligible_count": decision.eligible_count,
+        "eligible_snapshot": [
+            {
+                "provider_id": provider_id,
+                "profile_id": profile_id,
+                "reliability_lower_bound": reliability_lower_bound,
+                "independent_samples": independent_samples,
+                "latency_ms": latency_ms,
+                "queue_depth": queue_depth,
+            }
+            for (
+                provider_id,
+                profile_id,
+                reliability_lower_bound,
+                independent_samples,
+                latency_ms,
+                queue_depth,
+            ) in decision.eligible_snapshot
+        ],
         "rejections": [
             {"provider_id": provider_id, "reasons": list(reasons)}
             for provider_id, reasons in decision.rejections
@@ -611,6 +807,7 @@ class SQLiteDecisionStore:
         error: str | None = None,
     ) -> None:
         _require_nonempty("event_id", event_id)
+        _require_bool("success", success)
         with self._transaction():
             row = self._conn.execute(
                 "SELECT published_at FROM outbox WHERE event_id = ?",
@@ -661,8 +858,7 @@ Edge = tuple[int, int]
 
 
 def _canonical_edges(edges: Iterable[Edge], n_nodes: int) -> tuple[Edge, ...]:
-    if isinstance(n_nodes, bool) or not isinstance(n_nodes, int) or n_nodes < 1:
-        raise ValueError("n_nodes must be an integer >= 1")
+    _require_int_at_least("n_nodes", n_nodes, 1)
     out: set[Edge] = set()
     for left, right in edges:
         if not (0 <= left < n_nodes and 0 <= right < n_nodes):
@@ -674,8 +870,7 @@ def _canonical_edges(edges: Iterable[Edge], n_nodes: int) -> tuple[Edge, ...]:
 
 
 def ring_edges(n_nodes: int) -> tuple[Edge, ...]:
-    if n_nodes < 1:
-        raise ValueError("n_nodes must be >= 1")
+    _require_int_at_least("n_nodes", n_nodes, 1)
     if n_nodes == 1:
         return ()
     if n_nodes == 2:
@@ -684,14 +879,12 @@ def ring_edges(n_nodes: int) -> tuple[Edge, ...]:
 
 
 def star_edges(n_nodes: int) -> tuple[Edge, ...]:
-    if n_nodes < 1:
-        raise ValueError("n_nodes must be >= 1")
+    _require_int_at_least("n_nodes", n_nodes, 1)
     return tuple((0, idx) for idx in range(1, n_nodes))
 
 
 def full_edges(n_nodes: int) -> tuple[Edge, ...]:
-    if n_nodes < 1:
-        raise ValueError("n_nodes must be >= 1")
+    _require_int_at_least("n_nodes", n_nodes, 1)
     return tuple(
         (left, right)
         for left in range(n_nodes)
@@ -702,8 +895,7 @@ def full_edges(n_nodes: int) -> tuple[Edge, ...]:
 def hex_cell_patch(radius: int) -> tuple[tuple[tuple[int, int], ...], tuple[Edge, ...]]:
     """Return axial coordinates and six-neighbour edges for a compact hex patch."""
 
-    if isinstance(radius, bool) or not isinstance(radius, int) or radius < 0:
-        raise ValueError("radius must be an integer >= 0")
+    _require_int_at_least("radius", radius, 0)
     coords = sorted(
         (q, r)
         for q in range(-radius, radius + 1)
