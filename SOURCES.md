@@ -205,3 +205,16 @@
 
 | 626F935200206F98 | 2026-09-26 11:23 | src/toolkit | in-repo derived, #39 dt finiteness contract: dataset_split_hex_v3.py |
 | 8860CF78DF346255 | 2026-09-26 11:23 | src/toolkit | in-repo derived, #39 non-finite dt regressions + leakage invariant: test_dataset_split_hex_v3.py |
+
+
+## spec/ + src/toolkit/ — HexaRouter/HCM v0.5 deterministic MVP 2026-09-27
+
+> New experimental deterministic capability-planning core. The contract separates
+> static capability/provider data, dynamic runtime state, external assurance and
+> reliability evidence; routing is hard-gated and deterministic. SQLite inbox/outbox
+> persistence and dependency-free topology baselines are included. No learned routing,
+> broker, A2A, Kubernetes or external runtime dependency is enabled in v0.5.
+
+| 06637960554B4D81 | 2026-09-27 00:00 | spec | in-repo created, HexaRouter/HCM v0.5 contract: HEXAROUTER_V05_CONTRACT.md |
+| 91350CF1E02D2819 | 2026-09-27 00:00 | src/toolkit | in-repo created, HexaRouter/HCM v0.5 deterministic core: hexarouter_v05.py |
+| BF19A25146F926A2 | 2026-09-27 00:00 | src/toolkit | in-repo created, HexaRouter/HCM v0.5 contract tests: test_hexarouter_v05.py |
