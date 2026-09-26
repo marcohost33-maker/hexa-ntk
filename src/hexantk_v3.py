@@ -90,7 +90,7 @@ from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
-__version__ = "3.0.0"
+__version__ = "3.0.1"
 
 
 def module_hash() -> str:
@@ -565,6 +565,31 @@ def load_partial_checkpoint_raw(
 # ============================================================================
 
 
+def _finite_positive_float(name: str, value: Any) -> float:
+    """Convert a real scalar to finite binary64 and require it to be > 0.
+
+    Reject bool explicitly (bool is an int subclass), conversion overflow,
+    NaN/Inf, and positive exact values that underflow to 0.0.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a real scalar, not bool")
+    try:
+        out = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be representable as a finite real scalar") from exc
+    if not np.isfinite(out) or out <= 0.0:
+        raise ValueError(f"{name} must be finite and > 0, got {value!r}")
+    return out
+
+
+def _unit_interval_safety(value: Any) -> float:
+    """Convert safety to finite binary64 and require 0 < safety <= 1."""
+    out = _finite_positive_float("safety", value)
+    if out > 1.0:
+        raise ValueError(f"safety must be <= 1, got {value!r}")
+    return out
+
+
 def hex_laplacian_stencil_weight(h: float) -> float:
     r"""FV weight for 7-point hex Laplacian: 2/(3 h^2).
 
@@ -580,9 +605,8 @@ def hex_laplacian_stencil_weight(h: float) -> float:
     >>> bool(abs(hex_laplacian_stencil_weight(0.5) - 8.0/3.0) < 1e-14)
     True
     """
-    if not np.isfinite(h) or h <= 0:
-        raise ValueError(f"h must be finite and > 0, got {h!r}")
-    return 2.0 / (3.0 * h * h)
+    h_f = _finite_positive_float("h", h)
+    return 2.0 / (3.0 * h_f * h_f)
 
 
 def hex_cfl_max_dt(h: float, D_v: float, safety: float = 0.85) -> float:
@@ -603,18 +627,10 @@ def hex_cfl_max_dt(h: float, D_v: float, safety: float = 0.85) -> float:
     >>> bool(abs(hex_cfl_max_dt(1.0, 1.0, safety=1.0) - 1.0/3.0) < 1e-14)
     True
     """
-    if (
-        not np.isfinite(h)
-        or not np.isfinite(D_v)
-        or not np.isfinite(safety)
-        or h <= 0
-        or D_v <= 0
-        or not (0 < safety <= 1.0)
-    ):
-        raise ValueError(
-            "h and D_v must be finite and > 0; safety must be finite and in (0, 1]"
-        )
-    return safety * h * h / (3.0 * D_v)
+    h_f = _finite_positive_float("h", h)
+    d_f = _finite_positive_float("D_v", D_v)
+    safety_f = _unit_interval_safety(safety)
+    return safety_f * h_f * h_f / (3.0 * d_f)
 
 
 def hex_positivity_max_dt(h: float, D_v: float, safety: float = 1.0) -> float:
@@ -634,18 +650,10 @@ def hex_positivity_max_dt(h: float, D_v: float, safety: float = 1.0) -> float:
     >>> bool(abs(hex_positivity_max_dt(0.5, 2.0) - 0.03125) < 1e-14)
     True
     """
-    if (
-        not np.isfinite(h)
-        or not np.isfinite(D_v)
-        or not np.isfinite(safety)
-        or h <= 0
-        or D_v <= 0
-        or not (0 < safety <= 1.0)
-    ):
-        raise ValueError(
-            "h and D_v must be finite and > 0; safety must be finite and in (0, 1]"
-        )
-    return safety * h * h / (4.0 * D_v)
+    h_f = _finite_positive_float("h", h)
+    d_f = _finite_positive_float("D_v", D_v)
+    safety_f = _unit_interval_safety(safety)
+    return safety_f * h_f * h_f / (4.0 * d_f)
 
 
 # ============================================================================
@@ -1365,6 +1373,8 @@ def test_hex_laplacian_and_cfl() -> bool:
         lambda: hex_laplacian_stencil_weight(float("nan")),
         lambda: hex_cfl_max_dt(0.0, 1.0),
         lambda: hex_cfl_max_dt(1.0, float("inf")),
+        lambda: hex_cfl_max_dt(10**400, 1.0),
+        lambda: hex_cfl_max_dt(True, 1.0),
         lambda: hex_positivity_max_dt(1.0, 1.0, safety=0.0),
     ]
     rejected = 0
