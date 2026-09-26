@@ -76,6 +76,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import numbers
 import os
 import tempfile
 import time
@@ -571,8 +572,10 @@ def _finite_positive_float(name: str, value: Any) -> float:
     Reject bool explicitly (bool is an int subclass), conversion overflow,
     NaN/Inf, and positive exact values that underflow to 0.0.
     """
-    if isinstance(value, (bool, np.bool_)):
-        raise ValueError(f"{name} must be a real scalar, not bool")
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value, (numbers.Real, np.integer, np.floating)
+    ):
+        raise ValueError(f"{name} must be a real numeric scalar, got {type(value).__name__}")
     try:
         out = float(value)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -1375,6 +1378,7 @@ def test_hex_laplacian_and_cfl() -> bool:
         lambda: hex_cfl_max_dt(1.0, float("inf")),
         lambda: hex_cfl_max_dt(10**400, 1.0),
         lambda: hex_cfl_max_dt(True, 1.0),
+        lambda: hex_cfl_max_dt("1.0", 1.0),
         lambda: hex_positivity_max_dt(1.0, 1.0, safety=0.0),
     ]
     rejected = 0
