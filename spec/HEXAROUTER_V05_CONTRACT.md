@@ -53,7 +53,13 @@ Eligible providers are ranked lexicographically by:
 
 The policy identifier is `hexrouter.lexicographic.v1`.
 
-This avoids rank reversal caused solely by adding an irrelevant dominated candidate.
+The planner also computes a deterministic SHA-256 fingerprint of the complete static
+capability/provider registry. Every decision records this registry fingerprint plus an
+eligible-candidate snapshot containing the authorization-policy version, validator id,
+validity class, reliability evidence, runtime age, latency and queue depth.
+
+This avoids rank reversal caused solely by adding an irrelevant dominated candidate
+while still making a changed candidate/registry state visible in the audit identity.
 A future scoring policy may replace this ordering only behind an explicit policy version
 and regression tests.
 
@@ -142,7 +148,7 @@ Those are enabled only when an observed requirement justifies them.
 The v0.5 core is acceptable only when tests demonstrate at least:
 
 - hard-gate fail-closed behavior, including task-scoped policy;
-- deterministic and candidate-invariant provider choice with candidate-set-aware audit identity;
+- deterministic and candidate-invariant provider choice with registry- and candidate-set-aware audit identity;
 - code-SHA-bound runtime/assurance/reliability;
 - runtime freshness enforcement;
 - task-class/regime-bound reliability and independent-sample floors;
