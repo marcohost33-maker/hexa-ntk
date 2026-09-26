@@ -301,6 +301,21 @@ class TaskContract:
 
 
 @dataclass(frozen=True)
+class CandidateSnapshot:
+    provider_id: str
+    execution_profile_id: str
+    policy_version: str
+    validator_id: str
+    numerical_validity: str
+    reliability_lower_bound: float
+    reliability_n_raw: int
+    reliability_n_independent: int
+    runtime_age_ms: float
+    estimated_latency_ms: float
+    queue_depth: int
+
+
+@dataclass(frozen=True)
 class PlanDecision:
     decision_id: str
     task_id: str
@@ -308,8 +323,9 @@ class PlanDecision:
     provider_id: str | None
     execution_profile_id: str | None
     policy_version: str
+    registry_fingerprint: str
     eligible_count: int
-    eligible_snapshot: tuple[tuple[str, str, float, int, float, int], ...]
+    eligible_snapshot: tuple[CandidateSnapshot, ...]
     rejections: tuple[tuple[str, tuple[str, ...]], ...]
 
     def __post_init__(self) -> None:
@@ -358,6 +374,51 @@ class DeterministicPlanner:
             raise ValueError(
                 f"providers reference unknown capabilities: {unknown}"
             )
+        registry_payload = {
+            "capabilities": [
+                {
+                    "capability_id": item.capability_id,
+                    "functions": sorted(item.functions),
+                    "input_schemas": sorted(item.input_schemas),
+                    "output_schemas": sorted(item.output_schemas),
+                    "dtypes": sorted(item.dtypes),
+                    "unit_systems": sorted(item.unit_systems),
+                }
+                for item in sorted(
+                    capabilities,
+                    key=lambda value: value.capability_id,
+                )
+            ],
+            "providers": [
+                {
+                    "provider_id": item.provider_id,
+                    "capability_id": item.capability_id,
+                    "implementation_version": item.implementation_version,
+                    "code_sha": item.code_sha,
+                    "execution_profiles": [
+                        {
+                            "profile_id": profile.profile_id,
+                            "dtype": profile.dtype,
+                            "cpu_cores": profile.cpu_cores,
+                            "ram_gb": profile.ram_gb,
+                            "gpu_required": profile.gpu_required,
+                            "vram_gb": profile.vram_gb,
+                        }
+                        for profile in sorted(
+                            item.execution_profiles,
+                            key=lambda value: value.profile_id,
+                        )
+                    ],
+                }
+                for item in sorted(
+                    providers,
+                    key=lambda value: value.provider_id,
+                )
+            ],
+        }
+        self.registry_fingerprint = hashlib.sha256(
+            _canonical_json(registry_payload).encode("utf-8")
+        ).hexdigest()
 
     def plan(
         self,
@@ -484,14 +545,24 @@ class DeterministicPlanner:
         eligible_snapshot = tuple(
             sorted(
                 (
-                    row[0].provider_id,
-                    row[1].profile_id,
-                    row[3].lower_bound,
-                    row[3].n_independent,
-                    row[2].estimated_latency_ms,
-                    row[2].queue_depth,
-                )
-                for row in eligible
+                    CandidateSnapshot(
+                        provider_id=row[0].provider_id,
+                        execution_profile_id=row[1].profile_id,
+                        policy_version=policy[row[0].provider_id].policy_version,
+                        validator_id=assurance[row[0].provider_id].validator_id,
+                        numerical_validity=assurance[
+                            row[0].provider_id
+                        ].numerical_validity,
+                        reliability_lower_bound=row[3].lower_bound,
+                        reliability_n_raw=row[3].n_raw,
+                        reliability_n_independent=row[3].n_independent,
+                        runtime_age_ms=row[2].age_ms,
+                        estimated_latency_ms=row[2].estimated_latency_ms,
+                        queue_depth=row[2].queue_depth,
+                    )
+                    for row in eligible
+                ),
+                key=lambda item: item.provider_id,
             )
         )
 
@@ -578,7 +649,11 @@ class DeterministicPlanner:
             "provider_id": provider_id,
             "execution_profile_id": execution_profile_id,
             "policy_version": self.policy_version,
-            "eligible_snapshot": eligible_snapshot,
+            "registry_fingerprint": self.registry_fingerprint,
+            "eligible_snapshot": [
+                _candidate_payload(item)
+                for item in eligible_snapshot
+            ],
             "rejections": rejections,
         }
         decision_id = hashlib.sha256(
@@ -591,6 +666,7 @@ class DeterministicPlanner:
             provider_id=provider_id,
             execution_profile_id=execution_profile_id,
             policy_version=self.policy_version,
+            registry_fingerprint=self.registry_fingerprint,
             eligible_count=len(eligible_snapshot),
             eligible_snapshot=eligible_snapshot,
             rejections=tuple(rejections),
@@ -621,6 +697,22 @@ def _task_payload(task: TaskContract) -> dict[str, Any]:
     }
 
 
+def _candidate_payload(candidate: CandidateSnapshot) -> dict[str, Any]:
+    return {
+        "provider_id": candidate.provider_id,
+        "execution_profile_id": candidate.execution_profile_id,
+        "policy_version": candidate.policy_version,
+        "validator_id": candidate.validator_id,
+        "numerical_validity": candidate.numerical_validity,
+        "reliability_lower_bound": candidate.reliability_lower_bound,
+        "reliability_n_raw": candidate.reliability_n_raw,
+        "reliability_n_independent": candidate.reliability_n_independent,
+        "runtime_age_ms": candidate.runtime_age_ms,
+        "estimated_latency_ms": candidate.estimated_latency_ms,
+        "queue_depth": candidate.queue_depth,
+    }
+
+
 def _decision_payload(decision: PlanDecision) -> dict[str, Any]:
     return {
         "decision_id": decision.decision_id,
@@ -629,24 +721,11 @@ def _decision_payload(decision: PlanDecision) -> dict[str, Any]:
         "provider_id": decision.provider_id,
         "execution_profile_id": decision.execution_profile_id,
         "policy_version": decision.policy_version,
+        "registry_fingerprint": decision.registry_fingerprint,
         "eligible_count": decision.eligible_count,
         "eligible_snapshot": [
-            {
-                "provider_id": provider_id,
-                "profile_id": profile_id,
-                "reliability_lower_bound": reliability_lower_bound,
-                "independent_samples": independent_samples,
-                "latency_ms": latency_ms,
-                "queue_depth": queue_depth,
-            }
-            for (
-                provider_id,
-                profile_id,
-                reliability_lower_bound,
-                independent_samples,
-                latency_ms,
-                queue_depth,
-            ) in decision.eligible_snapshot
+            _candidate_payload(item)
+            for item in decision.eligible_snapshot
         ],
         "rejections": [
             {"provider_id": provider_id, "reasons": list(reasons)}
