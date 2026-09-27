@@ -900,6 +900,14 @@ class SQLiteDecisionStore:
                 processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (consumer_id, event_id)
             );
+            CREATE TABLE IF NOT EXISTS inbox_claims (
+                consumer_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                claim_token TEXT NOT NULL,
+                claimed_at_ms INTEGER NOT NULL CHECK(claimed_at_ms >= 0),
+                lease_until_ms INTEGER NOT NULL CHECK(lease_until_ms >= claimed_at_ms),
+                PRIMARY KEY (consumer_id, event_id)
+            );
             """
         )
 
@@ -927,7 +935,22 @@ class SQLiteDecisionStore:
         payload = _canonical_json(_decision_payload(decision))
         payload_sha = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         event_id = hashlib.sha256(
-            f"{decision.decision_id}|route.decision.v1".encode("utf-8")
+            f"{decision.decision_id}|route.decision.v2".encode("utf-8")
+        ).hexdigest()
+        event_payload = _canonical_json(
+            {
+                "specversion": "1.0",
+                "id": event_id,
+                "source": "urn:coworker:hexrouter:planner",
+                "type": "org.coworker.hexrouter.route.decision.v2",
+                "subject": decision.task_id,
+                "datacontenttype": "application/json",
+                "dataschema": "urn:coworker:hexrouter:schema:route-decision:v2",
+                "data": _decision_payload(decision),
+            }
+        )
+        event_payload_sha = hashlib.sha256(
+            event_payload.encode("utf-8")
         ).hexdigest()
 
         with self._transaction():
@@ -946,7 +969,7 @@ class SQLiteDecisionStore:
                 table="outbox",
                 key_column="event_id",
                 key_value=event_id,
-                payload_sha=payload_sha,
+                payload_sha=event_payload_sha,
                 insert_sql=(
                     "INSERT INTO outbox "
                     "(event_id, aggregate_id, event_type, payload_sha256, payload_json) "
@@ -955,9 +978,9 @@ class SQLiteDecisionStore:
                 insert_args=(
                     event_id,
                     decision.task_id,
-                    "hexrouter.route.decision.v1",
-                    payload_sha,
-                    payload,
+                    "org.coworker.hexrouter.route.decision.v2",
+                    event_payload_sha,
+                    event_payload,
                 ),
             )
         return event_id
@@ -1035,15 +1058,169 @@ class SQLiteDecisionStore:
                     (error or "publish failed", event_id),
                 )
 
-    def claim_inbox(self, consumer_id: str, event_id: str) -> bool:
+    def begin_inbox(
+        self,
+        consumer_id: str,
+        event_id: str,
+        *,
+        claim_token: str,
+        now_ms: int,
+        lease_ms: int,
+    ) -> bool:
+        """Acquire or renew a bounded processing lease for an inbox event.
+
+        A successful claim is not proof that processing completed. Completion
+        must be recorded separately with complete_inbox().
+        """
+
         _require_nonempty("consumer_id", consumer_id)
         _require_nonempty("event_id", event_id)
+        _require_nonempty("claim_token", claim_token)
+        _require_int_at_least("now_ms", now_ms, 0)
+        _require_int_at_least("lease_ms", lease_ms, 1)
+        lease_until_ms = now_ms + lease_ms
+        if lease_until_ms > 2**63 - 1:
+            raise ValueError("lease timestamp exceeds SQLite INTEGER range")
+
         with self._transaction():
-            cursor = self._conn.execute(
-                "INSERT OR IGNORE INTO inbox (consumer_id, event_id) VALUES (?, ?)",
+            processed = self._conn.execute(
+                """
+                SELECT 1 FROM inbox
+                WHERE consumer_id = ? AND event_id = ?
+                """,
+                (consumer_id, event_id),
+            ).fetchone()
+            if processed is not None:
+                return False
+
+            existing = self._conn.execute(
+                """
+                SELECT claim_token, lease_until_ms
+                FROM inbox_claims
+                WHERE consumer_id = ? AND event_id = ?
+                """,
+                (consumer_id, event_id),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    existing["claim_token"] != claim_token
+                    and int(existing["lease_until_ms"]) > now_ms
+                ):
+                    return False
+                self._conn.execute(
+                    """
+                    UPDATE inbox_claims
+                    SET claim_token = ?, claimed_at_ms = ?, lease_until_ms = ?
+                    WHERE consumer_id = ? AND event_id = ?
+                    """,
+                    (
+                        claim_token,
+                        now_ms,
+                        lease_until_ms,
+                        consumer_id,
+                        event_id,
+                    ),
+                )
+                return True
+
+            self._conn.execute(
+                """
+                INSERT INTO inbox_claims
+                (consumer_id, event_id, claim_token, claimed_at_ms, lease_until_ms)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    consumer_id,
+                    event_id,
+                    claim_token,
+                    now_ms,
+                    lease_until_ms,
+                ),
+            )
+            return True
+
+    def complete_inbox(
+        self,
+        consumer_id: str,
+        event_id: str,
+        *,
+        claim_token: str,
+    ) -> bool:
+        """Record successful processing only for the current lease owner."""
+
+        _require_nonempty("consumer_id", consumer_id)
+        _require_nonempty("event_id", event_id)
+        _require_nonempty("claim_token", claim_token)
+        with self._transaction():
+            processed = self._conn.execute(
+                """
+                SELECT 1 FROM inbox
+                WHERE consumer_id = ? AND event_id = ?
+                """,
+                (consumer_id, event_id),
+            ).fetchone()
+            if processed is not None:
+                return False
+
+            claim = self._conn.execute(
+                """
+                SELECT claim_token FROM inbox_claims
+                WHERE consumer_id = ? AND event_id = ?
+                """,
+                (consumer_id, event_id),
+            ).fetchone()
+            if claim is None or claim["claim_token"] != claim_token:
+                raise ValueError("inbox claim is missing or no longer owned")
+
+            self._conn.execute(
+                """
+                INSERT INTO inbox (consumer_id, event_id)
+                VALUES (?, ?)
+                """,
                 (consumer_id, event_id),
             )
+            self._conn.execute(
+                """
+                DELETE FROM inbox_claims
+                WHERE consumer_id = ? AND event_id = ?
+                """,
+                (consumer_id, event_id),
+            )
+            return True
+
+    def release_inbox_claim(
+        self,
+        consumer_id: str,
+        event_id: str,
+        *,
+        claim_token: str,
+    ) -> bool:
+        """Release a failed attempt without marking the event processed."""
+
+        _require_nonempty("consumer_id", consumer_id)
+        _require_nonempty("event_id", event_id)
+        _require_nonempty("claim_token", claim_token)
+        with self._transaction():
+            cursor = self._conn.execute(
+                """
+                DELETE FROM inbox_claims
+                WHERE consumer_id = ? AND event_id = ? AND claim_token = ?
+                """,
+                (consumer_id, event_id, claim_token),
+            )
             return cursor.rowcount == 1
+
+    def is_inbox_processed(self, consumer_id: str, event_id: str) -> bool:
+        _require_nonempty("consumer_id", consumer_id)
+        _require_nonempty("event_id", event_id)
+        row = self._conn.execute(
+            """
+            SELECT 1 FROM inbox
+            WHERE consumer_id = ? AND event_id = ?
+            """,
+            (consumer_id, event_id),
+        ).fetchone()
+        return row is not None
 
     def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}
