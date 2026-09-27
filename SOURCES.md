@@ -243,3 +243,17 @@
 | BEFC638F9AA7AAB1 | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 audit identity: HEXAROUTER_V05_CONTRACT.md |
 | 0DCF6B8969BB5076 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 audit identity: hexarouter_v05.py |
 | EC0F79DF985D38A9 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 audit identity tests: test_hexarouter_v05.py |
+
+
+## spec/ + src/toolkit/ — HexaRouter/HCM v0.5 evidence/delivery hardening 2026-09-27
+
+> Follow-up falsification round: reliability lower bounds are now recomputed from
+> independent Bernoulli evidence using the 95% Wilson interval; policy decisions
+> bind revision/bundle/input identity; assurance binds task/regime/evidence;
+> outbox payloads use a CloudEvents-compatible envelope; inbox receipt is split
+> from successful processing through bounded claim leases. The hash profile is
+> explicitly scoped as python-json-sortkeys-v1, not RFC 8785 JCS.
+
+| 35731A9F418EC601 | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 evidence/delivery hardening: HEXAROUTER_V05_CONTRACT.md |
+| 14069B61FE78F2A7 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 evidence/delivery hardening: hexarouter_v05.py |
+| A8C80BE0739B0AAA | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 evidence/delivery hardening tests: test_hexarouter_v05.py |
