@@ -270,3 +270,15 @@
 | 123E51DBA5ED347B | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 SQLite-race hardening: HEXAROUTER_V05_CONTRACT.md |
 | 2A75000219F81C8C | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 SQLite-race hardening: hexarouter_v05.py |
 | AA9B77E3E2C8B836 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 SQLite-race hardening tests: test_hexarouter_v05.py |
+
+
+## spec/ + src/toolkit/ — HexaRouter/HCM v0.5 identity hardening 2026-09-27
+
+> Security-relevant identity fields now fail closed on uppercase, Unicode
+> confusables, hidden format characters and silent normalization. Canonical
+> tokens use the bounded lowercase ASCII grammar
+> [a-z0-9][a-z0-9._-]{0,63}. Prior rows remain append-only lineage.
+
+| 805EE5786DC96F24 | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 identity hardening: HEXAROUTER_V05_CONTRACT.md |
+| B0958B9B45E35B87 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 identity hardening: hexarouter_v05.py |
+| D1919AD8EA8B13AF | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 identity hardening tests: test_hexarouter_v05.py |
