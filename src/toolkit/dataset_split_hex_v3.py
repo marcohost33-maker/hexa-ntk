@@ -11,17 +11,23 @@ Key design decisions:
 - Optional deterministic override for paper-reproducible splits
 - Attribute passthrough for grid, config, etc.
 
-Leakage guarantee (the unit of the split is the group key):
-- Default (group_by_dt=False): no trajectory_id appears in both train and
-  val, so no temporal correlation crosses the split boundary.
-- group_by_dt=True: no (trajectory_id, dt) group appears in both splits.
-  Distinct step sizes of one trajectory are deliberately independent groups
-  and may land on different sides (e.g. train on dt=0.1, validate on
-  dt=0.05); summarize_group_split()["overlap_trajectory_ids"] lists them.
+Leakage guarantee (owner decision E0927-03 on issue #42): no trajectory_id
+appears in both train and val -- ALWAYS, whatever the dt values or types and
+whether group_by_dt is set. The unit of the split is the trajectory.
+- Default (group_by_dt=False): one group per trajectory_id.
+- group_by_dt=True: groups are (trajectory_id, dt) for reporting
+  (summarize_group_split counts and lists them), but all dt groups of one
+  trajectory are allocated to the same side; val_fraction and
+  min_val_groups count trajectories. An explicit val_group_keys_override
+  that names only some dt groups of a trajectory raises ValueError.
+  summarize_group_split()["overlap_trajectory_ids"] stays [] for every split
+  produced here; it is the diagnostic for hand-built subsets.
   dt keys of one trajectory that differ only below float32 resolution
-  (0.1 as float vs. float32 tensor) are not distinct step sizes but one
-  step size in two precisions; they raise ValueError instead of silently
-  splitting the trajectory (issue #42). Set dt_round_ndigits to merge them.
+  (0.1 as float vs. float32 tensor) are one step size in two precisions and
+  still raise ValueError (inconsistent metadata, issue #42). Set
+  dt_round_ndigits to merge them.
+With one dt per trajectory the split for a given seed is identical to the
+one before E0927-03.
 
 Input contract (fail-closed, ValueError/TypeError instead of silent keys):
 - trajectory_id: an exact integer (int, integral float/Decimal/Fraction,
@@ -292,13 +298,19 @@ def _build_group_to_indices(
     return group_to_indices
 
 
+def _group_sort_key(g: TrajectoryGroupKey) -> Tuple[int, float]:
+    return (g.trajectory_id, float("-inf") if g.dt is None else g.dt)
+
+
 def _reject_precision_split_dt_keys(keys: Any) -> None:
     """Fail closed when one trajectory carries one step size twice (#42).
 
     0.1 (float) and tensor(0.1) (float32 -> 0.10000000149...) are different
-    keys; the trajectory then split into two groups and landed in train and
-    val in 41/50 seeds. Deliberately different step sizes (0.1 vs 0.2) stay
-    independent groups.
+    keys; before E0927-03 the trajectory then split into two groups and landed
+    in train and val in 41/50 seeds. The split now keeps a trajectory whole,
+    so this guard no longer carries the leakage invariant; it stays as a
+    metadata-consistency check (one step size must not be reported as two).
+    Deliberately different step sizes (0.1 vs 0.2) stay separate groups.
     """
     dts_by_trajectory: Dict[int, List[float]] = {}
     for key in keys:
@@ -312,8 +324,8 @@ def _reject_precision_split_dt_keys(keys: Any) -> None:
                 raise ValueError(
                     f"trajectory_id {trajectory_id} has dt keys {lower!r} and "
                     f"{upper!r} that differ only below float32 resolution, i.e. "
-                    "one step size in two precisions; as separate groups the "
-                    "trajectory could land in both train and val. Set "
+                    "one step size in two precisions, which would be grouped "
+                    "and reported as two step sizes. Set "
                     "dt_round_ndigits (e.g. 6) to normalise dt before grouping."
                 )
 
@@ -341,19 +353,20 @@ def split_dataset_by_trajectory(
     dataset :
         Base dataset exposing `.samples`
     val_fraction :
-        Fraction of groups allocated to validation (if no override)
+        Fraction of trajectories allocated to validation (if no override)
     seed :
         Reproducible shuffle seed
     group_by_dt :
-        If True, groups are (trajectory_id, dt): distinct step sizes of one
-        trajectory may land in different splits (see module docstring);
+        If True, groups are (trajectory_id, dt), but a trajectory is never
+        split across train and val (E0927-03, see module docstring);
         same-step keys that differ only by precision raise ValueError.
     dt_round_ndigits :
         Optional rounding for dt normalization (None or int)
     min_val_groups :
-        Minimum number of validation groups
+        Minimum number of validation trajectories
     val_group_keys_override :
-        Optional explicit validation groups (bypasses shuffle/fraction)
+        Optional explicit validation groups (bypasses shuffle/fraction);
+        must contain all dt groups of every trajectory it names
 
     Returns
     -------
@@ -370,6 +383,13 @@ def split_dataset_by_trajectory(
     )
     group_keys = list(group_to_indices.keys())
 
+    # E0927-03 (owner decision on issue #42): the unit of the split is the
+    # TRAJECTORY, always. Under group_by_dt one trajectory may own several
+    # (trajectory_id, dt) groups; they are allocated together, never apart.
+    groups_by_trajectory: Dict[int, List[TrajectoryGroupKey]] = {}
+    for key in group_keys:
+        groups_by_trajectory.setdefault(key.trajectory_id, []).append(key)
+
     if val_group_keys_override is not None:
         val_group_keys = set(val_group_keys_override)
         unknown = [g for g in val_group_keys if g not in group_to_indices]
@@ -377,6 +397,20 @@ def split_dataset_by_trajectory(
             raise ValueError(
                 f"val_group_keys_override contains unknown groups: {unknown}"
             )
+        # An explicit override is the caller's declared split: it is not
+        # silently widened. Naming only some dt groups of a trajectory would
+        # put that trajectory on both sides -> fail closed.
+        for trajectory_id in sorted({g.trajectory_id for g in val_group_keys}):
+            missing = [
+                g for g in groups_by_trajectory[trajectory_id] if g not in val_group_keys
+            ]
+            if missing:
+                raise ValueError(
+                    f"val_group_keys_override splits trajectory_id {trajectory_id}: "
+                    f"groups {sorted(missing, key=_group_sort_key)} would stay in "
+                    "train; a trajectory must never be in both train and val "
+                    "(E0927-03). List all of its dt groups or none."
+                )
         train_group_keys = set(group_keys) - val_group_keys
         if len(train_group_keys) == 0:
             raise ValueError(
@@ -387,31 +421,34 @@ def split_dataset_by_trajectory(
                 "Validation split would be empty under val_group_keys_override"
             )
     else:
-        group_keys_sorted = sorted(
-            group_keys,
-            key=lambda g: (
-                g.trajectory_id,
-                float("-inf") if g.dt is None else g.dt,
-            ),
-        )
+        # Shuffle trajectories, not groups. With one group per trajectory
+        # (group_by_dt=False, or one dt per trajectory) the sorted list has
+        # the same length and order as the former group list, so
+        # random.Random(seed).shuffle yields the same permutation and the
+        # split is unchanged; only multi-dt trajectories are now kept whole.
+        trajectories_sorted = sorted(groups_by_trajectory)
 
         rng = random.Random(seed)
-        rng.shuffle(group_keys_sorted)
+        rng.shuffle(trajectories_sorted)
 
-        n_groups = len(group_keys_sorted)
-        n_val_groups = max(min_val_groups, int(round(val_fraction * n_groups)))
+        n_units = len(trajectories_sorted)
+        n_val_units = max(min_val_groups, int(round(val_fraction * n_units)))
 
-        if n_val_groups >= n_groups:
-            n_val_groups = n_groups - 1
+        if n_val_units >= n_units:
+            n_val_units = n_units - 1
 
-        if n_val_groups <= 0:
+        if n_val_units <= 0:
             raise ValueError(
                 "Validation split would be empty after constraints; "
                 "increase dataset size or adjust val_fraction."
             )
 
-        val_group_keys = set(group_keys_sorted[:n_val_groups])
-        train_group_keys = set(group_keys_sorted[n_val_groups:])
+        val_group_keys = {
+            key
+            for trajectory_id in trajectories_sorted[:n_val_units]
+            for key in groups_by_trajectory[trajectory_id]
+        }
+        train_group_keys = set(group_keys) - val_group_keys
 
     if len(train_group_keys) == 0:
         raise ValueError("Training split would be empty")

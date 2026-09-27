@@ -23,11 +23,16 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   `val_nrmse` = gepoolter relativer L2-Fehler statt MSE-Kopie; `RunnerConfig` validiert
   (`save_every_n_epochs=0` war ZeroDivisionError); `TrainingAnomalyDetector(window_size=1)` war
   StatisticsError, NaN-`spike_multiplier` schaltete die Erkennung ab.
-  _Split (#42, #40 P3-1/5/6):_ Entscheid Option A+: `group_by_dt` behaelt die dokumentierte Semantik
-  (verschiedene Schrittweiten einer Trajektorie = eigene Gruppen, Docstring praezisiert), aber
-  dt-Schluessel einer Trajektorie, die sich nur unterhalb float32-Aufloesung unterscheiden
-  (0.1 vs. `tensor(0.1)`), werfen `ValueError` mit Hinweis auf `dt_round_ndigits` statt die
-  Trajektorie still auf beide Seiten zu verteilen (vorher 41/50 Seeds). `trajectory_id`: 0-d
+  _Split (#42, #40 P3-1/5/6):_ Owner-Entscheid E0927-03 (Option B, woertlich in #42): die Invariante
+  "keine Trajektorie in train UND val" gilt IMMER, unabhaengig von dt-Typen und `group_by_dt`.
+  Umsetzung: die Split-Einheit ist die Trajektorie; unter `group_by_dt=True` bleiben die
+  (trajectory_id, dt)-Gruppen fuer die Auswertung getrennt, landen aber immer auf derselben Seite
+  (vorher 28/50 Seeds mit Trajektorie auf beiden Seiten bei dt 0.1+0.2); `val_fraction` und
+  `min_val_groups` zaehlen Trajektorien; ein `val_group_keys_override`, der nur einen Teil der
+  dt-Gruppen einer Trajektorie nennt -> `ValueError`. Bei einer Schrittweite je Trajektorie ist der
+  Split je Seed unveraendert (gepinnt). dt-Schluessel einer Trajektorie, die sich nur unterhalb
+  float32-Aufloesung unterscheiden (0.1 vs. `tensor(0.1)`), werfen weiterhin `ValueError` mit
+  Hinweis auf `dt_round_ndigits` (Metadaten-Konsistenz). `trajectory_id`: 0-d
   numpy-Werte werden entpackt (1.5 -> Fehler statt 1), bool/bytes und nicht-kanonische Strings
   (`"012"`, `"+12"`, `" 12"`) abgelehnt, kanonische (`"12"`) bleiben gueltig; `Decimal('sNaN')`
   war bereits korrekt, jetzt gepinnt. `dt_round_ndigits` typvalidiert, Rundungs-Overflow ->

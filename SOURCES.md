@@ -244,3 +244,15 @@
 | 4721CC2E0CA4A9E4 | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: passes ema_decay and best_metric_name on resume: runner_hex_v3.py |
 | 9B5DA9254E8CA458 | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: regressions foreign best.pt, metric switch, decay mismatch: test_checkpoint_integration_hex_v3.py |
 | 0425499B2E3F9453 | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: regression resume with other ema_decay: test_runner_hex_v3.py |
+
+## src/toolkit/ — review of PR #46, E0927-03 + H7 (append-only, 2026-09-28)
+
+> Owner decision E0927-03 (issue #42): no trajectory in train AND val, always,
+> independent of dt types and group_by_dt. The split unit is now the trajectory;
+> dt groups of one trajectory stay together (before: 28/50 seeds split one
+> trajectory under group_by_dt with dt 0.1+0.2). Runner test for resume with a
+> switched best metric (Equalita H7). Rows above remain lineage.
+
+| 8C279370377CAE96 | 2026-09-28 00:00 | src/toolkit | in-repo derived, E0927-03 trajectory is the split unit, override may not split a trajectory: dataset_split_hex_v3.py |
+| 4CC7EC1399C817F1 | 2026-09-28 00:00 | src/toolkit | in-repo derived, E0927-03 invariant tests over seeds, single-dt split pinned: test_dataset_split_hex_v3.py |
+| 8D8857A4ED6CF6F8 | 2026-09-28 00:00 | src/toolkit | in-repo derived, H7 regression resume with switched best metric: test_runner_hex_v3.py |

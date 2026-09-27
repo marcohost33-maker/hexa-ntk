@@ -455,8 +455,7 @@ class TestSplitBehavior(unittest.TestCase):
         # datasets with ONE finite dt per trajectory (zero, signed zero,
         # negative, subnormal and huge included; float and float64-tensor
         # values, fresh objects per sample). Several dt values inside one
-        # trajectory are split by design under group_by_dt (see
-        # test_group_by_dt_separates_dt_variants) and are not covered here.
+        # trajectory: TestTrajectoryInvariantE092703 (same invariant).
         dt_pool = (0.1, 0.2, 1e-3, 0.0, -0.05, 1e300, 5e-324)
         for seed in range(50):
             rng = random.Random(seed)
@@ -548,21 +547,21 @@ class TestSplitBehavior(unittest.TestCase):
         self.assertEqual(train.sample_indices, sorted(train.sample_indices))
         self.assertEqual(val.sample_indices, sorted(val.sample_indices))
 
-    def test_group_by_dt_separates_dt_variants(self) -> None:
+    def test_group_by_dt_never_splits_one_trajectory(self) -> None:
+        # E0927-03 (issue #42): two step sizes of ONE trajectory are two
+        # (trajectory_id, dt) groups, but the split keeps them together, so a
+        # single trajectory cannot be split under either grouping mode.
         samples = [
             {"trajectory_id": 0, "dt": 0.1},
             {"trajectory_id": 0, "dt": 0.2},
         ]
         ds = FakeTrajectoryDataset(samples)
-        # With group_by_dt these are 2 groups -> a split is possible;
-        # without it they collapse into 1 group -> split must fail.
-        train, val = split_dataset_by_trajectory(
-            ds, val_fraction=0.5, seed=0, group_by_dt=True
-        )
-        self.assertEqual(len(train), 1)
-        self.assertEqual(len(val), 1)
-        with self.assertRaises(ValueError):
-            split_dataset_by_trajectory(ds, val_fraction=0.5, seed=0)
+        for group_by_dt in (False, True):
+            with self.subTest(group_by_dt=group_by_dt):
+                with self.assertRaises(ValueError):
+                    split_dataset_by_trajectory(
+                        ds, val_fraction=0.5, seed=0, group_by_dt=group_by_dt
+                    )
 
     def test_dt_rounding_merges_float_noise(self) -> None:
         samples = [
@@ -822,18 +821,22 @@ class TestDtPrecisionSplitIssue42(unittest.TestCase):
         )
         self.assertEqual(len(train) + len(val), 2)
 
-    def test_deliberate_dt_variants_remain_separate_groups(self) -> None:
-        # Documented semantics (module docstring): distinct step sizes of one
-        # trajectory are independent groups; the summary exposes the overlap.
+    def test_deliberate_dt_variants_never_split_a_trajectory(self) -> None:
+        # E0927-03 (owner decision on issue #42): "no trajectory in train AND
+        # val" holds ALWAYS, independent of dt types and group_by_dt. Distinct
+        # step sizes of one trajectory stay separate (trajectory_id, dt)
+        # groups for reporting, but always land on the same side.
         ds = FakeTrajectoryDataset(
             [{"trajectory_id": 0, "dt": 0.1}, {"trajectory_id": 0, "dt": 0.05}]
+            + [{"trajectory_id": 1, "dt": 0.1}]
         )
-        train, val = split_dataset_by_trajectory(
-            ds, val_fraction=0.5, seed=0, group_by_dt=True
-        )
-        summary = summarize_group_split(train, val, group_by_dt=True)
-        self.assertEqual(summary["num_overlap_groups"], 0)
-        self.assertEqual(summary["overlap_trajectory_ids"], [0])
+        for seed in range(50):
+            train, val = split_dataset_by_trajectory(
+                ds, val_fraction=0.5, seed=seed, group_by_dt=True
+            )
+            summary = summarize_group_split(train, val, group_by_dt=True)
+            self.assertEqual(summary["num_overlap_groups"], 0, msg=f"seed={seed}")
+            self.assertEqual(summary["overlap_trajectory_ids"], [], msg=f"seed={seed}")
 
     def test_summary_also_rejects_precision_split(self) -> None:
         ds = self._mixed_precision_dataset()
@@ -846,6 +849,132 @@ class TestDtPrecisionSplitIssue42(unittest.TestCase):
         doc = dataset_split.__doc__
         self.assertNotIn("stricter grouping", doc)
         self.assertIn("overlap_trajectory_ids", doc)
+        self.assertIn("E0927-03", doc)
+
+
+# ------------------------------------------------------------------
+# E0927-03 (owner decision on issue #42): the trajectory invariant is absolute
+# ------------------------------------------------------------------
+
+
+class TestTrajectoryInvariantE092703(unittest.TestCase):
+    """No trajectory_id in train AND val -- always, whatever dt looks like."""
+
+    @staticmethod
+    def _ids(subset: SampleSubsetDataset) -> set:
+        return {s["trajectory_id"] for s in subset.samples}
+
+    def _assert_invariant(self, ds, train, val, **grouping) -> None:
+        self.assertEqual(self._ids(train) & self._ids(val), set())
+        train_idx, val_idx = set(train.sample_indices), set(val.sample_indices)
+        self.assertEqual(train_idx & val_idx, set())
+        self.assertEqual(train_idx | val_idx, set(range(len(ds))))
+        self.assertTrue(train_idx)
+        self.assertTrue(val_idx)
+        summary = summarize_group_split(train, val, **grouping)
+        self.assertEqual(summary["overlap_trajectory_ids"], [])
+
+    def test_equalita_probe_shape_zero_of_fifty_seeds(self) -> None:
+        # Equalita probe (review of #46): 6 trajectories, trajectory 0 carries
+        # dt 0.1 and 0.2, 3 samples per (trajectory, dt). Before: trajectory 0
+        # in train AND val in 28/50 seeds. Required: 0/50.
+        samples = []
+        for tid in range(6):
+            for dt in ((0.1, 0.2) if tid == 0 else (0.1,)):
+                samples += [{"trajectory_id": tid, "dt": dt}] * 3
+        ds = FakeTrajectoryDataset(samples)
+        leaked = []
+        for seed in range(50):
+            train, val = split_dataset_by_trajectory(
+                ds, val_fraction=0.3, seed=seed, group_by_dt=True
+            )
+            if self._ids(train) & self._ids(val):
+                leaked.append(seed)
+        self.assertEqual(leaked, [])
+
+    def test_property_over_seeds_multi_dt_trajectories(self) -> None:
+        # Random datasets in which trajectories carry 1-3 DISTINCT step sizes
+        # (no precision twins, which fail closed elsewhere), float and
+        # float64-tensor values; both grouping modes, with/without rounding.
+        dt_pool = (0.1, 0.2, 0.05, 1e-3, 0.0, -0.05, 1e300, 5e-324)
+        for seed in range(50):
+            rng = random.Random(1000 + seed)
+            samples: List[Dict[str, Any]] = []
+            for tid in range(rng.randint(2, 12)):
+                for dt in rng.sample(dt_pool, rng.randint(1, 3)):
+                    for step in range(rng.randint(1, 4)):
+                        value: Any = float(dt)
+                        if rng.random() < 0.5:
+                            value = torch.tensor(value, dtype=torch.float64)
+                        samples.append({"trajectory_id": tid, "dt": value, "step": step})
+            rng.shuffle(samples)  # sample order must not matter
+            ds = FakeTrajectoryDataset(samples)
+            val_fraction = rng.choice((0.1, 0.25, 0.5, 0.9))
+            for group_by_dt in (False, True):
+                for ndigits in (None, 6):
+                    with self.subTest(seed=seed, group_by_dt=group_by_dt, ndigits=ndigits):
+                        train, val = split_dataset_by_trajectory(
+                            ds, val_fraction=val_fraction, seed=seed,
+                            group_by_dt=group_by_dt, dt_round_ndigits=ndigits,
+                        )
+                        self._assert_invariant(
+                            ds, train, val, group_by_dt=group_by_dt, dt_round_ndigits=ndigits
+                        )
+
+    def test_single_dt_splits_are_unchanged(self) -> None:
+        # Reproducibility pin: with one dt per trajectory the split is the
+        # one recorded on 271b56f (before E0927-03), in both grouping modes.
+        dts = [0.1, 0.2, 0.05, 0.1, 0.3, 0.2, 0.1, 0.4, 0.5, 0.1]
+        ds = FakeTrajectoryDataset(
+            [{"trajectory_id": t, "dt": dts[t], "step": k} for t in range(10) for k in range(3)]
+        )
+        expected = {0: [1, 7, 8], 1: [6, 8, 9], 2: [3, 5, 9], 3: [1, 5, 6], 4: [0, 2, 8]}
+        for group_by_dt in (False, True):
+            for seed, val_ids in expected.items():
+                with self.subTest(group_by_dt=group_by_dt, seed=seed):
+                    _, val = split_dataset_by_trajectory(
+                        ds, val_fraction=0.3, seed=seed, group_by_dt=group_by_dt
+                    )
+                    self.assertEqual(sorted(self._ids(val)), val_ids)
+
+    def test_val_fraction_counts_trajectories_under_group_by_dt(self) -> None:
+        # The split unit is the trajectory: 10 trajectories with 2 dt each
+        # and val_fraction=0.3 -> 3 validation trajectories (6 groups).
+        ds = FakeTrajectoryDataset(
+            [{"trajectory_id": t, "dt": dt} for t in range(10) for dt in (0.1, 0.2)]
+        )
+        train, val = split_dataset_by_trajectory(
+            ds, val_fraction=0.3, seed=0, group_by_dt=True
+        )
+        self.assertEqual(len(self._ids(val)), 3)
+        self.assertEqual(len(val), 6)
+
+    def test_override_splitting_a_trajectory_is_rejected(self) -> None:
+        ds = FakeTrajectoryDataset(
+            [{"trajectory_id": 0, "dt": 0.1}, {"trajectory_id": 0, "dt": 0.2}]
+            + [{"trajectory_id": 1, "dt": 0.1}]
+        )
+        with self.assertRaises(ValueError) as ctx:
+            split_dataset_by_trajectory(
+                ds, val_fraction=0.5, seed=0, group_by_dt=True,
+                val_group_keys_override=[TrajectoryGroupKey(0, 0.1)],
+            )
+        self.assertIn("trajectory_id 0", str(ctx.exception))
+
+    def test_override_with_all_dt_groups_of_a_trajectory_is_accepted(self) -> None:
+        ds = FakeTrajectoryDataset(
+            [{"trajectory_id": 0, "dt": 0.1}, {"trajectory_id": 0, "dt": 0.2}]
+            + [{"trajectory_id": 1, "dt": 0.1}]
+        )
+        try:
+            train, val = split_dataset_by_trajectory(
+                ds, val_fraction=0.5, seed=0, group_by_dt=True,
+                val_group_keys_override=[TrajectoryGroupKey(0, 0.1), TrajectoryGroupKey(0, 0.2)],
+            )
+        except ValueError as exc:  # over-blocking guard: a verdict, not a crash
+            self.fail(f"complete override of trajectory 0 was rejected: {exc}")
+        self.assertEqual(self._ids(val), {0})
+        self.assertEqual(self._ids(train), {1})
 
 
 class TestDtInputContract(unittest.TestCase):

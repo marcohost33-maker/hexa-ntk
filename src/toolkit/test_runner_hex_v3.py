@@ -986,6 +986,30 @@ class TestFullResumeEquivalence(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "decay"):
                 _seeded_runner(out, cfg).maybe_resume()
 
+    def test_resume_with_other_best_metric_does_not_adopt_foreign_best(self) -> None:
+        # Runner half of the Codex-T1 fix on #46 (Equalita H7): the runner must
+        # hand its best_metric_name to load_resume. With metric_name=None the
+        # val_nrmse best of the first run was adopted into a val_loss run and
+        # then blocked every val_loss best.pt (compared across metrics).
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            first = _seeded_runner(out, self._cfg(out, 2, best_metric_name="val_nrmse"))
+            first.run()
+            self.assertIsNotNone(first.ckpt_mgr.best_metric_value)
+
+            second = _seeded_runner(out, self._cfg(
+                out, 3, best_metric_name="val_loss",
+                resume_from=first.ckpt_mgr.resume_path, resume_trusted=True))
+            report = second.maybe_resume()
+            self.assertFalse(report["best_metric_restored"])
+            self.assertEqual(report["best_metric_restore_reason"], "metric_name_mismatch")
+            self.assertIsNone(second.ckpt_mgr.best_metric_value)
+
+            second.run()
+            best_extra = torch.load(second.ckpt_mgr.best_model_path, weights_only=True)["extra"]
+            self.assertEqual(best_extra["metric_name"], "val_loss")
+            self.assertEqual(best_extra["epoch"], 2)
+
     def test_resume_report_exposes_best_restore(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             out = Path(tmpdir)
