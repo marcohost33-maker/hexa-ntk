@@ -209,6 +209,7 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(decision.provider_id, "a")
         self.assertEqual(decision.policy_version, "hexrouter.lexicographic.v1")
         self.assertEqual(len(decision.registry_fingerprint), 64)
+        self.assertEqual(len(decision.evaluation_fingerprint), 64)
         self.assertEqual(decision.eligible_count, 2)
         self.assertEqual(len(decision.eligible_snapshot), 2)
 
@@ -479,6 +480,78 @@ class PlannerTests(unittest.TestCase):
             "POLICY_INPUT_MISMATCH",
             dict(decision.rejections)["p"],
         )
+
+    def test_policy_input_binds_complete_task_contract(self) -> None:
+        item = provider("p", code_sha="sha")
+        planner = DeterministicPlanner([CAP], [item])
+        authorized_contract = task(max_latency_ms=1000.0)
+        changed_contract = task(max_latency_ms=999.0)
+        decision = planner.plan(
+            changed_contract,
+            runtime={"p": runtime("p", "sha", latency=10)},
+            assurance={"p": assurance("p", "sha")},
+            reliability={"p": reliability("p", "sha", 0.95)},
+            policy={
+                "p": policy(
+                    "p",
+                    task_contract=authorized_contract,
+                )
+            },
+        )
+        self.assertEqual(decision.status, "ABSTAIN")
+        self.assertIn(
+            "POLICY_INPUT_MISMATCH",
+            dict(decision.rejections)["p"],
+        )
+
+    def test_rejected_evidence_changes_audit_identity(self) -> None:
+        good = provider("good", code_sha="sha-good")
+        bad = provider("bad", code_sha="sha-bad")
+        planner = DeterministicPlanner([CAP], [good, bad])
+        contract = task()
+
+        common_runtime = {
+            "good": runtime("good", "sha-good", latency=10),
+            "bad": runtime("bad", "sha-bad", latency=20),
+        }
+        common_assurance = {
+            "good": assurance("good", "sha-good"),
+            "bad": assurance("bad", "sha-bad"),
+        }
+        common_policy = {
+            "good": policy("good", task_contract=contract),
+            "bad": policy("bad", task_contract=contract),
+        }
+
+        first = planner.plan(
+            contract,
+            runtime=common_runtime,
+            assurance=common_assurance,
+            reliability={
+                "good": reliability("good", "sha-good", 0.95),
+                "bad": reliability("bad", "sha-bad", 0.10),
+            },
+            policy=common_policy,
+        )
+        second = planner.plan(
+            contract,
+            runtime=common_runtime,
+            assurance=common_assurance,
+            reliability={
+                "good": reliability("good", "sha-good", 0.95),
+                "bad": reliability("bad", "sha-bad", 0.20),
+            },
+            policy=common_policy,
+        )
+
+        self.assertEqual(first.provider_id, "good")
+        self.assertEqual(second.provider_id, "good")
+        self.assertEqual(first.rejections, second.rejections)
+        self.assertNotEqual(
+            first.evaluation_fingerprint,
+            second.evaluation_fingerprint,
+        )
+        self.assertNotEqual(first.decision_id, second.decision_id)
 
     def test_assurance_is_bound_to_task_regime(self) -> None:
         item = provider("p", code_sha="sha")
