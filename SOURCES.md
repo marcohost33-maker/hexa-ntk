@@ -257,3 +257,16 @@
 | 35731A9F418EC601 | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 evidence/delivery hardening: HEXAROUTER_V05_CONTRACT.md |
 | 14069B61FE78F2A7 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 evidence/delivery hardening: hexarouter_v05.py |
 | A8C80BE0739B0AAA | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 evidence/delivery hardening tests: test_hexarouter_v05.py |
+
+
+## spec/ + src/toolkit/ — HexaRouter/HCM v0.5 SQLite-race hardening 2026-09-27
+
+> SQLite's 2026 WAL-reset race changes the safe local-store default. The
+> reference store now enables WAL+FULL only on release lines explicitly known
+> to contain the upstream fix; otherwise it uses rollback DELETE+EXTRA and
+> exposes the active storage profile for audit. Prior rows remain append-only
+> lineage.
+
+| 123E51DBA5ED347B | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 SQLite-race hardening: HEXAROUTER_V05_CONTRACT.md |
+| 2A75000219F81C8C | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 SQLite-race hardening: hexarouter_v05.py |
+| AA9B77E3E2C8B836 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 SQLite-race hardening tests: test_hexarouter_v05.py |
