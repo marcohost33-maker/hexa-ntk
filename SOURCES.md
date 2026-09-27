@@ -307,3 +307,14 @@
 | 09DC0BF8696E255D | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 full-input audit binding: HEXAROUTER_V05_CONTRACT.md |
 | 9617A062F0208D31 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 full-input audit binding: hexarouter_v05.py |
 | F3C276F4739E8BD6 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 full-input audit tests: test_hexarouter_v05.py |
+
+
+## spec/ + src/toolkit/ — HexaRouter/HCM v0.5 lease-completion hardening 2026-09-27
+
+> Inbox completion now requires the current claim token AND an unexpired lease.
+> An expired worker can no longer mark work complete merely because no replacement
+> worker has reclaimed the event yet. Prior rows remain append-only lineage.
+
+| 3D6DEA257F19F9FE | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 lease-completion hardening: HEXAROUTER_V05_CONTRACT.md |
+| 388B7E6BC151F848 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 lease-completion hardening: hexarouter_v05.py |
+| AFF4B250D9145E5C | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 lease-completion hardening tests: test_hexarouter_v05.py |
