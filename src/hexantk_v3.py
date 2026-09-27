@@ -29,6 +29,12 @@ CHANGELOG (P0-P3 from review)
 
 [P1.1] test_checkpoint_integration_hex_v3: complete round-trip tests.
 [P1.2] test_operator_adapter_hex_v3: complete validation tests.
+[P1.3] Hex explicit-step contract: L2 stability (h^2/(3D)) is now
+       distinguished from positivity/DMP/monotonicity (h^2/(4D)).
+       Existing hex_cfl_max_dt behavior is preserved; a separate
+       hex_positivity_max_dt helper and regression checks were added.
+       Public numerical helpers now reject non-finite/invalid inputs with
+       ValueError instead of assert-only validation.
 
 [P2+P3] PyTorch 2.6+ SoTA: safe_globals context manager, non-reentrant
        activation checkpointing notes, DDP guards, atomic writes.
@@ -70,6 +76,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import numbers
 import os
 import tempfile
 import time
@@ -84,7 +91,7 @@ from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
-__version__ = "3.0.0"
+__version__ = "3.0.1"
 
 
 def module_hash() -> str:
@@ -559,10 +566,40 @@ def load_partial_checkpoint_raw(
 # ============================================================================
 
 
+def _finite_positive_float(name: str, value: Any) -> float:
+    """Convert a real scalar to finite binary64 and require it to be > 0.
+
+    Reject bool explicitly (bool is an int subclass), conversion overflow,
+    NaN/Inf, and positive exact values that underflow to 0.0.
+    """
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value, (numbers.Real, np.integer, np.floating)
+    ):
+        raise ValueError(f"{name} must be a real numeric scalar, got {type(value).__name__}")
+    try:
+        out = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be representable as a finite real scalar") from exc
+    if not np.isfinite(out) or out <= 0.0:
+        raise ValueError(f"{name} must be finite and > 0, got {value!r}")
+    return out
+
+
+def _unit_interval_safety(value: Any) -> float:
+    """Convert safety to finite binary64 and require 0 < safety <= 1."""
+    out = _finite_positive_float("safety", value)
+    if out > 1.0:
+        raise ValueError(f"safety must be <= 1, got {value!r}")
+    return out
+
+
 def hex_laplacian_stencil_weight(h: float) -> float:
     r"""FV weight for 7-point hex Laplacian: 2/(3 h^2).
 
     Formula: \nabla^2_h u_0 = (2/(3 h^2)) sum_{j=1}^{6}(u_j - u_0).
+
+    Here h is the nearest-neighbour / cell-centre spacing on the regular
+    six-neighbour lattice.
 
     Reference: Lee & Tien 2014, Lee 2017 for regular hex grids.
 
@@ -571,23 +608,55 @@ def hex_laplacian_stencil_weight(h: float) -> float:
     >>> bool(abs(hex_laplacian_stencil_weight(0.5) - 8.0/3.0) < 1e-14)
     True
     """
-    assert h > 0, f"h must be > 0, got {h}"
-    return 2.0 / (3.0 * h * h)
+    h_f = _finite_positive_float("h", h)
+    return 2.0 / (3.0 * h_f * h_f)
 
 
 def hex_cfl_max_dt(h: float, D_v: float, safety: float = 0.85) -> float:
-    """Maximum stable timestep for forward-Euler on hex 7-point Laplacian.
+    """L2-stable timestep bound for forward Euler on the hex 7-point Laplacian.
 
-    Stability: dt <= h^2 / (3 D_v). Safety factor of ~0.85 recommended.
+    For the regular six-neighbour stencil with constant isotropic diffusion,
+    the sharp spectral bound is dt <= h^2 / (3 D_v). This helper preserves
+    the historical default safety=0.85 for backward compatibility.
 
-    Reference: Review sec. 5.2; earlier factor of 6 in denominator was
-    over-conservative; 3 is the tight constant for the standard hex FV.
+    IMPORTANT: L2 stability does not imply positivity. For densities,
+    concentrations, probabilities, or any state that must remain non-negative,
+    use hex_positivity_max_dt(), whose sharp forward-Euler bound is
+    h^2 / (4 D_v).
+
+    Reference: Review sec. 5.2; the earlier factor of 6 in the denominator was
+    a valid but over-conservative sufficient condition, not the sharp bound.
 
     >>> bool(abs(hex_cfl_max_dt(1.0, 1.0, safety=1.0) - 1.0/3.0) < 1e-14)
     True
     """
-    assert h > 0 and D_v > 0 and 0 < safety <= 1.0
-    return safety * h * h / (3.0 * D_v)
+    h_f = _finite_positive_float("h", h)
+    d_f = _finite_positive_float("D_v", D_v)
+    safety_f = _unit_interval_safety(safety)
+    return safety_f * h_f * h_f / (3.0 * d_f)
+
+
+def hex_positivity_max_dt(h: float, D_v: float, safety: float = 1.0) -> float:
+    """Positivity/DMP/monotonicity timestep bound for the regular hex stencil.
+
+    For forward Euler with the 7-point regular six-neighbour Laplacian,
+    dt <= h^2/(4 D_v) is necessary and sufficient for all update weights to
+    be non-negative. The step is then a convex combination, giving positivity
+    preservation, the discrete maximum principle, and monotonicity for this
+    specific linear constant-coefficient scheme.
+
+    This statement is not universal for variable/anisotropic diffusion,
+    irregular cells, or different boundary/operator discretisations.
+
+    >>> bool(abs(hex_positivity_max_dt(1.0, 1.0) - 0.25) < 1e-14)
+    True
+    >>> bool(abs(hex_positivity_max_dt(0.5, 2.0) - 0.03125) < 1e-14)
+    True
+    """
+    h_f = _finite_positive_float("h", h)
+    d_f = _finite_positive_float("D_v", D_v)
+    safety_f = _unit_interval_safety(safety)
+    return safety_f * h_f * h_f / (4.0 * d_f)
 
 
 # ============================================================================
@@ -1281,15 +1350,50 @@ def test_warmstart_prefix_transforms() -> bool:
 
 
 def test_hex_laplacian_and_cfl() -> bool:
-    """Hex FV constants from review sec 5."""
+    """Hex FV stencil, L2 stability, positivity/DMP, and input contracts."""
     w1 = hex_laplacian_stencil_weight(1.0)
     assert abs(w1 - 2.0/3.0) < 1e-14
-    # CFL: dt_max = h^2 / (3 D_v) with safety ~0.85
-    dt = hex_cfl_max_dt(1.0, 1.0, safety=0.85)
-    assert abs(dt - 0.85/3.0) < 1e-14
-    dt_ref = hex_cfl_max_dt(0.5, 2.0, safety=1.0)
-    assert abs(dt_ref - 0.25/6.0) < 1e-14
-    print(f"  hex stencil weight = 2/3, CFL dt(h=1,D=1,safety=0.85) = {dt:.4f}")
+
+    # Backward-compatible L2 CFL helper: dt_max = h^2 / (3 D_v).
+    dt_l2_default = hex_cfl_max_dt(1.0, 1.0, safety=0.85)
+    assert abs(dt_l2_default - 0.85/3.0) < 1e-14
+    dt_l2_sharp = hex_cfl_max_dt(0.5, 2.0, safety=1.0)
+    assert abs(dt_l2_sharp - 0.25/6.0) < 1e-14
+
+    # Positivity/DMP bound: dt_max = h^2 / (4 D_v).
+    dt_pos = hex_positivity_max_dt(1.0, 1.0)
+    assert abs(dt_pos - 0.25) < 1e-14
+
+    # Historical L2 default 0.85 is stable but not positivity preserving:
+    # centre coefficient = 1 - 4 D dt / h^2.
+    centre_default = 1.0 - 4.0 * dt_l2_default
+    centre_pos = 1.0 - 4.0 * dt_pos
+    assert centre_default < 0.0
+    assert abs(centre_default + 2.0/15.0) < 1e-14
+    assert abs(centre_pos) < 1e-14
+
+    invalid_calls = [
+        lambda: hex_laplacian_stencil_weight(float("nan")),
+        lambda: hex_cfl_max_dt(0.0, 1.0),
+        lambda: hex_cfl_max_dt(1.0, float("inf")),
+        lambda: hex_cfl_max_dt(10**400, 1.0),
+        lambda: hex_cfl_max_dt(True, 1.0),
+        lambda: hex_cfl_max_dt("1.0", 1.0),
+        lambda: hex_positivity_max_dt(1.0, 1.0, safety=0.0),
+    ]
+    rejected = 0
+    for call in invalid_calls:
+        try:
+            call()
+        except ValueError:
+            rejected += 1
+    assert rejected == len(invalid_calls)
+
+    print(
+        "  hex stencil=2/3; "
+        f"L2 default dt={dt_l2_default:.4f}; positivity dt={dt_pos:.4f}; "
+        f"centre(default)={centre_default:.4f}"
+    )
     return True
 
 

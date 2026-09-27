@@ -22,9 +22,14 @@ vorbereitet ist. Der Engine-Header sagt das woertlich:
 > the rest of our infrastructure (dataset split, checkpoint semantics, OperatorAdapter) is
 > GAOT-ready." — `src/hexantk_v3.py:717-720`
 
-Hex-spezifisch im engeren Sinn sind zwei verifizierte Formeln:
-`hex_laplacian_stencil_weight` (7-Punkt-FV-Gewicht `2/(3h^2)`, `src/hexantk_v3.py:562`)
-und `hex_cfl_max_dt` (Stabilitaets-Schranke `dt <= h^2/(3 D)`, `src/hexantk_v3.py:578`).
+Hex-spezifisch im engeren Sinn sind drei getrennte numerische Aussagen implementiert:
+`hex_laplacian_stencil_weight` (7-Punkt-FV-Gewicht `2/(3h^2)`),
+`hex_cfl_max_dt` (scharfe spektrale/L2-Forward-Euler-Grenze
+`dt <= h^2/(3 D)`) und `hex_positivity_max_dt` (scharfe
+Positivitaets-/DMP-/Monotonie-Grenze dieses regulaeren linearen Schemas
+`dt <= h^2/(4 D)`). Der historische `hex_cfl_max_dt`-Default
+`safety=0.85` bleibt aus Kompatibilitaetsgruenden erhalten, ist aber fuer
+nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 
 ## Was das ausdruecklich NICHT ist
 
@@ -51,6 +56,11 @@ und `hex_cfl_max_dt` (Stabilitaets-Schranke `dt <= h^2/(3 D)`, `src/hexantk_v3.p
 Lokale Umgebung dieses Laufs: Python 3.14.4, `torch` 2.12.1+cpu, `numpy` 2.4.6.
 Die CI faehrt dieselbe Kette auf **Python 3.12** mit `torch==2.6.0` (CPU-Wheel).
 Die Zahlen gelten fuer diese beiden Umgebungen; ausserhalb ist nichts zugesichert.
+
+**Branch-Hinweis:** Der Fix `fix/hex-cfl-positivity-contract` fuegt zwei Doctests hinzu
+(49 statt 47 erwartet) und hebt die Engine-Version auf 3.0.1. Die obige Tabelle ist
+bewusst historische Evidenz des Laufs vom 2026-08-26 und wird nicht als neuer Lauf
+umetikettiert; ein neuer PASS wird erst nach CI/Engine-Gate als Evidenz eingetragen.
 
 **Resume-Pfad (in diesem Branch korrigiert):** `HexTrainingRunner.maybe_resume()`
 reicht `config.resume_from` jetzt explizit an den Checkpoint-Loader weiter.
@@ -82,7 +92,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt                  # zentrale Tool-Pins: ruff/coverage
 python -m pip install numpy
 python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
-python scripts/engine_gate.py                                  # 47 Doctests + 26 Selftests
+python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests (branch expectation)
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
 python -m coverage report                                      # 275 Unit-Tests (2026-09-26) + Coverage-Gate
