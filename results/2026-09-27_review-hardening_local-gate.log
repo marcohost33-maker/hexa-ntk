@@ -92,3 +92,30 @@ rc=0
 # [4/5] Engine-Mirror: git hash-object src/hexantk_v3.py = 3a64658394e1036f5f08d299b37376348203ac55,
 #   identisch mit coworker-dde@5dc3e6f (#50) -> Byte-Mirror intakt nach PR #45.
 # [5/5] Bewusst NICHT geaendert: Engine (Pflege via coworker-dde), CI-Workflow, Branch-Schutz.
+
+# ===========================================================================
+# Nachtrag 2026-09-27: Codex-Review-Runde auf PR #46 (3 x P2, alle bestaetigt)
+# (1) best.pt eines ANDEREN Laufs mit besserem Wert wurde beim Resume uebernommen
+#     -> run_id + best_metric_name im Resume-Record und in best.pt, Pflichtabgleich
+# (2) Resume mit anderem ema_decay -> stilles Hybrid-EMA -> ema_decay gespeichert,
+#     Abweichung = ValueError VOR jeder Zustandsaenderung
+# (3) mutation_probe zaehlte jeden Exit != 0 als Kill. Repro: alte Probe auf HEAD mit
+#     python3.11 OHNE torch/numpy -> '[MUTATION-PROBE] 16/16 killed | PASS', rc=0 (falsch).
+#     Neue Probe im selben Env -> 'baseline red', rc=3. Kill nur mit 'Ran N>0' + 'FAILED ('.
+
+$ ruff check src scripts
+All checks passed!
+rc=0
+$ python scripts/verify_sources.py
+[VERIFY-SOURCES] 22 Toolkit-Eintraege + 2 Spec-Eintraege | Dateiliste: git (24 Dateien) | PASS
+rc=0
+$ python scripts/engine_gate.py
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+rc=0
+$ python -m coverage run -m unittest discover ... && python -m coverage report --precision=2
+Ran 378 tests in 3.595s
+OK
+TOTAL                                           1654    133    654     89  89.60%
+$ python scripts/mutation_probe.py
+[MUTATION-PROBE] baseline green | 19/19 killed | PASS
+rc=0

@@ -94,13 +94,17 @@ def build_resume_payload(
     include_torch_rng: bool = True,
     include_dataloader_state: Optional[Dict[str, Any]] = None,
     ema_state_dict: Optional[Dict[str, Any]] = None,
+    ema_decay: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Build a resume checkpoint payload dict without writing to disk.
 
     ``ema_state_dict`` is ``AveragedModel.state_dict()`` (averaged weights
     plus the ``n_averaged`` counter); it holds tensors only, so it does not
-    affect the safe (weights_only=True) load path.
+    affect the safe (weights_only=True) load path. The averaging function is
+    not part of it, so ``ema_decay`` is stored next to it (as a float) and
+    checked on load: continuing with another decay would silently produce a
+    hybrid average.
 
     This function is separated from save_resume_checkpoint so that
     callers (e.g. CheckpointIntegrationManager) can use their own
@@ -149,6 +153,8 @@ def build_resume_payload(
 
     if ema_state_dict is not None:
         payload["ema_state_dict"] = ema_state_dict
+        if ema_decay is not None:
+            payload["ema_decay"] = float(ema_decay)
 
     if extra is not None:
         payload["extra"] = extra
@@ -176,6 +182,7 @@ def save_resume_checkpoint(
     include_torch_rng: bool = True,
     include_dataloader_state: Optional[Dict[str, Any]] = None,
     ema_state_dict: Optional[Dict[str, Any]] = None,
+    ema_decay: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Save a training resume checkpoint.
@@ -199,6 +206,7 @@ def save_resume_checkpoint(
         include_torch_rng=include_torch_rng,
         include_dataloader_state=include_dataloader_state,
         ema_state_dict=ema_state_dict,
+        ema_decay=ema_decay,
     )
 
     torch.save(payload, path)
@@ -290,6 +298,7 @@ def load_resume_checkpoint(
     strict: bool = True,
     trusted: bool = False,
     ema_model: Optional[torch.optim.swa_utils.AveragedModel] = None,
+    ema_decay: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Load a training resume checkpoint.
@@ -303,6 +312,10 @@ def load_resume_checkpoint(
         Optional AveragedModel, built with the same decay as when saving.
         Restored from ``ema_state_dict`` if the checkpoint carries one;
         ``report["ema_restored"]`` says whether it did.
+    ema_decay :
+        The decay ``ema_model`` averages with. If both it and the checkpoint's
+        recorded ``ema_decay`` are known and differ, ValueError is raised
+        before anything is restored (no silent hybrid EMA).
 
     Restore order (PyTorch convention):
         1. model state
@@ -337,6 +350,19 @@ def load_resume_checkpoint(
         if payload.get("global_step") is not None
         else None
     )
+    recorded_decay = payload.get("ema_decay")
+    if (
+        ema_model is not None
+        and "ema_state_dict" in payload
+        and ema_decay is not None
+        and recorded_decay is not None
+        and float(recorded_decay) != float(ema_decay)
+    ):
+        raise ValueError(
+            f"Resume checkpoint EMA was averaged with decay {recorded_decay!r}, "
+            f"but the current EMA uses {ema_decay!r}; continuing would mix two "
+            "averages. Resume with the same ema_decay (or without ema_model)."
+        )
 
     # 1. Model
     model_incompat = model.load_state_dict(payload["model_state_dict"], strict=strict)
@@ -389,6 +415,7 @@ def load_resume_checkpoint(
         "grad_scaler_restored": grad_scaler_restored,
         "has_ema_state": "ema_state_dict" in payload,
         "ema_restored": ema_restored,
+        "ema_decay": recorded_decay,
         "rng_restored": rng_report,
         "has_dataloader_state": "dataloader_state_dict" in payload,
         "has_extra": "extra" in payload,

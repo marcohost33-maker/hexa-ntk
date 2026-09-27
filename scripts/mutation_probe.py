@@ -10,14 +10,22 @@ Why this script exists: earlier ROADMAP entries cited "11/11 mutants" and
 "600/600 differential" from scripts that never entered the repo (issue #40
 P3-4). This probe is the in-repo evidence for its own claim.
 
+Validity (Codex review on #46): a nonzero exit alone is not a kill. Every
+target test class must first pass on the unmutated tree (baseline); otherwise
+missing dependencies or import errors would make every mutant look killed. A
+mutant counts as KILLED only if its run executed tests ("Ran N tests", N > 0)
+and ended in "FAILED (...)".
+
 Run from anywhere (every file is restored, also on failure):
     python scripts/mutation_probe.py
-Exit code 0 only if every mutant is killed; 2 if a mutant no longer applies
-(the source moved on and the probe must be updated).
+Exit codes: 0 every mutant killed; 1 a mutant survived or a run was not a
+valid test failure; 2 a mutant no longer applies (source moved on); 3 the
+baseline is red (the probe proves nothing then).
 """
 from __future__ import annotations
 
 import pathlib
+import re
 import subprocess
 import sys
 from typing import NamedTuple
@@ -38,12 +46,24 @@ RU = "runner_hex_v3.py"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
-    Mutant(CK, "            self.best_metric_value = metric\n            return {\n",
-           "            self.best_metric_value = metric_value\n            return {\n",
+    Mutant(CK, "            self.best_metric_value = metric\n            self.best_metric_name = metric_name\n"
+           "            return {\n",
+           "            self.best_metric_value = metric_value\n            self.best_metric_name = metric_name\n"
+           "            return {\n",
            "test_checkpoint_integration_hex_v3.TestNonMainRankStoresValidatedFloat"),
     # #40 P3-3: no commit when the file was replaced but dir-fsync failed.
-    Mutant(CK, "            self.best_metric_value = metric\n            raise\n", "            raise\n",
+    Mutant(CK, "            self.best_metric_value = metric\n            self.best_metric_name = metric_name\n"
+           "            raise\n", "            raise\n",
            "test_checkpoint_integration_hex_v3.TestDurabilityErrorAfterReplace"),
+    # Codex review on #46: run identity / metric identity / EMA decay.
+    Mutant(CK, '        if disk_run_id is None or disk_run_id != state.get("run_id"):\n',
+           "        if False:\n",
+           "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
+    Mutant(CK, "        if disk_name != recorded_name:\n", "        if False:\n",
+           "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
+    Mutant("resume_utils_hex_v3.py", "        and float(recorded_decay) != float(ema_decay)\n",
+           "        and False\n",
+           "test_checkpoint_integration_hex_v3.TestResumeEmaState"),
     # Resume best restore: trust the record without checking best.pt.
     Mutant(CK, "        if not at_least_as_good:\n", "        if False:\n",
            "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
@@ -61,8 +81,8 @@ MUTANTS = (
     Mutant(RU, "        self.min_history = max(1, window_size // 2)", "        self.min_history = window_size // 2",
            "test_runner_hex_v3.TestDetectorContract"),
     # Resume without the EMA average.
-    Mutant(RU, "            ema_model=self.ema_model,\n        )\n        if self.ema_model",
-           "        )\n        if self.ema_model",
+    Mutant(RU, "            ema_model=self.ema_model,\n            ema_decay=",
+           "            ema_decay=",
            "test_runner_hex_v3.TestFullResumeEquivalence"),
     # Final epoch not checkpointed.
     Mutant(RU, "epoch % self.config.save_every_n_epochs == 0 or is_final_epoch",
@@ -88,37 +108,75 @@ MUTANTS = (
 )
 
 
-def run_mutant(mutant: Mutant) -> bool:
-    """Apply one mutant, run its test class, restore. True = killed."""
+_RAN = re.compile(r"^Ran (\d+) tests?", re.MULTILINE)
+
+
+def _run_tests(test: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "unittest", test],
+        cwd=TOOLKIT,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _tests_ran(output: str) -> int:
+    match = _RAN.search(output)
+    return int(match.group(1)) if match else 0
+
+
+def run_mutant(mutant: Mutant) -> str:
+    """Apply one mutant, run its test class, restore.
+
+    Returns "KILLED", "SURVIVED" or "INVALID" (the run failed without
+    executing tests, e.g. a crash before discovery).
+    """
     path = TOOLKIT / mutant.module
     original = path.read_text(encoding="utf-8")
     if original.count(mutant.original) != 1:
         raise LookupError(f"{mutant.module}: mutation site not found exactly once: {mutant.original!r}")
     path.write_text(original.replace(mutant.original, mutant.mutated), encoding="utf-8")
     try:
-        result = subprocess.run(
-            [sys.executable, "-m", "unittest", mutant.test],
-            cwd=TOOLKIT,
-            capture_output=True,
-        )
+        result = _run_tests(mutant.test)
     finally:
         path.write_text(original, encoding="utf-8")
-    return result.returncode != 0
+    if result.returncode == 0:
+        return "SURVIVED"
+    output = result.stderr + result.stdout
+    if _tests_ran(output) > 0 and "FAILED (" in output:
+        return "KILLED"
+    return "INVALID"
+
+
+def check_baseline() -> list[str]:
+    """Every target class must pass unmutated; return the red ones."""
+    red = []
+    for test in sorted({m.test for m in MUTANTS}):
+        result = _run_tests(test)
+        if result.returncode != 0 or _tests_ran(result.stderr + result.stdout) == 0:
+            red.append(test)
+    return red
 
 
 def main() -> int:
+    red = check_baseline()
+    if red:
+        for test in red:
+            print(f"[BASELINE RED] {test}")
+        print("[MUTATION-PROBE] baseline red - no mutant result is valid | FAIL")
+        return 3
     killed = 0
     for index, mutant in enumerate(MUTANTS, 1):
         try:
-            is_killed = run_mutant(mutant)
+            status = run_mutant(mutant)
         except LookupError as exc:
             print(f"M{index:02d} STALE     {exc}")
             return 2
-        killed += is_killed
-        status = "KILLED  " if is_killed else "SURVIVED"
-        print(f"M{index:02d} {status}  {mutant.module} -> {mutant.test.rsplit('.', 1)[-1]}")
-    print(f"[MUTATION-PROBE] {killed}/{len(MUTANTS)} killed | {'PASS' if killed == len(MUTANTS) else 'FAIL'}")
-    return 0 if killed == len(MUTANTS) else 1
+        killed += status == "KILLED"
+        print(f"M{index:02d} {status:<8}  {mutant.module} -> {mutant.test.rsplit('.', 1)[-1]}")
+    ok = killed == len(MUTANTS)
+    print(f"[MUTATION-PROBE] baseline green | {killed}/{len(MUTANTS)} killed | {'PASS' if ok else 'FAIL'}")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

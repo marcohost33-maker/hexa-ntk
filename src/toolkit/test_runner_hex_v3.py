@@ -976,6 +976,16 @@ class TestFullResumeEquivalence(unittest.TestCase):
                 (full_best["metric_value"], full_best["epoch"]),
             )
 
+    def test_resume_with_other_ema_decay_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            first = _seeded_runner(out, self._cfg(out, 1))
+            first.run()
+            cfg = RunnerConfig(output_dir=str(out), num_epochs=2, ema_decay=0.5,
+                               resume_from=first.ckpt_mgr.resume_path, resume_trusted=True)
+            with self.assertRaisesRegex(ValueError, "decay"):
+                _seeded_runner(out, cfg).maybe_resume()
+
     def test_resume_report_exposes_best_restore(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             out = Path(tmpdir)

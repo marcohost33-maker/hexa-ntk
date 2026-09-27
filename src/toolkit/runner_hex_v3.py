@@ -376,6 +376,8 @@ class HexTrainingRunner:
             trusted=self.config.resume_trusted,
             path=resume_path,
             ema_model=self.ema_model,
+            ema_decay=self.config.ema_decay if self.ema_model is not None else None,
+            metric_name=self.config.best_metric_name,
         )
         if self.ema_model is not None and not report.get("ema_restored"):
             logger.warning(
@@ -893,6 +895,7 @@ class HexTrainingRunner:
             ema_state_dict=(
                 self.ema_model.state_dict() if self.ema_model is not None else None
             ),
+            ema_decay=self.config.ema_decay if self.ema_model is not None else None,
             extra={
                 "train_loss": train_report["mean_loss"],
                 "val_loss": val_report["val_loss"],

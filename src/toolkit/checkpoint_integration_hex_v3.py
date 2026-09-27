@@ -37,6 +37,7 @@ import math
 import numbers
 import os
 import tempfile
+import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -259,6 +260,11 @@ class CheckpointIntegrationManager:
         Policy for deciding best-model updates.
     is_main_process :
         DDP guard. If False, save operations are skipped.
+    run_id :
+        Identity of the training run, written into best.pt and the resume
+        record. A fresh manager gets a random id; load_resume() adopts the id
+        of the resumed run, so best.pt of that run is recognised and a best.pt
+        of any other run in the same directory is not.
     """
 
     def __init__(
@@ -267,12 +273,16 @@ class CheckpointIntegrationManager:
         *,
         best_policy: Optional[BestCheckpointPolicy] = None,
         is_main_process: bool = True,
+        run_id: Optional[str] = None,
     ) -> None:
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self.best_policy = best_policy or BestCheckpointPolicy(mode="min", min_delta=0.0)
         self.best_metric_value: Optional[float] = None
+        self.best_metric_name: Optional[str] = None
         self.is_main_process = is_main_process
+        # DDP: pass the same run_id on every rank if the ranks' ids must agree.
+        self.run_id = run_id if run_id is not None else uuid.uuid4().hex
 
     # ------------------------------------------------------------------
     # Paths
@@ -300,6 +310,8 @@ class CheckpointIntegrationManager:
             "root_dir": str(self.root_dir),
             "best_policy": asdict(self.best_policy),
             "best_metric_value": self.best_metric_value,
+            "best_metric_name": self.best_metric_name,
+            "run_id": self.run_id,
             "is_main_process": self.is_main_process,
             "paths": {
                 "best_model_path": self.best_model_path,
@@ -361,12 +373,14 @@ class CheckpointIntegrationManager:
                 else None
             ),
             "best_policy": asdict(self.best_policy),
+            "run_id": self.run_id,
         }
         if extra is not None:
             payload_extra["user_extra"] = extra
 
         if not self.is_main_process:
             self.best_metric_value = metric
+            self.best_metric_name = metric_name
             return {
                 "saved": False,
                 "reason": "not_main_process",
@@ -386,10 +400,12 @@ class CheckpointIntegrationManager:
             # best.pt already holds the new model (#40 P3-3): keeping the old
             # value would let a later, worse metric overwrite it.
             self.best_metric_value = metric
+            self.best_metric_name = metric_name
             raise
         # Commit only after the durable write: a failed save must not move
         # the best value, or the same improvement would never be saved.
         self.best_metric_value = metric
+        self.best_metric_name = metric_name
 
         return {
             "saved": True,
@@ -471,6 +487,7 @@ class CheckpointIntegrationManager:
         include_torch_rng: bool = True,
         include_dataloader_state: Optional[Dict[str, Any]] = None,
         ema_state_dict: Optional[Dict[str, Any]] = None,
+        ema_decay: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Save a full resume checkpoint atomically.
@@ -505,10 +522,13 @@ class CheckpointIntegrationManager:
             include_torch_rng=include_torch_rng,
             include_dataloader_state=include_dataloader_state,
             ema_state_dict=ema_state_dict,
+            ema_decay=ema_decay,
         )
         payload["checkpoint_manager_state"] = {
             "best_metric_value": self.best_metric_value,
+            "best_metric_name": self.best_metric_name,
             "best_policy_mode": self.best_policy.mode,
+            "run_id": self.run_id,
         }
 
         AtomicCheckpointWriter.save_torch_payload_atomic(self.resume_path, payload)
@@ -607,6 +627,8 @@ class CheckpointIntegrationManager:
         trusted: bool = False,
         path: Optional[Union[str, Path]] = None,
         ema_model: Optional[torch.optim.swa_utils.AveragedModel] = None,
+        ema_decay: Optional[float] = None,
+        metric_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Load a resume checkpoint.
@@ -619,7 +641,12 @@ class CheckpointIntegrationManager:
         restored from this manager's best.pt, if best.pt is consistent with
         the record (see _restore_best_metric). Without it a resumed run
         started with best=None and its first epoch replaced a better best.pt
-        (issue #40).
+        (issue #40). ``metric_name``, if given, must equal the recorded best
+        metric's name; a resume that switches the selection metric starts a
+        fresh best. The manager adopts the resumed run's ``run_id``.
+
+        ``ema_decay`` is compared with the decay recorded next to the EMA
+        state; a mismatch raises ValueError before anything is restored.
 
         path explicitly selects the resume checkpoint. If omitted, the
         manager-owned resume_path is used. Callers that expose a configurable
@@ -638,10 +665,13 @@ class CheckpointIntegrationManager:
             strict=strict,
             trusted=trusted,
             ema_model=ema_model,
+            ema_decay=ema_decay,
         )
-        restored, reason = self._restore_best_metric(
-            report.get("checkpoint_manager_state")
-        )
+        state = report.get("checkpoint_manager_state")
+        if isinstance(state, dict) and isinstance(state.get("run_id"), str):
+            # Resuming continues that run: later saves carry its identity.
+            self.run_id = state["run_id"]
+        restored, reason = self._restore_best_metric(state, metric_name=metric_name)
         report["best_metric_restored"] = restored
         report["best_metric_restore_reason"] = reason
         report["best_metric_value"] = self.best_metric_value
@@ -654,7 +684,9 @@ class CheckpointIntegrationManager:
             )
         return report
 
-    def _restore_best_metric(self, state: Any) -> Tuple[bool, str]:
+    def _restore_best_metric(
+        self, state: Any, *, metric_name: Optional[str] = None
+    ) -> Tuple[bool, str]:
         """Restore best_metric_value from best.pt, if the resume record allows it.
 
         best.pt in this manager's root_dir is the source of truth (memory must
@@ -662,9 +694,11 @@ class CheckpointIntegrationManager:
         and a metric at least as good as the one recorded in the resume
         checkpoint: equal = the state at save time; better = a later epoch of
         the same run improved best.pt after the last periodic resume save
-        ("restored_from_newer_best"). A worse or missing best.pt (foreign
-        resume, deleted or replaced file) is not trusted, so it cannot block
-        saving a new best model. Returns (restored, reason).
+        ("restored_from_newer_best"). Identity is checked first: best.pt must
+        carry the recorded run_id and metric name, and the metric name must
+        equal ``metric_name`` if the caller names it. A best.pt of another
+        run, of another metric, a worse or a missing one is not trusted, so it
+        cannot block saving a new best model. Returns (restored, reason).
         """
         if not isinstance(state, dict):
             return False, "absent"
@@ -673,6 +707,9 @@ class CheckpointIntegrationManager:
             return False, "no_best_recorded"
         if state.get("best_policy_mode") != self.best_policy.mode:
             return False, "policy_mode_mismatch"
+        recorded_name = state.get("best_metric_name")
+        if metric_name is not None and recorded_name != metric_name:
+            return False, "metric_name_mismatch"
         try:
             value = _finite_metric_value(recorded)
         except (TypeError, ValueError):
@@ -688,8 +725,14 @@ class CheckpointIntegrationManager:
             )["extra"]
             on_disk = _finite_metric_value(best_extra["metric_value"])
             disk_mode = best_extra.get("best_policy", {}).get("mode", self.best_policy.mode)
+            disk_run_id = best_extra.get("run_id")
+            disk_name = best_extra.get("metric_name")
         except Exception:  # unreadable/legacy best.pt: do not trust the record
             return False, "best_checkpoint_unreadable"
+        if disk_run_id is None or disk_run_id != state.get("run_id"):
+            return False, "run_id_mismatch"
+        if disk_name != recorded_name:
+            return False, "metric_name_mismatch"
         if disk_mode != self.best_policy.mode:
             return False, "policy_mode_mismatch"
         at_least_as_good = on_disk <= value if self.best_policy.mode == "min" else on_disk >= value
@@ -697,6 +740,7 @@ class CheckpointIntegrationManager:
             return False, "best_checkpoint_mismatch"
 
         self.best_metric_value = on_disk
+        self.best_metric_name = disk_name
         return True, "restored" if on_disk == value else "restored_from_newer_best"
 
     # ------------------------------------------------------------------

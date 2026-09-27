@@ -229,3 +229,18 @@
 | 54C56D743B99827C | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 regressions resume equivalence, schedule, empty validation, nRMSE, config: test_runner_hex_v3.py |
 | 53663241136220FA | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 new test module (warmstart 43% coverage): test_warmstart_utils_hex_v3.py |
 | 45DE93FC82AEA5ED | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 fail-closed prefix collisions, skip_shape_mismatch, numpy._core first: warmstart_utils_hex_v3.py |
+
+## src/toolkit/ — Codex review round on PR #46 (append-only, 2026-09-27)
+
+> Three P2 findings, all reproduced and fixed: (1) a numerically better best.pt
+> of another run or metric was adopted on resume -> run_id and metric name are
+> now recorded and must match; (2) resuming with another ema_decay silently
+> mixed two averages -> decay recorded, mismatch raises before any restore;
+> (3) scripts/mutation_probe.py counted any nonzero exit as a kill -> baseline
+> must be green and a kill needs executed, failing tests. Rows above remain lineage.
+
+| F06CE491B62990BA | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: run_id + metric-name identity for best restore, ema_decay record: checkpoint_integration_hex_v3.py |
+| 56735A1D24018408 | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: ema_decay recorded and checked before restore: resume_utils_hex_v3.py |
+| 4721CC2E0CA4A9E4 | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: passes ema_decay and best_metric_name on resume: runner_hex_v3.py |
+| 9B5DA9254E8CA458 | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: regressions foreign best.pt, metric switch, decay mismatch: test_checkpoint_integration_hex_v3.py |
+| 0425499B2E3F9453 | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: regression resume with other ema_decay: test_runner_hex_v3.py |

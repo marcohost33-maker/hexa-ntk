@@ -51,9 +51,9 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
 | Provenance | `python scripts/verify_sources.py` | 22 Toolkit- + 2 Spec-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 372/372, exit 0 |
-| Coverage | `python -m coverage run ... && python -m coverage report` | 89,4 % gesamt (Branch, `fail_under = 87`), exit 0 |
-| Mutation | `python scripts/mutation_probe.py` | 16/16 Mutanten getoetet, exit 0 |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 378/378, exit 0 |
+| Coverage | `python -m coverage run ... && python -m coverage report` | 89,6 % gesamt (Branch, `fail_under = 87`), exit 0 |
+| Mutation | `python scripts/mutation_probe.py` | 19/19 Mutanten getoetet (Baseline gruen), exit 0 |
 
 Lokale Umgebung dieses Laufs: Python 3.12.3, `torch` 2.6.0 (PyPI-Wheel `+cu124`, auf
 CPU ausgefuehrt — der CPU-Wheel-Index war in der Laufumgebung gesperrt), `numpy` 2.5.3.
@@ -69,7 +69,9 @@ wieder her. Vorher startete das EMA nach einem Resume neu, und der Best-Wert beg
 Wahrheit ist `best.pt` im eigenen Checkpoint-Ordner: uebernommen wird dessen Wert, wenn er
 dieselbe Policy traegt und mindestens so gut ist wie der im Resume notierte (besser = spaetere
 Epoche desselben Laufs); fehlt `best.pt` oder ist es schlechter (Fremd-Resume, ersetzte Datei),
-wird nichts uebernommen und nichts blockiert. Regressionstest:
+wird nichts uebernommen und nichts blockiert. Zusaetzlich muessen Lauf-ID und Metrikname
+passen, und ein Resume mit anderem `ema_decay` wird abgelehnt (kein stilles Hybrid-EMA).
+Regressionstest:
 unterbrochener Lauf (2 + 2 Epochen) == ununterbrochener Lauf (4 Epochen), bitgleich fuer
 Modell und EMA.
 
@@ -99,8 +101,8 @@ python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/wh
 python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 372 Unit-Tests (2026-09-27) + Coverage-Gate
-python scripts/mutation_probe.py                               # optional: 16 Mutanten der 09-27-Fixes
+python -m coverage report                                      # 378 Unit-Tests (2026-09-27) + Coverage-Gate
+python scripts/mutation_probe.py                               # optional: 19 Mutanten der 09-27-Fixes
 ```
 
 CI (`.github/workflows/ci.yml`), beide Jobs scheitern mit exit != 0 (ob `tests (cpu)` auch
@@ -108,7 +110,7 @@ den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (372, Stand 2026-09-27) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (378, Stand 2026-09-27) unter Branch-Coverage.
 
 ## Struktur
 

@@ -1022,14 +1022,67 @@ class TestResumeRestoresBestMetric(_TmpRootCase):
         self.assertEqual(report["best_metric_restore_reason"], "best_checkpoint_missing")
         self.assertIsNone(fresh.best_metric_value)
 
-    def test_not_restored_when_best_file_holds_other_value(self) -> None:
+    def test_not_restored_when_same_run_best_file_is_worse(self) -> None:
         mgr = self._make_manager()
         self._run_with_best(mgr, 0.4)
-        other = self._make_manager(Path(self.tmpdir.name) / "other")
-        other.save_best_model_checkpoint(model=build_test_model(), metric_value=0.9, metric_name="v", epoch=0)
-        os.replace(other.best_model_path, mgr.best_model_path)
+        same_run = self._make_manager(Path(self.tmpdir.name) / "other", run_id=mgr.run_id)
+        same_run.save_best_model_checkpoint(
+            model=build_test_model(), metric_value=0.9, metric_name="v", epoch=0
+        )
+        os.replace(same_run.best_model_path, mgr.best_model_path)
         report = self._resume(self._make_manager())
         self.assertEqual(report["best_metric_restore_reason"], "best_checkpoint_mismatch")
+
+    def test_better_best_file_of_another_run_is_not_adopted(self) -> None:
+        # Codex review on #46: a numerically better best.pt of ANOTHER run in
+        # the directory must not become the best value (it would block every
+        # later save and leave best.pt pointing at unrelated weights).
+        mgr = self._make_manager()
+        self._run_with_best(mgr, 0.4)
+        foreign = self._make_manager(Path(self.tmpdir.name) / "other")
+        foreign.save_best_model_checkpoint(
+            model=build_test_model(), metric_value=0.01, metric_name="v", epoch=0
+        )
+        os.replace(foreign.best_model_path, mgr.best_model_path)
+        fresh = self._make_manager()
+        report = self._resume(fresh)
+        self.assertFalse(report["best_metric_restored"])
+        self.assertEqual(report["best_metric_restore_reason"], "run_id_mismatch")
+        self.assertIsNone(fresh.best_metric_value)
+        saved = fresh.save_best_model_checkpoint(
+            model=build_test_model(), metric_value=0.5, metric_name="v", epoch=1
+        )
+        self.assertTrue(saved["saved"])
+
+    def test_best_file_of_other_metric_is_not_adopted(self) -> None:
+        mgr = self._make_manager()
+        self._run_with_best(mgr, 0.4)
+        same_run = self._make_manager(Path(self.tmpdir.name) / "other", run_id=mgr.run_id)
+        same_run.save_best_model_checkpoint(
+            model=build_test_model(), metric_value=0.1, metric_name="other_metric", epoch=2
+        )
+        os.replace(same_run.best_model_path, mgr.best_model_path)
+        report = self._resume(self._make_manager())
+        self.assertEqual(report["best_metric_restore_reason"], "metric_name_mismatch")
+
+    def test_resume_with_new_selection_metric_starts_fresh_best(self) -> None:
+        self._run_with_best(self._make_manager(), 0.4)
+        fresh = self._make_manager()
+        model = build_test_model()
+        report = fresh.load_resume(
+            model=model, optimizer=build_test_optimizer(model), metric_name="val_h1"
+        )
+        self.assertEqual(report["best_metric_restore_reason"], "metric_name_mismatch")
+        self.assertIsNone(fresh.best_metric_value)
+
+    def test_resume_adopts_run_id(self) -> None:
+        mgr = self._make_manager()
+        self._run_with_best(mgr, 0.4)
+        fresh = self._make_manager()
+        self.assertNotEqual(fresh.run_id, mgr.run_id)
+        self._resume(fresh)
+        self.assertEqual(fresh.run_id, mgr.run_id)
+        self.assertEqual(fresh.best_metric_name, "v")
 
     def test_newer_better_best_from_same_run_is_adopted(self) -> None:
         # best.pt is written every epoch, resume only periodically: a later
@@ -1094,11 +1147,15 @@ class TestResumeRestoresBestMetric(_TmpRootCase):
 
     def test_resume_payload_stays_weights_only_loadable(self) -> None:
         self._run_with_best(self._make_manager(), 0.4)
+        mgr = self._make_manager()
         payload = torch.load(self.root / "resume_last.pt", weights_only=True)
+        state = payload["checkpoint_manager_state"]
         self.assertEqual(
-            payload["checkpoint_manager_state"],
-            {"best_metric_value": 0.4, "best_policy_mode": "min"},
+            {k: state[k] for k in ("best_metric_value", "best_metric_name", "best_policy_mode")},
+            {"best_metric_value": 0.4, "best_metric_name": "v", "best_policy_mode": "min"},
         )
+        self.assertIsInstance(state["run_id"], str)
+        self.assertNotEqual(state["run_id"], mgr.run_id)
 
 
 class TestResumeEmaState(_TmpRootCase):
@@ -1130,6 +1187,30 @@ class TestResumeEmaState(_TmpRootCase):
         self.assertEqual(int(ema2.n_averaged.item()), 3)
         for key, value in ema.state_dict().items():
             self.assertTrue(torch.equal(value, ema2.state_dict()[key]), msg=key)
+
+    def test_ema_decay_mismatch_fails_before_restore(self) -> None:
+        # Codex review on #46: a different decay would silently continue a
+        # hybrid average.
+        torch.manual_seed(0)
+        model = build_test_model()
+        ema = self._ema(model)
+        ema.update_parameters(model)
+        mgr = self._make_manager()
+        mgr.save_resume(model=model, optimizer=build_test_optimizer(model), epoch=0,
+                        ema_state_dict=ema.state_dict(), ema_decay=0.9,
+                        include_python_rng=False, include_numpy_rng=False)
+        torch.manual_seed(1)
+        target = build_test_model()
+        before = {k: v.clone() for k, v in target.state_dict().items()}
+        with self.assertRaisesRegex(ValueError, "decay 0.9"):
+            mgr.load_resume(model=target, optimizer=build_test_optimizer(target),
+                            ema_model=self._ema(target), ema_decay=0.999)
+        for k, v in before.items():
+            self.assertTrue(torch.equal(v, target.state_dict()[k]), msg=k)
+        report = mgr.load_resume(model=target, optimizer=build_test_optimizer(target),
+                                 ema_model=self._ema(target), ema_decay=0.9)
+        self.assertTrue(report["ema_restored"])
+        self.assertEqual(report["ema_decay"], 0.9)
 
     def test_missing_ema_state_is_reported(self) -> None:
         model = build_test_model()

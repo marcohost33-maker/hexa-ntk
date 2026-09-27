@@ -10,7 +10,9 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   _Resume/Checkpoint:_ Der Resume-Checkpoint traegt jetzt den EMA-Zustand und den Best-Wert
   (`checkpoint_manager_state`); vorher startete das EMA nach Resume neu und `best_metric_value`
   bei `None`, sodass die erste Epoche ein besseres `best.pt` ueberschrieb. Uebernommen wird der
-  Wert aus `best.pt`, wenn es dieselbe Policy traegt und mindestens so gut ist wie der notierte Wert. `CheckpointDurabilityError` (#40 P3-3): scheitert
+  Wert aus `best.pt`, wenn es dieselbe Policy, Lauf-ID (`run_id`) und denselben Metriknamen traegt
+  und mindestens so gut ist wie der notierte Wert; ein anderes `ema_decay` beim Resume -> `ValueError`
+  (Codex-Review auf #46). `CheckpointDurabilityError` (#40 P3-3): scheitert
   nach `os.replace` nur noch der Verzeichnis-fsync, wird der Best-Wert trotzdem committet (Speicher
   == Datei). `epoch`/`global_step` ueber `as_step_count` (inf/NaN/1.5/-1 -> `ValueError`, bool ->
   `TypeError`), in `load_resume_checkpoint` **vor** dem Ueberschreiben von Modell/Optimizer.
@@ -35,8 +37,8 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   -> `ValueError`; `load_ema_state` respektiert `strict` auch im Full-State-Pfad.
   _Evidenz:_ neue Tests gegen die alten Modul-Bytes (HEAD 9538e87): failures=52, errors=16 (2
   Testmodule scheitern schon am Import neuer Namen; Shim-Lauf dieser 2 Module mit alter Logik:
-  50 rot) -> mit Fix 372/372 OK;
-  Mutationsprobe 16/16 (`scripts/mutation_probe.py`, im Repo); Coverage 83 % -> **89,4 %**,
+  50 rot) -> mit Fix 372/372 OK, nach Codex-Review 378/378;
+  Mutationsprobe 19/19 (mit Baseline-Pflicht) (`scripts/mutation_probe.py`, im Repo); Coverage 83 % -> **89,6 %**,
   `fail_under` 79 -> 87; warmstart 43 % -> 94 %, ema 56 % -> 88 %.
 
 - [x] **Endlichkeitsvertrag `dt` beim Gruppieren (Issue #39, 2026-09-26).**
@@ -107,7 +109,7 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Offen
 
-- [x] ~~**Coverage-Ratchet Richtung 80–90%.**~~ Erledigt 2026-09-27: 89,4 % Branch-Coverage,
+- [x] ~~**Coverage-Ratchet Richtung 80–90%.**~~ Erledigt 2026-09-27: 89,6 % Branch-Coverage,
   `fail_under = 87` (siehe oben). Schwaechste Module jetzt `runner_hex_v3.py` / `stress_hex_v3.py`
   (je 84 %). Draft-PR #20 (aelterer Ratchet-Versuch 79->91 + resume_from-Fix) ist damit inhaltlich
   ueberholt: resume_from kam mit PR #31, der Ratchet hiermit — Schliessen empfohlen.

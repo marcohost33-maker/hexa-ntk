@@ -39,7 +39,7 @@ source = ["src/toolkit"]
 [tool.coverage.report]
 # Testfiles selbst zaehlen nicht als abzudeckender Code.
 omit = ["*/test_*.py"]
-# Ratchet-Schwelle: Ist-Wert 89.4% (verified 2026-09-27 nach warmstart/ema/
+# Ratchet-Schwelle: Ist-Wert 89.6% (verified 2026-09-27 nach warmstart/ema/
 # resume-Tests, results/2026-09-27_review-hardening_local-gate.log; vorher 82-83%
 # bei fail_under 79), Schwelle knapp darunter — Best Practice: unter Ist setzen
 # und mit neuen Tests hochziehen, nie ueber Ist wuenschen (Gate darf nicht durch
