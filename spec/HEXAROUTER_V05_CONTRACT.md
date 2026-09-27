@@ -13,9 +13,9 @@ The MVP deliberately separates:
 1. CapabilitySpec — what a capability can do.
 2. ProviderSpec — which implementation provides it.
 3. RuntimeState — current health, load, latency and available resources.
-4. AssuranceAttestation — what an external validator has established.
-5. ReliabilityEstimate — empirical lower-bound evidence for a defined provider build, task class and regime.
-6. PolicyDecision — task-scoped authorization for a provider.
+4. AssuranceAttestation — externally produced, evidence-bound validation for a provider build, task class and regime.
+5. ReliabilityEstimate — a computed 95% Wilson lower bound from independent Bernoulli cases for a defined provider build, task class and regime.
+6. PolicyDecision — task-scoped authorization bound to policy revision, policy-bundle digest, decision id and task/provider input digest.
 7. TaskContract — what a task requires.
 
 Runtime load and assurance MUST NOT be self-declared inside the static capability spec.
@@ -28,12 +28,13 @@ A provider is eligible only if all applicable gates pass:
 - input and output schema identifiers are compatible;
 - requested numeric dtype and unit system are supported;
 - provider identity links to the registered capability;
-- an explicit task-scoped PolicyDecision allows the provider;
+- an explicit task-scoped PolicyDecision allows the provider and its input digest matches the exact task/provider identity pair;
 - runtime refers to the current provider code SHA, is healthy, fresh enough and resource-feasible;
-- assurance refers to the provider's current code SHA and reaches the task threshold;
+- assurance refers to the provider's current code SHA, task class and regime, carries a content digest, and reaches the task threshold;
 - an independent validator is present when required;
-- reliability refers to the current provider code SHA, task class and regime;
-- the reliability lower bound and independent-sample floor reach the task thresholds;
+- reliability refers to the current provider code SHA, task class and regime and carries a content digest;
+- the reliability lower bound is computed from independent Bernoulli outcomes rather than accepted as a producer-declared scalar;
+- the computed reliability lower bound and independent-sample floor reach the task thresholds;
 - latency and queue ceilings are respected when supplied.
 
 If the feasible set is empty the planner MUST return ABSTAIN. A ranking policy MUST
@@ -55,8 +56,15 @@ The policy identifier is `hexrouter.lexicographic.v1`.
 
 The planner also computes a deterministic SHA-256 fingerprint of the complete static
 capability/provider registry. Every decision records this registry fingerprint plus an
-eligible-candidate snapshot containing the authorization-policy version, validator id,
-validity class, reliability evidence, runtime age, latency and queue depth.
+eligible-candidate snapshot containing policy revision/bundle/decision identity,
+validator/attestation/evidence identity, reliability method/evidence, runtime age,
+latency and queue depth.
+
+The prototype hash profile is explicitly named `python-json-sortkeys-v1`. It is
+deterministic for this Python reference implementation, but it is NOT claimed to be
+RFC 8785 JSON Canonicalization Scheme (JCS) compatible or cross-language signature
+canonicalization. A cross-language Q-Forge port must either adopt a conforming JCS
+implementation or use an equally explicit canonical binary/integer representation.
 
 This avoids rank reversal caused solely by adding an irrelevant dominated candidate
 while still making a changed candidate/registry state visible in the audit identity.
@@ -76,21 +84,33 @@ alternative execution profiles instead of ambiguous booleans such as `gpu_option
 
 ## 5. Assurance and reliability
 
-AssuranceAttestation and ReliabilityEstimate MUST bind to the exact provider code SHA.
-ReliabilityEstimate additionally binds to a task class and regime; evidence from an ID
-regime therefore cannot silently satisfy a geometry-OOD task.
+AssuranceAttestation and ReliabilityEstimate MUST bind to the exact provider code SHA,
+task class and regime, and carry a lowercase SHA-256 evidence digest. Evidence from an
+ID regime therefore cannot silently satisfy a geometry-OOD task.
 
 Assurance is a separate external statement. It is not a property a provider may grant
-itself. PolicyDecision is also separate from capability: a provider can be technically
-capable while still being unauthorized for a task.
+itself. The `independent_validator` flag is still a statement supplied to the prototype,
+not cryptographic proof of organizational independence; the final Q-Forge owner must
+derive that status from its trust/policy registry.
 
-Reliability is not scientific truth. The MVP stores a lower bound plus raw and
-independent sample counts. A TaskContract can require a minimum independent-sample
-count. No online learning or decay constant is defined in v0.5.
+PolicyDecision is separate from capability. The prototype binds each decision to:
+`policy_version`, `policy_revision`, `policy_bundle_sha256`, a policy `decision_id`,
+and a digest of the exact task/provider identity pair. This follows the same audit
+principle as external policy decision logs: policy identity and evaluated input must be
+recoverable.
+
+Reliability is not scientific truth. For v0.5 the only admitted statistical form is a
+two-sided 95% Wilson lower confidence bound over independent Bernoulli pass/fail cases.
+The lower bound is recomputed from `n_success_independent / n_independent`; it is not
+accepted as a producer-declared number. `n_raw` remains lineage metadata. Continuous
+errors, calibrated probabilities, survival times and correlated trajectories require
+separate evidence models rather than being forced into this Bernoulli contract.
 
 ## 6. Durable local decision log
 
-The reference store uses SQLite only as a local MVP persistence layer.
+The reference store uses SQLite only as a local MVP persistence layer. File-backed
+databases require WAL mode and `synchronous=FULL`. This is deliberately not a
+network-filesystem or multi-host database contract.
 
 A route decision and its outbox event are written in the same SQL transaction.
 The producer operation is idempotent: replaying the same decision/event is a no-op,
@@ -99,10 +119,22 @@ identity includes the eligible-candidate snapshot, so adding an eligible but dom
 provider does not change the chosen provider but does produce a distinct auditable
 decision record.
 
-Inbox processing is keyed by `(consumer_id, event_id)` and is idempotent.
+The outbox serializes the decision as a CloudEvents-compatible v1.0 JSON envelope with
+stable `id`, `source`, `type`, `subject`, `dataschema`, content type and `data`.
+The event id is deterministic from the decision id and event-contract version. The
+absence of a wall-clock `time` attribute is deliberate because CloudEvents makes it
+optional and the audit identity must not acquire accidental nondeterminism.
 
-Transport semantics are intentionally not called exactly-once. A future broker must
-assume at-least-once delivery and retain idempotent consumers.
+Inbox processing is NOT marked complete when a worker first sees an event. A worker
+first acquires a bounded claim lease; successful processing is recorded separately.
+Expired leases may be reclaimed and a stale claim token cannot mark an event complete.
+For external side effects, the downstream operation must still use the event identity as
+an idempotency key because a lease cannot make a remote effect exactly-once.
+
+Transport semantics are intentionally not called exactly-once. Outbox delivery is
+at-least-once compatible and consumers remain idempotent. The v0.5 local outbox has no
+multi-publisher leasing protocol; run a single publisher or accept duplicate publish
+attempts until a broker-backed transport contract is introduced.
 
 ## 7. Graph separation
 
@@ -125,7 +157,13 @@ shortest path, articulation-node count, and mean largest-component survival afte
 node failure.
 
 These are structural diagnostics only. They do not establish that any topology is best
-for task quality, latency, cost, or scientific validity.
+for task quality, latency, cost, or scientific validity. Current multi-agent research
+also provides evidence that task-adaptive and moderately sparse communication graphs can
+outperform fixed dense or fixed hand-crafted structures on some workloads. Therefore the
+hex topology remains a benchmark candidate, not an architectural theorem. Promotion
+requires task-level comparisons of quality, communication volume, wall time, recovery,
+error propagation and evidence integrity against star/router, ring, dense and dynamic
+sparse baselines.
 
 ## 9. Non-goals for v0.5
 
@@ -138,7 +176,7 @@ The following remain deliberately out of scope:
 - SPIFFE/SPIRE;
 - Kubernetes/DRA;
 - UCUM conversion or dimensional-analysis engine;
-- RO-Crate/in-toto emission;
+- RO-Crate/in-toto/SLSA emission from this prototype (Q-Forge remains the evidence owner);
 - cross-process locking beyond SQLite's local database guarantees.
 
 Those are enabled only when an observed requirement justifies them.
@@ -151,10 +189,12 @@ The v0.5 core is acceptable only when tests demonstrate at least:
 - deterministic and candidate-invariant provider choice with registry- and candidate-set-aware audit identity;
 - code-SHA-bound runtime/assurance/reliability;
 - runtime freshness enforcement;
-- task-class/regime-bound reliability and independent-sample floors;
+- task-class/regime-bound assurance and reliability evidence;
+- recomputed 95% Wilson reliability lower bound from independent Bernoulli cases;
+- policy revision/bundle/input binding and fail-closed input mismatch;
 - resource-profile feasibility;
-- atomic/idempotent decision+outbox recording;
-- idempotent inbox claim;
+- atomic/idempotent decision+CloudEvents-outbox recording;
+- lease/reclaim/complete inbox semantics that do not confuse receipt with successful processing;
 - exact reference topology metrics for C6, K1,5, K6 and compact hex patches;
 - no third-party runtime dependency.
 
