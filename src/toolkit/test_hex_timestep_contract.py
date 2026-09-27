@@ -146,6 +146,47 @@ class TestExactFromGivenReal(unittest.TestCase):
         self.assertLessEqual(Fraction(dt), Fraction(*h.as_integer_ratio()) ** 2 / (4 * 3))
 
 
+class TestExactOperandsBeyondBinary64(unittest.TestCase):
+    """Codex #47: operands are validated exactly; only the RESULT must be a
+    finite positive binary64 (spec 5.2a)."""
+
+    @staticmethod
+    def _call(fn, *args):
+        """Result or the raised ValueError, so a rejection fails by assertion."""
+        try:
+            return fn(*args)
+        except ValueError as exc:
+            return exc
+
+    def test_huge_operands_that_cancel_give_exact_result(self):
+        self.assertEqual(self._call(engine.hex_positivity_max_dt, 10**400, 10**800), 0.25)
+        dt = self._call(engine.hex_cfl_max_dt, 10**400, 10**800, 1)
+        self.assertIsInstance(dt, float)
+        self.assertLessEqual(Fraction(dt), Fraction(1, 3))
+        self.assertEqual(dt, engine.hex_cfl_max_dt(1.0, 1.0, 1.0))
+
+    def test_tiny_operands_that_cancel_give_exact_result(self):
+        h, d = Fraction(1, 10**400), Fraction(1, 10**800)
+        self.assertEqual(self._call(engine.hex_positivity_max_dt, h, d), 0.25)
+
+    def test_unrepresentable_result_still_raises(self):
+        with self.assertRaises(ValueError):
+            engine.hex_positivity_max_dt(10**400, 1)  # overflow
+        with self.assertRaises(ValueError):
+            engine.hex_positivity_max_dt(Fraction(1, 10**400), 1)  # underflow to 0
+        with self.assertRaises(ValueError):
+            engine.hex_laplacian_stencil_weight(Fraction(1, 10**200))  # overflow
+
+    def test_invalid_operands_still_rejected(self):
+        for bad in (float("nan"), float("inf"), -1, 0, Fraction(0), True, "1.0",
+                    np.float64("nan"), np.float32("inf"), None):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                engine.hex_positivity_max_dt(bad, 1.0)
+        for bad_safety in (Fraction(10**400 + 1, 10**400), 0, float("nan")):
+            with self.assertRaises(ValueError, msg=repr(bad_safety)):
+                engine.hex_positivity_max_dt(1.0, 1.0, bad_safety)
+
+
 class TestDocsContract(unittest.TestCase):
     def test_agents_quoted_hook_anchor_resolves(self):
         agents = (_ROOT / "AGENTS.md").read_text(encoding="utf-8")

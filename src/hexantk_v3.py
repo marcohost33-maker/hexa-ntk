@@ -567,33 +567,6 @@ def load_partial_checkpoint_raw(
 # ============================================================================
 
 
-def _finite_positive_float(name: str, value: Any) -> float:
-    """Convert a real scalar to finite binary64 and require it to be > 0.
-
-    Reject bool explicitly (bool is an int subclass), conversion overflow,
-    NaN/Inf, and positive exact values that underflow to 0.0.
-    """
-    if isinstance(value, (bool, np.bool_)) or not isinstance(
-        value, (numbers.Real, np.integer, np.floating)
-    ):
-        raise ValueError(f"{name} must be a real numeric scalar, got {type(value).__name__}")
-    try:
-        out = float(value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be representable as a finite real scalar") from exc
-    if not np.isfinite(out) or out <= 0.0:
-        raise ValueError(f"{name} must be finite and > 0, got {value!r}")
-    return out
-
-
-def _unit_interval_safety(value: Any) -> float:
-    """Convert safety to finite binary64 and require 0 < safety <= 1."""
-    out = _finite_positive_float("safety", value)
-    if out > 1.0:
-        raise ValueError(f"safety must be <= 1, got {value!r}")
-    return out
-
-
 def _exact_real(name: str, value: Any) -> Fraction:
     """Exact rational value of an already validated real scalar.
 
@@ -603,10 +576,17 @@ def _exact_real(name: str, value: Any) -> Fraction:
     Fraction and numpy integer/floating scalars convert exactly; any other
     numbers.Real without an exact rational form is rejected (fail-closed).
     """
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value, (numbers.Real, np.integer, np.floating)
+    ):
+        raise ValueError(f"{name} must be a real numeric scalar, got {type(value).__name__}")
     if isinstance(value, np.integer):
         return Fraction(int(value))
     if isinstance(value, (int, float, Fraction)):
-        return Fraction(value)
+        try:
+            return Fraction(value)
+        except (ValueError, OverflowError) as exc:  # NaN / +-Inf floats
+            raise ValueError(f"{name} must be finite, got {value!r}") from exc
     ratio = getattr(value, "as_integer_ratio", None)
     if callable(ratio):
         try:
@@ -620,8 +600,13 @@ def _exact_real(name: str, value: Any) -> Fraction:
 
 
 def _exact_positive(name: str, value: Any) -> Fraction:
-    """Validate like _finite_positive_float, then return the exact given value."""
-    _finite_positive_float(name, value)
+    """Exact given value, validated on the rational itself (finite and > 0).
+
+    No binary64 conversion here (Codex #47): operands that exceed binary64
+    individually but cancel in the formula, e.g. h=10**400, D_v=10**800, have a
+    representable result. Only the RESULT must be a finite positive binary64
+    (_exact_to_positive_float, spec 5.2a).
+    """
     out = _exact_real(name, value)
     if out <= 0:
         raise ValueError(f"{name} must be > 0, got {value!r}")
@@ -629,12 +614,11 @@ def _exact_positive(name: str, value: Any) -> Fraction:
 
 
 def _exact_unit_safety(value: Any) -> Fraction:
-    """Validate like _unit_interval_safety, then require 0 < safety <= 1 EXACTLY.
+    """Require 0 < safety <= 1 EXACTLY on the given value (no binary64 rounding).
 
     A rational just above 1 can round to 1.0 in binary64 and would otherwise
     pass the float check while scaling the bound above the sharp limit.
     """
-    _unit_interval_safety(value)
     out = _exact_real("safety", value)
     if not 0 < out <= 1:
         raise ValueError(f"safety must satisfy 0 < safety <= 1 exactly, got {value!r}")

@@ -223,3 +223,10 @@
 > plus the README toolkit counts are pinned by tests. Prior rows remain lineage.
 
 | 5ACC8D1F335C55F7 | 2026-09-27 00:00 | src/toolkit | in-repo derived, PR #45 follow-up round 2 (exact given-Real bounds, doc anchors): test_hex_timestep_contract.py |
+
+## src/toolkit/ — Codex review on PR #47 2026-09-28 (append-only)
+
+> Operands are validated on their exact rational value; only a non-representable
+> result raises (e.g. h=10**400, D_v=10**800 -> exactly 0.25). Prior rows remain lineage.
+
+| 9BF8C7A71221F307 | 2026-09-28 00:00 | src/toolkit | in-repo derived, PR #47 Codex follow-up (exact operand validation): test_hex_timestep_contract.py |
