@@ -103,8 +103,8 @@ def assurance(
         regime=regime,
         numerical_validity="verified",
         independent_validator=independent,
-        validator_id="validator-A",
-        attestation_id=f"attestation:{provider_id}",
+        validator_id="validator-a",
+        attestation_id=f"attestation-{provider_id}",
         evidence_sha256="b" * 64,
     )
 
@@ -145,7 +145,7 @@ def policy(
         policy_version="test-policy.v1",
         policy_revision="rev-1",
         policy_bundle_sha256="a" * 64,
-        decision_id=f"policy:{task_id}:{provider_id}",
+        decision_id=f"policy-{task_id}-{provider_id}",
         input_sha256=(
             input_sha256
             if input_sha256 is not None
@@ -756,6 +756,34 @@ class TopologyTests(unittest.TestCase):
             ring_edges(True)
         with self.assertRaises(ValueError):
             hex_cell_patch(False)
+
+
+class IdentifierContractTests(unittest.TestCase):
+    def test_confusable_or_uppercase_identity_tokens_fail_closed(self) -> None:
+        with self.assertRaises(ValueError):
+            provider("Provider", code_sha="sha")
+        with self.assertRaises(ValueError):
+            provider("p\u200b", code_sha="sha")
+        with self.assertRaises(ValueError):
+            PolicyDecision(
+                provider_id="p",
+                task_id="task-1",
+                allowed=True,
+                policy_version="v1",
+                policy_revision="rev-1",
+                policy_bundle_sha256="a" * 64,
+                decision_id="decision-1",
+                input_sha256=policy_input_digest("task-1", "p"),
+            ).__class__(
+                provider_id="р",
+                task_id="task-1",
+                allowed=True,
+                policy_version="v1",
+                policy_revision="rev-1",
+                policy_bundle_sha256="a" * 64,
+                decision_id="decision-1",
+                input_sha256=policy_input_digest("task-1", "p"),
+            )
 
 
 class ContractValidationTests(unittest.TestCase):
