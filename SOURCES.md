@@ -294,3 +294,16 @@
 | 40B2ADD4DF3F49B6 | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 directed-workflow topology hardening: HEXAROUTER_V05_CONTRACT.md |
 | 3F6FDD5CA1798340 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 directed-workflow topology hardening: hexarouter_v05.py |
 | 2779C52539915390 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 directed-workflow topology hardening tests: test_hexarouter_v05.py |
+
+
+## spec/ + src/toolkit/ — HexaRouter/HCM v0.5 full-input audit binding 2026-09-27
+
+> Policy authorization now binds the complete canonical TaskContract plus
+> provider identity, not only task_id. Decision identity additionally binds a
+> dynamic evaluation fingerprint over runtime/assurance/reliability/policy
+> inputs for every registered provider, including rejected candidates. Prior
+> rows remain append-only lineage.
+
+| 09DC0BF8696E255D | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 full-input audit binding: HEXAROUTER_V05_CONTRACT.md |
+| 9617A062F0208D31 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 full-input audit binding: hexarouter_v05.py |
+| F3C276F4739E8BD6 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 full-input audit tests: test_hexarouter_v05.py |
