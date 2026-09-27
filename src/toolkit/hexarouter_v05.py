@@ -14,7 +14,7 @@ import numbers
 import sqlite3
 from collections import deque
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Sequence
 
@@ -53,7 +53,7 @@ def _finite_nonnegative(name: str, value: float) -> float:
         raise ValueError(f"{name} must be a finite non-negative number") from exc
     if not math.isfinite(out) or out < 0.0:
         raise ValueError(f"{name} must be a finite non-negative number")
-    return out
+    return 0.0 if out == 0.0 else out
 
 
 def _finite_unit_interval(name: str, value: float) -> float:
@@ -61,6 +61,42 @@ def _finite_unit_interval(name: str, value: float) -> float:
     if out > 1.0:
         raise ValueError(f"{name} must be <= 1")
     return out
+
+
+def _require_sha256(name: str, value: str) -> str:
+    _require_nonempty(name, value)
+    if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+        raise ValueError(f"{name} must be a lowercase SHA-256 hex digest")
+    return value
+
+
+def _wilson_lower_bound_95(successes: int, trials: int) -> float:
+    """Two-sided 95% Wilson lower confidence bound for a Bernoulli proportion."""
+
+    _require_int_at_least("successes", successes, 0)
+    _require_int_at_least("trials", trials, 0)
+    if successes > trials:
+        raise ValueError("successes must be <= trials")
+    if trials == 0:
+        return 0.0
+    z = 1.959963984540054
+    p_hat = successes / trials
+    z2 = z * z
+    denominator = 1.0 + z2 / trials
+    centre = p_hat + z2 / (2.0 * trials)
+    margin = z * math.sqrt(
+        p_hat * (1.0 - p_hat) / trials + z2 / (4.0 * trials * trials)
+    )
+    return max(0.0, (centre - margin) / denominator)
+
+
+def policy_input_digest(task_id: str, provider_id: str) -> str:
+    """Bind an authorization decision to the exact task/provider identity pair."""
+
+    _require_nonempty("task_id", task_id)
+    _require_nonempty("provider_id", provider_id)
+    payload = {"provider_id": provider_id, "task_id": task_id}
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -165,14 +201,22 @@ class RuntimeState:
 class AssuranceAttestation:
     provider_id: str
     code_sha: str
+    task_class: str
+    regime: str
     numerical_validity: str
     independent_validator: bool
     validator_id: str
+    attestation_id: str
+    evidence_sha256: str
 
     def __post_init__(self) -> None:
         _require_nonempty("provider_id", self.provider_id)
         _require_nonempty("code_sha", self.code_sha)
+        _require_nonempty("task_class", self.task_class)
+        _require_nonempty("regime", self.regime)
         _require_nonempty("validator_id", self.validator_id)
+        _require_nonempty("attestation_id", self.attestation_id)
+        _require_sha256("evidence_sha256", self.evidence_sha256)
         _require_bool("independent_validator", self.independent_validator)
         if self.numerical_validity not in VALIDITY_RANK:
             raise ValueError(f"unknown numerical_validity: {self.numerical_validity!r}")
@@ -184,24 +228,40 @@ class ReliabilityEstimate:
     code_sha: str
     task_class: str
     regime: str
-    lower_bound: float
     n_raw: int
     n_independent: int
+    n_success_independent: int
+    evidence_sha256: str
+    method: str = "wilson-95-two-sided"
+    lower_bound: float = field(init=False)
 
     def __post_init__(self) -> None:
         _require_nonempty("provider_id", self.provider_id)
         _require_nonempty("code_sha", self.code_sha)
         _require_nonempty("task_class", self.task_class)
         _require_nonempty("regime", self.regime)
+        _require_sha256("evidence_sha256", self.evidence_sha256)
+        if self.method != "wilson-95-two-sided":
+            raise ValueError("unsupported reliability method")
+        _require_int_at_least("n_raw", self.n_raw, 0)
+        _require_int_at_least("n_independent", self.n_independent, 0)
+        _require_int_at_least(
+            "n_success_independent",
+            self.n_success_independent,
+            0,
+        )
+        if self.n_independent > self.n_raw:
+            raise ValueError("n_independent must be <= n_raw")
+        if self.n_success_independent > self.n_independent:
+            raise ValueError("n_success_independent must be <= n_independent")
         object.__setattr__(
             self,
             "lower_bound",
-            _finite_unit_interval("lower_bound", self.lower_bound),
+            _wilson_lower_bound_95(
+                self.n_success_independent,
+                self.n_independent,
+            ),
         )
-        _require_int_at_least("n_raw", self.n_raw, 0)
-        _require_int_at_least("n_independent", self.n_independent, 0)
-        if self.n_independent > self.n_raw:
-            raise ValueError("n_independent must be <= n_raw")
 
 
 @dataclass(frozen=True)
@@ -210,11 +270,19 @@ class PolicyDecision:
     task_id: str
     allowed: bool
     policy_version: str
+    policy_revision: str
+    policy_bundle_sha256: str
+    decision_id: str
+    input_sha256: str
 
     def __post_init__(self) -> None:
         _require_nonempty("provider_id", self.provider_id)
         _require_nonempty("task_id", self.task_id)
         _require_nonempty("policy_version", self.policy_version)
+        _require_nonempty("policy_revision", self.policy_revision)
+        _require_nonempty("decision_id", self.decision_id)
+        _require_sha256("policy_bundle_sha256", self.policy_bundle_sha256)
+        _require_sha256("input_sha256", self.input_sha256)
         _require_bool("allowed", self.allowed)
 
 
@@ -305,11 +373,19 @@ class CandidateSnapshot:
     provider_id: str
     execution_profile_id: str
     policy_version: str
+    policy_revision: str
+    policy_bundle_sha256: str
+    policy_decision_id: str
     validator_id: str
+    attestation_id: str
+    assurance_evidence_sha256: str
     numerical_validity: str
+    reliability_method: str
+    reliability_evidence_sha256: str
     reliability_lower_bound: float
     reliability_n_raw: int
     reliability_n_independent: int
+    reliability_n_success_independent: int
     runtime_age_ms: float
     estimated_latency_ms: float
     queue_depth: int
@@ -323,6 +399,7 @@ class PlanDecision:
     provider_id: str | None
     execution_profile_id: str | None
     policy_version: str
+    canonicalization_profile: str
     registry_fingerprint: str
     eligible_count: int
     eligible_snapshot: tuple[CandidateSnapshot, ...]
@@ -345,6 +422,9 @@ class PlanDecision:
 
 
 
+CANONICALIZATION_PROFILE = "python-json-sortkeys-v1"
+
+
 class DeterministicPlanner:
     """Hard-gated deterministic planner.
 
@@ -353,6 +433,7 @@ class DeterministicPlanner:
     """
 
     policy_version = "hexrouter.lexicographic.v1"
+    canonicalization_profile = CANONICALIZATION_PROFILE
 
     def __init__(
         self,
@@ -454,9 +535,17 @@ class DeterministicPlanner:
                 policy_decision is None
                 or policy_decision.provider_id != provider_id
                 or policy_decision.task_id != task.task_id
-                or not policy_decision.allowed
             ):
                 reasons.append("POLICY_DENY_OR_MISSING")
+            else:
+                expected_policy_input = policy_input_digest(
+                    task.task_id,
+                    provider_id,
+                )
+                if policy_decision.input_sha256 != expected_policy_input:
+                    reasons.append("POLICY_INPUT_MISMATCH")
+                if not policy_decision.allowed:
+                    reasons.append("POLICY_DENY")
 
             state = runtime.get(provider_id)
             if (
@@ -489,6 +578,8 @@ class DeterministicPlanner:
                 att is None
                 or att.provider_id != provider_id
                 or att.code_sha != provider.code_sha
+                or att.task_class != task.task_class
+                or att.regime != task.regime
             ):
                 reasons.append("ASSURANCE_MISSING_OR_STALE")
             else:
@@ -549,13 +640,31 @@ class DeterministicPlanner:
                         provider_id=row[0].provider_id,
                         execution_profile_id=row[1].profile_id,
                         policy_version=policy[row[0].provider_id].policy_version,
+                        policy_revision=policy[row[0].provider_id].policy_revision,
+                        policy_bundle_sha256=policy[
+                            row[0].provider_id
+                        ].policy_bundle_sha256,
+                        policy_decision_id=policy[
+                            row[0].provider_id
+                        ].decision_id,
                         validator_id=assurance[row[0].provider_id].validator_id,
+                        attestation_id=assurance[
+                            row[0].provider_id
+                        ].attestation_id,
+                        assurance_evidence_sha256=assurance[
+                            row[0].provider_id
+                        ].evidence_sha256,
                         numerical_validity=assurance[
                             row[0].provider_id
                         ].numerical_validity,
+                        reliability_method=row[3].method,
+                        reliability_evidence_sha256=row[3].evidence_sha256,
                         reliability_lower_bound=row[3].lower_bound,
                         reliability_n_raw=row[3].n_raw,
                         reliability_n_independent=row[3].n_independent,
+                        reliability_n_success_independent=(
+                            row[3].n_success_independent
+                        ),
                         runtime_age_ms=row[2].age_ms,
                         estimated_latency_ms=row[2].estimated_latency_ms,
                         queue_depth=row[2].queue_depth,
@@ -646,6 +755,7 @@ class DeterministicPlanner:
             "provider_id": provider_id,
             "execution_profile_id": execution_profile_id,
             "policy_version": self.policy_version,
+            "canonicalization_profile": self.canonicalization_profile,
             "registry_fingerprint": self.registry_fingerprint,
             "eligible_snapshot": [
                 _candidate_payload(item)
@@ -663,6 +773,7 @@ class DeterministicPlanner:
             provider_id=provider_id,
             execution_profile_id=execution_profile_id,
             policy_version=self.policy_version,
+            canonicalization_profile=self.canonicalization_profile,
             registry_fingerprint=self.registry_fingerprint,
             eligible_count=len(eligible_snapshot),
             eligible_snapshot=eligible_snapshot,
@@ -699,11 +810,21 @@ def _candidate_payload(candidate: CandidateSnapshot) -> dict[str, Any]:
         "provider_id": candidate.provider_id,
         "execution_profile_id": candidate.execution_profile_id,
         "policy_version": candidate.policy_version,
+        "policy_revision": candidate.policy_revision,
+        "policy_bundle_sha256": candidate.policy_bundle_sha256,
+        "policy_decision_id": candidate.policy_decision_id,
         "validator_id": candidate.validator_id,
+        "attestation_id": candidate.attestation_id,
+        "assurance_evidence_sha256": candidate.assurance_evidence_sha256,
         "numerical_validity": candidate.numerical_validity,
+        "reliability_method": candidate.reliability_method,
+        "reliability_evidence_sha256": candidate.reliability_evidence_sha256,
         "reliability_lower_bound": candidate.reliability_lower_bound,
         "reliability_n_raw": candidate.reliability_n_raw,
         "reliability_n_independent": candidate.reliability_n_independent,
+        "reliability_n_success_independent": (
+            candidate.reliability_n_success_independent
+        ),
         "runtime_age_ms": candidate.runtime_age_ms,
         "estimated_latency_ms": candidate.estimated_latency_ms,
         "queue_depth": candidate.queue_depth,
@@ -718,6 +839,7 @@ def _decision_payload(decision: PlanDecision) -> dict[str, Any]:
         "provider_id": decision.provider_id,
         "execution_profile_id": decision.execution_profile_id,
         "policy_version": decision.policy_version,
+        "canonicalization_profile": decision.canonicalization_profile,
         "registry_fingerprint": decision.registry_fingerprint,
         "eligible_count": decision.eligible_count,
         "eligible_snapshot": [
