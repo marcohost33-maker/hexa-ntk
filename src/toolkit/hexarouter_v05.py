@@ -103,12 +103,19 @@ def _wilson_lower_bound_95(successes: int, trials: int) -> float:
     return max(0.0, (centre - margin) / denominator)
 
 
-def policy_input_digest(task_id: str, provider_id: str) -> str:
-    """Bind an authorization decision to the exact task/provider identity pair."""
+def policy_input_digest(
+    task: "TaskContract",
+    provider_id: str,
+) -> str:
+    """Bind authorization to the complete task contract and provider identity."""
 
-    _require_identifier("task_id", task_id)
+    if not isinstance(task, TaskContract):
+        raise ValueError("task must be a TaskContract")
     _require_identifier("provider_id", provider_id)
-    payload = {"provider_id": provider_id, "task_id": task_id}
+    payload = {
+        "provider_id": provider_id,
+        "task": _task_payload(task),
+    }
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
 
@@ -552,7 +559,7 @@ class DeterministicPlanner:
                 reasons.append("POLICY_DENY_OR_MISSING")
             else:
                 expected_policy_input = policy_input_digest(
-                    task.task_id,
+                    task,
                     provider_id,
                 )
                 if policy_decision.input_sha256 != expected_policy_input:
