@@ -697,6 +697,7 @@ class StoreTests(unittest.TestCase):
                         "consumer-a",
                         "event-1",
                         claim_token="worker-a",
+                        now_ms=120,
                     )
                 )
                 self.assertTrue(
@@ -739,13 +740,38 @@ class StoreTests(unittest.TestCase):
                         "consumer-a",
                         "event-1",
                         claim_token="worker-a",
+                        now_ms=112,
                     )
                 self.assertTrue(
                     store.complete_inbox(
                         "consumer-a",
                         "event-1",
                         claim_token="worker-b",
+                        now_ms=115,
                     )
+                )
+
+    def test_inbox_expired_owner_cannot_complete_without_reclaim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with SQLiteDecisionStore(Path(tmp) / "router.sqlite3") as store:
+                self.assertTrue(
+                    store.begin_inbox(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-a",
+                        now_ms=100,
+                        lease_ms=10,
+                    )
+                )
+                with self.assertRaisesRegex(ValueError, "lease has expired"):
+                    store.complete_inbox(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-a",
+                        now_ms=110,
+                    )
+                self.assertFalse(
+                    store.is_inbox_processed("consumer-a", "event-1")
                 )
 
     def test_inbox_failed_attempt_can_release_claim(self) -> None:
