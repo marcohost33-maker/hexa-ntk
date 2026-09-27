@@ -44,46 +44,50 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 - **Kein Nachweis physikalischer Korrektheit** einer PDE-Loesung. Die Gates pruefen
   Software-Integritaet (Determinismus, Round-Trips, Shapes), nicht Physik.
 
-## Reifegrad / Evidenz (Lauf 2026-08-26, lokal, Exit-Codes gesehen)
+## Reifegrad / Evidenz (Lauf 2026-09-27, lokal, Exit-Codes gesehen)
 
 | Gate | Kommando | Ergebnis |
 |---|---|---|
-| Engine | `python scripts/engine_gate.py` | 47/47 Doctests + 26/26 Selftests, exit 0 |
-| Provenance | `python scripts/verify_sources.py` | 17/17 Toolkit-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 166/166, exit 0 |
-| Coverage | `python -m coverage run ... && python -m coverage report` | 82 % gesamt (`fail_under = 79`), exit 0 |
+| Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
+| Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
+| Provenance | `python scripts/verify_sources.py` | 22 Toolkit- + 2 Spec-Eintraege, exit 0 |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 372/372, exit 0 |
+| Coverage | `python -m coverage run ... && python -m coverage report` | 89,4 % gesamt (Branch, `fail_under = 87`), exit 0 |
+| Mutation | `python scripts/mutation_probe.py` | 16/16 Mutanten getoetet, exit 0 |
 
-Lokale Umgebung dieses Laufs: Python 3.14.4, `torch` 2.12.1+cpu, `numpy` 2.4.6.
+Lokale Umgebung dieses Laufs: Python 3.12.3, `torch` 2.6.0 (PyPI-Wheel `+cu124`, auf
+CPU ausgefuehrt — der CPU-Wheel-Index war in der Laufumgebung gesperrt), `numpy` 2.5.3.
 Die CI faehrt dieselbe Kette auf **Python 3.12** mit `torch==2.6.0` (CPU-Wheel).
-Die Zahlen gelten fuer diese beiden Umgebungen; ausserhalb ist nichts zugesichert.
+Log: `results/2026-09-27_review-hardening_local-gate.log`. Fruehere Laeufe (z. B.
+2026-08-26: 47 Doctests, 166 Tests, 82 %) bleiben dort als historische Evidenz stehen.
 
-**Branch-Hinweis:** Der Fix `fix/hex-cfl-positivity-contract` fuegt zwei Doctests hinzu
-(49 statt 47 erwartet) und hebt die Engine-Version auf 3.0.1. Die obige Tabelle ist
-bewusst historische Evidenz des Laufs vom 2026-08-26 und wird nicht als neuer Lauf
-umetikettiert; ein neuer PASS wird erst nach CI/Engine-Gate als Evidenz eingetragen.
+**Resume ist vollstaendig (seit 2026-09-27).** `HexTrainingRunner.maybe_resume()` laedt
+exakt `config.resume_from` (fail-closed bei fehlender Datei, PR #31) und stellt neben
+Modell/Optimizer/Scheduler/RNG jetzt auch den **EMA-Mittelwert** und den **Best-Wert**
+wieder her. Vorher startete das EMA nach einem Resume neu, und der Best-Wert begann bei
+`None` — die erste Epoche nach dem Resume ueberschrieb ein besseres `best.pt`. Quelle der
+Wahrheit ist `best.pt` im eigenen Checkpoint-Ordner: uebernommen wird dessen Wert, wenn er
+dieselbe Policy traegt und mindestens so gut ist wie der im Resume notierte (besser = spaetere
+Epoche desselben Laufs); fehlt `best.pt` oder ist es schlechter (Fremd-Resume, ersetzte Datei),
+wird nichts uebernommen und nichts blockiert. Regressionstest:
+unterbrochener Lauf (2 + 2 Epochen) == ununterbrochener Lauf (4 Epochen), bitgleich fuer
+Modell und EMA.
 
-**Resume-Pfad (in diesem Branch korrigiert):** `HexTrainingRunner.maybe_resume()`
-reicht `config.resume_from` jetzt explizit an den Checkpoint-Loader weiter.
-Existenzpruefung und tatsaechlich geladene Datei bezeichnen damit denselben Pfad.
-Manager- und Runner-Regressionstests decken einen Checkpoint ausserhalb des
-aktuellen `output_dir` mit abweichender Epoche und `global_step` ab, auch wenn
-im `output_dir` bereits ein eigener Resume-Checkpoint liegt (der fruehere
-Fehlerfall: dieser wurde still geladen). Eine gesetzte, aber fehlende
-`resume_from`-Datei bricht mit `FileNotFoundError` ab (fail-closed), statt
-still bei Epoche 0 neu zu trainieren. Die
-Trust-/`weights_only`-Semantik bleibt unveraendert. Der isolierte Fix ersetzt
-den entsprechenden Teil des aelteren Sammel-PR #20.
+**Metrik:** `val_nrmse` ist jetzt der gepoolte relative L2-Fehler
+`sqrt(sum |pred - y|^2 / sum |y|^2)` ueber den Validierungssatz (vorher eine Kopie des
+MSE-`val_loss`, als "Placeholder" markiert, aber Default-Kriterium fuer `best.pt`).
 
 Toolkit-Stand 2026-04-06, Engine-Stand 2026-05-25. Das gehaertete Experten-Review liegt
 in `spec/`, offene Lint-/Test-Schuld in `docs/ROADMAP.md`.
 
 ## Kern
 
-- **Engine:** `src/hexantk_v3.py` (1595 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
-  Train-Step, Operator-Vertraege, 26 Selftests inline)
-- **Toolkit:** `src/toolkit/` — 10 Module + 7 Testmodule (Benchmark, Checkpoint-Integration,
+- **Engine:** `src/hexantk_v3.py` (1699 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
+  Train-Step, Operator-Vertraege, 26 Selftests inline; Byte-Mirror von `coworker-dde`,
+  git-Blob `3a646583` in beiden Repos, verifiziert 2026-09-27)
+- **Toolkit:** `src/toolkit/` — 11 Module + 11 Testmodule (Benchmark, Checkpoint-Integration,
   Dataloader-Utils, Dataset-Split, EMA, Failure-Signature, Operator-Adapter, Resume-Utils,
-  Runner, Warmstart-Utils)
+  Runner, Stress, Warmstart-Utils; dazu der Test des Provenance-Gates)
 
 ## Reproduzieren
 
@@ -92,16 +96,19 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt                  # zentrale Tool-Pins: ruff/coverage
 python -m pip install numpy
 python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
-python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests (branch expectation)
+python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 275 Unit-Tests (2026-09-26) + Coverage-Gate
+python -m coverage report                                      # 372 Unit-Tests (2026-09-27) + Coverage-Gate
+python scripts/mutation_probe.py                               # optional: 16 Mutanten der 09-27-Fixes
 ```
 
-CI (`.github/workflows/ci.yml`), beide Jobs **blocking**:
+CI (`.github/workflows/ci.yml`), beide Jobs scheitern mit exit != 0 (ob `tests (cpu)` auch
+den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom 2026-09-21 ist
+nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (275, Stand 2026-09-26) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (372, Stand 2026-09-27) unter Branch-Coverage.
 
 ## Struktur
 

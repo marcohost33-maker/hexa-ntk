@@ -5,6 +5,40 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Review-Haertung 2026-09-27: Issues #40 und #42 geschlossen, Resume vollstaendig.**
+  Alle Befunde vor dem Fix reproduziert (`results/2026-09-27_review-hardening_local-gate.log`).
+  _Resume/Checkpoint:_ Der Resume-Checkpoint traegt jetzt den EMA-Zustand und den Best-Wert
+  (`checkpoint_manager_state`); vorher startete das EMA nach Resume neu und `best_metric_value`
+  bei `None`, sodass die erste Epoche ein besseres `best.pt` ueberschrieb. Uebernommen wird der
+  Wert aus `best.pt`, wenn es dieselbe Policy traegt und mindestens so gut ist wie der notierte Wert. `CheckpointDurabilityError` (#40 P3-3): scheitert
+  nach `os.replace` nur noch der Verzeichnis-fsync, wird der Best-Wert trotzdem committet (Speicher
+  == Datei). `epoch`/`global_step` ueber `as_step_count` (inf/NaN/1.5/-1 -> `ValueError`, bool ->
+  `TypeError`), in `load_resume_checkpoint` **vor** dem Ueberschreiben von Modell/Optimizer.
+  `min_delta` NaN/inf -> `ValueError`. P3-2 per Test gepinnt.
+  _Runner:_ Best-Checkpoint jede Epoche (vorher nur an `save_every_n_epochs`-Epochen), last/resume
+  zusaetzlich nach der letzten Epoche; leere Validierung -> NaN + FailureSignature
+  `Empty_Validation` statt Bestwert 0.0; Epoche ohne gesunden Schritt -> `mean_loss` NaN statt 0.0;
+  `val_nrmse` = gepoolter relativer L2-Fehler statt MSE-Kopie; `RunnerConfig` validiert
+  (`save_every_n_epochs=0` war ZeroDivisionError); `TrainingAnomalyDetector(window_size=1)` war
+  StatisticsError, NaN-`spike_multiplier` schaltete die Erkennung ab.
+  _Split (#42, #40 P3-1/5/6):_ Entscheid Option A+: `group_by_dt` behaelt die dokumentierte Semantik
+  (verschiedene Schrittweiten einer Trajektorie = eigene Gruppen, Docstring praezisiert), aber
+  dt-Schluessel einer Trajektorie, die sich nur unterhalb float32-Aufloesung unterscheiden
+  (0.1 vs. `tensor(0.1)`), werfen `ValueError` mit Hinweis auf `dt_round_ndigits` statt die
+  Trajektorie still auf beide Seiten zu verteilen (vorher 41/50 Seeds). `trajectory_id`: 0-d
+  numpy-Werte werden entpackt (1.5 -> Fehler statt 1), bool/bytes und nicht-kanonische Strings
+  (`"012"`, `"+12"`, `" 12"`) abgelehnt, kanonische (`"12"`) bleiben gueltig; `Decimal('sNaN')`
+  war bereits korrekt, jetzt gepinnt. `dt_round_ndigits` typvalidiert, Rundungs-Overflow ->
+  `ValueError`.
+  _Warmstart/EMA:_ Prefix-Transformationen scheitern bei Schluessel-Kollision (vorher still ein
+  Tensor verworfen); optional `skip_shape_mismatch` mit Bericht; EMA-`decay` ausserhalb [0, 1]
+  -> `ValueError`; `load_ema_state` respektiert `strict` auch im Full-State-Pfad.
+  _Evidenz:_ neue Tests gegen die alten Modul-Bytes (HEAD 9538e87): failures=52, errors=16 (2
+  Testmodule scheitern schon am Import neuer Namen; Shim-Lauf dieser 2 Module mit alter Logik:
+  50 rot) -> mit Fix 372/372 OK;
+  Mutationsprobe 16/16 (`scripts/mutation_probe.py`, im Repo); Coverage 83 % -> **89,4 %**,
+  `fail_under` 79 -> 87; warmstart 43 % -> 94 %, ema 56 % -> 88 %.
+
 - [x] **Endlichkeitsvertrag `dt` beim Gruppieren (Issue #39, 2026-09-26).**
   `dataset_split_hex_v3`: mit `group_by_dt=True` wurde ein NaN-`dt` Teil des Gruppenschluessels;
   NaN != NaN, also bildete jedes Sample mit frischem NaN (`tensor.item()`, Arithmetik) eine
@@ -73,28 +107,27 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Offen
 
-- [ ] **Coverage-Ratchet Richtung 80–90%.** Ist 68% (Branch, 2026-07-03). Schwaechste Module,
-  in Prioritaetsreihenfolge des Nutzens: `runner_hex_v3.py` **25%** (191 Stmts offen — groesster
-  Hebel), `warmstart_utils_hex_v3.py` **43%**, `ema_hex_v3.py` **56%**, `resume_utils_hex_v3.py`
-  **73%**. Pro geschlossener Luecke `fail_under` in `pyproject.toml` nachziehen.
-  _Nachtrag 2026-09-25 (gemessen, py3.12/torch 2.6.0):_ Ist **83%** gesamt, `fail_under = 79`;
-  `runner_hex_v3.py` 80%, `warmstart_utils_hex_v3.py` **43%**, `ema_hex_v3.py` **56%**,
-  `resume_utils_hex_v3.py` 82%. Groesster Hebel jetzt warmstart/ema; Draft-PR #20 enthaelt
-  einen aelteren Ratchet-Versuch (79→91), der gegen den aktuellen `main` neu zu pruefen ist.
-- [ ] **Nachbarn der float→int-Klasse (P3, bewusst nicht in #36/#37).** `int(epoch)` /
-  `int(global_step)` in `checkpoint_integration_hex_v3.py` (save_last/save_resume) und
-  `resume_utils_hex_v3.py` werfen fuer `float('inf')` einen rohen `OverflowError` statt eines
-  Vertrags-Fehlers. Schleifenzaehler, kein Datensatz-Metadatum; kein Zustand wird vorher
-  veraendert. _Quelle: `results/2026-09-25_issues36-37_local-gate.log` [6/6]._
-- [ ] **Nachbarn im Split-Modul (P3, bewusst nicht in #39).** (a) `group_by_dt=True`
-  schluesselt nach exaktem `dt`: mischt eine Trajektorie `0.1` (float) und `tensor(0.1)`
-  (float32 -> 0.10000000149...), zerfaellt sie in zwei Gruppen und landet in beiden Splits
-  (gemessen 41/50 Seeds; mit `dt_round_ndigits=6` 0/50). Das ist dieselbe Mechanik wie
-  `test_group_by_dt_separates_dt_variants` (mehrere `dt` je Trajektorie = gewollt getrennt) und
-  widerspricht dem Modul-Docstring "No trajectory appears in both" - Produktentscheid offen.
-  (b) `_normalize_dt_value`: `round(dt, negative ndigits)` nahe binary64-Max wirft rohen
-  `OverflowError`; `dt_round_ndigits` wird nicht validiert (1.5 -> roher `TypeError`).
-  _Quelle: `results/2026-09-26_issue39_local-gate.log` [5/5]._
+- [x] ~~**Coverage-Ratchet Richtung 80–90%.**~~ Erledigt 2026-09-27: 89,4 % Branch-Coverage,
+  `fail_under = 87` (siehe oben). Schwaechste Module jetzt `runner_hex_v3.py` / `stress_hex_v3.py`
+  (je 84 %). Draft-PR #20 (aelterer Ratchet-Versuch 79->91 + resume_from-Fix) ist damit inhaltlich
+  ueberholt: resume_from kam mit PR #31, der Ratchet hiermit — Schliessen empfohlen.
+- [x] ~~**Nachbarn der float→int-Klasse (P3).**~~ Erledigt 2026-09-27 (`as_step_count`, siehe oben).
+- [x] ~~**Nachbarn im Split-Modul (P3, #42).**~~ Erledigt 2026-09-27 (siehe oben).
+- [ ] **Evidenz-Nachtrag zu frueheren Eintraegen (#40 P3-4).** Die Angaben "Mutationsprobe 11/11"
+  und "Differential alt/neu 600/600 bitgleich" (Eintrag #36/#37) stammen aus Skripten einer
+  externen Sitzung, die nie ins Repo kamen; sie sind **aus dem Repo nicht reproduzierbar** und
+  gelten hier nur als Bericht, nicht als Evidenz. Neue Mutationsbehauptungen nur noch mit
+  Skript im Repo (Beispiel: `scripts/mutation_probe.py`).
+- [ ] **`tests (cpu)` als Required Check.** Laut externem Bericht (2026-09-21) ist nur `gate`
+  Required Check; ein roter Testjob blockiert den Merge also nicht. Nur der Repo-Owner kann das
+  im Branch-Schutz aendern.
+- [ ] **Mid-Epoch-Resume.** `dataloader_state_dict` wird gespeichert/geladen, der Runner nutzt es
+  aber nicht (Resume nur an Epochengrenzen). Fuer lange Epochen auf Preemptible-Clustern relevant
+  (Muster: `torchdata.StatefulDataLoader`).
+- [ ] **DDP-Integration des Runners.** Nur `is_main_process`-Guard; kein `DistributedSampler.
+  set_epoch`, kein Barrier nach dem Checkpoint-Write, Metriken nicht ueber Ranks reduziert.
+- [ ] **CI-Reproduzierbarkeit:** `numpy` ist im Testjob ungepinnt (`pip install numpy`); ein
+  numpy-Major-Sprung aendert die CI ohne Commit. Pin in `requirements-dev.txt` erwaegen.
 
 ## Zurueckgestellt (bewusst, mit Begruendung)
 

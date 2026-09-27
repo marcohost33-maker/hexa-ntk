@@ -205,3 +205,27 @@
 
 | 626F935200206F98 | 2026-09-26 11:23 | src/toolkit | in-repo derived, #39 dt finiteness contract: dataset_split_hex_v3.py |
 | 8860CF78DF346255 | 2026-09-26 11:23 | src/toolkit | in-repo derived, #39 non-finite dt regressions + leakage invariant: test_dataset_split_hex_v3.py |
+
+## src/toolkit/ — review hardening 2026-09-27 (append-only, issues #40, #42)
+
+> Review of main 9538e87: every finding reproduced before the fix
+> (results/2026-09-27_review-hardening_local-gate.log). Resume now restores
+> the EMA average and the best metric (verified against best.pt); the runner
+> evaluates best every epoch and saves the final epoch; val_nrmse is the
+> pooled relative L2 error; epoch/global_step/min_delta/decay/dt/trajectory_id
+> contracts fail closed. Two new test modules (resume utils, warmstart utils)
+> need their first rows here (SHA-First). Prior rows remain lineage.
+
+| 42D60044E19B8342 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 #40 min_delta/step-count contract, durability commit, best+EMA resume state: checkpoint_integration_hex_v3.py |
+| 00A84DBEEAE647D2 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 #42 precision-split dt keys fail closed, #40 trajectory_id numpy/bool/str contract: dataset_split_hex_v3.py |
+| 4790DFE7CBA298A2 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 EMA decay contract [0, 1], strict on full-state load: ema_hex_v3.py |
+| B4B2D20101A4A8CA | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 Empty_Validation kind documented: failure_signature_hex_v3.py |
+| A39A16D67EFFAC0C | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 as_step_count, validate-before-restore, EMA resume state: resume_utils_hex_v3.py |
+| D8A9ECF8874EF347 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 full resume (EMA + best), best every epoch, final-epoch state, real val_nrmse, config contract: runner_hex_v3.py |
+| 2DEBCC0F014D7F11 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 regressions #40 counters/durability/resume best+EMA: test_checkpoint_integration_hex_v3.py |
+| A072FA6B50E991D5 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 regressions #42 and #40 P3-1/5/6: test_dataset_split_hex_v3.py |
+| 89BE5BA18AED0777 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 EMA decay and load-path tests: test_ema_hex_v3.py |
+| B8A76790A0B83F81 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 new test module (resume utils had none): test_resume_utils_hex_v3.py |
+| 54C56D743B99827C | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 regressions resume equivalence, schedule, empty validation, nRMSE, config: test_runner_hex_v3.py |
+| 53663241136220FA | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 new test module (warmstart 43% coverage): test_warmstart_utils_hex_v3.py |
+| 45DE93FC82AEA5ED | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 fail-closed prefix collisions, skip_shape_mismatch, numpy._core first: warmstart_utils_hex_v3.py |

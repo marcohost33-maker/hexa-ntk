@@ -1,0 +1,94 @@
+# Gate-Log 2026-09-27 — Review-Haertung (#40, #42, Resume-Vollstaendigkeit)
+# base main 9538e87 | branch claude/hexa-ntk-review-optimize-i99syo (tree as committed)
+# env: python 3.12.3 torch 2.6.0+cu124 numpy 2.5.3 | CPU only (torch.cuda.is_available()=False)
+# note: torch from PyPI (+cu124) because download.pytorch.org is blocked by the sandbox egress policy; CI uses the CPU wheel of the same version
+
+$ ruff check src scripts
+All checks passed!
+rc=0
+
+$ python -m compileall -q src scripts
+rc=0
+
+$ python scripts/verify_sources.py
+
+[VERIFY-SOURCES] 22 Toolkit-Eintraege + 2 Spec-Eintraege | Dateiliste: git (24 Dateien) | PASS
+rc=0
+
+$ python scripts/engine_gate.py
+======================================================================
+
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+rc=0
+
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p test_*.py
+----------------------------------------------------------------------
+Ran 372 tests in 3.574s
+
+OK
+rc=0
+
+$ python -m coverage report --precision=2
+Name                                           Stmts   Miss Branch BrPart   Cover
+---------------------------------------------------------------------------------
+src/toolkit/benchmark_hex_v3.py                  246     20     80     20  87.73%
+src/toolkit/checkpoint_integration_hex_v3.py     200     11     60      6  93.46%
+src/toolkit/dataloader_utils_hex_v3.py            22      0      2      0 100.00%
+src/toolkit/dataset_split_hex_v3.py              181      5     80      6  95.79%
+src/toolkit/ema_hex_v3.py                         40      5     10      1  88.00%
+src/toolkit/failure_signature_hex_v3.py           41      3      0      0  92.68%
+src/toolkit/operator_adapter_hex_v3.py           128     12     94     12  89.19%
+src/toolkit/resume_utils_hex_v3.py               118      6     64      5  93.96%
+src/toolkit/runner_hex_v3.py                     318     38    110     13  83.88%
+src/toolkit/stress_hex_v3.py                     207     25     92     23  83.95%
+src/toolkit/warmstart_utils_hex_v3.py            129      8     50      3  93.85%
+---------------------------------------------------------------------------------
+TOTAL                                           1630    133    642     89  89.44%
+rc=0
+
+$ python scripts/mutation_probe.py
+M01 KILLED    checkpoint_integration_hex_v3.py -> TestNonMainRankStoresValidatedFloat
+M02 KILLED    checkpoint_integration_hex_v3.py -> TestDurabilityErrorAfterReplace
+M03 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M04 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M05 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M06 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M07 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M08 KILLED    runner_hex_v3.py -> TestDetectorContract
+M09 KILLED    runner_hex_v3.py -> TestFullResumeEquivalence
+M10 KILLED    runner_hex_v3.py -> TestCheckpointSchedule
+M11 KILLED    runner_hex_v3.py -> TestEmptyValidationAndTrainEpoch
+M12 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M13 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M14 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M15 KILLED    warmstart_utils_hex_v3.py -> TestPrefixTransforms
+M16 KILLED    ema_hex_v3.py -> TestDecayContract
+[MUTATION-PROBE] 16/16 killed | PASS
+rc=0
+
+# ---------------------------------------------------------------------------
+# [1/5] Reproduktion VOR dem Fix (main 9538e87, gleiche Umgebung), je Befund:
+#   R1  TrainingAnomalyDetector(window_size=1).check_loss(1.0)  -> StatisticsError
+#   R1b TrainingAnomalyDetector(spike_multiplier=nan)            -> akzeptiert
+#   R2  Resume: best_metric_value None (vorher 0.4810...)        -> naechste Epoche ueberschreibt best.pt
+#   R3  Resume 2+2 vs. 4 Epochen: Modell gleich, EMA UNGLEICH
+#   R4  save_every_n_epochs=2, 3 Epochen: Best nur an Epoche 0/2 geprueft
+#   R5  leere Validierung: val_loss 0.0 -> best 0.0
+#   R5b save_every_n_epochs=0 -> ZeroDivisionError nach Epoche 0
+#   R6  BestCheckpointPolicy(min_delta=nan) -> akzeptiert, blockiert jede Verbesserung
+#   R7  trajectory_id np.array(1.5)->1, np.array(1.7)->1, '012'->12, '+12'->12, b'12'->12, True->1
+#       dt_round_ndigits=1.5 -> roher TypeError; round(1.797e308,-308) -> roher OverflowError
+#   R8  dir-fsync-Fehler nach os.replace: Datei-Best 0.5, Speicher-Best 1.0
+#   R10 Warmstart strip "module.": Kollision, ein Tensor still verworfen
+#   R11 load_resume epoch=inf: OverflowError NACHDEM Modell ueberschrieben war
+#   R12 save_last epoch=inf -> OverflowError; epoch=1.5 -> still 1
+#   Decimal('sNaN') als trajectory_id: bereits korrekt (Vertrags-ValueError) -> nur gepinnt
+# [2/5] Diskriminierung: neue Tests gegen alte Modul-Bytes: Ran 300, failures=52, errors=16
+#   (test_checkpoint_integration + test_resume_utils scheitern am Import neuer Namen;
+#    Shim-Lauf dieser zwei Module mit alter Logik: failures=32, errors=18)
+#   (Stand vor der Praezisierung "restored_from_newer_best"; deren 2 Tests + 2 Mutanten kamen danach)
+# [3/5] Nach dem Fix: alle R-Faelle liefern Vertragsfehler bzw. korrektes Verhalten
+#   (R2 best restauriert, R3 EMA bitgleich, R8 Speicher == Datei == 0.5).
+# [4/5] Engine-Mirror: git hash-object src/hexantk_v3.py = 3a64658394e1036f5f08d299b37376348203ac55,
+#   identisch mit coworker-dde@5dc3e6f (#50) -> Byte-Mirror intakt nach PR #45.
+# [5/5] Bewusst NICHT geaendert: Engine (Pflege via coworker-dde), CI-Workflow, Branch-Schutz.
