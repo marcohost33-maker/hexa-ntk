@@ -21,6 +21,7 @@ from hexarouter_v05 import (
     full_edges,
     graph_metrics,
     hex_cell_patch,
+    policy_input_digest,
     reference_topology_benchmark,
     ring_edges,
     star_edges,
@@ -92,33 +93,41 @@ def assurance(
     code_sha: str,
     *,
     independent: bool = True,
+    task_class: str = "resolvent",
+    regime: str = "default",
 ) -> AssuranceAttestation:
     return AssuranceAttestation(
         provider_id=provider_id,
         code_sha=code_sha,
+        task_class=task_class,
+        regime=regime,
         numerical_validity="verified",
         independent_validator=independent,
         validator_id="validator-A",
+        attestation_id=f"attestation:{provider_id}",
+        evidence_sha256="b" * 64,
     )
 
 
 def reliability(
     provider_id: str,
     code_sha: str,
-    lower: float,
+    success_rate: float,
     *,
     task_class: str = "resolvent",
     regime: str = "default",
-    n_independent: int = 5,
+    n_independent: int = 100,
 ) -> ReliabilityEstimate:
+    successes = round(success_rate * n_independent)
     return ReliabilityEstimate(
         provider_id=provider_id,
         code_sha=code_sha,
         task_class=task_class,
         regime=regime,
-        lower_bound=lower,
-        n_raw=20,
+        n_raw=n_independent,
         n_independent=n_independent,
+        n_success_independent=successes,
+        evidence_sha256="c" * 64,
     )
 
 
@@ -127,12 +136,21 @@ def policy(
     *,
     allowed: bool = True,
     task_id: str = "task-1",
+    input_sha256: str | None = None,
 ) -> PolicyDecision:
     return PolicyDecision(
         provider_id=provider_id,
         task_id=task_id,
         allowed=allowed,
         policy_version="test-policy.v1",
+        policy_revision="rev-1",
+        policy_bundle_sha256="a" * 64,
+        decision_id=f"policy:{task_id}:{provider_id}",
+        input_sha256=(
+            input_sha256
+            if input_sha256 is not None
+            else policy_input_digest(task_id, provider_id)
+        ),
     )
 
 
@@ -148,8 +166,8 @@ def task(**overrides: object) -> TaskContract:
         "unit_system": "UCUM",
         "min_numerical_validity": "verified",
         "independent_validation_required": True,
-        "min_reliability_lower_bound": 0.8,
-        "min_independent_samples": 1,
+        "min_reliability_lower_bound": 0.70,
+        "min_independent_samples": 20,
         "min_ram_gb": 4.0,
         "max_latency_ms": 1000.0,
         "max_queue_depth": 5,
@@ -275,7 +293,7 @@ class PlannerTests(unittest.TestCase):
         item = provider("p", code_sha="sha")
         planner = DeterministicPlanner([CAP], [item])
         decision = planner.plan(
-            task(min_reliability_lower_bound=0.9),
+            task(min_reliability_lower_bound=0.85),
             runtime={"p": runtime("p", "sha", latency=10)},
             assurance={"p": assurance("p", "sha")},
             reliability={"p": reliability("p", "sha", 0.89)},
@@ -290,7 +308,13 @@ class PlannerTests(unittest.TestCase):
         decision = planner.plan(
             task(regime="geometry-ood"),
             runtime={"p": runtime("p", "sha", latency=10)},
-            assurance={"p": assurance("p", "sha")},
+            assurance={
+                "p": assurance(
+                    "p",
+                    "sha",
+                    regime="geometry-ood",
+                )
+            },
             reliability={"p": reliability("p", "sha", 0.95, regime="default")},
             policy={"p": policy("p")},
         )
@@ -428,6 +452,78 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(decision.provider_id, "a")
 
 
+    def test_policy_input_digest_mismatch_fails_closed(self) -> None:
+        item = provider("p", code_sha="sha")
+        planner = DeterministicPlanner([CAP], [item])
+        decision = planner.plan(
+            task(),
+            runtime={"p": runtime("p", "sha", latency=10)},
+            assurance={"p": assurance("p", "sha")},
+            reliability={"p": reliability("p", "sha", 0.95)},
+            policy={"p": policy("p", input_sha256="d" * 64)},
+        )
+        self.assertEqual(decision.status, "ABSTAIN")
+        self.assertIn(
+            "POLICY_INPUT_MISMATCH",
+            dict(decision.rejections)["p"],
+        )
+
+    def test_assurance_is_bound_to_task_regime(self) -> None:
+        item = provider("p", code_sha="sha")
+        planner = DeterministicPlanner([CAP], [item])
+        decision = planner.plan(
+            task(regime="geometry-ood"),
+            runtime={"p": runtime("p", "sha", latency=10)},
+            assurance={"p": assurance("p", "sha", regime="default")},
+            reliability={
+                "p": reliability(
+                    "p",
+                    "sha",
+                    0.95,
+                    regime="geometry-ood",
+                )
+            },
+            policy={"p": policy("p")},
+        )
+        self.assertEqual(decision.status, "ABSTAIN")
+        self.assertIn(
+            "ASSURANCE_MISSING_OR_STALE",
+            dict(decision.rejections)["p"],
+        )
+
+    def test_reliability_lower_bound_is_computed_not_declared(self) -> None:
+        estimate = reliability("p", "sha", 0.95)
+        self.assertLess(estimate.lower_bound, 0.95)
+        self.assertGreater(estimate.lower_bound, 0.85)
+        self.assertEqual(estimate.method, "wilson-95-two-sided")
+
+    def test_reliability_rejects_successes_over_independent_trials(self) -> None:
+        with self.assertRaises(ValueError):
+            ReliabilityEstimate(
+                provider_id="p",
+                code_sha="sha",
+                task_class="resolvent",
+                regime="default",
+                n_raw=10,
+                n_independent=5,
+                n_success_independent=6,
+                evidence_sha256="c" * 64,
+            )
+
+    def test_policy_digest_requires_lowercase_sha256(self) -> None:
+        with self.assertRaises(ValueError):
+            PolicyDecision(
+                provider_id="p",
+                task_id="task-1",
+                allowed=True,
+                policy_version="v1",
+                policy_revision="rev1",
+                policy_bundle_sha256="not-a-digest",
+                decision_id="decision-1",
+                input_sha256=policy_input_digest("task-1", "p"),
+            )
+
+
 class StoreTests(unittest.TestCase):
     def _decision(self):
         item = provider("p", code_sha="sha")
@@ -539,13 +635,14 @@ class ContractValidationTests(unittest.TestCase):
     def test_reliability_independent_count_cannot_exceed_raw(self) -> None:
         with self.assertRaises(ValueError):
             ReliabilityEstimate(
-                "p",
-                "sha",
-                "resolvent",
-                "default",
-                0.9,
+                provider_id="p",
+                code_sha="sha",
+                task_class="resolvent",
+                regime="default",
                 n_raw=2,
                 n_independent=3,
+                n_success_independent=2,
+                evidence_sha256="c" * 64,
             )
 
     def test_execution_profile_rejects_vram_without_gpu(self) -> None:
