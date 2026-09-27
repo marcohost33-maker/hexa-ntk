@@ -20,6 +20,11 @@ The MVP deliberately separates:
 
 Runtime load and assurance MUST NOT be self-declared inside the static capability spec.
 
+Security-relevant identity tokens (provider, capability, profile, task, regime,
+validator, attestation and policy identifiers) are strict lowercase ASCII tokens matching
+`[a-z0-9][a-z0-9._-]{0,63}`. They are rejected rather than Unicode-normalized,
+case-folded or silently trimmed. Human-readable labels belong in separate metadata.
+
 ## 2. Hard routing invariants
 
 A provider is eligible only if all applicable gates pass:
@@ -200,6 +205,7 @@ The v0.5 core is acceptable only when tests demonstrate at least:
 - task-class/regime-bound assurance and reliability evidence;
 - recomputed 95% Wilson reliability lower bound from independent Bernoulli cases;
 - policy revision/bundle/input binding and fail-closed input mismatch;
+- strict lowercase-ASCII identity tokens with confusable/Unicode rejection;
 - resource-profile feasibility;
 - atomic/idempotent decision+CloudEvents-outbox recording;
 - lease/reclaim/complete inbox semantics that do not confuse receipt with successful processing;
