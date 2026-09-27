@@ -671,5 +671,227 @@ class TestSummarizeGroupSplit(unittest.TestCase):
         )
 
 
+
+# ------------------------------------------------------------------
+# Issue #40 (P3-1, P3-5, P3-6): trajectory_id input contract
+# ------------------------------------------------------------------
+
+
+class TestTrajectoryIdContractIssue40(unittest.TestCase):
+    CONTRACT = "Sample 'trajectory_id' must be a finite integer"
+
+    @staticmethod
+    def _key(trajectory_id: Any) -> int:
+        return dataset_split._extract_group_key(
+            {"trajectory_id": trajectory_id}, group_by_dt=False
+        ).trajectory_id
+
+    def _assert_contract_error(self, trajectory_id: Any) -> None:
+        # Exact type check: a TypeError or a silently accepted key both fail.
+        with self.assertRaises(Exception) as ctx:
+            self._key(trajectory_id)
+        self.assertIs(type(ctx.exception), ValueError)
+        self.assertIn(self.CONTRACT, str(ctx.exception))
+
+    def test_non_integral_numpy_values_are_rejected(self) -> None:
+        # P3-1: a 0-d array is not numbers.Real and was truncated by int().
+        for value in (
+            np.array(1.5),
+            np.array(1.7),
+            np.array([2.5]),
+            np.float64(1.5),
+            np.float32(2.5),
+            np.array(np.inf),
+        ):
+            with self.subTest(value=repr(value)):
+                self._assert_contract_error(value)
+
+    def test_numpy_1_5_and_1_7_no_longer_share_a_group(self) -> None:
+        ds = FakeTrajectoryDataset(
+            [
+                {"trajectory_id": np.array(1.5)},
+                {"trajectory_id": np.array(1.7)},
+                {"trajectory_id": 2},
+            ]
+        )
+        with self.assertRaises(ValueError):
+            split_dataset_by_trajectory(ds, val_fraction=0.5, seed=0)
+
+    def test_integral_numpy_values_keep_their_key(self) -> None:
+        for value, expected in (
+            (np.array(7), 7),
+            (np.int64(7), 7),
+            (np.int32(-3), -3),
+            (np.float64(7.0), 7),
+            (np.array([3]), 3),
+            (np.uint8(200), 200),
+        ):
+            with self.subTest(value=repr(value)):
+                key = self._key(value)
+                self.assertEqual(key, expected)
+                self.assertIs(type(key), int)
+
+    def test_non_scalar_numpy_array_rejected(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            self._key(np.array([1, 2]))
+        self.assertEqual(
+            str(ctx.exception), "Sample 'trajectory_id' tensor must be scalar-like"
+        )
+
+    def test_bool_ids_rejected(self) -> None:
+        # P3-5: True silently became trajectory 1 and merged with id 1.
+        for value in (True, False, np.bool_(True), torch.tensor(True)):
+            with self.subTest(value=repr(value)):
+                self._assert_contract_error(value)
+
+    def test_non_canonical_strings_rejected(self) -> None:
+        # P3-5: all of these used to map to 12 (or 0) and collide.
+        for value in ("012", "+12", " 12", "12 ", "1_2", "-0", "00", "\u0661\u0662", ""):
+            with self.subTest(value=repr(value)):
+                self._assert_contract_error(value)
+
+    def test_canonical_strings_keep_their_key(self) -> None:
+        for value, expected in (("0", 0), ("12", 12), ("-3", -3), ("7", 7)):
+            with self.subTest(value=value):
+                self.assertEqual(self._key(value), expected)
+
+    def test_bytes_rejected(self) -> None:
+        for value in (b"12", bytearray(b"12")):
+            with self.subTest(value=repr(value)):
+                self._assert_contract_error(value)
+
+    def test_decimal_specials_carry_contract_message(self) -> None:
+        # P3-6: pinned; sNaN must not escape as InvalidOperation or a bare
+        # ValueError without the contract text.
+        for value in (Decimal("sNaN"), Decimal("NaN"), Decimal("Infinity"), Decimal("1.5")):
+            with self.subTest(value=repr(value)):
+                self._assert_contract_error(value)
+
+
+# ------------------------------------------------------------------
+# Issue #42: group_by_dt and dt keys that differ only by precision
+# ------------------------------------------------------------------
+
+
+class TestDtPrecisionSplitIssue42(unittest.TestCase):
+    @staticmethod
+    def _mixed_precision_dataset() -> FakeTrajectoryDataset:
+        # Trajectory 0 mixes 0.1 (binary64) and tensor(0.1) (float32).
+        return FakeTrajectoryDataset(
+            [{"trajectory_id": 0, "dt": 0.1}, {"trajectory_id": 0, "dt": torch.tensor(0.1)}]
+            + [{"trajectory_id": tid, "dt": 0.1} for tid in range(1, 6)]
+        )
+
+    def test_mixed_precision_dt_fails_closed(self) -> None:
+        # Before: two groups for one trajectory; in 41/50 seeds it landed in
+        # both train and val (issue #42).
+        with self.assertRaises(Exception) as ctx:
+            split_dataset_by_trajectory(
+                self._mixed_precision_dataset(), val_fraction=0.3, seed=0, group_by_dt=True
+            )
+        self.assertIs(type(ctx.exception), ValueError)
+        self.assertIn("trajectory_id 0", str(ctx.exception))
+        self.assertIn("dt_round_ndigits", str(ctx.exception))
+
+    def test_mixed_precision_dt_with_rounding_never_leaks(self) -> None:
+        ds = self._mixed_precision_dataset()
+        for seed in range(50):
+            train, val = split_dataset_by_trajectory(
+                ds, val_fraction=0.3, seed=seed, group_by_dt=True, dt_round_ndigits=6
+            )
+            summary = summarize_group_split(
+                train, val, group_by_dt=True, dt_round_ndigits=6
+            )
+            self.assertEqual(summary["overlap_trajectory_ids"], [], msg=f"seed={seed}")
+
+    def test_float64_noise_without_rounding_fails_closed(self) -> None:
+        ds = FakeTrajectoryDataset(
+            [{"trajectory_id": 0, "dt": 0.1}, {"trajectory_id": 0, "dt": 0.1 + 1e-12}]
+            + [{"trajectory_id": 1, "dt": 0.1}]
+        )
+        with self.assertRaises(ValueError):
+            split_dataset_by_trajectory(ds, val_fraction=0.5, seed=0, group_by_dt=True)
+
+    def test_same_dt_on_different_trajectories_is_fine(self) -> None:
+        # The check is per trajectory; tensor(0.1) on another id is no issue.
+        ds = FakeTrajectoryDataset(
+            [{"trajectory_id": 0, "dt": 0.1}, {"trajectory_id": 1, "dt": torch.tensor(0.1)}]
+        )
+        train, val = split_dataset_by_trajectory(
+            ds, val_fraction=0.5, seed=0, group_by_dt=True
+        )
+        self.assertEqual(len(train) + len(val), 2)
+
+    def test_deliberate_dt_variants_remain_separate_groups(self) -> None:
+        # Documented semantics (module docstring): distinct step sizes of one
+        # trajectory are independent groups; the summary exposes the overlap.
+        ds = FakeTrajectoryDataset(
+            [{"trajectory_id": 0, "dt": 0.1}, {"trajectory_id": 0, "dt": 0.05}]
+        )
+        train, val = split_dataset_by_trajectory(
+            ds, val_fraction=0.5, seed=0, group_by_dt=True
+        )
+        summary = summarize_group_split(train, val, group_by_dt=True)
+        self.assertEqual(summary["num_overlap_groups"], 0)
+        self.assertEqual(summary["overlap_trajectory_ids"], [0])
+
+    def test_summary_also_rejects_precision_split(self) -> None:
+        ds = self._mixed_precision_dataset()
+        subset = dataset_split.SampleSubsetDataset(ds, [0, 1])
+        other = dataset_split.SampleSubsetDataset(ds, [2])
+        with self.assertRaises(ValueError):
+            summarize_group_split(subset, other, group_by_dt=True)
+
+    def test_docstring_states_the_group_by_dt_semantics(self) -> None:
+        doc = dataset_split.__doc__
+        self.assertNotIn("stricter grouping", doc)
+        self.assertIn("overlap_trajectory_ids", doc)
+
+
+class TestDtInputContract(unittest.TestCase):
+    def test_numpy_scalar_dt_accepted(self) -> None:
+        for dt in (np.float32(0.1), np.float64(0.1), np.array(0.25)):
+            with self.subTest(dt=repr(dt)):
+                key = dataset_split._extract_group_key(
+                    {"trajectory_id": 0, "dt": dt}, group_by_dt=True
+                )
+                self.assertEqual(key.dt, float(dt))
+                self.assertIs(type(key.dt), float)
+
+    def test_bool_dt_rejected(self) -> None:
+        with self.assertRaises(TypeError):
+            dataset_split._extract_group_key(
+                {"trajectory_id": 0, "dt": True}, group_by_dt=True
+            )
+
+    def test_invalid_dt_round_ndigits_type_rejected(self) -> None:
+        ds = make_dataset(4)
+        for ndigits in (1.5, "6", True, 6.0):
+            with self.subTest(ndigits=repr(ndigits)):
+                with self.assertRaises(TypeError):
+                    split_dataset_by_trajectory(
+                        ds, val_fraction=0.5, seed=0, group_by_dt=True,
+                        dt_round_ndigits=ndigits,
+                    )
+
+    def test_numpy_int_dt_round_ndigits_accepted(self) -> None:
+        ds = make_dataset(4)
+        train, val = split_dataset_by_trajectory(
+            ds, val_fraction=0.5, seed=0, group_by_dt=True, dt_round_ndigits=np.int64(6)
+        )
+        self.assertEqual(len(train) + len(val), len(ds))
+
+    def test_rounding_overflow_raises_value_error(self) -> None:
+        ds = FakeTrajectoryDataset(
+            [{"trajectory_id": 0, "dt": 1.797e308}, {"trajectory_id": 1, "dt": 0.1}]
+        )
+        with self.assertRaises(Exception) as ctx:
+            split_dataset_by_trajectory(
+                ds, val_fraction=0.5, seed=0, group_by_dt=True, dt_round_ndigits=-308
+            )
+        self.assertIs(type(ctx.exception), ValueError)
+        self.assertIsInstance(ctx.exception.__cause__, OverflowError)
+
+
 if __name__ == "__main__":
     unittest.main()

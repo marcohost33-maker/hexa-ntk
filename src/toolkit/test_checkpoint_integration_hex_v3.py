@@ -20,6 +20,7 @@ Covers:
 from __future__ import annotations
 
 import os
+import stat
 import tempfile
 import unittest
 from fractions import Fraction
@@ -27,12 +28,14 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import numpy as np
 import torch
 import torch.nn as nn
 
 from checkpoint_integration_hex_v3 import (
     AtomicCheckpointWriter,
     BestCheckpointPolicy,
+    CheckpointDurabilityError,
     CheckpointIntegrationManager,
 )
 from resume_utils_hex_v3 import save_resume_checkpoint
@@ -807,6 +810,336 @@ class TestFailureSignatureIntegration(unittest.TestCase):
             loaded = FailureSignature.from_json(path)
             self.assertEqual(loaded.kind, "NaN_or_Inf_Loss")
             self.assertEqual(loaded.step, 42)
+
+
+
+# ------------------------------------------------------------------
+# Issue #40 follow-ups: policy, counters, non-main rank, durability
+# ------------------------------------------------------------------
+
+
+class _TmpRootCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmpdir.name) / "checkpoints"
+
+    def tearDown(self) -> None:
+        self.tmpdir.cleanup()
+
+    def _make_manager(self, root: Path | None = None, **kwargs: Any) -> CheckpointIntegrationManager:
+        return CheckpointIntegrationManager(root or self.root, **kwargs)
+
+    @staticmethod
+    def _disk_metric(mgr: CheckpointIntegrationManager) -> float:
+        return torch.load(mgr.best_model_path, weights_only=True)["extra"]["metric_value"]
+
+
+class TestMinDeltaContract(unittest.TestCase):
+    def test_non_finite_min_delta_rejected(self) -> None:
+        # NaN passed "< 0" and then blocked every improvement.
+        for value in (float("nan"), float("inf"), -float("inf"), -1e-9):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    BestCheckpointPolicy(min_delta=value)
+
+    def test_non_numeric_min_delta_rejected(self) -> None:
+        for value in ("0.1", None, True):
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(ValueError):
+                    BestCheckpointPolicy(min_delta=value)
+
+    def test_valid_min_delta_values_accepted(self) -> None:
+        for value in (0, 0.0, 1e-4, np.float32(0.5), Fraction(1, 10)):
+            with self.subTest(value=repr(value)):
+                self.assertTrue(BestCheckpointPolicy(min_delta=value).is_improved(0.0, 1.0))
+
+
+class TestStepCounterContract(_TmpRootCase):
+    """int(epoch)/int(global_step) raised raw OverflowError on inf and
+    truncated 1.5 silently (issue #40); now a contract error, before any write."""
+
+    BAD_VALUES = (float("inf"), float("nan"), 1.5, -1, 2.5)
+
+    def _save_calls(self, mgr: CheckpointIntegrationManager, model: nn.Module, **kw: Any):
+        optimizer = build_test_optimizer(model)
+        return {
+            "last": lambda: mgr.save_last_model_checkpoint(model=model, **kw),
+            "resume": lambda: mgr.save_resume(
+                model=model, optimizer=optimizer,
+                include_python_rng=False, include_numpy_rng=False, **kw,
+            ),
+            "best": lambda: mgr.save_best_model_checkpoint(
+                model=model, metric_value=0.5, metric_name="v", **kw
+            ),
+        }
+
+    def test_invalid_epoch_and_step_raise_value_error_without_writing(self) -> None:
+        model = build_test_model()
+        for field in ("epoch", "global_step"):
+            for bad in self.BAD_VALUES:
+                kw = {"epoch": 0, "global_step": 0}
+                kw[field] = bad
+                mgr = self._make_manager()
+                for name, call in self._save_calls(mgr, model, **kw).items():
+                    with self.subTest(field=field, value=bad, save=name):
+                        with self.assertRaises(Exception) as ctx:
+                            call()
+                        self.assertIs(type(ctx.exception), ValueError)
+                        self.assertIn(f"{field} must be a non-negative integer", str(ctx.exception))
+                self.assertEqual(sorted(p.name for p in self.root.iterdir()), [])
+                self.assertIsNone(mgr.best_metric_value)
+
+    def test_bool_and_non_numeric_counters_raise_type_error(self) -> None:
+        model = build_test_model()
+        mgr = self._make_manager()
+        for bad in (True, "3", None):
+            with self.subTest(value=repr(bad)):
+                with self.assertRaises(TypeError):
+                    mgr.save_last_model_checkpoint(model=model, epoch=bad)
+
+    def test_integral_counters_are_normalised_to_int(self) -> None:
+        model = build_test_model()
+        mgr = self._make_manager()
+        for epoch, step in ((2.0, 5.0), (np.int64(2), np.int32(5)), (torch.tensor(2), Fraction(10, 2))):
+            with self.subTest(epoch=repr(epoch)):
+                report = mgr.save_last_model_checkpoint(model=model, epoch=epoch, global_step=step)
+                self.assertEqual((report["epoch"], report["global_step"]), (2, 5))
+                self.assertIs(type(report["epoch"]), int)
+                extra = torch.load(mgr.last_model_path, weights_only=True)["extra"]
+                self.assertEqual((extra["epoch"], extra["global_step"]), (2, 5))
+
+    def test_non_main_rank_validates_counters_too(self) -> None:
+        # All DDP ranks must accept/reject the same inputs.
+        mgr = self._make_manager(is_main_process=False)
+        with self.assertRaises(ValueError):
+            mgr.save_last_model_checkpoint(model=build_test_model(), epoch=1.5)
+
+
+class TestNonMainRankStoresValidatedFloat(_TmpRootCase):
+    def test_non_main_rank_best_value_is_the_validated_float(self) -> None:
+        # P3-2: all 37 checkpoint tests stayed green when non-main ranks
+        # stored the raw metric object; pin the converted value and type.
+        for raw in (torch.tensor(0.5), np.float32(0.5), Fraction(1, 2), 1):
+            with self.subTest(raw=repr(raw)):
+                mgr = self._make_manager(is_main_process=False)
+                mgr.save_best_model_checkpoint(
+                    model=build_test_model(), metric_value=raw, metric_name="v", epoch=0
+                )
+                self.assertIs(type(mgr.best_metric_value), float)
+                self.assertEqual(mgr.best_metric_value, float(raw))
+
+
+def _fail_directory_fsync(real_fsync):
+    def fsync(fd: int) -> None:
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError(5, "simulated directory fsync failure")
+        real_fsync(fd)
+    return fsync
+
+
+@unittest.skipUnless(os.name == "posix", "directory fsync is POSIX-only")
+class TestDurabilityErrorAfterReplace(_TmpRootCase):
+    """P3-3: an exception after os.replace left best.pt newer than memory."""
+
+    def test_writer_reports_replaced_file(self) -> None:
+        target = self.root / "x.pt"
+        with mock.patch("os.fsync", _fail_directory_fsync(os.fsync)):
+            with self.assertRaises(CheckpointDurabilityError) as ctx:
+                AtomicCheckpointWriter.save_torch_payload_atomic(target, {"a": torch.ones(1)})
+        self.assertIsInstance(ctx.exception, OSError)
+        self.assertTrue(ctx.exception.replaced)
+        self.assertEqual(ctx.exception.path, str(target))
+        self.assertIsInstance(ctx.exception.__cause__, OSError)
+        self.assertTrue(torch.equal(torch.load(target, weights_only=True)["a"], torch.ones(1)))
+        self.assertEqual([p.name for p in self.root.iterdir()], ["x.pt"])
+
+    def test_best_value_matches_file_after_directory_fsync_failure(self) -> None:
+        mgr = self._make_manager()
+        model = build_test_model()
+        mgr.save_best_model_checkpoint(model=model, metric_value=1.0, metric_name="v", epoch=0)
+        with mock.patch("os.fsync", _fail_directory_fsync(os.fsync)):
+            with self.assertRaises(CheckpointDurabilityError):
+                mgr.save_best_model_checkpoint(model=model, metric_value=0.5, metric_name="v", epoch=1)
+        self.assertEqual(self._disk_metric(mgr), 0.5)
+        self.assertEqual(mgr.best_metric_value, 0.5)
+        # A caller that catches the error and continues must not overwrite
+        # the better model with a worse one.
+        report = mgr.save_best_model_checkpoint(model=model, metric_value=0.7, metric_name="v", epoch=2)
+        self.assertFalse(report["saved"])
+        self.assertEqual(self._disk_metric(mgr), 0.5)
+
+    def test_failure_before_replace_is_not_a_durability_error(self) -> None:
+        mgr = self._make_manager()
+        with mock.patch("torch.save", side_effect=RuntimeError("disk full")):
+            with self.assertRaises(RuntimeError) as ctx:
+                mgr.save_best_model_checkpoint(
+                    model=build_test_model(), metric_value=0.5, metric_name="v", epoch=0
+                )
+        self.assertNotIsInstance(ctx.exception, CheckpointDurabilityError)
+        self.assertIsNone(mgr.best_metric_value)
+
+
+# ------------------------------------------------------------------
+# Resume restores best metric (issue #40) and EMA state
+# ------------------------------------------------------------------
+
+
+class TestResumeRestoresBestMetric(_TmpRootCase):
+    def _run_with_best(self, mgr: CheckpointIntegrationManager, *metrics: float):
+        model = build_test_model()
+        optimizer = build_test_optimizer(model)
+        for epoch, metric in enumerate(metrics):
+            mgr.save_best_model_checkpoint(model=model, metric_value=metric, metric_name="v", epoch=epoch)
+        mgr.save_resume(model=model, optimizer=optimizer, epoch=len(metrics) - 1,
+                        include_python_rng=False, include_numpy_rng=False)
+        return model
+
+    def _resume(self, mgr: CheckpointIntegrationManager, path: Any = None) -> dict:
+        model = build_test_model()
+        return mgr.load_resume(model=model, optimizer=build_test_optimizer(model), path=path)
+
+    def test_best_value_restored_and_protects_best_file(self) -> None:
+        self._run_with_best(self._make_manager(), 1.0, 0.4, 0.6)
+        fresh = self._make_manager()
+        report = self._resume(fresh)
+        self.assertTrue(report["best_metric_restored"])
+        self.assertEqual(report["best_metric_restore_reason"], "restored")
+        self.assertEqual(fresh.best_metric_value, 0.4)
+        # Before the fix best was None after resume, so 0.6 replaced 0.4.
+        after = fresh.save_best_model_checkpoint(
+            model=build_test_model(), metric_value=0.6, metric_name="v", epoch=3
+        )
+        self.assertFalse(after["saved"])
+        self.assertEqual(self._disk_metric(fresh), 0.4)
+
+    def test_not_restored_when_best_file_missing(self) -> None:
+        mgr = self._make_manager()
+        self._run_with_best(mgr, 0.4)
+        os.remove(mgr.best_model_path)
+        fresh = self._make_manager()
+        report = self._resume(fresh)
+        self.assertFalse(report["best_metric_restored"])
+        self.assertEqual(report["best_metric_restore_reason"], "best_checkpoint_missing")
+        self.assertIsNone(fresh.best_metric_value)
+
+    def test_not_restored_when_best_file_holds_other_value(self) -> None:
+        mgr = self._make_manager()
+        self._run_with_best(mgr, 0.4)
+        other = self._make_manager(Path(self.tmpdir.name) / "other")
+        other.save_best_model_checkpoint(model=build_test_model(), metric_value=0.9, metric_name="v", epoch=0)
+        os.replace(other.best_model_path, mgr.best_model_path)
+        report = self._resume(self._make_manager())
+        self.assertEqual(report["best_metric_restore_reason"], "best_checkpoint_mismatch")
+
+    def test_newer_better_best_from_same_run_is_adopted(self) -> None:
+        # best.pt is written every epoch, resume only periodically: a later
+        # epoch may have improved best.pt after the last resume save.
+        mgr = self._make_manager()
+        model = self._run_with_best(mgr, 1.0, 0.5)
+        mgr.save_best_model_checkpoint(model=model, metric_value=0.3, metric_name="v", epoch=2)
+        fresh = self._make_manager()
+        report = self._resume(fresh)
+        self.assertTrue(report["best_metric_restored"])
+        self.assertEqual(report["best_metric_restore_reason"], "restored_from_newer_best")
+        self.assertEqual(fresh.best_metric_value, 0.3)
+        again = fresh.save_best_model_checkpoint(
+            model=build_test_model(), metric_value=0.4, metric_name="v", epoch=3
+        )
+        self.assertFalse(again["saved"])
+        self.assertEqual(self._disk_metric(fresh), 0.3)
+
+    def test_newer_best_rule_respects_max_mode(self) -> None:
+        policy = BestCheckpointPolicy(mode="max")
+        mgr = self._make_manager(best_policy=policy)
+        model = self._run_with_best(mgr, 0.2, 0.6)
+        mgr.save_best_model_checkpoint(model=model, metric_value=0.8, metric_name="v", epoch=2)
+        fresh = self._make_manager(best_policy=BestCheckpointPolicy(mode="max"))
+        self.assertEqual(self._resume(fresh)["best_metric_restore_reason"], "restored_from_newer_best")
+        self.assertEqual(fresh.best_metric_value, 0.8)
+
+    def test_not_restored_on_policy_mode_mismatch(self) -> None:
+        self._run_with_best(self._make_manager(), 0.4)
+        fresh = self._make_manager(best_policy=BestCheckpointPolicy(mode="max"))
+        report = self._resume(fresh)
+        self.assertEqual(report["best_metric_restore_reason"], "policy_mode_mismatch")
+        self.assertIsNone(fresh.best_metric_value)
+
+    def test_foreign_resume_into_fresh_dir_does_not_block_first_best(self) -> None:
+        self._run_with_best(self._make_manager(), 0.1)
+        foreign = self.root / "resume_last.pt"
+        fresh = self._make_manager(Path(self.tmpdir.name) / "new_run")
+        report = self._resume(fresh, path=foreign)
+        self.assertEqual(report["best_metric_restore_reason"], "best_checkpoint_missing")
+        saved = fresh.save_best_model_checkpoint(
+            model=build_test_model(), metric_value=0.5, metric_name="v", epoch=1
+        )
+        self.assertTrue(saved["saved"])
+
+    def test_legacy_resume_without_record(self) -> None:
+        model = build_test_model()
+        save_resume_checkpoint(self.root / "resume_last.pt", model=model,
+                               optimizer=build_test_optimizer(model), epoch=0,
+                               include_python_rng=False, include_numpy_rng=False)
+        report = self._resume(self._make_manager())
+        self.assertEqual(report["best_metric_restore_reason"], "absent")
+        self.assertFalse(report["best_metric_restored"])
+
+    def test_resume_without_any_best_yet(self) -> None:
+        mgr = self._make_manager()
+        model = build_test_model()
+        mgr.save_resume(model=model, optimizer=build_test_optimizer(model), epoch=0,
+                        include_python_rng=False, include_numpy_rng=False)
+        report = self._resume(self._make_manager())
+        self.assertEqual(report["best_metric_restore_reason"], "no_best_recorded")
+
+    def test_resume_payload_stays_weights_only_loadable(self) -> None:
+        self._run_with_best(self._make_manager(), 0.4)
+        payload = torch.load(self.root / "resume_last.pt", weights_only=True)
+        self.assertEqual(
+            payload["checkpoint_manager_state"],
+            {"best_metric_value": 0.4, "best_policy_mode": "min"},
+        )
+
+
+class TestResumeEmaState(_TmpRootCase):
+    @staticmethod
+    def _ema(model: nn.Module) -> torch.optim.swa_utils.AveragedModel:
+        return torch.optim.swa_utils.AveragedModel(
+            model, multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.9), use_buffers=True
+        )
+
+    def test_ema_state_roundtrip_through_resume(self) -> None:
+        torch.manual_seed(0)
+        model = build_test_model()
+        optimizer = build_test_optimizer(model)
+        ema = self._ema(model)
+        for _ in range(3):
+            run_one_step(model, optimizer)
+            ema.update_parameters(model)
+        mgr = self._make_manager()
+        report = mgr.save_resume(model=model, optimizer=optimizer, epoch=0,
+                                 ema_state_dict=ema.state_dict(),
+                                 include_python_rng=False, include_numpy_rng=False)
+        self.assertTrue(report["has_ema_state"])
+
+        torch.manual_seed(1)
+        model2 = build_test_model()
+        ema2 = self._ema(model2)
+        loaded = mgr.load_resume(model=model2, optimizer=build_test_optimizer(model2), ema_model=ema2)
+        self.assertTrue(loaded["ema_restored"])
+        self.assertEqual(int(ema2.n_averaged.item()), 3)
+        for key, value in ema.state_dict().items():
+            self.assertTrue(torch.equal(value, ema2.state_dict()[key]), msg=key)
+
+    def test_missing_ema_state_is_reported(self) -> None:
+        model = build_test_model()
+        mgr = self._make_manager()
+        mgr.save_resume(model=model, optimizer=build_test_optimizer(model), epoch=0,
+                        include_python_rng=False, include_numpy_rng=False)
+        loaded = mgr.load_resume(model=model, optimizer=build_test_optimizer(model),
+                                 ema_model=self._ema(model))
+        self.assertFalse(loaded["has_ema_state"])
+        self.assertFalse(loaded["ema_restored"])
 
 
 if __name__ == "__main__":
