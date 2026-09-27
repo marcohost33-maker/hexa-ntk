@@ -6,14 +6,29 @@ Leakage-safe dataset splitting for HexaNTK operator learning.
 Key design decisions:
 - Non-mutating: SampleSubsetDataset wraps without modifying base dataset
 - Group-based: splits by trajectory_id, not individual samples
-- Optional stricter grouping by (trajectory_id, dt)
+- Optional finer grouping by (trajectory_id, dt)
 - Optional dt rounding for floating-point normalization
 - Optional deterministic override for paper-reproducible splits
 - Attribute passthrough for grid, config, etc.
 
-Prevents data leakage by ensuring:
-- No trajectory appears in both train and val splits
-- No temporal correlation across the split boundary
+Leakage guarantee (the unit of the split is the group key):
+- Default (group_by_dt=False): no trajectory_id appears in both train and
+  val, so no temporal correlation crosses the split boundary.
+- group_by_dt=True: no (trajectory_id, dt) group appears in both splits.
+  Distinct step sizes of one trajectory are deliberately independent groups
+  and may land on different sides (e.g. train on dt=0.1, validate on
+  dt=0.05); summarize_group_split()["overlap_trajectory_ids"] lists them.
+  dt keys of one trajectory that differ only below float32 resolution
+  (0.1 as float vs. float32 tensor) are not distinct step sizes but one
+  step size in two precisions; they raise ValueError instead of silently
+  splitting the trajectory (issue #42). Set dt_round_ndigits to merge them.
+
+Input contract (fail-closed, ValueError/TypeError instead of silent keys):
+- trajectory_id: an exact integer (int, integral float/Decimal/Fraction,
+  single-element tensor or numpy array/scalar) or a canonical decimal
+  string ("12", "-3"). bool, bytes and non-canonical strings ("012",
+  "+12", " 12") are rejected: they collide with other ids.
+- dt (only read under group_by_dt): a finite real scalar, not bool.
 """
 from __future__ import annotations
 
@@ -27,11 +42,11 @@ __all__ = [
 import math
 import numbers
 import random
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-import torch
 from torch.utils.data import Dataset
 
 
@@ -113,6 +128,44 @@ class SampleSubsetDataset(Dataset):
 # Internal helpers
 # ------------------------------------------------------------------
 
+# Two dt keys of one trajectory closer than this (relative) are the same step
+# size in different precisions. float32 rounds with relative error <= 2**-24;
+# 2**-20 leaves room for a few float32 ulps of arithmetic noise and is still
+# far below any deliberate step-size ratio (issue #42).
+_DT_SAME_STEP_RTOL = 2.0**-20
+
+# Canonical decimal integer: no sign "+", no leading zeros, no "-0", no
+# whitespace, ASCII digits only (int() also accepts "٣" and "1_2").
+_CANONICAL_INT_STR = re.compile(r"0|-?[1-9][0-9]*")
+
+
+def _unwrap_scalar(value: Any, *, name: str) -> Any:
+    """Return the Python scalar of a single-element tensor/numpy value.
+
+    torch.Tensor, numpy.ndarray and numpy scalars all expose ``shape`` and
+    ``item()``; numpy values are not ``numbers.Real`` subclasses in general
+    (a 0-d array is not), so without unwrapping they bypass exactness checks
+    (#40 P3-1: np.array(1.5) was truncated to 1).
+    """
+    item = getattr(value, "item", None)
+    shape = getattr(value, "shape", None)
+    if callable(item) and shape is not None:
+        if math.prod(shape) != 1:
+            raise ValueError(f"Sample '{name}' tensor must be scalar-like")
+        return item()
+    return value
+
+
+def _validate_dt_round_ndigits(dt_round_ndigits: Optional[int]) -> None:
+    if dt_round_ndigits is None:
+        return
+    if isinstance(dt_round_ndigits, bool) or not isinstance(
+        dt_round_ndigits, numbers.Integral
+    ):
+        raise TypeError(
+            f"dt_round_ndigits must be None or an int, got {dt_round_ndigits!r}"
+        )
+
 
 def _extract_dt_value(sample: Mapping[str, Any]) -> Optional[float]:
     """Return ``sample["dt"]`` as a finite float, None if absent, or raise.
@@ -125,21 +178,16 @@ def _extract_dt_value(sample: Mapping[str, Any]) -> Optional[float]:
     if "dt" not in sample:
         return None
 
-    dt = sample["dt"]
+    dt = _unwrap_scalar(sample["dt"], name="dt")
 
-    if isinstance(dt, (float, int)):
-        # An int beyond binary64 range (10**400) raises OverflowError here;
-        # report it as an invalid value rather than an arithmetic crash.
-        try:
-            value = float(dt)
-        except OverflowError as exc:
-            raise ValueError("Sample 'dt' must fit in a finite float") from exc
-    elif torch.is_tensor(dt):
-        if dt.numel() != 1:
-            raise ValueError("Sample 'dt' tensor must be scalar-like")
-        value = float(dt.item())
-    else:
+    if isinstance(dt, bool) or not isinstance(dt, numbers.Real):
         raise TypeError(f"Unsupported dt type: {type(dt)}")
+    # An int beyond binary64 range (10**400) raises OverflowError here;
+    # report it as an invalid value rather than an arithmetic crash.
+    try:
+        value = float(dt)
+    except OverflowError as exc:
+        raise ValueError("Sample 'dt' must fit in a finite float") from exc
 
     if not math.isfinite(value):
         raise ValueError(f"Sample 'dt' must be finite, got {value!r}")
@@ -154,7 +202,14 @@ def _normalize_dt_value(
         return None
     if dt_round_ndigits is None:
         return float(dt)
-    return round(float(dt), dt_round_ndigits)
+    try:
+        return round(float(dt), dt_round_ndigits)
+    except OverflowError as exc:
+        # round(1.797e308, -308) rounds past binary64 max.
+        raise ValueError(
+            f"Sample 'dt' {dt!r} cannot be rounded to {dt_round_ndigits} digits "
+            "within the finite float range"
+        ) from exc
 
 
 def _extract_trajectory_id(value: Any) -> int:
@@ -163,13 +218,17 @@ def _extract_trajectory_id(value: Any) -> int:
     int() alone raised OverflowError for inf and silently truncated
     non-integral reals (1.5 and 1.7 both became group 1, merging two
     trajectories). Exact int-convertible values keep their former key.
+
+    bool, bytes and non-canonical strings are rejected (#40 P3-5): True is
+    not an id, and int() maps "012", "+12", " 12" and b"12" all to 12.
     """
-    if torch.is_tensor(value):
-        if value.numel() != 1:
-            raise ValueError("Sample 'trajectory_id' tensor must be scalar-like")
-        value = value.item()
+    value = _unwrap_scalar(value, name="trajectory_id")
 
     message = f"Sample 'trajectory_id' must be a finite integer, got {value!r}"
+    if isinstance(value, (bool, bytes, bytearray)):
+        raise ValueError(message)
+    if isinstance(value, str) and not _CANONICAL_INT_STR.fullmatch(value):
+        raise ValueError(message)
     try:
         trajectory_id = int(value)
     except (OverflowError, ValueError) as exc:
@@ -210,6 +269,7 @@ def _build_group_to_indices(
             "Dataset must expose a 'samples' attribute for grouped splitting"
         )
 
+    _validate_dt_round_ndigits(dt_round_ndigits)
     group_to_indices: Dict[TrajectoryGroupKey, List[int]] = {}
 
     for idx, sample in enumerate(samples):
@@ -226,7 +286,36 @@ def _build_group_to_indices(
     if len(group_to_indices) == 0:
         raise ValueError("No groups found in dataset; cannot perform grouped split")
 
+    if group_by_dt:
+        _reject_precision_split_dt_keys(group_to_indices.keys())
+
     return group_to_indices
+
+
+def _reject_precision_split_dt_keys(keys: Any) -> None:
+    """Fail closed when one trajectory carries one step size twice (#42).
+
+    0.1 (float) and tensor(0.1) (float32 -> 0.10000000149...) are different
+    keys; the trajectory then split into two groups and landed in train and
+    val in 41/50 seeds. Deliberately different step sizes (0.1 vs 0.2) stay
+    independent groups.
+    """
+    dts_by_trajectory: Dict[int, List[float]] = {}
+    for key in keys:
+        if key.dt is not None:
+            dts_by_trajectory.setdefault(key.trajectory_id, []).append(key.dt)
+
+    for trajectory_id, dts in dts_by_trajectory.items():
+        dts.sort()
+        for lower, upper in zip(dts, dts[1:]):
+            if math.isclose(lower, upper, rel_tol=_DT_SAME_STEP_RTOL, abs_tol=0.0):
+                raise ValueError(
+                    f"trajectory_id {trajectory_id} has dt keys {lower!r} and "
+                    f"{upper!r} that differ only below float32 resolution, i.e. "
+                    "one step size in two precisions; as separate groups the "
+                    "trajectory could land in both train and val. Set "
+                    "dt_round_ndigits (e.g. 6) to normalise dt before grouping."
+                )
 
 
 # ------------------------------------------------------------------
@@ -256,9 +345,11 @@ def split_dataset_by_trajectory(
     seed :
         Reproducible shuffle seed
     group_by_dt :
-        If True, groups are (trajectory_id, dt)
+        If True, groups are (trajectory_id, dt): distinct step sizes of one
+        trajectory may land in different splits (see module docstring);
+        same-step keys that differ only by precision raise ValueError.
     dt_round_ndigits :
-        Optional rounding for dt normalization
+        Optional rounding for dt normalization (None or int)
     min_val_groups :
         Minimum number of validation groups
     val_group_keys_override :

@@ -18,6 +18,11 @@ Best practices applied:
 - GradScaler.unscale_ BEFORE clip_grad_norm_ (PyTorch AMP requirement)
 - torch.isfinite check on loss BEFORE backward (skip update on NaN)
 - NaN/Inf validation metric never becomes the best checkpoint (skip + record)
+- Empty validation never becomes the best checkpoint (no measurement != 0.0)
+- Best checkpoint is evaluated every epoch; last/resume every
+  save_every_n_epochs AND after the final epoch
+- Resume restores the EMA average and the best-metric state (full state)
+- val_nrmse is the pooled relative L2 error sqrt(sum|e|^2 / sum|y|^2)
 - set_to_none=True in zero_grad for memory efficiency
 - Moving median for spike detection (robust vs regime changes)
 - Replay capsule includes model state_dict (not just batch)
@@ -54,6 +59,7 @@ from checkpoint_integration_hex_v3 import (
     BestCheckpointPolicy,
     CheckpointIntegrationManager,
 )
+from ema_hex_v3 import create_ema_model
 from failure_signature_hex_v3 import FailureSignature
 from operator_adapter_hex_v3 import OperatorAdapterV3
 
@@ -94,10 +100,16 @@ class TrainingAnomalyDetector:
         spike_multiplier: float = 3.0,
         window_size: int = 50,
     ) -> None:
-        if spike_multiplier <= 1.0:
-            raise ValueError("spike_multiplier must be > 1.0")
+        # "nan <= 1.0" is False, so NaN used to pass and disable detection.
+        if not (math.isfinite(spike_multiplier) and spike_multiplier > 1.0):
+            raise ValueError("spike_multiplier must be a finite number > 1.0")
+        if isinstance(window_size, bool) or not isinstance(window_size, int) or window_size < 1:
+            raise ValueError("window_size must be an int >= 1")
         self.spike_multiplier = spike_multiplier
         self.window_size = window_size
+        # At least one value before a median exists: window_size=1 used to
+        # call statistics.median([]) on the first loss (StatisticsError).
+        self.min_history = max(1, window_size // 2)
         self.loss_history: collections.deque = collections.deque(maxlen=window_size)
 
     def check_loss(self, loss_val: float) -> Tuple[bool, str]:
@@ -109,7 +121,7 @@ class TrainingAnomalyDetector:
         if not torch.isfinite(torch.tensor(loss_val)):
             return True, "NaN_or_Inf_Loss"
 
-        if len(self.loss_history) >= self.window_size // 2:
+        if len(self.loss_history) >= self.min_history:
             median_loss = statistics.median(self.loss_history)
             if median_loss > 0 and loss_val > median_loss * self.spike_multiplier:
                 return (
@@ -215,6 +227,39 @@ class RunnerConfig:
     resume_from: Optional[str] = None
     resume_trusted: bool = False
 
+    def __post_init__(self) -> None:
+        """Reject values that would only fail (or silently misbehave) later.
+
+        save_every_n_epochs=0 raised ZeroDivisionError after the first
+        epoch; ema_decay > 1 diverges; NaN clip norms disable clipping.
+        """
+
+        def _int_at_least(name: str, minimum: int) -> None:
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                raise ValueError(f"{name} must be an int >= {minimum}, got {value!r}")
+
+        _int_at_least("num_epochs", 0)
+        _int_at_least("log_every_n_steps", 0)
+        _int_at_least("save_every_n_epochs", 1)
+        _int_at_least("warmup_steps", 0)
+        _int_at_least("spike_window_size", 1)
+        if math.isnan(self.grad_clip_max_norm) or self.grad_clip_max_norm <= 0:
+            raise ValueError(
+                f"grad_clip_max_norm must be > 0 (inf disables clipping), "
+                f"got {self.grad_clip_max_norm!r}"
+            )
+        if not (0.0 < self.warmup_start_factor <= 1.0):
+            raise ValueError(
+                f"warmup_start_factor must be in (0, 1], got {self.warmup_start_factor!r}"
+            )
+        if not (math.isfinite(self.ema_decay) and 0.0 <= self.ema_decay <= 1.0):
+            raise ValueError(f"ema_decay must be in [0, 1], got {self.ema_decay!r}")
+        if self.amp_dtype not in ("float16", "bfloat16"):
+            raise ValueError(
+                f"amp_dtype must be 'float16' or 'bfloat16', got {self.amp_dtype!r}"
+            )
+
 
 # ------------------------------------------------------------------
 # Training runner
@@ -279,17 +324,11 @@ class HexTrainingRunner:
         # EMA
         self.ema_model: Optional[torch.optim.swa_utils.AveragedModel] = None
         if config.use_ema:
-            try:
-                multi_avg_fn = torch.optim.swa_utils.get_ema_multi_avg_fn(
-                    config.ema_decay
-                )
-                self.ema_model = torch.optim.swa_utils.AveragedModel(
-                    model, multi_avg_fn=multi_avg_fn, use_buffers=True
-                )
-            except AttributeError:
-                logger.warning(
-                    "get_ema_multi_avg_fn not available. EMA disabled."
-                )
+            # One EMA construction path for the toolkit (validation + the
+            # scalar fallback for PyTorch < 2.0 live in ema_hex_v3).
+            self.ema_model = create_ema_model(
+                model, decay=config.ema_decay, use_buffers=True
+            )
 
         # AMP
         self.grad_scaler: Optional[torch.amp.GradScaler] = None
@@ -336,7 +375,14 @@ class HexTrainingRunner:
             map_location=self.device,
             trusted=self.config.resume_trusted,
             path=resume_path,
+            ema_model=self.ema_model,
         )
+        if self.ema_model is not None and not report.get("ema_restored"):
+            logger.warning(
+                "Resume checkpoint %s carries no EMA state; the EMA average "
+                "restarts from the resumed weights.",
+                resume_path,
+            )
         self.start_epoch = report["epoch"] + 1
         if report.get("global_step") is not None:
             self.global_step = report["global_step"]
@@ -532,11 +578,14 @@ class HexTrainingRunner:
         if self.scheduler is not None:
             self.scheduler.step()
 
-        mean_loss = sum(epoch_losses) / max(len(epoch_losses), 1)
+        # No healthy step means no measurement: NaN, not a perfect 0.0.
+        mean_loss = (
+            sum(epoch_losses) / len(epoch_losses) if epoch_losses else float("nan")
+        )
         mean_grad_norm = (
-            sum(epoch_grad_norms) / max(len(epoch_grad_norms), 1)
+            sum(epoch_grad_norms) / len(epoch_grad_norms)
             if epoch_grad_norms
-            else 0.0
+            else float("nan")
         )
 
         return {
@@ -575,6 +624,10 @@ class HexTrainingRunner:
         eval_module.eval()
 
         val_losses: List[float] = []
+        # Pooled relative L2 error over the whole validation set, accumulated
+        # in float64: nRMSE = sqrt(sum ||pred - y||^2 / sum ||y||^2).
+        sq_err_sum = 0.0
+        sq_ref_sum = 0.0
 
         for batch in self.val_loader:
             x = batch["input"].to(self.device)
@@ -611,16 +664,33 @@ class HexTrainingRunner:
 
             loss = self.loss_fn(pred, target)
             val_losses.append(float(loss.item()))
+            ref = target.detach().to(torch.float64)
+            err = pred.detach().to(torch.float64) - ref
+            sq_err_sum += float(err.pow(2).sum().item())
+            sq_ref_sum += float(ref.pow(2).sum().item())
 
         # Restore training mode
         self.model.train()
 
-        mean_val_loss = sum(val_losses) / max(len(val_losses), 1)
+        if val_losses:
+            mean_val_loss = sum(val_losses) / len(val_losses)
+            # sq_ref_sum == 0 (all-zero targets) gives inf/nan: the metric is
+            # undefined there and the best-checkpoint skip path records it.
+            val_nrmse = (
+                math.sqrt(sq_err_sum / sq_ref_sum)
+                if sq_ref_sum > 0
+                else (0.0 if sq_err_sum == 0 else float("inf"))
+            )
+        else:
+            # No validation batch: no measurement. 0.0 used to become the
+            # best value and blocked every later real improvement.
+            mean_val_loss = float("nan")
+            val_nrmse = float("nan")
 
         return {
             "epoch": epoch,
             "val_loss": mean_val_loss,
-            "val_nrmse": mean_val_loss,  # Placeholder; real nRMSE needs benchmark_hex_v3
+            "val_nrmse": val_nrmse,
             "n_batches": len(val_losses),
             "used_ema": self.ema_model is not None,
         }
@@ -679,14 +749,20 @@ class HexTrainingRunner:
                 val_report["used_ema"],
             )
 
-            # Checkpointing
-            if epoch % self.config.save_every_n_epochs == 0:
-                ckpt_reports = self._save_checkpoints(
-                    epoch=epoch,
-                    val_report=val_report,
-                    train_report=train_report,
-                )
-                history["checkpoints"].append(ckpt_reports)
+            # Checkpointing: best every epoch (validation already ran, a
+            # better model at a non-save epoch was silently lost before);
+            # last/resume periodically and always after the final epoch, so
+            # the end state of the run is never dropped.
+            is_final_epoch = epoch == self.config.num_epochs - 1
+            ckpt_reports = self._save_checkpoints(
+                epoch=epoch,
+                val_report=val_report,
+                train_report=train_report,
+                save_state=(
+                    epoch % self.config.save_every_n_epochs == 0 or is_final_epoch
+                ),
+            )
+            history["checkpoints"].append(ckpt_reports)
 
         # Final summary
         return {
@@ -701,18 +777,24 @@ class HexTrainingRunner:
     # ------------------------------------------------------------------
 
     def _skip_non_finite_best_metric(
-        self, epoch: int, metric_value: Any
+        self,
+        epoch: int,
+        metric_value: Any,
+        *,
+        kind: str = "NaN_or_Inf_Metric",
+        reason: str = "non_finite_metric",
     ) -> Dict[str, Any]:
-        """Record a NaN/inf best metric instead of saving a best checkpoint."""
+        """Record a NaN/inf (or absent) metric instead of saving a best checkpoint."""
         metric_name = self.config.best_metric_name
         logger.error(
-            "Non-finite %s=%s at epoch %d; best checkpoint not updated",
+            "%s: %s=%s at epoch %d; best checkpoint not updated",
+            kind,
             metric_name,
             metric_value,
             epoch,
         )
         signature_path = FailureSignature(
-            kind="NaN_or_Inf_Metric",
+            kind=kind,
             step=self.global_step,
             locus="save_checkpoints_best_metric",
             observable=f"{metric_name}={metric_value}",
@@ -720,7 +802,7 @@ class HexTrainingRunner:
         ).register(self.output_dir / "failures")
         return {
             "saved": False,
-            "reason": "non_finite_metric",
+            "reason": reason,
             "checkpoint_semantics": "best_model",
             "metric_name": metric_name,
             "metric_value": metric_value,
@@ -734,8 +816,14 @@ class HexTrainingRunner:
         epoch: int,
         val_report: Dict[str, Any],
         train_report: Dict[str, Any],
+        *,
+        save_state: bool = True,
     ) -> Dict[str, Any]:
-        """Save best, last, and resume checkpoints."""
+        """Save the best checkpoint if improved; last + resume if save_state.
+
+        The report always has the keys "best", "last" and "resume"; skipped
+        periodic saves carry reason "not_scheduled".
+        """
         reports: Dict[str, Any] = {}
 
         metric_value = val_report.get(
@@ -753,7 +841,14 @@ class HexTrainingRunner:
         # Best model. A NaN/inf metric is never promoted: the manager would
         # reject it with ValueError; the runner records it and keeps training
         # (same policy as a NaN train loss: skip, record, continue).
-        if _is_non_finite_metric(metric_value):
+        if val_report.get("n_batches", 1) == 0:
+            best_report = self._skip_non_finite_best_metric(
+                epoch,
+                metric_value,
+                kind="Empty_Validation",
+                reason="empty_validation",
+            )
+        elif _is_non_finite_metric(metric_value):
             best_report = self._skip_non_finite_best_metric(epoch, metric_value)
         else:
             best_report = self.ckpt_mgr.save_best_model_checkpoint(
@@ -769,6 +864,12 @@ class HexTrainingRunner:
                 },
             )
         reports["best"] = best_report
+
+        if not save_state:
+            not_scheduled = {"saved": False, "reason": "not_scheduled"}
+            reports["last"] = {**not_scheduled, "checkpoint_semantics": "last_model_only"}
+            reports["resume"] = {**not_scheduled, "checkpoint_semantics": "resume_full"}
+            return reports
 
         # Last model
         last_report = self.ckpt_mgr.save_last_model_checkpoint(
@@ -789,6 +890,9 @@ class HexTrainingRunner:
             include_python_rng=True,
             include_numpy_rng=True,
             include_torch_rng=True,
+            ema_state_dict=(
+                self.ema_model.state_dict() if self.ema_model is not None else None
+            ),
             extra={
                 "train_loss": train_report["mean_loss"],
                 "val_loss": val_report["val_loss"],

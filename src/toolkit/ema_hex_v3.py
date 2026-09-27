@@ -27,12 +27,29 @@ __all__ = [
 ]
 
 import logging
+import math
+import numbers
 from typing import Any, Dict, Optional, Union
 
 import torch
 import torch.nn as nn
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_decay(decay: Any) -> float:
+    """Return ``decay`` as a float in [0, 1], or raise ValueError.
+
+    decay > 1 makes the average diverge (ema = d*ema + (1-d)*p with a
+    negative weight on the model), decay < 0 oscillates, NaN poisons every
+    parameter on the first real update.
+    """
+    if isinstance(decay, bool) or not isinstance(decay, numbers.Real):
+        raise ValueError(f"EMA decay must be a real number in [0, 1], got {decay!r}")
+    value = float(decay)
+    if not (math.isfinite(value) and 0.0 <= value <= 1.0):
+        raise ValueError(f"EMA decay must be a real number in [0, 1], got {decay!r}")
+    return value
 
 
 def create_ema_model(
@@ -70,7 +87,9 @@ def create_ema_model(
       then load the state_dict.
     - For BatchNorm, either set use_buffers=True (recommended) or call
       torch.optim.swa_utils.update_bn(loader, ema_model) after training.
+    - decay outside [0, 1] or non-finite raises ValueError.
     """
+    decay = _validate_decay(decay)
     try:
         # PyTorch >= 2.0: use fused multi-tensor EMA (faster)
         multi_avg_fn = torch.optim.swa_utils.get_ema_multi_avg_fn(decay)
@@ -148,10 +167,14 @@ def load_ema_state(
     Dict with load results.
     """
     if "ema_full_state_dict" in ema_state:
-        ema_model.load_state_dict(ema_state["ema_full_state_dict"])
+        incompat = ema_model.load_state_dict(
+            ema_state["ema_full_state_dict"], strict=strict
+        )
         return {
             "loaded_via": "ema_full_state_dict",
             "n_averaged": int(ema_model.n_averaged.item()),
+            "missing_keys": list(incompat.missing_keys),
+            "unexpected_keys": list(incompat.unexpected_keys),
         }
 
     if "ema_model_state_dict" in ema_state:
