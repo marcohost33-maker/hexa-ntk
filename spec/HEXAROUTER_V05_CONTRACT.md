@@ -33,7 +33,7 @@ A provider is eligible only if all applicable gates pass:
 - input and output schema identifiers are compatible;
 - requested numeric dtype and unit system are supported;
 - provider identity links to the registered capability;
-- an explicit task-scoped PolicyDecision allows the provider and its input digest matches the exact task/provider identity pair;
+- an explicit task-scoped PolicyDecision allows the provider and its input digest matches the complete canonical TaskContract plus provider identity;
 - runtime refers to the current provider code SHA, is healthy, fresh enough and resource-feasible;
 - assurance refers to the provider's current code SHA, task class and regime, carries a content digest, and reaches the task threshold;
 - an independent validator is present when required;
@@ -59,11 +59,18 @@ Eligible providers are ranked lexicographically by:
 
 The policy identifier is `hexrouter.lexicographic.v1`.
 
-The planner also computes a deterministic SHA-256 fingerprint of the complete static
-capability/provider registry. Every decision records this registry fingerprint plus an
-eligible-candidate snapshot containing policy revision/bundle/decision identity,
-validator/attestation/evidence identity, reliability method/evidence, runtime age,
-latency and queue depth.
+The planner computes two distinct deterministic SHA-256 fingerprints:
+
+1. a static registry fingerprint over the complete capability/provider registry;
+2. an evaluation fingerprint over every registered provider's dynamic runtime,
+   assurance, reliability and policy input, including missing entries.
+
+Every decision records both fingerprints plus an eligible-candidate snapshot containing
+policy revision/bundle/decision identity, validator/attestation/evidence identity,
+reliability method/evidence, runtime age, latency and queue depth. Rejected providers
+are therefore also bound through the evaluation fingerprint: changing a rejected
+candidate's evidence can leave the route unchanged while still changing the auditable
+decision identity.
 
 The prototype hash profile is explicitly named `python-json-sortkeys-v1`. It is
 deterministic for this Python reference implementation, but it is NOT claimed to be
@@ -209,7 +216,8 @@ The v0.5 core is acceptable only when tests demonstrate at least:
 - runtime freshness enforcement;
 - task-class/regime-bound assurance and reliability evidence;
 - recomputed 95% Wilson reliability lower bound from independent Bernoulli cases;
-- policy revision/bundle/input binding and fail-closed input mismatch;
+- policy revision/bundle/full-TaskContract input binding and fail-closed mismatch;
+- decision identity changes when any evaluated registered provider evidence changes, including rejected candidates;
 - strict lowercase-ASCII identity tokens with confusable/Unicode rejection;
 - resource-profile feasibility;
 - atomic/idempotent decision+CloudEvents-outbox recording;
