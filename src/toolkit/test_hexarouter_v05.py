@@ -691,6 +691,16 @@ class StoreTests(unittest.TestCase):
                     )
                 )
 
+    def test_storage_profile_is_durable_and_version_aware(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with SQLiteDecisionStore(Path(tmp) / "router.sqlite3") as store:
+                profile = store.storage_profile()
+                self.assertIn(profile["journal_mode"], {"wal", "delete"})
+                if profile["journal_mode"] == "wal":
+                    self.assertEqual(profile["synchronous"], "FULL")
+                else:
+                    self.assertEqual(profile["synchronous"], "EXTRA")
+
     def test_publish_result_rejects_non_bool_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with SQLiteDecisionStore(Path(tmp) / "router.sqlite3") as store:
