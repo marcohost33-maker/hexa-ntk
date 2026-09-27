@@ -11,12 +11,16 @@ import hashlib
 import json
 import math
 import numbers
+import re
 import sqlite3
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Sequence
+
+
+_IDENTIFIER_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
 VALIDITY_RANK = {
@@ -29,6 +33,15 @@ VALIDITY_RANK = {
 def _require_nonempty(name: str, value: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string")
+    return value
+
+
+def _require_identifier(name: str, value: str) -> str:
+    _require_nonempty(name, value)
+    if _IDENTIFIER_RE.fullmatch(value) is None:
+        raise ValueError(
+            f"{name} must match [a-z0-9][a-z0-9._-]{{0,63}}"
+        )
     return value
 
 
@@ -93,8 +106,8 @@ def _wilson_lower_bound_95(successes: int, trials: int) -> float:
 def policy_input_digest(task_id: str, provider_id: str) -> str:
     """Bind an authorization decision to the exact task/provider identity pair."""
 
-    _require_nonempty("task_id", task_id)
-    _require_nonempty("provider_id", provider_id)
+    _require_identifier("task_id", task_id)
+    _require_identifier("provider_id", provider_id)
     payload = {"provider_id": provider_id, "task_id": task_id}
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
@@ -109,7 +122,7 @@ class CapabilitySpec:
     unit_systems: frozenset[str]
 
     def __post_init__(self) -> None:
-        _require_nonempty("capability_id", self.capability_id)
+        _require_identifier("capability_id", self.capability_id)
         if not self.functions:
             raise ValueError("functions must not be empty")
         if not self.input_schemas or not self.output_schemas:
@@ -130,7 +143,7 @@ class ExecutionProfile:
     vram_gb: float = 0.0
 
     def __post_init__(self) -> None:
-        _require_nonempty("profile_id", self.profile_id)
+        _require_identifier("profile_id", self.profile_id)
         _require_nonempty("dtype", self.dtype)
         if isinstance(self.cpu_cores, bool) or not isinstance(self.cpu_cores, int) or self.cpu_cores < 1:
             raise ValueError("cpu_cores must be an integer >= 1")
@@ -150,8 +163,8 @@ class ProviderSpec:
     execution_profiles: tuple[ExecutionProfile, ...]
 
     def __post_init__(self) -> None:
-        _require_nonempty("provider_id", self.provider_id)
-        _require_nonempty("capability_id", self.capability_id)
+        _require_identifier("provider_id", self.provider_id)
+        _require_identifier("capability_id", self.capability_id)
         _require_nonempty("implementation_version", self.implementation_version)
         _require_nonempty("code_sha", self.code_sha)
         if not self.execution_profiles:
@@ -174,7 +187,7 @@ class RuntimeState:
     queue_depth: int
 
     def __post_init__(self) -> None:
-        _require_nonempty("provider_id", self.provider_id)
+        _require_identifier("provider_id", self.provider_id)
         _require_nonempty("code_sha", self.code_sha)
         _require_bool("healthy", self.healthy)
         _require_int_at_least("available_cpu_cores", self.available_cpu_cores, 0)
@@ -210,12 +223,12 @@ class AssuranceAttestation:
     evidence_sha256: str
 
     def __post_init__(self) -> None:
-        _require_nonempty("provider_id", self.provider_id)
+        _require_identifier("provider_id", self.provider_id)
         _require_nonempty("code_sha", self.code_sha)
-        _require_nonempty("task_class", self.task_class)
-        _require_nonempty("regime", self.regime)
-        _require_nonempty("validator_id", self.validator_id)
-        _require_nonempty("attestation_id", self.attestation_id)
+        _require_identifier("task_class", self.task_class)
+        _require_identifier("regime", self.regime)
+        _require_identifier("validator_id", self.validator_id)
+        _require_identifier("attestation_id", self.attestation_id)
         _require_sha256("evidence_sha256", self.evidence_sha256)
         _require_bool("independent_validator", self.independent_validator)
         if self.numerical_validity not in VALIDITY_RANK:
@@ -236,10 +249,10 @@ class ReliabilityEstimate:
     lower_bound: float = field(init=False)
 
     def __post_init__(self) -> None:
-        _require_nonempty("provider_id", self.provider_id)
+        _require_identifier("provider_id", self.provider_id)
         _require_nonempty("code_sha", self.code_sha)
-        _require_nonempty("task_class", self.task_class)
-        _require_nonempty("regime", self.regime)
+        _require_identifier("task_class", self.task_class)
+        _require_identifier("regime", self.regime)
         _require_sha256("evidence_sha256", self.evidence_sha256)
         if self.method != "wilson-95-two-sided":
             raise ValueError("unsupported reliability method")
@@ -276,11 +289,11 @@ class PolicyDecision:
     input_sha256: str
 
     def __post_init__(self) -> None:
-        _require_nonempty("provider_id", self.provider_id)
-        _require_nonempty("task_id", self.task_id)
-        _require_nonempty("policy_version", self.policy_version)
-        _require_nonempty("policy_revision", self.policy_revision)
-        _require_nonempty("decision_id", self.decision_id)
+        _require_identifier("provider_id", self.provider_id)
+        _require_identifier("task_id", self.task_id)
+        _require_identifier("policy_version", self.policy_version)
+        _require_identifier("policy_revision", self.policy_revision)
+        _require_identifier("decision_id", self.decision_id)
         _require_sha256("policy_bundle_sha256", self.policy_bundle_sha256)
         _require_sha256("input_sha256", self.input_sha256)
         _require_bool("allowed", self.allowed)
@@ -308,9 +321,9 @@ class TaskContract:
     max_runtime_age_ms: float | None = None
 
     def __post_init__(self) -> None:
-        _require_nonempty("task_id", self.task_id)
-        _require_nonempty("task_class", self.task_class)
-        _require_nonempty("regime", self.regime)
+        _require_identifier("task_id", self.task_id)
+        _require_identifier("task_class", self.task_class)
+        _require_identifier("regime", self.regime)
         if not self.required_functions:
             raise ValueError("required_functions must not be empty")
         _require_nonempty("input_schema", self.input_schema)
