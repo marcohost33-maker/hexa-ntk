@@ -857,11 +857,25 @@ def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+def _sqlite_wal_reset_fix_known(version: tuple[int, int, int]) -> bool:
+    """Return True only for SQLite release lines documented with the WAL-reset fix."""
+
+    major, minor, patch = version
+    if (major, minor, patch) >= (3, 51, 3):
+        return True
+    if (major, minor) == (3, 50) and patch >= 7:
+        return True
+    if (major, minor) == (3, 44) and patch >= 6:
+        return True
+    return False
+
+
 class SQLiteDecisionStore:
     """Local durable decision/inbox/outbox store.
 
-    Uses explicit BEGIN IMMEDIATE transactions. WAL is enabled for file-backed
-    databases; synchronous=FULL favors durability over write throughput.
+    Uses explicit BEGIN IMMEDIATE transactions. File-backed databases use
+    WAL+FULL only on SQLite release lines documented with the 2026 WAL-reset
+    fix; otherwise the store falls back to rollback journal DELETE+EXTRA.
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -869,11 +883,30 @@ class SQLiteDecisionStore:
         self._conn = sqlite3.connect(self.path, isolation_level=None, timeout=5.0)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.execute("PRAGMA synchronous=FULL")
+        self.sqlite_version = sqlite3.sqlite_version
+        self.journal_mode = "memory"
+        self.synchronous = "FULL"
         if self.path != ":memory:":
-            mode = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
-            if str(mode).lower() != "wal":
-                raise RuntimeError(f"failed to enable WAL mode, got {mode!r}")
+            if _sqlite_wal_reset_fix_known(sqlite3.sqlite_version_info):
+                mode = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+                if str(mode).lower() != "wal":
+                    raise RuntimeError(f"failed to enable WAL mode, got {mode!r}")
+                self._conn.execute("PRAGMA synchronous=FULL")
+                self.journal_mode = "wal"
+                self.synchronous = "FULL"
+            else:
+                mode = self._conn.execute(
+                    "PRAGMA journal_mode=DELETE"
+                ).fetchone()[0]
+                if str(mode).lower() != "delete":
+                    raise RuntimeError(
+                        f"failed to enable rollback journal mode, got {mode!r}"
+                    )
+                self._conn.execute("PRAGMA synchronous=EXTRA")
+                self.journal_mode = "delete"
+                self.synchronous = "EXTRA"
+        else:
+            self._conn.execute("PRAGMA synchronous=FULL")
         self._conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS decisions (
@@ -921,6 +954,13 @@ class SQLiteDecisionStore:
             raise
         else:
             self._conn.execute("COMMIT")
+
+    def storage_profile(self) -> dict[str, str]:
+        return {
+            "sqlite_version": self.sqlite_version,
+            "journal_mode": self.journal_mode,
+            "synchronous": self.synchronous,
+        }
 
     def close(self) -> None:
         self._conn.close()
