@@ -141,21 +141,22 @@ def policy(
     provider_id: str,
     *,
     allowed: bool = True,
-    task_id: str = "task-1",
+    task_contract: TaskContract | None = None,
     input_sha256: str | None = None,
 ) -> PolicyDecision:
+    bound_task = task() if task_contract is None else task_contract
     return PolicyDecision(
         provider_id=provider_id,
-        task_id=task_id,
+        task_id=bound_task.task_id,
         allowed=allowed,
         policy_version="test-policy.v1",
         policy_revision="rev-1",
         policy_bundle_sha256="a" * 64,
-        decision_id=f"policy-{task_id}-{provider_id}",
+        decision_id=f"policy-{bound_task.task_id}-{provider_id}",
         input_sha256=(
             input_sha256
             if input_sha256 is not None
-            else policy_input_digest(task_id, provider_id)
+            else policy_input_digest(bound_task, provider_id)
         ),
     )
 
@@ -272,12 +273,13 @@ class PlannerTests(unittest.TestCase):
     def test_runtime_freshness_is_hard_gate(self) -> None:
         item = provider("p", code_sha="sha")
         planner = DeterministicPlanner([CAP], [item])
+        contract = task(max_runtime_age_ms=100.0)
         decision = planner.plan(
-            task(max_runtime_age_ms=100.0),
+            contract,
             runtime={"p": runtime("p", "sha", latency=10, age_ms=101.0)},
             assurance={"p": assurance("p", "sha")},
             reliability={"p": reliability("p", "sha", 0.95)},
-            policy={"p": policy("p")},
+            policy={"p": policy("p", task_contract=contract)},
         )
         self.assertEqual(decision.status, "ABSTAIN")
         self.assertIn("RUNTIME_TOO_OLD", dict(decision.rejections)["p"])
@@ -298,12 +300,13 @@ class PlannerTests(unittest.TestCase):
     def test_low_reliability_fails_closed(self) -> None:
         item = provider("p", code_sha="sha")
         planner = DeterministicPlanner([CAP], [item])
+        contract = task(min_reliability_lower_bound=0.85)
         decision = planner.plan(
-            task(min_reliability_lower_bound=0.85),
+            contract,
             runtime={"p": runtime("p", "sha", latency=10)},
             assurance={"p": assurance("p", "sha")},
             reliability={"p": reliability("p", "sha", 0.89)},
-            policy={"p": policy("p")},
+            policy={"p": policy("p", task_contract=contract)},
         )
         self.assertEqual(decision.status, "ABSTAIN")
         self.assertIn("RELIABILITY_TOO_LOW", dict(decision.rejections)["p"])
@@ -311,8 +314,9 @@ class PlannerTests(unittest.TestCase):
     def test_reliability_is_bound_to_task_class_and_regime(self) -> None:
         item = provider("p", code_sha="sha")
         planner = DeterministicPlanner([CAP], [item])
+        contract = task(regime="geometry-ood")
         decision = planner.plan(
-            task(regime="geometry-ood"),
+            contract,
             runtime={"p": runtime("p", "sha", latency=10)},
             assurance={
                 "p": assurance(
@@ -322,7 +326,7 @@ class PlannerTests(unittest.TestCase):
                 )
             },
             reliability={"p": reliability("p", "sha", 0.95, regime="default")},
-            policy={"p": policy("p")},
+            policy={"p": policy("p", task_contract=contract)},
         )
         self.assertEqual(decision.status, "ABSTAIN")
         self.assertIn(
@@ -333,8 +337,9 @@ class PlannerTests(unittest.TestCase):
     def test_independent_sample_floor_is_hard_gate(self) -> None:
         item = provider("p", code_sha="sha")
         planner = DeterministicPlanner([CAP], [item])
+        contract = task(min_independent_samples=2)
         decision = planner.plan(
-            task(min_independent_samples=2),
+            contract,
             runtime={"p": runtime("p", "sha", latency=10)},
             assurance={"p": assurance("p", "sha")},
             reliability={
@@ -345,7 +350,7 @@ class PlannerTests(unittest.TestCase):
                     n_independent=1,
                 )
             },
-            policy={"p": policy("p")},
+            policy={"p": policy("p", task_contract=contract)},
         )
         self.assertEqual(decision.status, "ABSTAIN")
         self.assertIn(
@@ -417,12 +422,13 @@ class PlannerTests(unittest.TestCase):
     def test_resource_profile_is_hard_gate(self) -> None:
         item = provider("gpu", code_sha="sha", gpu=True, vram_gb=16.0)
         planner = DeterministicPlanner([CAP], [item])
+        contract = task(require_gpu=True, min_vram_gb=16.0)
         decision = planner.plan(
-            task(require_gpu=True, min_vram_gb=16.0),
+            contract,
             runtime={"gpu": runtime("gpu", "sha", latency=10, vram=8.0)},
             assurance={"gpu": assurance("gpu", "sha")},
             reliability={"gpu": reliability("gpu", "sha", 0.95)},
-            policy={"gpu": policy("gpu")},
+            policy={"gpu": policy("gpu", task_contract=contract)},
         )
         self.assertEqual(decision.status, "ABSTAIN")
         self.assertIn(
@@ -477,8 +483,9 @@ class PlannerTests(unittest.TestCase):
     def test_assurance_is_bound_to_task_regime(self) -> None:
         item = provider("p", code_sha="sha")
         planner = DeterministicPlanner([CAP], [item])
+        contract = task(regime="geometry-ood")
         decision = planner.plan(
-            task(regime="geometry-ood"),
+            contract,
             runtime={"p": runtime("p", "sha", latency=10)},
             assurance={"p": assurance("p", "sha", regime="default")},
             reliability={
@@ -489,7 +496,7 @@ class PlannerTests(unittest.TestCase):
                     regime="geometry-ood",
                 )
             },
-            policy={"p": policy("p")},
+            policy={"p": policy("p", task_contract=contract)},
         )
         self.assertEqual(decision.status, "ABSTAIN")
         self.assertIn(
@@ -526,7 +533,7 @@ class PlannerTests(unittest.TestCase):
                 policy_revision="rev1",
                 policy_bundle_sha256="not-a-digest",
                 decision_id="decision-1",
-                input_sha256=policy_input_digest("task-1", "p"),
+                input_sha256=policy_input_digest(task(), "p"),
             )
 
 
@@ -818,7 +825,7 @@ class IdentifierContractTests(unittest.TestCase):
                 policy_revision="rev-1",
                 policy_bundle_sha256="a" * 64,
                 decision_id="decision-1",
-                input_sha256=policy_input_digest("task-1", "p"),
+                input_sha256=policy_input_digest(task(), "p"),
             ).__class__(
                 provider_id="р",
                 task_id="task-1",
@@ -827,7 +834,7 @@ class IdentifierContractTests(unittest.TestCase):
                 policy_revision="rev-1",
                 policy_bundle_sha256="a" * 64,
                 decision_id="decision-1",
-                input_sha256=policy_input_digest("task-1", "p"),
+                input_sha256=policy_input_digest(task(), "p"),
             )
 
 
