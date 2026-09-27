@@ -551,6 +551,22 @@ class StoreTests(unittest.TestCase):
                 pending = store.pending_events()
                 self.assertEqual(len(pending), 1)
                 self.assertEqual(pending[0]["event_id"], event_id_1)
+                envelope = __import__("json").loads(pending[0]["payload_json"])
+                self.assertEqual(envelope["specversion"], "1.0")
+                self.assertEqual(envelope["id"], event_id_1)
+                self.assertEqual(
+                    envelope["source"],
+                    "urn:coworker:hexrouter:planner",
+                )
+                self.assertEqual(
+                    envelope["type"],
+                    "org.coworker.hexrouter.route.decision.v2",
+                )
+                self.assertEqual(envelope["subject"], "task-1")
+                self.assertEqual(
+                    envelope["dataschema"],
+                    "urn:coworker:hexrouter:schema:route-decision:v2",
+                )
 
     def test_outbox_publish_result_and_retry_counter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -566,13 +582,114 @@ class StoreTests(unittest.TestCase):
                 store.mark_publish_result(event_id, success=True)
                 self.assertEqual(store.pending_events(), [])
 
-    def test_inbox_claim_is_idempotent_per_consumer(self) -> None:
+    def test_inbox_processing_uses_lease_then_completion(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with SQLiteDecisionStore(Path(tmp) / "router.sqlite3") as store:
-                self.assertTrue(store.claim_inbox("consumer-a", "event-1"))
-                self.assertFalse(store.claim_inbox("consumer-a", "event-1"))
-                self.assertTrue(store.claim_inbox("consumer-b", "event-1"))
-                self.assertEqual(store.counts()["inbox"], 2)
+                self.assertTrue(
+                    store.begin_inbox(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-a",
+                        now_ms=100,
+                        lease_ms=50,
+                    )
+                )
+                self.assertFalse(
+                    store.begin_inbox(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-b",
+                        now_ms=120,
+                        lease_ms=50,
+                    )
+                )
+                self.assertFalse(
+                    store.is_inbox_processed("consumer-a", "event-1")
+                )
+                self.assertTrue(
+                    store.complete_inbox(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-a",
+                    )
+                )
+                self.assertTrue(
+                    store.is_inbox_processed("consumer-a", "event-1")
+                )
+                self.assertFalse(
+                    store.begin_inbox(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-c",
+                        now_ms=200,
+                        lease_ms=50,
+                    )
+                )
+                self.assertEqual(store.counts()["inbox"], 1)
+
+    def test_inbox_expired_lease_can_be_reclaimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with SQLiteDecisionStore(Path(tmp) / "router.sqlite3") as store:
+                self.assertTrue(
+                    store.begin_inbox(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-a",
+                        now_ms=100,
+                        lease_ms=10,
+                    )
+                )
+                self.assertTrue(
+                    store.begin_inbox(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-b",
+                        now_ms=111,
+                        lease_ms=10,
+                    )
+                )
+                with self.assertRaises(ValueError):
+                    store.complete_inbox(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-a",
+                    )
+                self.assertTrue(
+                    store.complete_inbox(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-b",
+                    )
+                )
+
+    def test_inbox_failed_attempt_can_release_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with SQLiteDecisionStore(Path(tmp) / "router.sqlite3") as store:
+                self.assertTrue(
+                    store.begin_inbox(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-a",
+                        now_ms=100,
+                        lease_ms=1000,
+                    )
+                )
+                self.assertTrue(
+                    store.release_inbox_claim(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-a",
+                    )
+                )
+                self.assertTrue(
+                    store.begin_inbox(
+                        "consumer-a",
+                        "event-1",
+                        claim_token="worker-b",
+                        now_ms=101,
+                        lease_ms=1000,
+                    )
+                )
 
     def test_publish_result_rejects_non_bool_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
