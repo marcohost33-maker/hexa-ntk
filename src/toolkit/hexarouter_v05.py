@@ -421,6 +421,7 @@ class PlanDecision:
     policy_version: str
     canonicalization_profile: str
     registry_fingerprint: str
+    evaluation_fingerprint: str
     eligible_count: int
     eligible_snapshot: tuple[CandidateSnapshot, ...]
     rejections: tuple[tuple[str, tuple[str, ...]], ...]
@@ -529,6 +530,12 @@ class DeterministicPlanner:
         reliability: Mapping[str, ReliabilityEstimate],
         policy: Mapping[str, PolicyDecision],
     ) -> PlanDecision:
+        evaluation_fingerprint = self._evaluation_fingerprint(
+            runtime=runtime,
+            assurance=assurance,
+            reliability=reliability,
+            policy=policy,
+        )
         eligible: list[
             tuple[ProviderSpec, ExecutionProfile, RuntimeState, ReliabilityEstimate]
         ] = []
@@ -702,6 +709,7 @@ class DeterministicPlanner:
                 None,
                 rejected,
                 eligible_snapshot,
+                evaluation_fingerprint,
             )
 
         provider, profile, _, _ = min(
@@ -720,7 +728,35 @@ class DeterministicPlanner:
             profile.profile_id,
             rejected,
             eligible_snapshot,
+            evaluation_fingerprint,
         )
+
+    def _evaluation_fingerprint(
+        self,
+        *,
+        runtime: Mapping[str, RuntimeState],
+        assurance: Mapping[str, AssuranceAttestation],
+        reliability: Mapping[str, ReliabilityEstimate],
+        policy: Mapping[str, PolicyDecision],
+    ) -> str:
+        payload = []
+        for provider_id in sorted(self._providers):
+            payload.append(
+                {
+                    "provider_id": provider_id,
+                    "runtime": _runtime_payload(runtime.get(provider_id)),
+                    "assurance": _assurance_payload(
+                        assurance.get(provider_id)
+                    ),
+                    "reliability": _reliability_payload(
+                        reliability.get(provider_id)
+                    ),
+                    "policy": _policy_payload(policy.get(provider_id)),
+                }
+            )
+        return hashlib.sha256(
+            _canonical_json(payload).encode("utf-8")
+        ).hexdigest()
 
     @staticmethod
     def _choose_profile(
@@ -767,6 +803,7 @@ class DeterministicPlanner:
         execution_profile_id: str | None,
         rejections: Sequence[tuple[str, tuple[str, ...]]],
         eligible_snapshot: tuple[CandidateSnapshot, ...],
+        evaluation_fingerprint: str,
     ) -> PlanDecision:
         status = "ROUTE" if provider_id is not None else "ABSTAIN"
         identity = {
@@ -777,6 +814,7 @@ class DeterministicPlanner:
             "policy_version": self.policy_version,
             "canonicalization_profile": self.canonicalization_profile,
             "registry_fingerprint": self.registry_fingerprint,
+            "evaluation_fingerprint": evaluation_fingerprint,
             "eligible_snapshot": [
                 _candidate_payload(item)
                 for item in eligible_snapshot
@@ -795,6 +833,7 @@ class DeterministicPlanner:
             policy_version=self.policy_version,
             canonicalization_profile=self.canonicalization_profile,
             registry_fingerprint=self.registry_fingerprint,
+            evaluation_fingerprint=evaluation_fingerprint,
             eligible_count=len(eligible_snapshot),
             eligible_snapshot=eligible_snapshot,
             rejections=tuple(rejections),
@@ -822,6 +861,76 @@ def _task_payload(task: TaskContract) -> dict[str, Any]:
         "max_latency_ms": task.max_latency_ms,
         "max_queue_depth": task.max_queue_depth,
         "max_runtime_age_ms": task.max_runtime_age_ms,
+    }
+
+
+def _runtime_payload(state: RuntimeState | None) -> dict[str, Any] | None:
+    if state is None:
+        return None
+    return {
+        "provider_id": state.provider_id,
+        "code_sha": state.code_sha,
+        "healthy": state.healthy,
+        "age_ms": state.age_ms,
+        "available_cpu_cores": state.available_cpu_cores,
+        "available_ram_gb": state.available_ram_gb,
+        "available_vram_gb": state.available_vram_gb,
+        "estimated_latency_ms": state.estimated_latency_ms,
+        "queue_depth": state.queue_depth,
+    }
+
+
+def _assurance_payload(
+    attestation: AssuranceAttestation | None,
+) -> dict[str, Any] | None:
+    if attestation is None:
+        return None
+    return {
+        "provider_id": attestation.provider_id,
+        "code_sha": attestation.code_sha,
+        "task_class": attestation.task_class,
+        "regime": attestation.regime,
+        "numerical_validity": attestation.numerical_validity,
+        "independent_validator": attestation.independent_validator,
+        "validator_id": attestation.validator_id,
+        "attestation_id": attestation.attestation_id,
+        "evidence_sha256": attestation.evidence_sha256,
+    }
+
+
+def _reliability_payload(
+    estimate: ReliabilityEstimate | None,
+) -> dict[str, Any] | None:
+    if estimate is None:
+        return None
+    return {
+        "provider_id": estimate.provider_id,
+        "code_sha": estimate.code_sha,
+        "task_class": estimate.task_class,
+        "regime": estimate.regime,
+        "method": estimate.method,
+        "n_raw": estimate.n_raw,
+        "n_independent": estimate.n_independent,
+        "n_success_independent": estimate.n_success_independent,
+        "lower_bound": estimate.lower_bound,
+        "evidence_sha256": estimate.evidence_sha256,
+    }
+
+
+def _policy_payload(
+    decision: PolicyDecision | None,
+) -> dict[str, Any] | None:
+    if decision is None:
+        return None
+    return {
+        "provider_id": decision.provider_id,
+        "task_id": decision.task_id,
+        "allowed": decision.allowed,
+        "policy_version": decision.policy_version,
+        "policy_revision": decision.policy_revision,
+        "policy_bundle_sha256": decision.policy_bundle_sha256,
+        "decision_id": decision.decision_id,
+        "input_sha256": decision.input_sha256,
     }
 
 
@@ -861,6 +970,7 @@ def _decision_payload(decision: PlanDecision) -> dict[str, Any]:
         "policy_version": decision.policy_version,
         "canonicalization_profile": decision.canonicalization_profile,
         "registry_fingerprint": decision.registry_fingerprint,
+        "evaluation_fingerprint": decision.evaluation_fingerprint,
         "eligible_count": decision.eligible_count,
         "eligible_snapshot": [
             _candidate_payload(item)
