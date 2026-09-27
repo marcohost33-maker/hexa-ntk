@@ -108,9 +108,17 @@ separate evidence models rather than being forced into this Bernoulli contract.
 
 ## 6. Durable local decision log
 
-The reference store uses SQLite only as a local MVP persistence layer. File-backed
-databases require WAL mode and `synchronous=FULL`. This is deliberately not a
-network-filesystem or multi-host database contract.
+The reference store uses SQLite only as a local MVP persistence layer. It is deliberately
+not a network-filesystem or multi-host database contract.
+
+A 2026 SQLite WAL-reset race materially changes the safe default: upstream documents the
+bug as affecting WAL-mode databases through SQLite 3.51.2, with the fix in 3.51.3 and
+backports on the 3.50 and 3.44 release lines. Therefore the reference store enables
+WAL+`synchronous=FULL` only on release lines explicitly known to contain that fix.
+Otherwise it falls back to rollback-journal `DELETE` + `synchronous=EXTRA`.
+This trades concurrency for a smaller correctness surface, which is appropriate for the
+low-throughput local control-plane MVP. The active storage profile is inspectable at
+runtime and must be captured with evidence if persistence semantics are claim-relevant.
 
 A route decision and its outbox event are written in the same SQL transaction.
 The producer operation is idempotent: replaying the same decision/event is a no-op,
