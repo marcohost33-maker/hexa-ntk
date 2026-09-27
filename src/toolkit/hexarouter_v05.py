@@ -1315,12 +1315,14 @@ class SQLiteDecisionStore:
         event_id: str,
         *,
         claim_token: str,
+        now_ms: int,
     ) -> bool:
-        """Record successful processing only for the current lease owner."""
+        """Record success only for the current, unexpired lease owner."""
 
         _require_nonempty("consumer_id", consumer_id)
         _require_nonempty("event_id", event_id)
         _require_nonempty("claim_token", claim_token)
+        _require_int_at_least("now_ms", now_ms, 0)
         with self._transaction():
             processed = self._conn.execute(
                 """
@@ -1334,13 +1336,15 @@ class SQLiteDecisionStore:
 
             claim = self._conn.execute(
                 """
-                SELECT claim_token FROM inbox_claims
+                SELECT claim_token, lease_until_ms FROM inbox_claims
                 WHERE consumer_id = ? AND event_id = ?
                 """,
                 (consumer_id, event_id),
             ).fetchone()
             if claim is None or claim["claim_token"] != claim_token:
                 raise ValueError("inbox claim is missing or no longer owned")
+            if int(claim["lease_until_ms"]) <= now_ms:
+                raise ValueError("inbox claim lease has expired")
 
             self._conn.execute(
                 """
