@@ -147,7 +147,8 @@ optional and the audit identity must not acquire accidental nondeterminism.
 
 Inbox processing is NOT marked complete when a worker first sees an event. A worker
 first acquires a bounded claim lease; successful processing is recorded separately.
-Expired leases may be reclaimed and a stale claim token cannot mark an event complete.
+Expired leases may be reclaimed; an expired lease cannot complete even before a new
+worker claims it, and a stale claim token cannot mark an event complete.
 For external side effects, the downstream operation must still use the event identity as
 an idempotency key because a lease cannot make a remote effect exactly-once.
 
