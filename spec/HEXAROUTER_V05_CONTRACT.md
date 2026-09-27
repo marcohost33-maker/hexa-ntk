@@ -162,12 +162,17 @@ partitioning.
 
 ## 8. Topology benchmark
 
-The MVP contains dependency-free graph metrics for reproducible structural baselines:
-ring, star, full graph, and compact six-neighbour hex-cell patches.
+The MVP contains dependency-free graph metrics for reproducible structural baselines.
+Undirected physics-style baselines cover ring, star, full graph, and compact
+six-neighbour hex-cell patches. A separate directed workflow benchmark covers a
+directed cycle, feed-forward chain, bidirectional orchestrator/star, directed full
+graph, and bidirectional projections of compact hex-cell patches.
 
-Metrics include edge count, average degree, density, connectivity, diameter, mean
-shortest path, articulation-node count, and mean largest-component survival after one
-node failure.
+Undirected metrics include edge count, average degree, density, connectivity, diameter,
+mean shortest path, articulation-node count, and mean largest-component survival after
+one node failure. Directed workflow metrics separately include average in/out degree,
+directed density, strong connectivity, directed diameter, mean reachable shortest path
+and ordered-pair reachability fraction.
 
 These are structural diagnostics only. They do not establish that any topology is best
 for task quality, latency, cost, or scientific validity. Current multi-agent research
@@ -209,6 +214,7 @@ The v0.5 core is acceptable only when tests demonstrate at least:
 - resource-profile feasibility;
 - atomic/idempotent decision+CloudEvents-outbox recording;
 - lease/reclaim/complete inbox semantics that do not confuse receipt with successful processing;
-- exact reference topology metrics for C6, K1,5, K6 and compact hex patches;
+- exact undirected reference topology metrics for C6, K1,5, K6 and compact hex patches;
+- exact directed workflow metrics for cycle, chain, bidirectional-star, dense and hex projections;
 - no third-party runtime dependency.
 
