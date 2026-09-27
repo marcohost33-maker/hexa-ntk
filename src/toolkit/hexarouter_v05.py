@@ -1421,6 +1421,135 @@ def _component_sizes(adjacency: Sequence[set[int]], removed: int) -> list[int]:
     return sizes
 
 
+def _canonical_directed_edges(
+    edges: Iterable[Edge],
+    n_nodes: int,
+) -> tuple[Edge, ...]:
+    _require_int_at_least("n_nodes", n_nodes, 1)
+    out: set[Edge] = set()
+    for left, right in edges:
+        if not (0 <= left < n_nodes and 0 <= right < n_nodes):
+            raise ValueError("directed edge endpoint outside graph")
+        if left == right:
+            raise ValueError("self loops are not part of the topology benchmark")
+        out.add((left, right))
+    return tuple(sorted(out))
+
+
+def directed_ring_edges(n_nodes: int) -> tuple[Edge, ...]:
+    _require_int_at_least("n_nodes", n_nodes, 1)
+    if n_nodes == 1:
+        return ()
+    return tuple((idx, (idx + 1) % n_nodes) for idx in range(n_nodes))
+
+
+def directed_chain_edges(n_nodes: int) -> tuple[Edge, ...]:
+    _require_int_at_least("n_nodes", n_nodes, 1)
+    return tuple((idx, idx + 1) for idx in range(n_nodes - 1))
+
+
+def directed_full_edges(n_nodes: int) -> tuple[Edge, ...]:
+    _require_int_at_least("n_nodes", n_nodes, 1)
+    return tuple(
+        (left, right)
+        for left in range(n_nodes)
+        for right in range(n_nodes)
+        if left != right
+    )
+
+
+def bidirectional_edges(
+    n_nodes: int,
+    edges: Iterable[Edge],
+) -> tuple[Edge, ...]:
+    undirected = _canonical_edges(edges, n_nodes)
+    return tuple(
+        sorted(
+            {
+                directed
+                for left, right in undirected
+                for directed in ((left, right), (right, left))
+            }
+        )
+    )
+
+
+def directed_graph_metrics(
+    n_nodes: int,
+    edges: Iterable[Edge],
+) -> dict[str, Any]:
+    canonical = _canonical_directed_edges(edges, n_nodes)
+    adjacency = [set() for _ in range(n_nodes)]
+    in_degree = [0 for _ in range(n_nodes)]
+    for left, right in canonical:
+        adjacency[left].add(right)
+        in_degree[right] += 1
+
+    reachable_pairs = 0
+    distance_sum = 0
+    diameter = 0
+    strongly_connected = True
+    for source in range(n_nodes):
+        distances = _bfs_distances(adjacency, source)
+        if len(distances) != n_nodes:
+            strongly_connected = False
+        for target, distance in distances.items():
+            if target == source:
+                continue
+            reachable_pairs += 1
+            distance_sum += distance
+            diameter = max(diameter, distance)
+
+    possible_pairs = n_nodes * (n_nodes - 1)
+    edge_count = len(canonical)
+    return {
+        "n_nodes": n_nodes,
+        "edge_count": edge_count,
+        "average_out_degree": edge_count / n_nodes,
+        "average_in_degree": sum(in_degree) / n_nodes,
+        "density": (edge_count / possible_pairs) if possible_pairs else 0.0,
+        "strongly_connected": strongly_connected,
+        "diameter": diameter if strongly_connected else None,
+        "mean_reachable_shortest_path": (
+            distance_sum / reachable_pairs if reachable_pairs else 0.0
+        ),
+        "reachability_fraction": (
+            reachable_pairs / possible_pairs if possible_pairs else 1.0
+        ),
+    }
+
+
+def workflow_topology_benchmark() -> dict[str, dict[str, Any]]:
+    coords_r1, edges_r1 = hex_cell_patch(1)
+    coords_r2, edges_r2 = hex_cell_patch(2)
+    return {
+        "directed_cycle6": directed_graph_metrics(
+            6,
+            directed_ring_edges(6),
+        ),
+        "directed_chain6": directed_graph_metrics(
+            6,
+            directed_chain_edges(6),
+        ),
+        "bidirectional_star6": directed_graph_metrics(
+            6,
+            bidirectional_edges(6, star_edges(6)),
+        ),
+        "directed_full6": directed_graph_metrics(
+            6,
+            directed_full_edges(6),
+        ),
+        "bidirectional_hex_cell_r1": directed_graph_metrics(
+            len(coords_r1),
+            bidirectional_edges(len(coords_r1), edges_r1),
+        ),
+        "bidirectional_hex_cell_r2": directed_graph_metrics(
+            len(coords_r2),
+            bidirectional_edges(len(coords_r2), edges_r2),
+        ),
+    }
+
+
 def reference_topology_benchmark() -> dict[str, dict[str, Any]]:
     coords_r1, edges_r1 = hex_cell_patch(1)
     coords_r2, edges_r2 = hex_cell_patch(2)
