@@ -205,3 +205,13 @@
 
 | 626F935200206F98 | 2026-09-26 11:23 | src/toolkit | in-repo derived, #39 dt finiteness contract: dataset_split_hex_v3.py |
 | 8860CF78DF346255 | 2026-09-26 11:23 | src/toolkit | in-repo derived, #39 non-finite dt regressions + leakage invariant: test_dataset_split_hex_v3.py |
+
+## spec/ + src/toolkit/ — Post-merge review follow-up 2026-09-27 (append-only, PR #45)
+
+> Codex review threads on PR #45 (open after merge): the spec now carries the
+> positivity/DMP contract h^2/(4 D_v) next to the L2 bound (section 5.2a), and
+> new regression tests pin the overflow-safe, toward-zero timestep bounds and
+> the README source anchors. Prior rows remain lineage.
+
+| FA25DE9F8A724345 | 2026-09-27 00:00 | spec | in-repo updated, PR #45 follow-up positivity contract (5.2a): HexaNTK_Review_Gehaertet.md |
+| 1AAB1765CE69D520 | 2026-09-27 00:00 | src/toolkit | in-repo created, PR #45 follow-up timestep-contract regressions: test_hex_timestep_contract.py |

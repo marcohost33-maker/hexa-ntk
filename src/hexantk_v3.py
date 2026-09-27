@@ -83,6 +83,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -593,6 +594,27 @@ def _unit_interval_safety(value: Any) -> float:
     return out
 
 
+def _exact_to_positive_float(name: str, exact: Fraction, *, toward_zero: bool) -> float:
+    """Round an exact positive rational to a finite, strictly positive binary64.
+
+    The inputs are finite floats, so every bound below is an exact rational.
+    Evaluating it exactly avoids overflow/underflow in intermediate products
+    such as h*h (e.g. h=1e200 or h=1e-200). With toward_zero=True the result
+    never exceeds the exact value, so a returned timestep bound is never above
+    the analytic boundary it promises. A result that overflows binary64 or
+    rounds to 0.0 is not representable and is rejected (fail-closed).
+    """
+    try:
+        out = float(exact)  # correctly rounded (round-half-even), incl. subnormals
+    except OverflowError as exc:
+        raise ValueError(f"{name} is not representable as a finite binary64 value") from exc
+    if toward_zero and Fraction(out) > exact:
+        out = float(np.nextafter(out, 0.0))
+    if not np.isfinite(out) or out <= 0.0:
+        raise ValueError(f"{name} is not representable as a finite positive binary64 value")
+    return out
+
+
 def hex_laplacian_stencil_weight(h: float) -> float:
     r"""FV weight for 7-point hex Laplacian: 2/(3 h^2).
 
@@ -609,7 +631,9 @@ def hex_laplacian_stencil_weight(h: float) -> float:
     True
     """
     h_f = _finite_positive_float("h", h)
-    return 2.0 / (3.0 * h_f * h_f)
+    return _exact_to_positive_float(
+        "stencil weight", Fraction(2) / (3 * Fraction(h_f) ** 2), toward_zero=False
+    )
 
 
 def hex_cfl_max_dt(h: float, D_v: float, safety: float = 0.85) -> float:
@@ -617,7 +641,9 @@ def hex_cfl_max_dt(h: float, D_v: float, safety: float = 0.85) -> float:
 
     For the regular six-neighbour stencil with constant isotropic diffusion,
     the sharp spectral bound is dt <= h^2 / (3 D_v). This helper preserves
-    the historical default safety=0.85 for backward compatibility.
+    the historical default safety=0.85 for backward compatibility. The
+    returned value is rounded toward zero, so it never exceeds the exact
+    safety * h^2 / (3 D_v); unrepresentable results raise ValueError.
 
     IMPORTANT: L2 stability does not imply positivity. For densities,
     concentrations, probabilities, or any state that must remain non-negative,
@@ -633,7 +659,11 @@ def hex_cfl_max_dt(h: float, D_v: float, safety: float = 0.85) -> float:
     h_f = _finite_positive_float("h", h)
     d_f = _finite_positive_float("D_v", D_v)
     safety_f = _unit_interval_safety(safety)
-    return safety_f * h_f * h_f / (3.0 * d_f)
+    return _exact_to_positive_float(
+        "L2 timestep bound",
+        Fraction(safety_f) * Fraction(h_f) ** 2 / (3 * Fraction(d_f)),
+        toward_zero=True,
+    )
 
 
 def hex_positivity_max_dt(h: float, D_v: float, safety: float = 1.0) -> float:
@@ -648,6 +678,10 @@ def hex_positivity_max_dt(h: float, D_v: float, safety: float = 1.0) -> float:
     This statement is not universal for variable/anisotropic diffusion,
     irregular cells, or different boundary/operator discretisations.
 
+    The returned value is rounded toward zero, so with safety=1.0 the exact
+    centre weight 1 - 4 D_v dt / h^2 of the returned dt is never negative;
+    unrepresentable results (overflow or underflow to 0) raise ValueError.
+
     >>> bool(abs(hex_positivity_max_dt(1.0, 1.0) - 0.25) < 1e-14)
     True
     >>> bool(abs(hex_positivity_max_dt(0.5, 2.0) - 0.03125) < 1e-14)
@@ -656,7 +690,11 @@ def hex_positivity_max_dt(h: float, D_v: float, safety: float = 1.0) -> float:
     h_f = _finite_positive_float("h", h)
     d_f = _finite_positive_float("D_v", D_v)
     safety_f = _unit_interval_safety(safety)
-    return safety_f * h_f * h_f / (4.0 * d_f)
+    return _exact_to_positive_float(
+        "positivity timestep bound",
+        Fraction(safety_f) * Fraction(h_f) ** 2 / (4 * Fraction(d_f)),
+        toward_zero=True,
+    )
 
 
 # ============================================================================
@@ -1380,6 +1418,9 @@ def test_hex_laplacian_and_cfl() -> bool:
         lambda: hex_cfl_max_dt(True, 1.0),
         lambda: hex_cfl_max_dt("1.0", 1.0),
         lambda: hex_positivity_max_dt(1.0, 1.0, safety=0.0),
+        lambda: hex_cfl_max_dt(1e200, 1.0),
+        lambda: hex_positivity_max_dt(1e-200, 1.0),
+        lambda: hex_laplacian_stencil_weight(1e-200),
     ]
     rejected = 0
     for call in invalid_calls:
