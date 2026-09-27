@@ -108,7 +108,64 @@ class TestBoundsRoundTowardZero(unittest.TestCase):
                 self.assertGreater(Fraction(float(np.nextafter(got, np.inf))), exact)
 
 
+class TestExactFromGivenReal(unittest.TestCase):
+    """Bounds are computed from the GIVEN numbers.Real, not from float(x)."""
+
+    def _centre(self, h, d, dt) -> Fraction:
+        return 1 - 4 * Fraction(d) * Fraction(dt) / Fraction(h) ** 2
+
+    def test_int_above_2_53_centre_weight_nonnegative(self):
+        # float(2**53 + 3) == 2**53 + 4: the old path bounded a larger h.
+        h, d = 2**53 + 3, 1
+        dt = engine.hex_positivity_max_dt(h, d)
+        self.assertGreaterEqual(self._centre(h, d, dt), 0)
+        self.assertLessEqual(Fraction(dt), _exact_pos(h, d))
+
+    def test_fraction_inputs_centre_weight_nonnegative(self):
+        h, d = Fraction(7, 3), Fraction(1, 7)
+        dt = engine.hex_positivity_max_dt(h, d)
+        self.assertGreaterEqual(self._centre(h, d, dt), 0)
+        self.assertLessEqual(Fraction(engine.hex_cfl_max_dt(h, d, 1)), _exact_l2(h, d))
+
+    def test_fraction_scan_never_above_exact_bound_of_given_inputs(self):
+        rng = random.Random(20260927)
+        for _ in range(3000):
+            h = Fraction(rng.randint(1, 10**6), rng.randint(1, 10**6))
+            d = Fraction(rng.randint(1, 10**6), rng.randint(1, 10**6))
+            self.assertLessEqual(Fraction(engine.hex_positivity_max_dt(h, d)), _exact_pos(h, d))
+            self.assertLessEqual(Fraction(engine.hex_cfl_max_dt(h, d, 1)), _exact_l2(h, d))
+
+    def test_safety_just_above_one_rejected(self):
+        # rounds to 1.0 in binary64 but is > 1 exactly
+        with self.assertRaises(ValueError):
+            engine.hex_positivity_max_dt(1.0, 1.0, Fraction(2**60 + 1, 2**60))
+
+    def test_numpy_scalars_are_exact(self):
+        h, d = np.float32(0.1), np.int64(3)
+        dt = engine.hex_positivity_max_dt(h, d)
+        self.assertLessEqual(Fraction(dt), Fraction(*h.as_integer_ratio()) ** 2 / (4 * 3))
+
+
 class TestDocsContract(unittest.TestCase):
+    def test_agents_quoted_hook_anchor_resolves(self):
+        agents = (_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        m = re.search(r"Shape-Validierung \(src/hexantk_v3\.py:(\d+)-(\d+)\)", agents)
+        self.assertIsNotNone(m)
+        lines = _ENGINE.read_text(encoding="utf-8").splitlines()
+        a, b = int(m.group(1)), int(m.group(2))
+        self.assertIn("This config is a FUTURE-EXTENSION HOOK", lines[a - 1])
+        self.assertIn("GAOT-ready.", "\n".join(lines[a - 1:b]))
+
+    def test_readme_toolkit_counts_current(self):
+        readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+        m = re.search(r"(\d+) Module \+ (\d+) Testmodule", readme)
+        self.assertIsNotNone(m)
+        toolkit = _ROOT / "src" / "toolkit"
+        tests = [p for p in toolkit.glob("test_*.py")]
+        modules = [p for p in toolkit.glob("*.py")
+                   if not p.name.startswith("test_") and p.name != "__init__.py"]
+        self.assertEqual((int(m.group(1)), int(m.group(2))), (len(modules), len(tests)))
+
     def test_spec_contains_positivity_contract(self):
         spec = (_ROOT / "spec" / "HexaNTK_Review_Gehaertet.md").read_text(encoding="utf-8")
         self.assertIn("h²/(4Dᵥ)", spec)

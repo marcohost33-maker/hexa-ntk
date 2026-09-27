@@ -215,3 +215,11 @@
 
 | FA25DE9F8A724345 | 2026-09-27 00:00 | spec | in-repo updated, PR #45 follow-up positivity contract (5.2a): HexaNTK_Review_Gehaertet.md |
 | 1AAB1765CE69D520 | 2026-09-27 00:00 | src/toolkit | in-repo created, PR #45 follow-up timestep-contract regressions: test_hex_timestep_contract.py |
+
+## src/toolkit/ — Post-merge review round 2 2026-09-27 (append-only, PR #45)
+
+> Equalita round 2: bounds are now computed from the exact value of the GIVEN
+> numbers.Real (Fraction), safety is checked exactly, and the AGENTS.md anchor
+> plus the README toolkit counts are pinned by tests. Prior rows remain lineage.
+
+| 5ACC8D1F335C55F7 | 2026-09-27 00:00 | src/toolkit | in-repo derived, PR #45 follow-up round 2 (exact given-Real bounds, doc anchors): test_hex_timestep_contract.py |

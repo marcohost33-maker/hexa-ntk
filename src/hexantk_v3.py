@@ -594,11 +594,59 @@ def _unit_interval_safety(value: Any) -> float:
     return out
 
 
+def _exact_real(name: str, value: Any) -> Fraction:
+    """Exact rational value of an already validated real scalar.
+
+    The bounds below are computed from the value the caller GAVE, not from its
+    binary64 rounding: float(2**53 + 3) is 2**53 + 4, and a bound computed from
+    the rounded h can lie above the exact bound of the given h. int, float,
+    Fraction and numpy integer/floating scalars convert exactly; any other
+    numbers.Real without an exact rational form is rejected (fail-closed).
+    """
+    if isinstance(value, np.integer):
+        return Fraction(int(value))
+    if isinstance(value, (int, float, Fraction)):
+        return Fraction(value)
+    ratio = getattr(value, "as_integer_ratio", None)
+    if callable(ratio):
+        try:
+            num, den = ratio()
+            return Fraction(num, den)
+        except (TypeError, ValueError, OverflowError, ZeroDivisionError) as exc:
+            raise ValueError(f"{name} has no exact rational representation") from exc
+    raise ValueError(
+        f"{name} has no exact rational representation ({type(value).__name__})"
+    )
+
+
+def _exact_positive(name: str, value: Any) -> Fraction:
+    """Validate like _finite_positive_float, then return the exact given value."""
+    _finite_positive_float(name, value)
+    out = _exact_real(name, value)
+    if out <= 0:
+        raise ValueError(f"{name} must be > 0, got {value!r}")
+    return out
+
+
+def _exact_unit_safety(value: Any) -> Fraction:
+    """Validate like _unit_interval_safety, then require 0 < safety <= 1 EXACTLY.
+
+    A rational just above 1 can round to 1.0 in binary64 and would otherwise
+    pass the float check while scaling the bound above the sharp limit.
+    """
+    _unit_interval_safety(value)
+    out = _exact_real("safety", value)
+    if not 0 < out <= 1:
+        raise ValueError(f"safety must satisfy 0 < safety <= 1 exactly, got {value!r}")
+    return out
+
+
 def _exact_to_positive_float(name: str, exact: Fraction, *, toward_zero: bool) -> float:
     """Round an exact positive rational to a finite, strictly positive binary64.
 
-    The inputs are finite floats, so every bound below is an exact rational.
-    Evaluating it exactly avoids overflow/underflow in intermediate products
+    Every bound below is built from the exact rational value of the GIVEN
+    inputs (_exact_real). Evaluating it exactly avoids overflow/underflow in
+    intermediate products
     such as h*h (e.g. h=1e200 or h=1e-200). With toward_zero=True the result
     never exceeds the exact value, so a returned timestep bound is never above
     the analytic boundary it promises. A result that overflows binary64 or
@@ -630,9 +678,9 @@ def hex_laplacian_stencil_weight(h: float) -> float:
     >>> bool(abs(hex_laplacian_stencil_weight(0.5) - 8.0/3.0) < 1e-14)
     True
     """
-    h_f = _finite_positive_float("h", h)
+    h_q = _exact_positive("h", h)
     return _exact_to_positive_float(
-        "stencil weight", Fraction(2) / (3 * Fraction(h_f) ** 2), toward_zero=False
+        "stencil weight", Fraction(2) / (3 * h_q**2), toward_zero=False
     )
 
 
@@ -656,12 +704,12 @@ def hex_cfl_max_dt(h: float, D_v: float, safety: float = 0.85) -> float:
     >>> bool(abs(hex_cfl_max_dt(1.0, 1.0, safety=1.0) - 1.0/3.0) < 1e-14)
     True
     """
-    h_f = _finite_positive_float("h", h)
-    d_f = _finite_positive_float("D_v", D_v)
-    safety_f = _unit_interval_safety(safety)
+    h_q = _exact_positive("h", h)
+    d_q = _exact_positive("D_v", D_v)
+    safety_q = _exact_unit_safety(safety)
     return _exact_to_positive_float(
         "L2 timestep bound",
-        Fraction(safety_f) * Fraction(h_f) ** 2 / (3 * Fraction(d_f)),
+        safety_q * h_q**2 / (3 * d_q),
         toward_zero=True,
     )
 
@@ -687,12 +735,12 @@ def hex_positivity_max_dt(h: float, D_v: float, safety: float = 1.0) -> float:
     >>> bool(abs(hex_positivity_max_dt(0.5, 2.0) - 0.03125) < 1e-14)
     True
     """
-    h_f = _finite_positive_float("h", h)
-    d_f = _finite_positive_float("D_v", D_v)
-    safety_f = _unit_interval_safety(safety)
+    h_q = _exact_positive("h", h)
+    d_q = _exact_positive("D_v", D_v)
+    safety_q = _exact_unit_safety(safety)
     return _exact_to_positive_float(
         "positivity timestep bound",
-        Fraction(safety_f) * Fraction(h_f) ** 2 / (4 * Fraction(d_f)),
+        safety_q * h_q**2 / (4 * d_q),
         toward_zero=True,
     )
 
