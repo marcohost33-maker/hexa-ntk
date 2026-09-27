@@ -18,6 +18,11 @@ from hexarouter_v05 import (
     RuntimeState,
     SQLiteDecisionStore,
     TaskContract,
+    bidirectional_edges,
+    directed_chain_edges,
+    directed_full_edges,
+    directed_graph_metrics,
+    directed_ring_edges,
     full_edges,
     graph_metrics,
     hex_cell_patch,
@@ -25,6 +30,7 @@ from hexarouter_v05 import (
     reference_topology_benchmark,
     ring_edges,
     star_edges,
+    workflow_topology_benchmark,
 )
 
 
@@ -749,6 +755,45 @@ class TopologyTests(unittest.TestCase):
         self.assertTrue(first["hex_cell_r1"]["connected"])
         self.assertTrue(
             math.isfinite(first["hex_cell_r2"]["mean_shortest_path"])
+        )
+
+    def test_directed_workflow_reference_metrics(self) -> None:
+        cycle = directed_graph_metrics(6, directed_ring_edges(6))
+        self.assertEqual(cycle["edge_count"], 6)
+        self.assertAlmostEqual(cycle["average_out_degree"], 1.0)
+        self.assertTrue(cycle["strongly_connected"])
+        self.assertEqual(cycle["diameter"], 5)
+        self.assertAlmostEqual(cycle["mean_reachable_shortest_path"], 3.0)
+
+        chain = directed_graph_metrics(6, directed_chain_edges(6))
+        self.assertEqual(chain["edge_count"], 5)
+        self.assertFalse(chain["strongly_connected"])
+        self.assertIsNone(chain["diameter"])
+        self.assertAlmostEqual(chain["reachability_fraction"], 0.5)
+
+        dense = directed_graph_metrics(6, directed_full_edges(6))
+        self.assertEqual(dense["edge_count"], 30)
+        self.assertAlmostEqual(dense["density"], 1.0)
+        self.assertEqual(dense["diameter"], 1)
+
+    def test_bidirectional_projection_doubles_undirected_edges(self) -> None:
+        directed = bidirectional_edges(6, star_edges(6))
+        self.assertEqual(len(directed), 10)
+        metrics = directed_graph_metrics(6, directed)
+        self.assertTrue(metrics["strongly_connected"])
+        self.assertEqual(metrics["diameter"], 2)
+
+    def test_workflow_reference_benchmark_is_reproducible(self) -> None:
+        first = workflow_topology_benchmark()
+        second = workflow_topology_benchmark()
+        self.assertEqual(first, second)
+        self.assertEqual(
+            first["bidirectional_hex_cell_r1"]["edge_count"],
+            24,
+        )
+        self.assertEqual(
+            first["bidirectional_hex_cell_r2"]["edge_count"],
+            84,
         )
 
     def test_topology_sizes_reject_bool(self) -> None:
