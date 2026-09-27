@@ -282,3 +282,15 @@
 | 805EE5786DC96F24 | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 identity hardening: HEXAROUTER_V05_CONTRACT.md |
 | B0958B9B45E35B87 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 identity hardening: hexarouter_v05.py |
 | D1919AD8EA8B13AF | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 identity hardening tests: test_hexarouter_v05.py |
+
+
+## spec/ + src/toolkit/ — HexaRouter/HCM v0.5 directed-workflow topology hardening 2026-09-27
+
+> Workflow topology metrics are now explicitly directed and remain separate
+> from undirected physics-style graph diagnostics. Added directed cycle/chain,
+> bidirectional-star, directed-dense and bidirectional hex-patch baselines.
+> Prior rows remain append-only lineage.
+
+| 40B2ADD4DF3F49B6 | 2026-09-27 00:00 | spec | in-repo derived, HexaRouter/HCM v0.5 directed-workflow topology hardening: HEXAROUTER_V05_CONTRACT.md |
+| 3F6FDD5CA1798340 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 directed-workflow topology hardening: hexarouter_v05.py |
+| 2779C52539915390 | 2026-09-27 00:00 | src/toolkit | in-repo derived, HexaRouter/HCM v0.5 directed-workflow topology hardening tests: test_hexarouter_v05.py |
