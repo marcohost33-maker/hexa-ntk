@@ -20,7 +20,7 @@ vorbereitet ist. Der Engine-Header sagt das woertlich:
 > "This config is a FUTURE-EXTENSION HOOK. The actual PyTorch implementation is kept in a
 > separate training-adapter session; here we declare the contract and validate shapes so
 > the rest of our infrastructure (dataset split, checkpoint semantics, OperatorAdapter) is
-> GAOT-ready." — `src/hexantk_v3.py:717-720`
+> GAOT-ready." — `src/hexantk_v3.py:856-859`
 
 Hex-spezifisch im engeren Sinn sind drei getrennte numerische Aussagen implementiert:
 `hex_laplacian_stencil_weight` (7-Punkt-FV-Gewicht `2/(3h^2)`),
@@ -57,7 +57,7 @@ Lokale Umgebung dieses Laufs: Python 3.14.4, `torch` 2.12.1+cpu, `numpy` 2.4.6.
 Die CI faehrt dieselbe Kette auf **Python 3.12** mit `torch==2.6.0` (CPU-Wheel).
 Die Zahlen gelten fuer diese beiden Umgebungen; ausserhalb ist nichts zugesichert.
 
-**Branch-Hinweis:** Der Fix `fix/hex-cfl-positivity-contract` fuegt zwei Doctests hinzu
+**Branch-Hinweis:** Der Fix `codex/hex-cfl-positivity-contract` (PR #45) fuegt zwei Doctests hinzu
 (49 statt 47 erwartet) und hebt die Engine-Version auf 3.0.1. Die obige Tabelle ist
 bewusst historische Evidenz des Laufs vom 2026-08-26 und wird nicht als neuer Lauf
 umetikettiert; ein neuer PASS wird erst nach CI/Engine-Gate als Evidenz eingetragen.
@@ -79,11 +79,11 @@ in `spec/`, offene Lint-/Test-Schuld in `docs/ROADMAP.md`.
 
 ## Kern
 
-- **Engine:** `src/hexantk_v3.py` (1595 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
+- **Engine:** `src/hexantk_v3.py` (1772 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
   Train-Step, Operator-Vertraege, 26 Selftests inline)
-- **Toolkit:** `src/toolkit/` — 10 Module + 7 Testmodule (Benchmark, Checkpoint-Integration,
+- **Toolkit:** `src/toolkit/` — 11 Module + 10 Testmodule (Benchmark, Checkpoint-Integration,
   Dataloader-Utils, Dataset-Split, EMA, Failure-Signature, Operator-Adapter, Resume-Utils,
-  Runner, Warmstart-Utils)
+  Runner, Stress, Warmstart-Utils)
 
 ## Reproduzieren
 
@@ -116,7 +116,7 @@ SOURCES.md  Provenance: Quelle + SHA-256 + mtime je Datei
 
 ## Referenzen (fremde Verfahren — nicht Ergebnisse dieses Repos)
 
-Der vollstaendige Referenz-Block mit Kontext steht in `src/hexantk_v3.py:37-60`.
+Der vollstaendige Referenz-Block mit Kontext steht in `src/hexantk_v3.py:43-67`.
 
 - **[Li23]** Z. Li, N. Kovachki, C. Choy et al., *Geometry-Informed Neural Operator for
   Large-Scale 3D PDEs*, NeurIPS 2023, arXiv:2309.00583. — Ursprung von **GINO**.
@@ -124,10 +124,10 @@ Der vollstaendige Referenz-Block mit Kontext steht in `src/hexantk_v3.py:37-60`.
   ScienceDirect S0045782525009405 (Dez. 2025).
 - **[GAOT25]** S. Wen et al., *Geometry Aware Operator Transformer*, arXiv:2505.18781.
   Die 2D-Default-Hyperparameter in `GAOTConfig` sind aus dieser Arbeit uebernommen;
-  fuer 3D gibt es dort **keinen** validierten Default (siehe `src/hexantk_v3.py:707-715`).
+  fuer 3D gibt es dort **keinen** validierten Default (siehe `src/hexantk_v3.py:846-854`).
 - **[Sarkar25]** S. Sarkar et al., *Physics- and geometry-aware spatio-spectral graph
   neural operator* (piG-Sp2GNO / mGNO), arXiv Aug. 2025.
-- Hex-FV-Stencil: Lee & Tien 2014 / Lee 2017 (`src/hexantk_v3.py:567`).
+- Hex-FV-Stencil: Lee & Tien 2014 / Lee 2017 (`src/hexantk_v3.py:658`).
 
 Die Herkunft jeder Datei (inkl. der in-repo gehaerteten Ableitungen) ist in `SOURCES.md`
 mit SHA-256 gepinnt und mit `scripts/verify_sources.py` nachpruefbar.

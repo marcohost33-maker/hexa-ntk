@@ -356,6 +356,32 @@ Der Skalierungsfaktor 4 (beim Standard-FD auf regulärem Gitter) wird durch den 
 dt_max = safety_factor * h**2 / (3 * D_v)  # safety_factor ∈ [0.8, 0.9]
 ```
 
+### 5.2a Positivitäts-/DMP-Grenze (Nachtrag 2026-09-27, Vertrag zu PR #45)
+
+L²-Stabilität (5.2) impliziert **keine** Positivität. Für Forward-Euler mit dem
+obigen 7-Punkt-Stencil ist der Zentrums-Koeffizient 1 − 4Dᵥ·Δt/h², die sechs
+Nachbar-Koeffizienten sind je (2/3)·Dᵥ·Δt/h² ≥ 0. Alle Koeffizienten sind genau
+dann nicht-negativ, wenn
+
+Δt ≤ h²/(4Dᵥ)
+
+Dann ist der Schritt eine Konvexkombination: Positivität, diskretes
+Maximumprinzip und Monotonie gelten — nur für dieses reguläre, lineare Schema mit
+konstantem isotropem Dᵥ, nicht allgemein für variable/anisotrope Diffusion,
+irreguläre Zellen oder andere Rand-/Operator-Diskretisierungen.
+
+Implementierungs-Vertrag (`src/hexantk_v3.py`):
+
+- `hex_cfl_max_dt(h, D_v, safety=0.85)` = safety · h²/(3Dᵥ) — nur L²-Stabilität;
+  der historische Default 0.85 ist für nicht-negative Zustände **keine**
+  Positivitätsgarantie (Zentrums-Koeffizient bei h = Dᵥ = 1: −2/15).
+- `hex_positivity_max_dt(h, D_v, safety=1.0)` = safety · h²/(4Dᵥ) —
+  Positivität/DMP; für Dichten, Konzentrationen, Wahrscheinlichkeiten verwenden.
+- Beide verlangen endliche h, Dᵥ > 0 und 0 < safety ≤ 1, rechnen exakt und runden
+  das Ergebnis **Richtung null** (der Rückgabewert liegt nie über der exakten
+  Grenze); nicht als endliches positives binary64 darstellbare Ergebnisse
+  (Überlauf, Unterlauf auf 0) werden mit `ValueError` abgewiesen.
+
 ### 5.3 FHN L²-Monotonie: KORREKT ALS FALSCH MARKIERT
 
 Die Dokumente warnen richtigerweise, dass für das FitzHugh-Nagumo-System keine monotone L²-Energieabnahme behauptet werden darf. FHN hat aktivatorische Dynamik (Excitability), die Energie erzeugen kann. Stattdessen sollten Bounds-Guards und observable drift monitoring verwendet werden.

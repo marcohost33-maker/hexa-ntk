@@ -83,6 +83,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -566,30 +567,83 @@ def load_partial_checkpoint_raw(
 # ============================================================================
 
 
-def _finite_positive_float(name: str, value: Any) -> float:
-    """Convert a real scalar to finite binary64 and require it to be > 0.
+def _exact_real(name: str, value: Any) -> Fraction:
+    """Exact rational value of an already validated real scalar.
 
-    Reject bool explicitly (bool is an int subclass), conversion overflow,
-    NaN/Inf, and positive exact values that underflow to 0.0.
+    The bounds below are computed from the value the caller GAVE, not from its
+    binary64 rounding: float(2**53 + 3) is 2**53 + 4, and a bound computed from
+    the rounded h can lie above the exact bound of the given h. int, float,
+    Fraction and numpy integer/floating scalars convert exactly; any other
+    numbers.Real without an exact rational form is rejected (fail-closed).
     """
     if isinstance(value, (bool, np.bool_)) or not isinstance(
         value, (numbers.Real, np.integer, np.floating)
     ):
         raise ValueError(f"{name} must be a real numeric scalar, got {type(value).__name__}")
-    try:
-        out = float(value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} must be representable as a finite real scalar") from exc
-    if not np.isfinite(out) or out <= 0.0:
-        raise ValueError(f"{name} must be finite and > 0, got {value!r}")
+    if isinstance(value, np.integer):
+        return Fraction(int(value))
+    if isinstance(value, (int, float, Fraction)):
+        try:
+            return Fraction(value)
+        except (ValueError, OverflowError) as exc:  # NaN / +-Inf floats
+            raise ValueError(f"{name} must be finite, got {value!r}") from exc
+    ratio = getattr(value, "as_integer_ratio", None)
+    if callable(ratio):
+        try:
+            num, den = ratio()
+            return Fraction(num, den)
+        except (TypeError, ValueError, OverflowError, ZeroDivisionError) as exc:
+            raise ValueError(f"{name} has no exact rational representation") from exc
+    raise ValueError(
+        f"{name} has no exact rational representation ({type(value).__name__})"
+    )
+
+
+def _exact_positive(name: str, value: Any) -> Fraction:
+    """Exact given value, validated on the rational itself (finite and > 0).
+
+    No binary64 conversion here (Codex #47): operands that exceed binary64
+    individually but cancel in the formula, e.g. h=10**400, D_v=10**800, have a
+    representable result. Only the RESULT must be a finite positive binary64
+    (_exact_to_positive_float, spec 5.2a).
+    """
+    out = _exact_real(name, value)
+    if out <= 0:
+        raise ValueError(f"{name} must be > 0, got {value!r}")
     return out
 
 
-def _unit_interval_safety(value: Any) -> float:
-    """Convert safety to finite binary64 and require 0 < safety <= 1."""
-    out = _finite_positive_float("safety", value)
-    if out > 1.0:
-        raise ValueError(f"safety must be <= 1, got {value!r}")
+def _exact_unit_safety(value: Any) -> Fraction:
+    """Require 0 < safety <= 1 EXACTLY on the given value (no binary64 rounding).
+
+    A rational just above 1 can round to 1.0 in binary64 and would otherwise
+    pass the float check while scaling the bound above the sharp limit.
+    """
+    out = _exact_real("safety", value)
+    if not 0 < out <= 1:
+        raise ValueError(f"safety must satisfy 0 < safety <= 1 exactly, got {value!r}")
+    return out
+
+
+def _exact_to_positive_float(name: str, exact: Fraction, *, toward_zero: bool) -> float:
+    """Round an exact positive rational to a finite, strictly positive binary64.
+
+    Every bound below is built from the exact rational value of the GIVEN
+    inputs (_exact_real). Evaluating it exactly avoids overflow/underflow in
+    intermediate products
+    such as h*h (e.g. h=1e200 or h=1e-200). With toward_zero=True the result
+    never exceeds the exact value, so a returned timestep bound is never above
+    the analytic boundary it promises. A result that overflows binary64 or
+    rounds to 0.0 is not representable and is rejected (fail-closed).
+    """
+    try:
+        out = float(exact)  # correctly rounded (round-half-even), incl. subnormals
+    except OverflowError as exc:
+        raise ValueError(f"{name} is not representable as a finite binary64 value") from exc
+    if toward_zero and Fraction(out) > exact:
+        out = float(np.nextafter(out, 0.0))
+    if not np.isfinite(out) or out <= 0.0:
+        raise ValueError(f"{name} is not representable as a finite positive binary64 value")
     return out
 
 
@@ -608,8 +662,10 @@ def hex_laplacian_stencil_weight(h: float) -> float:
     >>> bool(abs(hex_laplacian_stencil_weight(0.5) - 8.0/3.0) < 1e-14)
     True
     """
-    h_f = _finite_positive_float("h", h)
-    return 2.0 / (3.0 * h_f * h_f)
+    h_q = _exact_positive("h", h)
+    return _exact_to_positive_float(
+        "stencil weight", Fraction(2) / (3 * h_q**2), toward_zero=False
+    )
 
 
 def hex_cfl_max_dt(h: float, D_v: float, safety: float = 0.85) -> float:
@@ -617,7 +673,9 @@ def hex_cfl_max_dt(h: float, D_v: float, safety: float = 0.85) -> float:
 
     For the regular six-neighbour stencil with constant isotropic diffusion,
     the sharp spectral bound is dt <= h^2 / (3 D_v). This helper preserves
-    the historical default safety=0.85 for backward compatibility.
+    the historical default safety=0.85 for backward compatibility. The
+    returned value is rounded toward zero, so it never exceeds the exact
+    safety * h^2 / (3 D_v); unrepresentable results raise ValueError.
 
     IMPORTANT: L2 stability does not imply positivity. For densities,
     concentrations, probabilities, or any state that must remain non-negative,
@@ -630,10 +688,14 @@ def hex_cfl_max_dt(h: float, D_v: float, safety: float = 0.85) -> float:
     >>> bool(abs(hex_cfl_max_dt(1.0, 1.0, safety=1.0) - 1.0/3.0) < 1e-14)
     True
     """
-    h_f = _finite_positive_float("h", h)
-    d_f = _finite_positive_float("D_v", D_v)
-    safety_f = _unit_interval_safety(safety)
-    return safety_f * h_f * h_f / (3.0 * d_f)
+    h_q = _exact_positive("h", h)
+    d_q = _exact_positive("D_v", D_v)
+    safety_q = _exact_unit_safety(safety)
+    return _exact_to_positive_float(
+        "L2 timestep bound",
+        safety_q * h_q**2 / (3 * d_q),
+        toward_zero=True,
+    )
 
 
 def hex_positivity_max_dt(h: float, D_v: float, safety: float = 1.0) -> float:
@@ -648,15 +710,23 @@ def hex_positivity_max_dt(h: float, D_v: float, safety: float = 1.0) -> float:
     This statement is not universal for variable/anisotropic diffusion,
     irregular cells, or different boundary/operator discretisations.
 
+    The returned value is rounded toward zero, so with safety=1.0 the exact
+    centre weight 1 - 4 D_v dt / h^2 of the returned dt is never negative;
+    unrepresentable results (overflow or underflow to 0) raise ValueError.
+
     >>> bool(abs(hex_positivity_max_dt(1.0, 1.0) - 0.25) < 1e-14)
     True
     >>> bool(abs(hex_positivity_max_dt(0.5, 2.0) - 0.03125) < 1e-14)
     True
     """
-    h_f = _finite_positive_float("h", h)
-    d_f = _finite_positive_float("D_v", D_v)
-    safety_f = _unit_interval_safety(safety)
-    return safety_f * h_f * h_f / (4.0 * d_f)
+    h_q = _exact_positive("h", h)
+    d_q = _exact_positive("D_v", D_v)
+    safety_q = _exact_unit_safety(safety)
+    return _exact_to_positive_float(
+        "positivity timestep bound",
+        safety_q * h_q**2 / (4 * d_q),
+        toward_zero=True,
+    )
 
 
 # ============================================================================
@@ -1380,6 +1450,9 @@ def test_hex_laplacian_and_cfl() -> bool:
         lambda: hex_cfl_max_dt(True, 1.0),
         lambda: hex_cfl_max_dt("1.0", 1.0),
         lambda: hex_positivity_max_dt(1.0, 1.0, safety=0.0),
+        lambda: hex_cfl_max_dt(1e200, 1.0),
+        lambda: hex_positivity_max_dt(1e-200, 1.0),
+        lambda: hex_laplacian_stencil_weight(1e-200),
     ]
     rejected = 0
     for call in invalid_calls:
