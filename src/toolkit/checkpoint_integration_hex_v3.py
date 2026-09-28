@@ -48,6 +48,7 @@ import torch.nn as nn
 from resume_utils_hex_v3 import (
     as_step_count,
     build_resume_payload,
+    check_ema_save_metadata,
     load_resume_checkpoint,
 )
 from warmstart_utils_hex_v3 import load_partial_checkpoint
@@ -496,11 +497,15 @@ class CheckpointIntegrationManager:
         atomic writing with unique temp file names. The payload also records
         the manager's best-metric state (``checkpoint_manager_state``) so
         load_resume() can restore it, and ``ema_state_dict`` (from
-        ``AveragedModel.state_dict()``) if given.
+        ``AveragedModel.state_dict()``) if given. ``ema_decay`` is required
+        with ``ema_state_dict`` (EMADecayError otherwise); like epoch and
+        global_step it is validated on every rank, so a bad call fails the
+        same way everywhere instead of only on the main process.
         """
         epoch = as_step_count(epoch, name="epoch")
         if global_step is not None:
             global_step = as_step_count(global_step, name="global_step")
+        check_ema_save_metadata(ema_state_dict, ema_decay)
 
         if not self.is_main_process:
             return {
@@ -645,8 +650,10 @@ class CheckpointIntegrationManager:
         metric's name; a resume that switches the selection metric starts a
         fresh best. The manager adopts the resumed run's ``run_id``.
 
-        ``ema_decay`` is compared with the decay recorded next to the EMA
-        state; a mismatch raises ValueError before anything is restored.
+        With ``ema_model`` and a checkpoint that carries EMA state,
+        ``ema_decay`` is required and must equal the decay recorded next to
+        the EMA state; a missing decay on either side or a mismatch raises
+        EMADecayError (a ValueError) before anything is restored.
 
         path explicitly selects the resume checkpoint. If omitted, the
         manager-owned resume_path is used. Callers that expose a configurable

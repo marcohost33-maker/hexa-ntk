@@ -27,7 +27,9 @@ Trusted load path:
 from __future__ import annotations
 
 __all__ = [
+    "EMADecayError",
     "as_step_count",
+    "check_ema_save_metadata",
     "build_resume_payload",
     "save_resume_checkpoint",
     "restore_rng_states",
@@ -76,6 +78,54 @@ def as_step_count(value: Any, *, name: str) -> int:
 
 
 # ------------------------------------------------------------------
+# EMA decay contract
+# ------------------------------------------------------------------
+
+
+class EMADecayError(ValueError):
+    """EMA resume state and its averaging decay do not travel together.
+
+    ``AveragedModel.state_dict()`` holds the averaged weights and the
+    ``n_averaged`` counter, but not the averaging function. Continuing an
+    average that was accumulated with another decay yields a hybrid EMA that
+    matches neither run, silently. So the decay is part of the contract:
+    required whenever EMA state is saved, required (and compared) whenever
+    EMA state is restored. Subclass of ValueError for existing callers.
+    """
+
+
+def _as_ema_decay(value: Any, *, name: str) -> float:
+    """Return ``value`` as a float in [0, 1], or raise EMADecayError."""
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise EMADecayError(f"{name} must be a real number in [0, 1], got {value!r}")
+    decay = float(value)
+    if not (math.isfinite(decay) and 0.0 <= decay <= 1.0):
+        raise EMADecayError(f"{name} must be a real number in [0, 1], got {value!r}")
+    return decay
+
+
+def check_ema_save_metadata(
+    ema_state_dict: Optional[Dict[str, Any]], ema_decay: Any
+) -> Optional[float]:
+    """Validate the decay that must accompany saved EMA state.
+
+    Returns the decay as float if ``ema_state_dict`` is given (None
+    otherwise); raises EMADecayError if it is given without a decay or with
+    one outside [0, 1]. Every resume save path calls this before writing.
+    """
+    if ema_state_dict is None:
+        return None
+    if ema_decay is None:
+        raise EMADecayError(
+            "ema_state_dict is given without ema_decay: the decay the EMA "
+            "averages with is not part of AveragedModel.state_dict(), and "
+            "without it a resume cannot detect a different decay (silent "
+            "hybrid EMA). Pass the decay the EMA was built with."
+        )
+    return _as_ema_decay(ema_decay, name="ema_decay")
+
+
+# ------------------------------------------------------------------
 # Payload construction (separated for composability with atomic writers)
 # ------------------------------------------------------------------
 
@@ -102,9 +152,11 @@ def build_resume_payload(
     ``ema_state_dict`` is ``AveragedModel.state_dict()`` (averaged weights
     plus the ``n_averaged`` counter); it holds tensors only, so it does not
     affect the safe (weights_only=True) load path. The averaging function is
-    not part of it, so ``ema_decay`` is stored next to it (as a float) and
-    checked on load: continuing with another decay would silently produce a
-    hybrid average.
+    not part of it, so ``ema_decay`` is REQUIRED with it (EMADecayError
+    otherwise, before anything is built), stored next to it as a float in
+    [0, 1] and checked on load: continuing with another decay would silently
+    produce a hybrid average. Without ``ema_state_dict`` the decay is not
+    stored.
 
     This function is separated from save_resume_checkpoint so that
     callers (e.g. CheckpointIntegrationManager) can use their own
@@ -118,6 +170,7 @@ def build_resume_payload(
     epoch = as_step_count(epoch, name="epoch")
     if global_step is not None:
         global_step = as_step_count(global_step, name="global_step")
+    checked_decay = check_ema_save_metadata(ema_state_dict, ema_decay)
 
     payload: Dict[str, Any] = {
         "checkpoint_type": "resume",
@@ -153,8 +206,7 @@ def build_resume_payload(
 
     if ema_state_dict is not None:
         payload["ema_state_dict"] = ema_state_dict
-        if ema_decay is not None:
-            payload["ema_decay"] = float(ema_decay)
+        payload["ema_decay"] = checked_decay
 
     if extra is not None:
         payload["extra"] = extra
@@ -313,9 +365,12 @@ def load_resume_checkpoint(
         Restored from ``ema_state_dict`` if the checkpoint carries one;
         ``report["ema_restored"]`` says whether it did.
     ema_decay :
-        The decay ``ema_model`` averages with. If both it and the checkpoint's
-        recorded ``ema_decay`` are known and differ, ValueError is raised
-        before anything is restored (no silent hybrid EMA).
+        The decay ``ema_model`` averages with. Required when ``ema_model`` is
+        given and the checkpoint carries EMA state; the checkpoint must then
+        record its ``ema_decay`` and both must be equal. Any violation raises
+        EMADecayError (a ValueError) before anything is restored (no silent
+        hybrid EMA). A checkpoint written without decay metadata can only be
+        resumed without ``ema_model``.
 
     Restore order (PyTorch convention):
         1. model state
@@ -351,18 +406,33 @@ def load_resume_checkpoint(
         else None
     )
     recorded_decay = payload.get("ema_decay")
-    if (
-        ema_model is not None
-        and "ema_state_dict" in payload
-        and ema_decay is not None
-        and recorded_decay is not None
-        and float(recorded_decay) != float(ema_decay)
-    ):
-        raise ValueError(
-            f"Resume checkpoint EMA was averaged with decay {recorded_decay!r}, "
-            f"but the current EMA uses {ema_decay!r}; continuing would mix two "
-            "averages. Resume with the same ema_decay (or without ema_model)."
-        )
+    if ema_model is not None and "ema_state_dict" in payload:
+        # Fail-closed decay contract (Codex review #46): both sides must be
+        # known and equal, otherwise nothing is restored.
+        if ema_decay is None:
+            raise EMADecayError(
+                "Resume checkpoint carries EMA state, but ema_decay was not "
+                "given: the restored average could not be checked against the "
+                "decay ema_model averages with. Pass ema_decay (or resume "
+                "without ema_model)."
+            )
+        current_decay = _as_ema_decay(ema_decay, name="ema_decay")
+        if recorded_decay is None:
+            raise EMADecayError(
+                f"Resume checkpoint {path} carries EMA state without the decay "
+                "it was averaged with (written before decay metadata became "
+                "mandatory); continuing it could silently mix two averages. "
+                "Resume without ema_model (the EMA restarts from the resumed "
+                "weights), or, if the original decay is known for certain, "
+                "re-save the checkpoint with payload['ema_decay'] set to it."
+            )
+        recorded = _as_ema_decay(recorded_decay, name="checkpoint ema_decay")
+        if recorded != current_decay:
+            raise EMADecayError(
+                f"Resume checkpoint EMA was averaged with decay {recorded_decay!r}, "
+                f"but the current EMA uses {ema_decay!r}; continuing would mix two "
+                "averages. Resume with the same ema_decay (or without ema_model)."
+            )
 
     # 1. Model
     model_incompat = model.load_state_dict(payload["model_state_dict"], strict=strict)

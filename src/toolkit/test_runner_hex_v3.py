@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from resume_utils_hex_v3 import save_resume_checkpoint
+from resume_utils_hex_v3 import EMADecayError, save_resume_checkpoint
 from runner_hex_v3 import (
     HexTrainingRunner,
     RunnerConfig,
@@ -985,6 +985,36 @@ class TestFullResumeEquivalence(unittest.TestCase):
                                resume_from=first.ckpt_mgr.resume_path, resume_trusted=True)
             with self.assertRaisesRegex(ValueError, "decay"):
                 _seeded_runner(out, cfg).maybe_resume()
+
+    def test_resume_checkpoint_records_config_decay(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            first = _seeded_runner(out, self._cfg(out, 1))
+            first.run()
+            payload = torch.load(first.ckpt_mgr.resume_path, weights_only=False)
+            self.assertIn("ema_state_dict", payload)
+            self.assertEqual(payload["ema_decay"], 0.9)
+
+    def test_legacy_resume_without_decay_is_rejected_with_ema(self) -> None:
+        # Decision on Codex review #46 (PRRT_kwDOSwvSC86m2eei): a resume
+        # checkpoint with EMA state but no recorded decay fails closed while
+        # the EMA is on; with use_ema=False the resume still works.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            first = _seeded_runner(out, self._cfg(out, 1))
+            first.run()
+            path = first.ckpt_mgr.resume_path
+            payload = torch.load(path, weights_only=False)
+            del payload["ema_decay"]
+            torch.save(payload, path)
+            cfg = RunnerConfig(output_dir=str(out), num_epochs=2, ema_decay=0.9,
+                               resume_from=path, resume_trusted=True)
+            with self.assertRaisesRegex(EMADecayError, "without the decay"):
+                _seeded_runner(out, cfg).maybe_resume()
+            cfg = RunnerConfig(output_dir=str(out), num_epochs=2, use_ema=False,
+                               resume_from=path, resume_trusted=True)
+            report = _seeded_runner(out, cfg).maybe_resume()
+            self.assertFalse(report["ema_restored"])
 
     def test_resume_with_other_best_metric_does_not_adopt_foreign_best(self) -> None:
         # Runner half of the Codex-T1 fix on #46 (Equalita H7): the runner must

@@ -22,6 +22,7 @@ import torch
 import torch.nn as nn
 
 from resume_utils_hex_v3 import (
+    EMADecayError,
     as_step_count,
     build_resume_payload,
     load_resume_checkpoint,
@@ -149,9 +150,11 @@ class TestRoundtrip(unittest.TestCase):
         payload = build_resume_payload(model=model,
                                        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
                                        epoch=0, ema_state_dict=ema.state_dict(),
+                                       ema_decay=0.9,
                                        include_python_rng=False, include_numpy_rng=False)
         self.assertIn("ema_state_dict", payload)
         self.assertEqual(int(payload["ema_state_dict"]["n_averaged"]), 1)
+        self.assertEqual(payload["ema_decay"], 0.9)
 
     def test_missing_fields_raise(self) -> None:
         model = _model()
@@ -178,6 +181,143 @@ class TestRoundtrip(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             load_resume_checkpoint(self.path, model=_model(),
                                    optimizer=torch.optim.SGD(_model().parameters(), lr=0.1))
+
+
+class TestEmaDecayContract(unittest.TestCase):
+    """Codex review #46 (PRRT_kwDOSwvSC86m2eei): EMA state and its decay
+    travel together. Saving EMA state without a decay, restoring it without
+    the current decay, or restoring a checkpoint that never recorded one
+    would let a 0.9-average continue as a 0.5-average unnoticed."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "resume.pt"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _ema(model: nn.Module, decay: float) -> torch.optim.swa_utils.AveragedModel:
+        return torch.optim.swa_utils.AveragedModel(
+            model, multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(decay),
+            use_buffers=True)
+
+    def _save(self, **kw):
+        torch.manual_seed(0)
+        model = _model()
+        ema = self._ema(model, 0.9)
+        ema.update_parameters(model)
+        return save_resume_checkpoint(
+            self.path, model=model, optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+            epoch=1, ema_state_dict=ema.state_dict(),
+            include_python_rng=False, include_numpy_rng=False, **kw)
+
+    def _load(self, **kw):
+        torch.manual_seed(1)
+        model = _model()
+        before = {k: v.clone() for k, v in model.state_dict().items()}
+        return model, before, lambda: load_resume_checkpoint(
+            self.path, model=model, optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+            **kw)
+
+    def test_build_payload_requires_decay_with_ema_state(self) -> None:
+        model = _model()
+        ema = self._ema(model, 0.9)
+        with self.assertRaisesRegex(EMADecayError, "without ema_decay"):
+            build_resume_payload(model=model,
+                                 optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+                                 epoch=0, ema_state_dict=ema.state_dict(),
+                                 include_python_rng=False, include_numpy_rng=False)
+
+    def test_save_requires_decay_and_writes_nothing(self) -> None:
+        with self.assertRaisesRegex(EMADecayError, "without ema_decay"):
+            self._save()
+        self.assertFalse(self.path.exists())
+
+    def test_invalid_decay_is_rejected_on_save(self) -> None:
+        for bad in (float("nan"), float("inf"), -0.1, 1.5, True, "0.9"):
+            with self.subTest(decay=bad):
+                with self.assertRaises(EMADecayError):
+                    self._save(ema_decay=bad)
+                self.assertFalse(self.path.exists())
+
+    def test_decay_without_ema_state_is_not_recorded(self) -> None:
+        model = _model()
+        payload = build_resume_payload(model=model,
+                                       optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+                                       epoch=0, ema_decay=0.9,
+                                       include_python_rng=False, include_numpy_rng=False)
+        self.assertNotIn("ema_decay", payload)
+        self.assertNotIn("ema_state_dict", payload)
+
+    def test_error_is_a_value_error(self) -> None:
+        self.assertTrue(issubclass(EMADecayError, ValueError))
+
+    def test_matching_decay_restores(self) -> None:
+        self._save(ema_decay=0.9)
+        _, _, load = self._load(ema_model=self._ema(_model(), 0.9), ema_decay=0.9)
+        report = load()
+        self.assertTrue(report["ema_restored"])
+        self.assertEqual(report["ema_decay"], 0.9)
+
+    def test_load_requires_current_decay(self) -> None:
+        self._save(ema_decay=0.9)
+        target_ema = self._ema(_model(), 0.5)
+        ema_before = {k: v.clone() for k, v in target_ema.state_dict().items()}
+        model, before, load = self._load(ema_model=target_ema)
+        with self.assertRaisesRegex(EMADecayError, "ema_decay was not given"):
+            load()
+        for k, v in before.items():
+            self.assertTrue(torch.equal(v, model.state_dict()[k]), msg=k)
+        for k, v in ema_before.items():
+            self.assertTrue(torch.equal(v, target_ema.state_dict()[k]), msg=k)
+
+    def test_mismatching_decay_is_rejected(self) -> None:
+        self._save(ema_decay=0.9)
+        model, before, load = self._load(ema_model=self._ema(_model(), 0.5), ema_decay=0.5)
+        with self.assertRaisesRegex(EMADecayError, "decay 0.9"):
+            load()
+        for k, v in before.items():
+            self.assertTrue(torch.equal(v, model.state_dict()[k]), msg=k)
+
+    def test_invalid_current_decay_is_rejected(self) -> None:
+        self._save(ema_decay=0.9)
+        for bad in (float("nan"), 2.0, "0.9"):
+            with self.subTest(decay=bad):
+                _, _, load = self._load(ema_model=self._ema(_model(), 0.9), ema_decay=bad)
+                with self.assertRaises(EMADecayError):
+                    load()
+
+    def _set_recorded_decay(self, value=None) -> None:
+        payload = torch.load(self.path, weights_only=True)
+        if value is None:
+            del payload["ema_decay"]
+        else:
+            payload["ema_decay"] = value
+        torch.save(payload, self.path)
+
+    def test_legacy_checkpoint_without_decay_fails_closed(self) -> None:
+        # Decision: a checkpoint with EMA state but no recorded decay (written
+        # before the decay was mandatory) cannot be continued with an EMA.
+        self._save(ema_decay=0.9)
+        self._set_recorded_decay()
+        model, before, load = self._load(ema_model=self._ema(_model(), 0.9), ema_decay=0.9)
+        with self.assertRaisesRegex(EMADecayError, "without the decay"):
+            load()
+        for k, v in before.items():
+            self.assertTrue(torch.equal(v, model.state_dict()[k]), msg=k)
+        # The documented way out: resume without ema_model.
+        _, _, load = self._load()
+        report = load()
+        self.assertFalse(report["ema_restored"])
+        self.assertIsNone(report["ema_decay"])
+
+    def test_malformed_recorded_decay_fails_closed(self) -> None:
+        self._save(ema_decay=0.9)
+        self._set_recorded_decay(value=float("nan"))
+        _, _, load = self._load(ema_model=self._ema(_model(), 0.9), ema_decay=0.9)
+        with self.assertRaisesRegex(EMADecayError, "checkpoint ema_decay"):
+            load()
 
 
 class TestValidateBeforeMutation(unittest.TestCase):

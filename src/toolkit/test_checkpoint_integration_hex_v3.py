@@ -38,7 +38,7 @@ from checkpoint_integration_hex_v3 import (
     CheckpointDurabilityError,
     CheckpointIntegrationManager,
 )
-from resume_utils_hex_v3 import save_resume_checkpoint
+from resume_utils_hex_v3 import EMADecayError, save_resume_checkpoint
 
 
 # ------------------------------------------------------------------
@@ -1175,15 +1175,17 @@ class TestResumeEmaState(_TmpRootCase):
             ema.update_parameters(model)
         mgr = self._make_manager()
         report = mgr.save_resume(model=model, optimizer=optimizer, epoch=0,
-                                 ema_state_dict=ema.state_dict(),
+                                 ema_state_dict=ema.state_dict(), ema_decay=0.9,
                                  include_python_rng=False, include_numpy_rng=False)
         self.assertTrue(report["has_ema_state"])
 
         torch.manual_seed(1)
         model2 = build_test_model()
         ema2 = self._ema(model2)
-        loaded = mgr.load_resume(model=model2, optimizer=build_test_optimizer(model2), ema_model=ema2)
+        loaded = mgr.load_resume(model=model2, optimizer=build_test_optimizer(model2),
+                                 ema_model=ema2, ema_decay=0.9)
         self.assertTrue(loaded["ema_restored"])
+        self.assertEqual(loaded["ema_decay"], 0.9)
         self.assertEqual(int(ema2.n_averaged.item()), 3)
         for key, value in ema.state_dict().items():
             self.assertTrue(torch.equal(value, ema2.state_dict()[key]), msg=key)
@@ -1221,6 +1223,74 @@ class TestResumeEmaState(_TmpRootCase):
                                  ema_model=self._ema(model))
         self.assertFalse(loaded["has_ema_state"])
         self.assertFalse(loaded["ema_restored"])
+
+    # --- Decay contract (Codex review #46, PRRT_kwDOSwvSC86m2eei) ---
+
+    def test_save_resume_requires_decay_with_ema_state(self) -> None:
+        # Without the decay a later resume cannot detect a different one:
+        # save_resume must refuse, write nothing, and fail on every rank.
+        model = build_test_model()
+        ema = self._ema(model)
+        ema.update_parameters(model)
+        for main in (True, False):
+            with self.subTest(is_main_process=main):
+                mgr = self._make_manager(is_main_process=main)
+                with self.assertRaisesRegex(EMADecayError, "without ema_decay"):
+                    mgr.save_resume(model=model, optimizer=build_test_optimizer(model),
+                                    epoch=0, ema_state_dict=ema.state_dict(),
+                                    include_python_rng=False, include_numpy_rng=False)
+                self.assertFalse(Path(mgr.resume_path).exists())
+
+    def test_load_resume_requires_current_decay(self) -> None:
+        torch.manual_seed(0)
+        model = build_test_model()
+        ema = self._ema(model)
+        ema.update_parameters(model)
+        mgr = self._make_manager()
+        mgr.save_resume(model=model, optimizer=build_test_optimizer(model), epoch=0,
+                        ema_state_dict=ema.state_dict(), ema_decay=0.9,
+                        include_python_rng=False, include_numpy_rng=False)
+        torch.manual_seed(1)
+        target = build_test_model()
+        target_ema = self._ema(target)
+        before = {k: v.clone() for k, v in target.state_dict().items()}
+        ema_before = {k: v.clone() for k, v in target_ema.state_dict().items()}
+        with self.assertRaisesRegex(EMADecayError, "ema_decay was not given"):
+            mgr.load_resume(model=target, optimizer=build_test_optimizer(target),
+                            ema_model=target_ema)
+        for k, v in before.items():
+            self.assertTrue(torch.equal(v, target.state_dict()[k]), msg=k)
+        for k, v in ema_before.items():
+            self.assertTrue(torch.equal(v, target_ema.state_dict()[k]), msg=k)
+
+    def test_legacy_resume_without_decay_metadata_fails_closed(self) -> None:
+        # A checkpoint written before the decay became mandatory carries EMA
+        # state but no ema_decay. Its decay is unknown, so continuing it with
+        # an EMA is refused; resuming without ema_model still works.
+        torch.manual_seed(0)
+        model = build_test_model()
+        ema = self._ema(model)
+        ema.update_parameters(model)
+        mgr = self._make_manager()
+        mgr.save_resume(model=model, optimizer=build_test_optimizer(model), epoch=3,
+                        ema_state_dict=ema.state_dict(), ema_decay=0.9,
+                        include_python_rng=False, include_numpy_rng=False)
+        payload = torch.load(mgr.resume_path, weights_only=True)
+        del payload["ema_decay"]
+        torch.save(payload, mgr.resume_path)
+
+        torch.manual_seed(1)
+        target = build_test_model()
+        before = {k: v.clone() for k, v in target.state_dict().items()}
+        with self.assertRaisesRegex(EMADecayError, "without the decay"):
+            mgr.load_resume(model=target, optimizer=build_test_optimizer(target),
+                            ema_model=self._ema(target), ema_decay=0.9)
+        for k, v in before.items():
+            self.assertTrue(torch.equal(v, target.state_dict()[k]), msg=k)
+        report = mgr.load_resume(model=target, optimizer=build_test_optimizer(target))
+        self.assertEqual(report["epoch"], 3)
+        self.assertFalse(report["ema_restored"])
+        self.assertIsNone(report["ema_decay"])
 
 
 if __name__ == "__main__":

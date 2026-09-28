@@ -61,9 +61,24 @@ MUTANTS = (
            "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
     Mutant(CK, "        if disk_name != recorded_name:\n", "        if False:\n",
            "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
-    Mutant("resume_utils_hex_v3.py", "        and float(recorded_decay) != float(ema_decay)\n",
-           "        and False\n",
+    Mutant("resume_utils_hex_v3.py", "        if recorded != current_decay:\n",
+           "        if False:\n",
            "test_checkpoint_integration_hex_v3.TestResumeEmaState"),
+    # Codex review #46 (PRRT_kwDOSwvSC86m2eei): the decay is mandatory with EMA
+    # state -- on save, for the current EMA on load, and in the checkpoint.
+    Mutant("resume_utils_hex_v3.py", "    if ema_state_dict is None:\n        return None\n",
+           "    if ema_state_dict is None or ema_decay is None:\n        return None\n",
+           "test_resume_utils_hex_v3.TestEmaDecayContract"),
+    Mutant("resume_utils_hex_v3.py",
+           '    if ema_model is not None and "ema_state_dict" in payload:\n        # Fail-closed',
+           '    if ema_model is not None and "ema_state_dict" in payload and ema_decay is not None:\n'
+           "        # Fail-closed",
+           "test_resume_utils_hex_v3.TestEmaDecayContract"),
+    Mutant("resume_utils_hex_v3.py",
+           "        if recorded_decay is None:\n            raise EMADecayError(\n",
+           "        if recorded_decay is None:\n            recorded_decay = ema_decay\n"
+           "        if False:\n            raise EMADecayError(\n",
+           "test_resume_utils_hex_v3.TestEmaDecayContract"),
     # Resume best restore: trust the record without checking best.pt.
     Mutant(CK, "        if not at_least_as_good:\n", "        if False:\n",
            "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
