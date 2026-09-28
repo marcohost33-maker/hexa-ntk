@@ -281,3 +281,17 @@
 | 8C279370377CAE96 | 2026-09-28 00:00 | src/toolkit | in-repo derived, E0927-03 trajectory is the split unit, override may not split a trajectory: dataset_split_hex_v3.py |
 | 4CC7EC1399C817F1 | 2026-09-28 00:00 | src/toolkit | in-repo derived, E0927-03 invariant tests over seeds, single-dt split pinned: test_dataset_split_hex_v3.py |
 | 8D8857A4ED6CF6F8 | 2026-09-28 00:00 | src/toolkit | in-repo derived, H7 regression resume with switched best metric: test_runner_hex_v3.py |
+
+## src/toolkit/ — Codex review of PR #46 after merging main (append-only, 2026-09-28)
+
+> PRRT_kwDOSwvSC86m2eei: EMA resume state now requires its decay on save and the
+> current decay on load (EMADecayError, fail-closed; checkpoints without decay
+> metadata resume only without EMA). PRRT_kwDOSwvSC86m2eeU: README counts pinned
+> to the tree in TestDocsContract. Rows above remain lineage.
+
+| BA047FF01BB4E3F5 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: save_resume validates the EMA decay on every rank: checkpoint_integration_hex_v3.py |
+| B9FD4DF90F15C832 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: EMADecayError, decay mandatory on save and load: resume_utils_hex_v3.py |
+| 48AC0F8C6AA0A75C | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: manager round-trip with decay, save/load/legacy decay contract: test_checkpoint_integration_hex_v3.py |
+| 1D9EF5DEA81373F6 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: TestEmaDecayContract: test_resume_utils_hex_v3.py |
+| 5FB2BB8609C96209 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: runner records decay, legacy resume rejected with EMA: test_runner_hex_v3.py |
+| ED29A89E81B871F6 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: README counts pinned to the tree: test_hex_timestep_contract.py |

@@ -5,6 +5,16 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Codex-Review #46 nach Merge von `main` (2026-09-28).**
+  _EMA-Decay (PRRT_kwDOSwvSC86m2eei):_ die oeffentlichen Resume-Helfer nahmen `ema_state_dict`
+  ohne `ema_decay` an, und der Loader uebersprang den Vergleich, sobald eine Seite fehlte (stilles
+  Hybrid-EMA). Jetzt Pflicht beim Speichern (auch im Manager, auf jedem Rang) und beim
+  Wiederherstellen, Gleichheit gefordert, `EMADecayError` vor jedem Restore. Entscheid: Alt-Checkpoints
+  ohne Decay-Metadaten scheitern mit EMA (fail-closed), Ausweg Resume ohne EMA.
+  _Zaehlangaben (PRRT_kwDOSwvSC86m2eeU):_ README-Zahlen aus eigenem Lauf, am Baum festgenagelt
+  (`TestDocsContract`). Mutationsprobe: Decay-Mutant auf den neuen Code, drei Vertrags-Mutanten neu.
+  _Evidenz:_ `results/2026-09-28_codex46-review_local-gate.log`.
+
 - [x] **Review-Haertung 2026-09-27: Issues #40 und #42 geschlossen, Resume vollstaendig.**
   Alle Befunde vor dem Fix reproduziert (`results/2026-09-27_review-hardening_local-gate.log`).
   _Resume/Checkpoint:_ Der Resume-Checkpoint traegt jetzt den EMA-Zustand und den Best-Wert
