@@ -44,22 +44,25 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 - **Kein Nachweis physikalischer Korrektheit** einer PDE-Loesung. Die Gates pruefen
   Software-Integritaet (Determinismus, Round-Trips, Shapes), nicht Physik.
 
-## Reifegrad / Evidenz (Lauf 2026-09-27, lokal, Exit-Codes gesehen)
+## Reifegrad / Evidenz (Lauf 2026-09-28, lokal, Exit-Codes gesehen)
 
 | Gate | Kommando | Ergebnis |
 |---|---|---|
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
-| Provenance | `python scripts/verify_sources.py` | 22 Toolkit- + 2 Spec-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 378/378, exit 0 |
-| Coverage | `python -m coverage run ... && python -m coverage report` | 89,6 % gesamt (Branch, `fail_under = 87`), exit 0 |
-| Mutation | `python scripts/mutation_probe.py` | 19/19 Mutanten getoetet (Baseline gruen), exit 0 |
+| Provenance | `python scripts/verify_sources.py` | 23 Toolkit- + 2 Spec-Eintraege, exit 0 |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 429 Tests, OK (5 skipped: 3 POSIX-only, 2 Symlink-Recht unter Windows), exit 0 |
+| Coverage | `python -m coverage run ... && python -m coverage report` | 88,9 % gesamt (Branch, `fail_under = 87`), exit 0 |
+| Mutation | `python scripts/mutation_probe.py` | 21/22 Mutanten getoetet (Baseline gruen), exit 1: M02 ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped) |
 
-Lokale Umgebung dieses Laufs: Python 3.12.3, `torch` 2.6.0 (PyPI-Wheel `+cu124`, auf
-CPU ausgefuehrt — der CPU-Wheel-Index war in der Laufumgebung gesperrt), `numpy` 2.5.3.
-Die CI faehrt dieselbe Kette auf **Python 3.12** mit `torch==2.6.0` (CPU-Wheel).
-Log: `results/2026-09-27_review-hardening_local-gate.log`. Fruehere Laeufe (z. B.
-2026-08-26: 47 Doctests, 166 Tests, 82 %) bleiben dort als historische Evidenz stehen.
+Lokale Umgebung dieses Laufs: Windows 11, Python 3.12.10, `torch` 2.6.0+cpu, `numpy` 2.5.3;
+Stand nach dem Merge von `main` (e4a0e5e, Engine 3.0.1 aus PR #45) plus den Fixes der
+Codex-Threads auf #46. Die CI faehrt dieselbe Kette auf **Python 3.12** mit `torch==2.6.0`
+(CPU-Wheel, Linux). Log: `results/2026-09-28_codex46-review_local-gate.log`. Fruehere Laeufe
+(2026-09-27: 378 Tests, 19/19 Mutanten; 2026-08-26: 166 Tests, 82 %) bleiben in ihren Logs
+als historische Evidenz stehen. Die Zaehlangaben dieses Abschnitts zum aktuellen Baum
+(Tests, Provenance-Eintraege, Doctests, Mutanten) nagelt `TestDocsContract` in
+`src/toolkit/test_hex_timestep_contract.py` am Baum selbst fest.
 
 **Resume ist vollstaendig (seit 2026-09-27).** `HexTrainingRunner.maybe_resume()` laedt
 exakt `config.resume_from` (fail-closed bei fehlender Datei, PR #31) und stellt neben
@@ -70,15 +73,14 @@ Wahrheit ist `best.pt` im eigenen Checkpoint-Ordner: uebernommen wird dessen Wer
 dieselbe Policy traegt und mindestens so gut ist wie der im Resume notierte (besser = spaetere
 Epoche desselben Laufs); fehlt `best.pt` oder ist es schlechter (Fremd-Resume, ersetzte Datei),
 wird nichts uebernommen und nichts blockiert. Zusaetzlich muessen Lauf-ID und Metrikname
-passen, und ein Resume mit anderem `ema_decay` wird abgelehnt (kein stilles Hybrid-EMA).
+passen. EMA-Zustand wird nur zusammen mit seinem `ema_decay` gespeichert; ein Resume mit EMA
+verlangt den aktuellen Decay und lehnt fehlenden oder anderen Decay mit `EMADecayError` ab,
+bevor irgendetwas wiederhergestellt ist (kein stilles Hybrid-EMA). Aeltere Resume-Checkpoints
+mit EMA-Zustand, aber ohne Decay-Metadaten, lassen sich nur ohne EMA fortsetzen (das EMA
+startet dann neu) — ihr Decay ist nicht mehr pruefbar.
 Regressionstest:
 unterbrochener Lauf (2 + 2 Epochen) == ununterbrochener Lauf (4 Epochen), bitgleich fuer
 Modell und EMA.
-
-**Branch-Hinweis:** Der Fix `codex/hex-cfl-positivity-contract` (PR #45) fuegt zwei Doctests hinzu
-(49 statt 47 erwartet) und hebt die Engine-Version auf 3.0.1. Die obige Tabelle ist
-bewusst historische Evidenz des Laufs vom 2026-08-26 und wird nicht als neuer Lauf
-umetikettiert; ein neuer PASS wird erst nach CI/Engine-Gate als Evidenz eingetragen.
 
 **Metrik:** `val_nrmse` ist jetzt der gepoolte relative L2-Fehler
 `sqrt(sum |pred - y|^2 / sum |y|^2)` ueber den Validierungssatz (vorher eine Kopie des
@@ -105,8 +107,8 @@ python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/wh
 python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 378 Unit-Tests (2026-09-27) + Coverage-Gate
-python scripts/mutation_probe.py                               # optional: 19 Mutanten der 09-27-Fixes
+python -m coverage report                                      # 429 Unit-Tests (2026-09-28) + Coverage-Gate
+python scripts/mutation_probe.py                               # optional: 22 Mutanten der Review-Fixes
 ```
 
 CI (`.github/workflows/ci.yml`), beide Jobs scheitern mit exit != 0 (ob `tests (cpu)` auch
@@ -114,7 +116,7 @@ den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (378, Stand 2026-09-27) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (429, Stand 2026-09-28) unter Branch-Coverage.
 
 ## Struktur
 
