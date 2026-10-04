@@ -646,6 +646,107 @@ class TestCheckpointIntegrationManager(unittest.TestCase):
         self.assertEqual(resume_report["checkpoint_semantics"], "resume_full")
 
 
+
+class TestCounterMetadataContract(unittest.TestCase):
+    """epoch/global_step are exact, non-negative integer metadata."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmpdir.name) / "checkpoints"
+
+    def tearDown(self) -> None:
+        self.tmpdir.cleanup()
+
+    def _make_manager(self) -> CheckpointIntegrationManager:
+        return CheckpointIntegrationManager(self.root)
+
+    def test_last_checkpoint_rejects_invalid_epoch_before_write(self) -> None:
+        invalid = (
+            float("inf"),
+            float("-inf"),
+            float("nan"),
+            1.5,
+            Fraction(3, 2),
+            -1,
+        )
+        for value in invalid:
+            with self.subTest(value=repr(value)):
+                mgr = self._make_manager()
+                with self.assertRaises(ValueError):
+                    mgr.save_last_model_checkpoint(
+                        model=build_test_model(),
+                        epoch=value,
+                    )
+                self.assertFalse(Path(mgr.last_model_path).exists())
+
+    def test_bool_counter_is_rejected_as_type_error(self) -> None:
+        mgr = self._make_manager()
+        with self.assertRaises(TypeError):
+            mgr.save_last_model_checkpoint(
+                model=build_test_model(),
+                epoch=True,
+            )
+
+    def test_resume_rejects_invalid_global_step_before_write(self) -> None:
+        mgr = self._make_manager()
+        model = build_test_model()
+        optimizer = build_test_optimizer(model)
+        with self.assertRaises(ValueError):
+            mgr.save_resume(
+                model=model,
+                optimizer=optimizer,
+                epoch=0,
+                global_step=float("inf"),
+                include_python_rng=False,
+                include_numpy_rng=False,
+            )
+        self.assertFalse(Path(mgr.resume_path).exists())
+
+    def test_integral_compatible_scalars_are_normalized(self) -> None:
+        mgr = self._make_manager()
+        report = mgr.save_last_model_checkpoint(
+            model=build_test_model(),
+            epoch=Fraction(3, 1),
+            global_step=torch.tensor(4.0),
+        )
+        self.assertEqual(report["epoch"], 3)
+        self.assertEqual(report["global_step"], 4)
+        payload = torch.load(mgr.last_model_path, weights_only=True)
+        self.assertEqual(payload["extra"]["epoch"], 3)
+        self.assertEqual(payload["extra"]["global_step"], 4)
+
+    def test_load_rejects_invalid_counter_before_model_mutation(self) -> None:
+        mgr = self._make_manager()
+        source_model = build_test_model()
+        source_optimizer = build_test_optimizer(source_model)
+        payload = {
+            "checkpoint_type": "resume",
+            "checkpoint_semantics": "resume_full",
+            "schema_version": "1.0",
+            "epoch": float("inf"),
+            "model_state_dict": source_model.state_dict(),
+            "optimizer_state_dict": source_optimizer.state_dict(),
+        }
+        torch.save(payload, mgr.resume_path)
+
+        destination_model = build_test_model()
+        destination_optimizer = build_test_optimizer(destination_model)
+        before = {
+            key: value.detach().clone()
+            for key, value in destination_model.state_dict().items()
+        }
+        with self.assertRaises(ValueError):
+            mgr.load_resume(
+                model=destination_model,
+                optimizer=destination_optimizer,
+                restore_rng=False,
+            )
+        for key, value in before.items():
+            self.assertTrue(
+                torch.equal(value, destination_model.state_dict()[key])
+            )
+
+
 # ------------------------------------------------------------------
 # Tests: best-metric input contract + state ordering (issue #37)
 # ------------------------------------------------------------------
