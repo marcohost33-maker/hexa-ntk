@@ -51,7 +51,7 @@ def render_status_block(evidence: CIEvidence) -> str:
     return "\n".join(
         [
             BEGIN,
-            f"> main \`{evidence.main_sha}\` · CI run \`{evidence.workflow_run_id}\`",
+            f"> main `{evidence.main_sha}` · CI run `{evidence.workflow_run_id}`",
             "",
             "| Gate | Verifizierter letzter Main-Lauf |",
             "|---|---|",
