@@ -230,3 +230,12 @@
 > result raises (e.g. h=10**400, D_v=10**800 -> exactly 0.25). Prior rows remain lineage.
 
 | 9BF8C7A71221F307 | 2026-09-28 00:00 | src/toolkit | in-repo derived, PR #47 Codex follow-up (exact operand validation): test_hex_timestep_contract.py |
+
+
+## src/toolkit/ — Warmstart/EMA coverage ratchet 2026-10-04 (Codex)
+
+> Test-only salvage from the useful, still-valid parts of draft PR #20.
+> No production-code semantics are changed; prior rows remain lineage.
+
+| B5C8477B5F985FD3 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/coverage-ratchet-warmstart-ema: test_ema_hex_v3.py |
+| 665DC949ADA471EA | 2026-10-04 23:00 | src/toolkit | in-repo created, codex/coverage-ratchet-warmstart-ema: test_warmstart_utils_hex_v3.py |
