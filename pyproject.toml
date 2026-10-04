@@ -39,8 +39,8 @@ source = ["src/toolkit"]
 [tool.coverage.report]
 # Testfiles selbst zaehlen nicht als abzudeckender Code.
 omit = ["*/test_*.py"]
-# Ratchet-Schwelle: Ist-Wert 82% (verified 2026-07-03 nach runner_hex_v3-Tests
-# 25%->79%, results/), Schwelle knapp darunter — Best Practice: unter Ist setzen
-# und mit neuen Tests hochziehen, nie ueber Ist wuenschen (Gate darf nicht durch
-# Absenken erschlichen werden). Zielkorridor: 80-90% (docs/ROADMAP.md).
-fail_under = 79
+# Ratchet-Schwelle: PR #57 misst 90% Branch-Coverage unter der kanonischen
+# CI-Basis Python 3.12 / torch 2.6.0 (355 Toolkit-Tests). Die Schwelle bleibt
+# bewusst knapp unter dem gemessenen Ist-Wert, damit kleine, legitime Pfade nicht
+# sofort das Gate brechen, aber die erreichte Testtiefe nicht wieder verloren geht.
+fail_under = 88
