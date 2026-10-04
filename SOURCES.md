@@ -230,3 +230,13 @@
 > result raises (e.g. h=10**400, D_v=10**800 -> exactly 0.25). Prior rows remain lineage.
 
 | 9BF8C7A71221F307 | 2026-09-28 00:00 | src/toolkit | in-repo derived, PR #47 Codex follow-up (exact operand validation): test_hex_timestep_contract.py |
+
+
+## src/toolkit/ — Runner evidence semantics 2026-10-04 (Codex)
+
+> Validation no longer aliases loss to nRMSE, empty validation fails closed,
+> configured best metrics must exist, and EMA/raw validation shares the canonical
+> OperatorAdapter path. Prior rows remain lineage.
+
+| C51BEA39593F07A7 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/runner-evidence-semantics-p0: runner_hex_v3.py |
+| BFD8DC30774789CF | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/runner-evidence-semantics-p0: test_runner_hex_v3.py |
