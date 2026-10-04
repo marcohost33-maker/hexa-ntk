@@ -413,6 +413,55 @@ class TestCheckpointIntegrationManager(unittest.TestCase):
                 msg=f"Mismatch in {key}",
             )
 
+    def test_resume_restores_scheduler_before_optimizer(self) -> None:
+        mgr = self._make_manager()
+        model = build_test_model()
+        optimizer = build_test_optimizer(model)
+        scheduler = build_test_scheduler(optimizer)
+        run_one_step(model, optimizer)
+        scheduler.step()
+
+        mgr.save_resume(
+            model=model,
+            optimizer=optimizer,
+            epoch=2,
+            scheduler=scheduler,
+            include_python_rng=False,
+            include_numpy_rng=False,
+            include_torch_rng=False,
+        )
+
+        dst_model = build_test_model()
+        dst_optimizer = build_test_optimizer(dst_model)
+        dst_scheduler = build_test_scheduler(dst_optimizer)
+        order: list[str] = []
+
+        optimizer_load = dst_optimizer.load_state_dict
+        scheduler_load = dst_scheduler.load_state_dict
+
+        def record_optimizer(state):
+            order.append("optimizer")
+            return optimizer_load(state)
+
+        def record_scheduler(state):
+            order.append("scheduler")
+            return scheduler_load(state)
+
+        with mock.patch.object(
+            dst_optimizer, "load_state_dict", side_effect=record_optimizer
+        ), mock.patch.object(
+            dst_scheduler, "load_state_dict", side_effect=record_scheduler
+        ):
+            mgr.load_resume(
+                model=dst_model,
+                optimizer=dst_optimizer,
+                scheduler=dst_scheduler,
+                restore_rng=False,
+                trusted=False,
+            )
+
+        self.assertEqual(order, ["scheduler", "optimizer"])
+
     def test_load_resume_explicit_path_overrides_manager_default(self) -> None:
         """The existence check and actual load must refer to the same file."""
         mgr = self._make_manager()
