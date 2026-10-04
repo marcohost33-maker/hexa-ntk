@@ -39,6 +39,7 @@ import torch
 import torch.nn as nn
 
 from resume_utils_hex_v3 import (
+    _exact_nonnegative_int,
     build_resume_payload,
     load_resume_checkpoint,
 )
@@ -311,8 +312,12 @@ class CheckpointIntegrationManager:
         payload_extra = {
             "metric_name": metric_name,
             "metric_value": metric,
-            "epoch": int(epoch),
-            "global_step": int(global_step) if global_step is not None else None,
+            "epoch": _exact_nonnegative_int(epoch, name="epoch"),
+            "global_step": (
+                _exact_nonnegative_int(global_step, name="global_step")
+                if global_step is not None
+                else None
+            ),
             "best_policy": asdict(self.best_policy),
         }
         if extra is not None:
@@ -366,6 +371,12 @@ class CheckpointIntegrationManager:
 
         last.pt MUST NEVER be interpreted as a resume checkpoint.
         """
+        epoch_value = _exact_nonnegative_int(epoch, name="epoch")
+        global_step_value = (
+            _exact_nonnegative_int(global_step, name="global_step")
+            if global_step is not None
+            else None
+        )
         if not self.is_main_process:
             return {
                 "saved": False,
@@ -374,8 +385,8 @@ class CheckpointIntegrationManager:
             }
 
         payload_extra = {
-            "epoch": int(epoch),
-            "global_step": int(global_step) if global_step is not None else None,
+            "epoch": epoch_value,
+            "global_step": global_step_value,
         }
         if extra is not None:
             payload_extra["user_extra"] = extra
@@ -391,8 +402,8 @@ class CheckpointIntegrationManager:
             "saved": True,
             "checkpoint_semantics": "last_model_only",
             "path": path,
-            "epoch": int(epoch),
-            "global_step": int(global_step) if global_step is not None else None,
+            "epoch": epoch_value,
+            "global_step": global_step_value,
         }
 
     # ------------------------------------------------------------------
@@ -420,6 +431,12 @@ class CheckpointIntegrationManager:
         Uses build_resume_payload() + AtomicCheckpointWriter for
         atomic writing with unique temp file names.
         """
+        epoch_value = _exact_nonnegative_int(epoch, name="epoch")
+        global_step_value = (
+            _exact_nonnegative_int(global_step, name="global_step")
+            if global_step is not None
+            else None
+        )
         if not self.is_main_process:
             return {
                 "saved": False,
@@ -430,8 +447,8 @@ class CheckpointIntegrationManager:
         payload = build_resume_payload(
             model=model,
             optimizer=optimizer,
-            epoch=epoch,
-            global_step=global_step,
+            epoch=epoch_value,
+            global_step=global_step_value,
             scheduler=scheduler,
             grad_scaler=grad_scaler,
             extra=extra,
@@ -450,8 +467,8 @@ class CheckpointIntegrationManager:
             "checkpoint_path": self.resume_path,
             "checkpoint_type": "resume",
             "checkpoint_semantics": "resume_full",
-            "epoch": int(epoch),
-            "global_step": int(global_step) if global_step is not None else None,
+            "epoch": epoch_value,
+            "global_step": global_step_value,
             "requires_trusted_load": requires_trusted_load,
         }
 
