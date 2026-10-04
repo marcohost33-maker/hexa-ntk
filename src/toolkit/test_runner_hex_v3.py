@@ -224,6 +224,7 @@ class TestRunnerConfig(unittest.TestCase):
         self.assertIsNone(cfg.resume_from)
         self.assertEqual(cfg.warmup_steps, 0)
         self.assertEqual(cfg.warmup_start_factor, 0.01)
+        self.assertEqual(cfg.best_metric_name, "val_loss")
 
     def test_custom_values(self) -> None:
         cfg = RunnerConfig(
@@ -502,7 +503,7 @@ class TestEpochAndValidation(unittest.TestCase):
             runner = _make_runner(Path(tmpdir))
             report = runner._validate(epoch=0)
             self.assertIn("val_loss", report)
-            self.assertIn("val_nrmse", report)
+            self.assertNotIn("val_nrmse", report)
             self.assertTrue(report["used_ema"])
             self.assertEqual(report["n_batches"], 2)
 
@@ -514,6 +515,13 @@ class TestEpochAndValidation(unittest.TestCase):
             report = runner._validate(epoch=0)
             self.assertFalse(report["used_ema"])
             self.assertGreaterEqual(report["val_loss"], 0.0)
+
+    def test_validate_empty_loader_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = _make_runner(Path(tmpdir))
+            runner.val_loader = []
+            with self.assertRaisesRegex(RuntimeError, "zero batches"):
+                runner._validate(epoch=0)
 
 
 class TestFullRun(unittest.TestCase):
@@ -551,7 +559,6 @@ class TestNonFiniteValidationMetric(unittest.TestCase):
         return {
             "epoch": 0,
             "val_loss": value,
-            "val_nrmse": value,
             "n_batches": 2,
             "used_ema": True,
         }
@@ -578,7 +585,28 @@ class TestNonFiniteValidationMetric(unittest.TestCase):
                 record = json.loads(signatures[0].read_text(encoding="utf-8"))
                 self.assertEqual(record["kind"], "NaN_or_Inf_Metric")
                 self.assertEqual(record["locus"], "save_checkpoints_best_metric")
-                self.assertEqual(record["extra"], {"epoch": 0, "metric_name": "val_nrmse"})
+                self.assertEqual(record["extra"], {"epoch": 0, "metric_name": "val_loss"})
+
+    def test_missing_configured_metric_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            cfg = RunnerConfig(
+                output_dir=str(out),
+                best_metric_name="val_nrmse",
+            )
+            runner = _make_runner(out, config=cfg)
+            with self.assertRaisesRegex(KeyError, "absent from validation report"):
+                runner._save_checkpoints(
+                    epoch=0,
+                    val_report={
+                        "epoch": 0,
+                        "val_loss": 0.5,
+                        "n_batches": 2,
+                        "used_ema": True,
+                    },
+                    train_report={"mean_loss": 1.0},
+                )
+            self.assertFalse(Path(runner.ckpt_mgr.best_model_path).exists())
 
     def test_unrepresentable_metric_reaches_manager_contract(self) -> None:
         # Only NaN/inf are skipped; a value math.isfinite() cannot judge is
