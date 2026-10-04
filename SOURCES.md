@@ -240,3 +240,14 @@
 
 | 0000000000000000 | 2026-10-05 00:00 | src/toolkit | in-repo created, PR #57 resume coverage: test_resume_utils_hex_v3.py |
 | 0000000000000000 | 2026-10-05 00:00 | src/toolkit | in-repo created, PR #57 warmstart coverage: test_warmstart_utils_hex_v3.py |
+
+
+### Final branch pins from fail-closed CI gate
+
+| BB68B7256D44F01F | 2026-10-05 00:00 | src/toolkit | in-repo derived, PR #57 scheduler-before-optimizer restore: resume_utils_hex_v3.py |
+| 02C8D851DE6F94BE | 2026-10-05 00:00 | src/toolkit | in-repo derived, PR #57 validation/best-metric fail-closed semantics: runner_hex_v3.py |
+| 736EAA53B45934B2 | 2026-10-05 00:00 | src/toolkit | in-repo derived, PR #57 restore-order regression: test_checkpoint_integration_hex_v3.py |
+| B5C8477B5F985FD3 | 2026-10-05 00:00 | src/toolkit | in-repo derived, PR #57 EMA fallback/legacy-state regressions: test_ema_hex_v3.py |
+| 724276BC45641603 | 2026-10-05 00:00 | src/toolkit | in-repo created, PR #57 resume payload/RNG/loading regressions: test_resume_utils_hex_v3.py |
+| 1F21B0E506F57E0B | 2026-10-05 00:00 | src/toolkit | in-repo derived, PR #57 runner fail-closed regressions: test_runner_hex_v3.py |
+| 665DC949ADA471EA | 2026-10-05 00:00 | src/toolkit | in-repo created, PR #57 warmstart safety regressions: test_warmstart_utils_hex_v3.py |
