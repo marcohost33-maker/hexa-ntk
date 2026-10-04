@@ -230,3 +230,13 @@
 > result raises (e.g. h=10**400, D_v=10**800 -> exactly 0.25). Prior rows remain lineage.
 
 | 9BF8C7A71221F307 | 2026-09-28 00:00 | src/toolkit | in-repo derived, PR #47 Codex follow-up (exact operand validation): test_hex_timestep_contract.py |
+
+
+## src/toolkit/ — Resume restore-order hardening 2026-10-04 (Codex)
+
+> Scheduler state is restored after scheduler construction but before optimizer
+> state, with a regression that records the actual call order. Prior rows remain lineage.
+
+| AFC699CFBAA0A403 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/resume-restore-order-p1: resume_utils_hex_v3.py |
+| 01B34F570E59DD0F | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/resume-restore-order-p1: checkpoint_integration_hex_v3.py |
+| B37178AF2FEA27DF | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/resume-restore-order-p1: test_checkpoint_integration_hex_v3.py |
