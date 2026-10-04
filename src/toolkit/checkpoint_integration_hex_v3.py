@@ -540,8 +540,8 @@ class CheckpointIntegrationManager:
         Load a resume checkpoint.
 
         Delegates to load_resume_checkpoint from resume_utils_hex_v3.py
-        which handles the correct restore order:
-        1. model, 2. optimizer, 3. scheduler, 4. grad_scaler, 5. RNG
+        which handles the restore order:
+        1. model, 2. scheduler, 3. optimizer, 4. grad_scaler, 5. RNG
 
         path explicitly selects the resume checkpoint. If omitted, the
         manager-owned resume_path is used. Callers that expose a configurable
