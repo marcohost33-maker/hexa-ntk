@@ -244,10 +244,10 @@ def load_resume_checkpoint(
         If False (default), uses weights_only=True (safe path).
         If True, uses weights_only=False (for checkpoints with Python RNG states).
 
-    Restore order (PyTorch convention):
+    Restore order:
         1. model state
-        2. optimizer state
-        3. scheduler state
+        2. scheduler state (scheduler already constructed with optimizer)
+        3. optimizer state
         4. grad_scaler state
         5. RNG states
     """
@@ -270,14 +270,17 @@ def load_resume_checkpoint(
     # 1. Model
     model_incompat = model.load_state_dict(payload["model_state_dict"], strict=strict)
 
-    # 2. Optimizer (before scheduler — PyTorch convention)
-    optimizer.load_state_dict(payload["optimizer_state_dict"])
-
-    # 3. Scheduler
+    # 2. Scheduler. It must already be constructed with the optimizer.
+    # Restore its state before optimizer.load_state_dict() so the optimizer
+    # learning rates from the checkpoint are not overwritten by scheduler
+    # initialization/state restoration.
     scheduler_restored = False
     if scheduler is not None and "scheduler_state_dict" in payload:
         scheduler.load_state_dict(payload["scheduler_state_dict"])
         scheduler_restored = True
+
+    # 3. Optimizer
+    optimizer.load_state_dict(payload["optimizer_state_dict"])
 
     # 4. GradScaler
     grad_scaler_restored = False
