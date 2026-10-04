@@ -1,0 +1,22 @@
+{
+  "repository": "marcohost33-maker/hexa-ntk",
+  "main_sha": "e4a0e5e5f402f4b1df67443e090d6d2276fc8aba",
+  "workflow_run_id": 36478545347,
+  "tests_job_id": 109118231662,
+  "workflow_conclusion": "success",
+  "engine_doctests_passed": 49,
+  "engine_doctests_total": 49,
+  "engine_selftests_passed": 26,
+  "engine_selftests_total": 26,
+  "toolkit_tests": 299,
+  "toolkit_result": "OK",
+  "branch_coverage_percent": 83,
+  "coverage_fail_under": 79,
+  "python_selector": "3.12",
+  "torch": "2.6.0+cpu",
+  "numpy": "2.5.3",
+  "ruff": "0.16.4",
+  "coverage_py": "7.15.4",
+  "source": "GitHub Actions run #255 tests (cpu) decoded job log",
+  "claim_ceiling": "Observed in the successful 2026-09-28 CI log for this main SHA; not a rerun."
+}
