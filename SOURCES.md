@@ -240,3 +240,14 @@
 | AFC699CFBAA0A403 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/resume-restore-order-p1: resume_utils_hex_v3.py |
 | 01B34F570E59DD0F | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/resume-restore-order-p1: checkpoint_integration_hex_v3.py |
 | B37178AF2FEA27DF | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/resume-restore-order-p1: test_checkpoint_integration_hex_v3.py |
+
+
+## src/toolkit/ — Counter metadata contract 2026-10-04 (Codex)
+
+> Closes the ROADMAP float-to-int sibling: epoch/global_step are normalized as
+> exact non-negative integers and invalid metadata is rejected before checkpoint
+> writes or resume state mutation. Prior rows remain lineage.
+
+| 24206CC377238806 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/resume-restore-order-p1: resume_utils_hex_v3.py |
+| C85DB1A63D1CEB56 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/resume-restore-order-p1: checkpoint_integration_hex_v3.py |
+| 765102CDFBADC9F1 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/resume-restore-order-p1: test_checkpoint_integration_hex_v3.py |
