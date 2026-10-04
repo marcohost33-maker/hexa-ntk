@@ -96,6 +96,30 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   `OverflowError`; `dt_round_ndigits` wird nicht validiert (1.5 -> roher `TypeError`).
   _Quelle: `results/2026-09-26_issue39_local-gate.log` [5/5]._
 
+
+## Wave 7 — PR #57 branch status (2026-10-05)
+
+- [~] **Runner-/Checkpoint-Evidence-Semantik gehaertet.** Auf PR #57 emittiert
+  `_validate` nur noch `val_loss`; ein echtes nRMSE bleibt dem Benchmark-Modul
+  vorbehalten. Die konfigurierte Best-Metrik muss im Validation-Report vorhanden
+  sein (kein stiller Fallback), und ein leerer Validation-Loader bricht fail-closed ab.
+  Validation nutzt fuer Raw-/EMA-Gewichte denselben `OperatorAdapterV3`-Vertrag
+  wie Training. _PR-CI: 355/355 Toolkit-Tests PASS._
+- [~] **Resume-Restore-Reihenfolge korrigiert.** Scheduler-State wird nach
+  Scheduler-Konstruktion, aber vor `optimizer.load_state_dict` restauriert;
+  ein expliziter Regressionstest bindet die Reihenfolge.
+- [~] **Coverage-Ratchet 79 -> 88 vorbereitet.** PR #57 misst unter
+  Python 3.12.14 / torch 2.6.0+cpu **90 % Branch-Coverage**; neue gezielte
+  Testmodule decken Resume- und Warmstart-Vertraege ab, EMA-Legacy/Fallback-Pfade
+  sind erweitert. Erst nach Merge als Main-Evidenz markieren.
+- [ ] **Nach PR #57:** Best-Selection-State beim Resume persistieren und
+  EMA-validierte Best-Gewichte als eindeutig primären Selection-State abbilden.
+- [ ] **MetricSpec-Migration:** korrigierte per-sample nRMSE-Semantik versionieren,
+  Legacy-Reports nicht still umetikettieren; Nigin-Bridge entsprechend migrieren.
+- [ ] **Stateful Loader / Distributed Recovery:** torchdata-StatefulDataLoader
+  separat gegen committed/consumed Cursor falsifizieren; DCP/FSDP/2-rank als
+  eigene Evidence-Linie, nicht als allgemeiner Exact-Resume-Claim.
+
 ## Zurueckgestellt (bewusst, mit Begruendung)
 
 - [~] **Typing-Modernisierung (PEP 585/604).** Ruff `UP`-Regeln finden ~210 Stellen
