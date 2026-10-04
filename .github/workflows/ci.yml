@@ -32,6 +32,10 @@ jobs:
         # fail-closed: jedes Toolkit-Modul braucht einen SOURCES.md-Eintrag,
         # jeder Eintrag muss zur aktuellen Datei passen (SHA-256, LF-normalisiert).
         run: python scripts/verify_sources.py
+      - name: CI reality anchor
+        run: |
+          python scripts/test_ci_reality_anchor_v1.py
+          python scripts/ci_reality_anchor_v1.py --check README.md results/2026-09-28_main-ci-reality.json
 
   tests:
     name: tests (cpu)
