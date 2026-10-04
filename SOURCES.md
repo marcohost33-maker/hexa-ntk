@@ -230,3 +230,13 @@
 > result raises (e.g. h=10**400, D_v=10**800 -> exactly 0.25). Prior rows remain lineage.
 
 | 9BF8C7A71221F307 | 2026-09-28 00:00 | src/toolkit | in-repo derived, PR #47 Codex follow-up (exact operand validation): test_hex_timestep_contract.py |
+
+
+## src/toolkit/ — Wave 7 hardening derived forms 2026-10-05 (append-only, PR #57)
+
+> P0/P1 runner/resume semantics and focused coverage hardening. Initial zero
+> pins are deliberate placeholders only to let the fail-closed provenance gate
+> report the exact LF-normalized branch digests; they are replaced before review.
+
+| 0000000000000000 | 2026-10-05 00:00 | src/toolkit | in-repo created, PR #57 resume coverage: test_resume_utils_hex_v3.py |
+| 0000000000000000 | 2026-10-05 00:00 | src/toolkit | in-repo created, PR #57 warmstart coverage: test_warmstart_utils_hex_v3.py |
