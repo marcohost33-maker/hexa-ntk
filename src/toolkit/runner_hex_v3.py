@@ -188,7 +188,7 @@ class RunnerConfig:
 
     # Checkpointing
     save_every_n_epochs: int = 1
-    best_metric_name: str = "val_nrmse"
+    best_metric_name: str = "val_loss"
     best_metric_mode: str = "min"
     best_metric_min_delta: float = 1e-4
 
@@ -554,25 +554,26 @@ class HexTrainingRunner:
 
     @torch.no_grad()
     def _validate(self, epoch: int) -> Dict[str, Any]:
-        """
-        Run validation.
+        """Run validation through the same adapter contract as training.
 
-        EMA handling:
-        - If EMA is active, validate with EMA model weights
-        - AveragedModel.forward() delegates to its internal module copy,
-          so calling ema_model(x, **kwargs) uses the averaged weights
-        - The adapter wraps the TRAINING model, not the EMA model.
-          For EMA validation, we call ema_model.module directly with
-          the same kwargs the adapter would build, or we temporarily
-          wrap EMA's module in the adapter.
-        """
-        # Select which model to evaluate
-        if self.ema_model is not None:
-            eval_module = self.ema_model.module
-        else:
-            eval_module = self.model
+        val_loss is the only metric emitted here. A real normalized RMSE must
+        come from benchmark_hex_v3; the runner must never relabel an arbitrary
+        loss as nRMSE.
 
+        If EMA is active, a temporary adapter is bound to the EMA module so
+        context/output validation remains identical to the training path.
+        """
+        eval_module = (
+            self.ema_model.module if self.ema_model is not None else self.model
+        )
         eval_module.eval()
+
+        eval_adapter = None
+        if self.adapter is not None:
+            eval_adapter = OperatorAdapterV3(
+                eval_module,
+                self.adapter.model_type,
+            )
 
         val_losses: List[float] = []
 
@@ -580,47 +581,28 @@ class HexTrainingRunner:
             x = batch["input"].to(self.device)
             target = batch["target"].to(self.device)
 
-            # If adapter is available, use it for input validation
-            # and kwargs construction, but with the eval model
-            if self.adapter is not None and "context" in batch:
-                ctx = batch["context"]
-                # Validate inputs (shape checks etc.)
-                self.adapter.validate_context(x, ctx)
-                # Build kwargs and call eval model directly
-                # (bypasses adapter's model reference, uses eval_module)
-                if self.adapter.model_type == "graph_operator_v3":
-                    kwargs: Dict[str, Any] = {"edge_index": ctx.edge_index}
-                    if ctx.coords is not None:
-                        kwargs["coords"] = ctx.coords
-                    if ctx.dt is not None:
-                        kwargs["dt"] = ctx.dt
-                    pred = eval_module(x, **kwargs)
-                elif self.adapter.model_type in {"gino_hex_v3", "gino_hex_v3_v2"}:
-                    kwargs = {"coords_cart": ctx.coords}
-                    if ctx.dt is not None:
-                        kwargs["dt"] = ctx.dt
-                    if "sdf" in ctx.extra:
-                        kwargs["sdf"] = ctx.extra["sdf"]
-                    if "boundary_mask" in ctx.extra:
-                        kwargs["boundary_mask"] = ctx.extra["boundary_mask"]
-                    pred = eval_module(x, **kwargs)
-                else:
-                    pred = eval_module(x)
+            if eval_adapter is not None and "context" in batch:
+                pred = eval_adapter(x, batch["context"])
             else:
                 pred = eval_module(x)
 
             loss = self.loss_fn(pred, target)
             val_losses.append(float(loss.item()))
 
-        # Restore training mode
+        # Restore the trainable model's mode regardless of EMA usage.
         self.model.train()
 
-        mean_val_loss = sum(val_losses) / max(len(val_losses), 1)
+        if not val_losses:
+            raise RuntimeError(
+                "Validation loader produced zero batches; refusing to emit "
+                "a synthetic zero validation loss."
+            )
+
+        mean_val_loss = sum(val_losses) / len(val_losses)
 
         return {
             "epoch": epoch,
             "val_loss": mean_val_loss,
-            "val_nrmse": mean_val_loss,  # Placeholder; real nRMSE needs benchmark_hex_v3
             "n_batches": len(val_losses),
             "used_ema": self.ema_model is not None,
         }
@@ -738,9 +720,13 @@ class HexTrainingRunner:
         """Save best, last, and resume checkpoints."""
         reports: Dict[str, Any] = {}
 
-        metric_value = val_report.get(
-            self.config.best_metric_name, val_report.get("val_loss", float("inf"))
-        )
+        if self.config.best_metric_name not in val_report:
+            raise KeyError(
+                "Configured best metric "
+                f"{self.config.best_metric_name!r} is absent from validation report; "
+                "checkpoint selection is fail-closed."
+            )
+        metric_value = val_report[self.config.best_metric_name]
 
         # EMA state for best model
         ema_state = None
