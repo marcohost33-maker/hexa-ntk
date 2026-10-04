@@ -39,8 +39,8 @@ source = ["src/toolkit"]
 [tool.coverage.report]
 # Testfiles selbst zaehlen nicht als abzudeckender Code.
 omit = ["*/test_*.py"]
-# Ratchet-Schwelle: Ist-Wert 82% (verified 2026-07-03 nach runner_hex_v3-Tests
-# 25%->79%, results/), Schwelle knapp darunter — Best Practice: unter Ist setzen
-# und mit neuen Tests hochziehen, nie ueber Ist wuenschen (Gate darf nicht durch
-# Absenken erschlichen werden). Zielkorridor: 80-90% (docs/ROADMAP.md).
-fail_under = 79
+# Ratchet-Schwelle: CI auf codex/coverage-ratchet-warmstart-ema,
+# Run 37235639120 (2026-10-04): 331/331 Tests, 88% gesamt,
+# warmstart_utils 94%, ema 100%. Schwelle bewusst einen Punkt unter dem
+# gemessenen Gesamtwert; sie darf nur nach einem neuen gruenen Messlauf steigen.
+fail_under = 87
