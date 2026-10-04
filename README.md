@@ -44,7 +44,24 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 - **Kein Nachweis physikalischer Korrektheit** einer PDE-Loesung. Die Gates pruefen
   Software-Integritaet (Determinismus, Round-Trips, Shapes), nicht Physik.
 
-## Reifegrad / Evidenz (Lauf 2026-08-26, lokal, Exit-Codes gesehen)
+## Reifegrad / Evidenz
+
+### Aktueller Main-Reality-Anchor
+
+<!-- BEGIN GENERATED CI REALITY ANCHOR -->
+> main `e4a0e5e5f402f4b1df67443e090d6d2276fc8aba` · CI run `36478545347`
+
+| Gate | Verifizierter letzter Main-Lauf |
+|---|---|
+| Engine | 49/49 Doctests + 26/26 Selftests |
+| Toolkit | 299/299 Tests |
+| Branch-Coverage | 83 % |
+<!-- END GENERATED CI REALITY ANCHOR -->
+
+Quelle: strukturierter Evidence-Record unter `results/2026-09-28_main-ci-reality.json`.
+Der Block zwischen den Markern ist maschinengeprueft und darf nicht manuell divergieren.
+
+### Historischer lokaler Lauf 2026-08-26
 
 | Gate | Kommando | Ergebnis |
 |---|---|---|
@@ -92,16 +109,16 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt                  # zentrale Tool-Pins: ruff/coverage
 python -m pip install numpy
 python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
-python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests (branch expectation)
+python scripts/engine_gate.py                                  # aktuelle Zahlen: generierter Reality-Anchor oben
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 275 Unit-Tests (2026-09-26) + Coverage-Gate
+python -m coverage report                                      # aktuelle Testzahl/Coverage: Reality-Anchor oben
 ```
 
 CI (`.github/workflows/ci.yml`), beide Jobs **blocking**:
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (275, Stand 2026-09-26) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests unter Branch-Coverage; aktuelle Zahlen stehen im generierten Reality-Anchor.
 
 ## Struktur
 
