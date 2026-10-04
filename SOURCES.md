@@ -230,3 +230,13 @@
 > result raises (e.g. h=10**400, D_v=10**800 -> exactly 0.25). Prior rows remain lineage.
 
 | 9BF8C7A71221F307 | 2026-09-28 00:00 | src/toolkit | in-repo derived, PR #47 Codex follow-up (exact operand validation): test_hex_timestep_contract.py |
+
+
+## src/toolkit/ — MetricSpec v4 2026-10-04 (Codex)
+
+> Adds explicit mean-of-per-sample nRMSE, forecast-only time aggregation,
+> threshold-crossing terminology, a metric-spec digest, and legacy-report
+> preservation. Existing v3 functions remain available for reproduction.
+
+| DD71A9F23937E5D7 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/metricspec-v4: benchmark_hex_v3.py |
+| 1EA2A54085C9C5A4 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/metricspec-v4: test_benchmark_hex_v3.py |
