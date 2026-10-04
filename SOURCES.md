@@ -234,15 +234,8 @@
 
 ## src/toolkit/ — Wave 7 hardening derived forms 2026-10-05 (append-only, PR #57)
 
-> P0/P1 runner/resume semantics and focused coverage hardening. Initial zero
-> pins are deliberate placeholders only to let the fail-closed provenance gate
-> report the exact LF-normalized branch digests; they are replaced before review.
-
-| 0000000000000000 | 2026-10-05 00:00 | src/toolkit | in-repo created, PR #57 resume coverage: test_resume_utils_hex_v3.py |
-| 0000000000000000 | 2026-10-05 00:00 | src/toolkit | in-repo created, PR #57 warmstart coverage: test_warmstart_utils_hex_v3.py |
-
-
-### Final branch pins from fail-closed CI gate
+> P0/P1 runner/resume semantics and focused coverage hardening. The SHA pins
+> below are the LF-normalized branch bytes measured by the fail-closed CI gate.
 
 | BB68B7256D44F01F | 2026-10-05 00:00 | src/toolkit | in-repo derived, PR #57 scheduler-before-optimizer restore: resume_utils_hex_v3.py |
 | 02C8D851DE6F94BE | 2026-10-05 00:00 | src/toolkit | in-repo derived, PR #57 validation/best-metric fail-closed semantics: runner_hex_v3.py |
