@@ -57,6 +57,12 @@ Lokale Umgebung dieses Laufs: Python 3.14.4, `torch` 2.12.1+cpu, `numpy` 2.4.6.
 Die CI faehrt dieselbe Kette auf **Python 3.12** mit `torch==2.6.0` (CPU-Wheel).
 Die Zahlen gelten fuer diese beiden Umgebungen; ausserhalb ist nichts zugesichert.
 
+**Aktueller PR-#57-Reality-Anchor (GitHub CI, 2026-10-05):**
+Python 3.12.14 / torch 2.6.0+cpu; Engine **49/49 Doctests + 26/26 Selftests**,
+Toolkit **355/355 Tests**, Branch-Coverage **90 %**. Der Coverage-Ratchet dieses
+Branches liegt bei `fail_under = 88`. Diese Zahlen sind PR-Evidenz und werden
+erst nach Merge Main-Evidenz.
+
 **Branch-Hinweis:** Der Fix `codex/hex-cfl-positivity-contract` (PR #45) fuegt zwei Doctests hinzu
 (49 statt 47 erwartet) und hebt die Engine-Version auf 3.0.1. Die obige Tabelle ist
 bewusst historische Evidenz des Laufs vom 2026-08-26 und wird nicht als neuer Lauf
@@ -95,13 +101,13 @@ python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/wh
 python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests (branch expectation)
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 275 Unit-Tests (2026-09-26) + Coverage-Gate
+python -m coverage report                                      # 355 Unit-Tests (PR #57, 2026-10-05) + Coverage-Gate
 ```
 
 CI (`.github/workflows/ci.yml`), beide Jobs **blocking**:
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (275, Stand 2026-09-26) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (355, PR #57 Stand 2026-10-05) unter Branch-Coverage.
 
 ## Struktur
 
