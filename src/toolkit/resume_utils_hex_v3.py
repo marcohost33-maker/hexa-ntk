@@ -27,12 +27,58 @@ __all__ = [
     "load_resume_checkpoint",
 ]
 
+import math
+import numbers
 import random
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 import numpy as np
 import torch
+
+
+
+def _exact_nonnegative_int(value: Any, *, name: str) -> int:
+    """Normalize exact non-negative integer metadata or fail with a contract error."""
+    if torch.is_tensor(value):
+        if value.numel() != 1:
+            raise TypeError(f"{name} must be a scalar integer value")
+        value = value.item()
+
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be an integer value, not bool")
+
+    if isinstance(value, Decimal):
+        if not value.is_finite() or value != value.to_integral_value():
+            raise ValueError(f"{name} must be a finite exact integer, got {value!r}")
+        result = int(value)
+    elif isinstance(value, numbers.Integral):
+        result = int(value)
+    elif isinstance(value, numbers.Rational):
+        if value.denominator != 1:
+            raise ValueError(f"{name} must be an exact integer, got {value!r}")
+        result = int(value)
+    elif isinstance(value, numbers.Real):
+        try:
+            numeric = float(value)
+        except (OverflowError, ValueError) as exc:
+            raise ValueError(
+                f"{name} must be a finite exact integer, got {value!r}"
+            ) from exc
+        if not math.isfinite(numeric) or not numeric.is_integer():
+            raise ValueError(f"{name} must be a finite exact integer, got {value!r}")
+        result = int(value)
+        if value != result:
+            raise ValueError(f"{name} must be an exact integer, got {value!r}")
+    else:
+        raise TypeError(
+            f"{name} must be an integer-compatible scalar, got {type(value).__name__}"
+        )
+
+    if result < 0:
+        raise ValueError(f"{name} must be >= 0, got {result}")
+    return result
 
 
 # ------------------------------------------------------------------
@@ -70,13 +116,15 @@ def build_resume_payload(
         "checkpoint_type": "resume",
         "checkpoint_semantics": "resume_full",
         "schema_version": "1.0",
-        "epoch": int(epoch),
+        "epoch": _exact_nonnegative_int(epoch, name="epoch"),
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
     }
 
     if global_step is not None:
-        payload["global_step"] = int(global_step)
+        payload["global_step"] = _exact_nonnegative_int(
+            global_step, name="global_step"
+        )
 
     if scheduler is not None:
         payload["scheduler_state_dict"] = scheduler.state_dict()
@@ -155,8 +203,8 @@ def save_resume_checkpoint(
         "checkpoint_path": str(path),
         "checkpoint_type": "resume",
         "checkpoint_semantics": "resume_full",
-        "epoch": int(epoch),
-        "global_step": int(global_step) if global_step is not None else None,
+        "epoch": payload["epoch"],
+        "global_step": payload.get("global_step"),
         "has_scheduler": scheduler is not None,
         "has_grad_scaler": grad_scaler is not None,
         "has_torch_rng": include_torch_rng,
@@ -267,6 +315,14 @@ def load_resume_checkpoint(
     if "epoch" not in payload:
         raise ValueError("Resume checkpoint is missing 'epoch'.")
 
+    # Validate scalar metadata before mutating any training state.
+    epoch_value = _exact_nonnegative_int(payload["epoch"], name="epoch")
+    global_step_value = (
+        _exact_nonnegative_int(payload["global_step"], name="global_step")
+        if "global_step" in payload
+        else None
+    )
+
     # 1. Model
     model_incompat = model.load_state_dict(payload["model_state_dict"], strict=strict)
 
@@ -302,10 +358,8 @@ def load_resume_checkpoint(
         "checkpoint_path": str(path),
         "checkpoint_type": payload.get("checkpoint_type", "unknown"),
         "checkpoint_semantics": payload.get("checkpoint_semantics", "resume_full"),
-        "epoch": int(payload["epoch"]),
-        "global_step": (
-            int(payload["global_step"]) if "global_step" in payload else None
-        ),
+        "epoch": epoch_value,
+        "global_step": global_step_value,
         "strict": strict,
         "trusted": trusted,
         "model_load_result": {
