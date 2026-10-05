@@ -395,3 +395,10 @@
 > Pins for the integrated bytes of this block. Prior rows remain lineage.
 
 | 991FAA5046DEBD99 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R2-codex-pr58-path-unit: test_distributed_checkpoint_bundle_v1.py |
+
+## Integration R2-codex-pr58-tests (append-only, 2026-10-05, vero/hexa-integration-2026-10-05)
+
+> Pins for the integrated bytes of this block. Prior rows remain lineage.
+
+| 36D725225BF19466 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R2-codex-pr58-tests: test_benchmark_hex_v3.py |
+| CEE8332E93D341A9 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R2-codex-pr58-tests: test_distributed_checkpoint_bundle_v1.py |

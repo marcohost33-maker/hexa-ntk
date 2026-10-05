@@ -827,7 +827,10 @@ class TestMetricSpecV4(unittest.TestCase):
         target = torch.rand(5, 7, dtype=torch.float64) + 0.5
         pred = target + 0.1 * torch.rand(5, 7, dtype=torch.float64)
         pred[0] = target[0]
-        two_d = evaluate_rollout_v4(pred, target)
+        try:
+            two_d = evaluate_rollout_v4(pred, target)
+        except (TypeError, ValueError) as exc:  # contract: [T, DOF] is accepted
+            self.fail(f"[T, DOF] input rejected: {exc}")
         explicit = evaluate_rollout_v4(pred.unsqueeze(1), target.unsqueeze(1))
         self.assertEqual(two_d, explicit)
         self.assertTrue(torch.equal(compute_mean_nrmse_per_step(pred, target),

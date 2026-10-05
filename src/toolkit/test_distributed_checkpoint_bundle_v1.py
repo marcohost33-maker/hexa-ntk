@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -114,6 +115,19 @@ class TestValidateBundle(unittest.TestCase):
     def _rewrite_files_without(self, rel: str) -> None:
         _rewrite_manifest(self.bdir, lambda m: m.__setitem__(
             "files", [f for f in m["files"] if f["path"] != rel]))
+
+    def test_symlink_inside_dcp_escaping_is_rejected(self) -> None:
+        # Second layer: a well-formed dcp/ path whose file resolves outside dcp/.
+        outside = Path(self._tmp.name) / "outside.bin"
+        outside.write_bytes(b"x")
+        link = self.bdir / "dcp" / "link.bin"
+        try:
+            os.symlink(outside, link)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks not available here: {exc}")
+        self._add_entry("dcp/link.bin", outside)
+        with self.assertRaisesRegex(RuntimeError, "escapes dcp/"):
+            bundle.validate_bundle(self.bdir)
 
     def test_decoy_metadata_outside_dcp_is_rejected(self) -> None:
         decoy = self.bdir / "other" / ".metadata"
