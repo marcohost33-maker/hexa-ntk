@@ -311,3 +311,19 @@
 
 | 6E571FB9C282E945 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration probe step02_pr48 (merged bytes): runner_hex_v3.py |
 | B40A2DCCC489FCCC | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration probe step02_pr48 (merged bytes): test_runner_hex_v3.py |
+
+## src/toolkit/ — Warmstart/EMA coverage ratchet 2026-10-04 (Codex)
+
+> Test-only salvage from the useful, still-valid parts of draft PR #20.
+> No production-code semantics are changed; prior rows remain lineage.
+
+| B5C8477B5F985FD3 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/coverage-ratchet-warmstart-ema: test_ema_hex_v3.py |
+| 665DC949ADA471EA | 2026-10-04 23:00 | src/toolkit | in-repo created, codex/coverage-ratchet-warmstart-ema: test_warmstart_utils_hex_v3.py |
+
+## Integration probe step03_pr50 (append-only, 2026-10-05, vero/hexa-integration-probe)
+
+> Probe-only pins for merged bytes. Prior rows remain lineage.
+
+| 9A325FE96FA64572 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration probe step03_pr50 (merged bytes): test_ema_hex_v3.py |
+| 665DC949ADA471EA | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration probe step03_pr50 (merged bytes): test_warmstart_utils_cov_hex_v3.py |
+| 53663241136220FA | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration probe step03_pr50 (merged bytes): test_warmstart_utils_hex_v3.py |
