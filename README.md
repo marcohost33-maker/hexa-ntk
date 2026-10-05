@@ -59,7 +59,8 @@ Lokale Umgebung dieses Laufs: Windows 11, Python 3.12.10, `torch` 2.6.0+cpu, `nu
 Stand: Integrationszweig `vero/hexa-integration-2026-10-05` (PRs #46, #48, #50, #52, #53, #54
 auf `main` e4a0e5e, Entscheide E1-E6, Codex-Thread-Fixes). Die CI faehrt dieselbe Kette auf
 **Python 3.12** mit `torch==2.6.0` (CPU-Wheel, Linux). Log:
-`results/2026-10-05_integration_local-gate.log` (Commit-SHA, Kommandos, Exit-Codes, Zahlen).
+`results/2026-10-05_integration-r2_local-gate.log` (Commit-SHA, Kommandos, Exit-Codes, Zahlen;
+nach der Codex-Runde auf PR #58). Erster Integrationslauf: `results/2026-10-05_integration_local-gate.log`.
 Vorlauf 2026-09-28: `results/2026-09-28_codex46-review_local-gate.log`. Fruehere Laeufe
 (2026-09-27: 378 Tests, 19/19 Mutanten; 2026-08-26: 166 Tests, 82 %) bleiben in ihren Logs
 als historische Evidenz stehen. Die Zaehlangaben dieses Abschnitts zum aktuellen Baum
