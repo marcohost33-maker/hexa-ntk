@@ -2,7 +2,11 @@
 """Two-rank DCP bundle commit/digest oracle with negative controls."""
 from __future__ import annotations
 
+import argparse
 import json
+import os
+import re
+import subprocess
 from pathlib import Path
 import shutil
 import tempfile
@@ -16,7 +20,29 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from distributed_checkpoint_bundle_v1 import finalize_bundle, validate_bundle
 
-MAIN_SHA = "e4a0e5e5f402f4b1df67443e090d6d2276fc8aba"
+_SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def resolve_source_sha(explicit: str | None = None) -> str:
+    """Revision the bundle is produced from (Codex #54 T0).
+
+    Order: explicit argument, GITHUB_SHA (the checked-out workflow revision),
+    then `git rev-parse HEAD`. Fails closed if none yields a 40-hex SHA.
+    """
+    candidates = [explicit, os.environ.get("GITHUB_SHA")]
+    if not any(candidates):
+        try:
+            candidates.append(subprocess.run(
+                ["git", "rev-parse", "HEAD"], stdin=subprocess.DEVNULL,
+                capture_output=True, text=True, check=True,
+                cwd=Path(__file__).resolve().parent,
+            ).stdout.strip())
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise RuntimeError("cannot resolve source SHA (no --source-sha, GITHUB_SHA or git)") from exc
+    value = next((c for c in candidates if c), "")
+    if not _SHA.fullmatch(value):
+        raise RuntimeError(f"source SHA must be 40 lowercase hex characters, got {value!r}")
+    return value
 
 
 class Tiny(torch.nn.Module):
@@ -28,7 +54,7 @@ class Tiny(torch.nn.Module):
         return self.linear(x)
 
 
-def worker(rank: int, init_file: str, bundle_dir: str) -> None:
+def worker(rank: int, init_file: str, bundle_dir: str, source_sha: str) -> None:
     dist.init_process_group(
         "gloo",
         init_method=f"file://{init_file}",
@@ -58,7 +84,7 @@ def worker(rank: int, init_file: str, bundle_dir: str) -> None:
             finalize_bundle(
                 Path(bundle_dir),
                 {
-                    "main_sha": MAIN_SHA,
+                    "source_sha": source_sha,
                     "world_size": 2,
                     "backend": "gloo",
                     "torch_version": str(torch.__version__),
@@ -78,18 +104,18 @@ def rejected(callable_obj) -> str:
     return "UNEXPECTED_PASS"
 
 
-def run() -> dict[str, object]:
+def run(source_sha: str) -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix="hexantk_bundle_") as temp_dir:
         root = Path(temp_dir)
         bundle_dir = root / "bundle"
         bundle_dir.mkdir()
         mp.spawn(
             worker,
-            args=(str(root / "init"), str(bundle_dir)),
+            args=(str(root / "init"), str(bundle_dir), source_sha),
             nprocs=2,
             join=True,
         )
-        good = validate_bundle(bundle_dir, expected_main_sha=MAIN_SHA)
+        good = validate_bundle(bundle_dir, expected_source_sha=source_sha)
 
         partial = root / "partial"
         shutil.copytree(bundle_dir, partial)
@@ -109,16 +135,25 @@ def run() -> dict[str, object]:
         tampered = rejected(lambda: validate_bundle(corrupt))
 
         wrong_sha = rejected(
-            lambda: validate_bundle(bundle_dir, expected_main_sha="0" * 40)
+            lambda: validate_bundle(bundle_dir, expected_source_sha="0" * 40)
         )
 
-    negatives = [missing_commit, tampered, wrong_sha]
+        writing = root / "writing"
+        shutil.copytree(bundle_dir, writing)
+        marker = json.loads((writing / "COMMITTED.json").read_text(encoding="utf-8"))
+        marker["state"] = "WRITING"
+        (writing / "COMMITTED.json").write_text(json.dumps(marker), encoding="utf-8")
+        not_committed = rejected(lambda: validate_bundle(writing))
+
+    negatives = [missing_commit, tampered, wrong_sha, not_committed]
     return {
         "valid_bundle": good["valid"],
         "manifest_file_count": len(good["manifest"]["files"]),
         "missing_commit_rejected": missing_commit,
         "tampered_shard_rejected": tampered,
-        "main_sha_mismatch_rejected": wrong_sha,
+        "source_sha": source_sha,
+        "source_sha_mismatch_rejected": wrong_sha,
+        "non_committed_state_rejected": not_committed,
         "all_negative_controls_rejected": all(
             "UNEXPECTED_PASS" not in item for item in negatives
         ),
@@ -130,7 +165,11 @@ def run() -> dict[str, object]:
 
 
 def main() -> int:
-    result = run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source-sha", default=None,
+                        help="revision to record; default GITHUB_SHA, then git HEAD")
+    args = parser.parse_args()
+    result = run(resolve_source_sha(args.source_sha))
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["valid_bundle"] and result["all_negative_controls_rejected"] else 1
 

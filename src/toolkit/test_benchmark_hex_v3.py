@@ -772,6 +772,56 @@ class TestMetricSpecV4(unittest.TestCase):
                 zero_reference_policy="zero_if_both_zero",
             )
 
+    def test_identity_fields_are_fixed(self) -> None:
+        for kwargs in ({"name": "rmse"}, {"version": "99"}):
+            with self.subTest(**kwargs), self.assertRaises(ValueError):
+                MetricSpecV4(**kwargs)
+
+    def test_index_zero_dropped_only_for_shared_initial_state(self) -> None:
+        target = torch.ones((3, 2, 4, 1), dtype=torch.float64)
+        pred = target.clone()
+        pred[0] = 5.0  # forecast-only input: index 0 is a prediction
+        pred[1:] = 1.5
+        with self.assertRaisesRegex(ValueError, "shared initial state"):
+            evaluate_rollout_v4(pred, target)
+        forecast_only = evaluate_rollout_v4(
+            pred, target, spec=MetricSpecV4(exclude_initial_state=False))
+        self.assertGreater(forecast_only["aggregated_mean_nrmse"], 0.0)
+
+    def test_semantics_label_follows_aggregation(self) -> None:
+        x = torch.ones((3, 2, 4, 1), dtype=torch.float64)
+        labels = {
+            agg: evaluate_rollout_v4(x, x, spec=MetricSpecV4(time_aggregation=agg))[
+                "metric_semantics"]
+            for agg in ("geometric_mean", "arithmetic_mean", "max")
+        }
+        self.assertIn("; Eq32_geometric_mean_forecast_only", labels["geometric_mean"])
+        for agg in ("arithmetic_mean", "max"):
+            self.assertIn(f"not_Eq32_{agg}", labels[agg])
+            self.assertNotIn("; Eq32", labels[agg])
+        all_steps = evaluate_rollout_v4(
+            x, x, spec=MetricSpecV4(exclude_initial_state=False))["metric_semantics"]
+        self.assertIn("not_Eq32_geometric_mean_all_steps", all_steps)
+
+    def test_legacy_migration_carries_interpretation_parameters(self) -> None:
+        migrated = preserve_legacy_report_without_relabeling({"metrics": {
+            "nrmse_mean": 0.3, "divergence_step": 10, "num_steps": 10,
+            "aggregation_method": "max", "divergence_threshold": 0.5}})
+        self.assertEqual(migrated["legacy_num_steps"], 10)
+        self.assertEqual(migrated["legacy_aggregation_method"], "max")
+        self.assertEqual(migrated["legacy_divergence_threshold"], 0.5)
+        self.assertTrue(migrated["legacy_divergence_step_is_no_crossing_sentinel"])
+
+    def test_summary_reads_v4_result(self) -> None:
+        x = torch.ones((3, 2, 4, 1), dtype=torch.float64)
+        y = x.clone()
+        y[1:] = 1.5
+        metrics = evaluate_rollout_v4(y, x)
+        line = BenchmarkReport(model_name="m", dataset_name="d", metrics=metrics).summary()
+        self.assertIn(f"mean_nRMSE_v4.0={metrics['aggregated_mean_nrmse']:.4f}", line)
+        self.assertIn("crossing_step=none", line)
+        self.assertNotIn("div_step=?", line)
+
     def test_legacy_report_is_not_silently_relabelled(self) -> None:
         migrated = preserve_legacy_report_without_relabeling(
             {"metrics": {"nrmse_mean": 0.12, "divergence_step": 7}}

@@ -601,6 +601,37 @@ class TestFullRun(unittest.TestCase):
             self.assertTrue((ckpt_dir / "resume_last.pt").exists())
 
 
+class TestLazyEmaCopyForBest(unittest.TestCase):
+    """Codex review on #46 (T6): the EMA host copy for best.pt is built only
+    when the best policy accepted the metric, not on every epoch."""
+
+    @staticmethod
+    def _report(value: float) -> dict:
+        return {"epoch": 0, "val_loss": 1.0, "val_nrmse": value, "n_batches": 2,
+                "used_ema": True}
+
+    def test_non_improving_epoch_does_not_copy_ema(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner = _make_runner(out)
+            self.assertIsNotNone(runner.ema_model)
+            with mock.patch.object(
+                runner, "_ema_state_snapshot", wraps=runner._ema_state_snapshot
+            ) as snap:
+                first = runner._save_checkpoints(
+                    epoch=0, val_report=self._report(0.2), train_report={"mean_loss": 1.0},
+                    save_state=False)
+                self.assertTrue(first["best"]["saved"])
+                self.assertEqual(snap.call_count, 1)
+                worse = runner._save_checkpoints(
+                    epoch=1, val_report=self._report(0.9), train_report={"mean_loss": 1.0},
+                    save_state=False)
+                self.assertFalse(worse["best"]["saved"])
+                self.assertEqual(snap.call_count, 1)
+            payload = torch.load(runner.ckpt_mgr.best_model_path, weights_only=True)
+            self.assertIn("ema_model_state_dict", payload)
+
+
 class TestNonFiniteValidationMetric(unittest.TestCase):
     """A NaN/inf validation metric never becomes the best checkpoint (#37).
 

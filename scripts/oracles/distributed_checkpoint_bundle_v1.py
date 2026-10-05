@@ -46,6 +46,17 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
         raise
 
 
+def fsync_directory(path: Path) -> None:
+    """Persist directory entries (POSIX). No-op where directories cannot be opened."""
+    if os.name != "posix":
+        return
+    directory_fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def json_bytes(value: Mapping[str, Any]) -> bytes:
     return (
         json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
@@ -86,6 +97,13 @@ def finalize_bundle(
     """Write COMMITTED.json last, after DCP completion and the caller's barrier."""
     bundle_path = Path(bundle_dir)
     manifest = build_manifest(bundle_path, metadata)
+    # The DCP shard directory entries must be durable before the manifest and
+    # the marker claim them (O4): fsync every directory that holds a shard,
+    # then the bundle directory itself.
+    shard_dirs = sorted({(bundle_path / item["path"]).parent for item in manifest["files"]})
+    for directory in shard_dirs:
+        fsync_directory(directory)
+    fsync_directory(bundle_path)
     manifest_data = json_bytes(manifest)
     atomic_write_bytes(bundle_path / "manifest.json", manifest_data)
     manifest_sha = hashlib.sha256(manifest_data).hexdigest()
@@ -104,7 +122,7 @@ def finalize_bundle(
 def validate_bundle(
     bundle_dir: str | Path,
     *,
-    expected_main_sha: str | None = None,
+    expected_source_sha: str | None = None,
 ) -> dict[str, Any]:
     bundle_path = Path(bundle_dir)
     marker_path = bundle_path / "COMMITTED.json"
@@ -115,6 +133,10 @@ def validate_bundle(
         raise RuntimeError("committed bundle is missing manifest.json")
 
     marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    if marker.get("state") != "COMMITTED":
+        # Codex #54 T2: a syntactically valid marker in any other state
+        # (e.g. WRITING) is not a commit.
+        raise RuntimeError(f"bundle marker state is {marker.get('state')!r}, not 'COMMITTED'")
     manifest_data = manifest_path.read_bytes()
     manifest = json.loads(manifest_data)
     if marker.get("schema") != SCHEMA or manifest.get("schema") != SCHEMA:
@@ -125,10 +147,17 @@ def validate_bundle(
         raise RuntimeError("manifest digest mismatch")
 
     metadata = manifest.get("metadata", {})
-    if expected_main_sha is not None and metadata.get("main_sha") != expected_main_sha:
-        raise RuntimeError("checkpoint main_sha does not match expected main_sha")
+    if expected_source_sha is not None and metadata.get("source_sha") != expected_source_sha:
+        raise RuntimeError("checkpoint source_sha does not match expected source_sha")
 
-    for entry in manifest.get("files", []):
+    files = manifest.get("files")
+    # Codex #54 T3: mirror build_manifest -- a bundle without checkpoint files
+    # or without the DCP .metadata file is not valid.
+    if not isinstance(files, list) or not files:
+        raise RuntimeError("manifest lists no checkpoint files")
+    if not any(Path(str(entry.get("path", ""))).name == ".metadata" for entry in files):
+        raise RuntimeError("manifest lacks the DCP .metadata file")
+    for entry in files:
         path = bundle_path / entry["path"]
         if not path.is_file():
             raise RuntimeError(f"checkpoint file missing: {entry['path']}")

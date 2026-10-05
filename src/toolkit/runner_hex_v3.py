@@ -797,6 +797,13 @@ class HexTrainingRunner:
             "failure_signature": signature_path,
         }
 
+    def _ema_state_snapshot(self) -> Dict[str, Any]:
+        """Host copy of the averaged weights (called lazily by the manager)."""
+        return {
+            k: v.detach().cpu()
+            for k, v in self.ema_model.module.state_dict().items()
+        }
+
     def _save_checkpoints(
         self,
         epoch: int,
@@ -819,13 +826,10 @@ class HexTrainingRunner:
             )
         metric_value = val_report[self.config.best_metric_name]
 
-        # EMA state for best model
-        ema_state = None
-        if self.ema_model is not None:
-            ema_state = {
-                k: v.detach().cpu()
-                for k, v in self.ema_model.module.state_dict().items()
-            }
+        # EMA state for best model: a callable the manager invokes only when
+        # the best policy accepted the metric on the main process, so a
+        # non-improving epoch never copies the EMA to the host (Codex #46 T6).
+        ema_state = self._ema_state_snapshot if self.ema_model is not None else None
 
         # Best model. A NaN/inf metric is never promoted: the manager would
         # reject it with ValueError; the runner records it and keeps training

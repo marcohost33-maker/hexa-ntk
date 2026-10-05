@@ -361,3 +361,19 @@
 > Pins for the integrated bytes of this block. Prior rows remain lineage.
 
 | 36D3CBADC59CE6C3 | 2026-10-05 00:00 | scripts | in-repo derived, integration B1-decisions-E1-E6-final: verify_sources.py |
+
+## Integration B2-B3-thread-fixes (append-only, 2026-10-05, vero/hexa-integration-2026-10-05)
+
+> Pins for the integrated bytes of this block. Prior rows remain lineage.
+
+| 02F3C8E1BE282F1C | 2026-10-05 00:00 | scripts/oracles | in-repo derived, integration B2-B3-thread-fixes: dcp_bundle_2rank_oracle.py |
+| 688BCE7FF32501CA | 2026-10-05 00:00 | scripts/oracles | in-repo derived, integration B2-B3-thread-fixes: distributed_checkpoint_bundle_v1.py |
+| B18E21FADC714D84 | 2026-10-05 00:00 | spec | in-repo derived, integration B2-B3-thread-fixes: METRIC_SPEC_v4.md |
+| 319D9E0A8CB1697A | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B2-B3-thread-fixes: benchmark_hex_v3.py |
+| A77713B3C2F450AB | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B2-B3-thread-fixes: checkpoint_integration_hex_v3.py |
+| 4F1DE45D7416AAB8 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B2-B3-thread-fixes: runner_hex_v3.py |
+| 45F2096FCADED21E | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B2-B3-thread-fixes: test_benchmark_hex_v3.py |
+| 39C298784E6824E9 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B2-B3-thread-fixes: test_checkpoint_integration_hex_v3.py |
+| 35931254F6B5D720 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B2-B3-thread-fixes: test_distributed_checkpoint_bundle_v1.py |
+| 1A5842152C2CD33E | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B2-B3-thread-fixes: test_resume_utils_cov_hex_v3.py |
+| ACDCAA5B545E7CEC | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B2-B3-thread-fixes: test_runner_hex_v3.py |

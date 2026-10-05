@@ -40,7 +40,7 @@ import tempfile
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -334,10 +334,16 @@ class CheckpointIntegrationManager:
         epoch: int,
         global_step: Optional[int] = None,
         extra: Optional[Dict[str, Any]] = None,
-        ema_model_state: Optional[Dict[str, Any]] = None,
+        ema_model_state: Optional[
+            Union[Dict[str, Any], Callable[[], Dict[str, Any]]]
+        ] = None,
     ) -> Dict[str, Any]:
         """
         Save a best-model checkpoint if the metric has improved.
+
+        ``ema_model_state`` may be a zero-argument callable; it is then called
+        only when this rank actually writes best.pt (improved metric, main
+        process), so a non-improving epoch never copies the EMA to the host.
 
         Returns a report dict with saved=True/False.
 
@@ -389,6 +395,8 @@ class CheckpointIntegrationManager:
                 "metric_value": metric_value,
             }
 
+        if callable(ema_model_state):
+            ema_model_state = ema_model_state()
         try:
             AtomicCheckpointWriter.save_model_state_dict_atomic(
                 self.best_model_path,
@@ -678,6 +686,11 @@ class CheckpointIntegrationManager:
         if isinstance(state, dict) and isinstance(state.get("run_id"), str):
             # Resuming continues that run: later saves carry its identity.
             self.run_id = state["run_id"]
+        # A manager that already tracked a best value (e.g. an earlier run in
+        # this process) must not compare the resumed run against it: start
+        # fresh and let a successful restore set the value (Codex #46 T5).
+        self.best_metric_value = None
+        self.best_metric_name = None
         restored, reason = self._restore_best_metric(state, metric_name=metric_name)
         report["best_metric_restored"] = restored
         report["best_metric_restore_reason"] = reason

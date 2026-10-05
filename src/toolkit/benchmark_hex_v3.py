@@ -535,6 +535,12 @@ class MetricSpecV4:
     zero_reference_policy: str = "error"
 
     def __post_init__(self) -> None:
+        # Identity fields are part of the digest; a report must not declare a
+        # metric or version other than the one it computes (Codex #52 T2).
+        if self.name != "mean_nrmse":
+            raise ValueError("MetricSpecV4 requires name='mean_nrmse'")
+        if self.version != "4.0":
+            raise ValueError("MetricSpecV4 requires version='4.0'")
         if self.sample_reduction != "mean_of_ratios":
             raise ValueError("MetricSpecV4 requires sample_reduction='mean_of_ratios'")
         if self.time_aggregation not in {"geometric_mean", "arithmetic_mean", "max"}:
@@ -638,6 +644,21 @@ def compute_threshold_crossing_step(
     return None if exceeded.numel() == 0 else int(exceeded[0, 0].item())
 
 
+def metric_semantics_label(spec: MetricSpecV4) -> str:
+    """Provenance label derived from the spec, never hard-coded (Codex #52 T5).
+
+    APEBench Eq. 32 is the geometric mean over forecast steps; only that
+    combination carries the Eq32 label.
+    """
+    steps = "forecast_only" if spec.exclude_initial_state else "all_steps"
+    time_part = f"{spec.time_aggregation}_{steps}_time_aggregation"
+    if spec.time_aggregation == "geometric_mean" and spec.exclude_initial_state:
+        time_part = "Eq32_" + time_part
+    else:
+        time_part = "not_Eq32_" + time_part
+    return f"APEBench_Eq31_mean_of_sample_ratios; {time_part}"
+
+
 def evaluate_rollout_v4(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -645,21 +666,33 @@ def evaluate_rollout_v4(
     spec: Optional[MetricSpecV4] = None,
     threshold: float = 1.0,
 ) -> Dict[str, Any]:
+    """Evaluate a rollout under MetricSpec v4 (spec/METRIC_SPEC_v4.md).
+
+    With ``exclude_initial_state=True`` index 0 is dropped from time
+    aggregation, which is only valid if index 0 is the shared initial
+    condition. That is checked, fail-closed: ``pred[0]`` must equal
+    ``target[0]`` exactly, otherwise ValueError (Codex #52 T1). Forecast-only
+    rollouts pass ``MetricSpecV4(exclude_initial_state=False)``.
+    """
     spec = spec or MetricSpecV4()
     mean_nrmse = compute_mean_nrmse_per_step(
         pred,
         target,
         zero_reference_policy=spec.zero_reference_policy,
     )
+    if spec.exclude_initial_state and not torch.equal(pred[0], target[0]):
+        raise ValueError(
+            "MetricSpecV4.exclude_initial_state=True drops index 0, which requires "
+            "a shared initial state (pred[0] == target[0] exactly); index 0 of this "
+            "rollout differs. For forecast-only rollouts use "
+            "MetricSpecV4(exclude_initial_state=False)."
+        )
     rmse = compute_rmse_per_step(pred, target)
     return {
         "metric_spec": spec.to_dict(),
         "metric_spec_digest": metric_spec_digest(spec),
         "metric_spec_version": spec.version,
-        "metric_semantics": (
-            "APEBench_Eq31_mean_of_sample_ratios; "
-            "Eq32_forecast_only_time_aggregation"
-        ),
+        "metric_semantics": metric_semantics_label(spec),
         "mean_nrmse_per_step": [float(x) for x in mean_nrmse.tolist()],
         "rmse_per_step": [float(x) for x in rmse.tolist()],
         "aggregated_mean_nrmse": aggregate_forecast_metric(
@@ -687,11 +720,24 @@ def preserve_legacy_report_without_relabeling(
     """Preserve legacy aggregates without pretending they are MetricSpec-v4 values."""
     metrics_obj = report.get("metrics", {})
     metrics = metrics_obj if isinstance(metrics_obj, Mapping) else {}
+    legacy_step = metrics.get("divergence_step")
+    legacy_num_steps = metrics.get("num_steps")
+    no_crossing = (
+        None
+        if legacy_step is None or legacy_num_steps is None
+        else legacy_step == legacy_num_steps
+    )
     return {
         "migration_status": "legacy_non_convertible_without_per_sample_raw_values",
         "legacy_metric_spec": "hexantk_v3_ratio_of_aggregate_rms",
         "legacy_nrmse_mean": metrics.get("nrmse_mean"),
-        "legacy_divergence_step": metrics.get("divergence_step"),
+        "legacy_divergence_step": legacy_step,
+        # Parameters needed to interpret the copied values (Codex #52 T3).
+        # Legacy divergence_step == num_steps is the old no-crossing sentinel.
+        "legacy_num_steps": legacy_num_steps,
+        "legacy_aggregation_method": metrics.get("aggregation_method"),
+        "legacy_divergence_threshold": metrics.get("divergence_threshold"),
+        "legacy_divergence_step_is_no_crossing_sentinel": no_crossing,
         "corrected_aggregated_mean_nrmse": None,
         "threshold_crossing_step": None,
     }
@@ -835,6 +881,17 @@ class BenchmarkReport:
     def summary(self) -> str:
         """One-line summary string."""
         m = self.metrics
+        if "aggregated_mean_nrmse" in m:  # MetricSpec v4 result (Codex #52 T4)
+            value = m["aggregated_mean_nrmse"]
+            crossing = m.get("threshold_crossing_step")
+            parts = [
+                f"model={self.model_name}",
+                f"dataset={self.dataset_name}",
+                f"mean_nRMSE_v{m.get('metric_spec_version', '?')}={value:.4f}"
+                if isinstance(value, float) else "",
+                f"crossing_step={'none' if crossing is None else crossing}",
+            ]
+            return " | ".join(p for p in parts if p)
         parts = [
             f"model={self.model_name}",
             f"dataset={self.dataset_name}",

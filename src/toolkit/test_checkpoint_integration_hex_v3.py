@@ -1054,6 +1054,26 @@ class TestResumeRestoresBestMetric(_TmpRootCase):
         )
         self.assertTrue(saved["saved"])
 
+    def test_rejected_restore_clears_stale_best_of_used_manager(self) -> None:
+        # Codex review on #46 (T5): an already-used manager whose restore is
+        # rejected must not keep comparing against its previous best value.
+        mgr = self._make_manager()
+        self._run_with_best(mgr, 0.4)
+        foreign = self._make_manager(Path(self.tmpdir.name) / "other")
+        foreign.save_best_model_checkpoint(
+            model=build_test_model(), metric_value=0.01, metric_name="v", epoch=0
+        )
+        os.replace(foreign.best_model_path, mgr.best_model_path)
+        report = self._resume(mgr)
+        self.assertFalse(report["best_metric_restored"])
+        self.assertEqual(report["best_metric_restore_reason"], "run_id_mismatch")
+        self.assertIsNone(mgr.best_metric_value)
+        self.assertIsNone(mgr.best_metric_name)
+        saved = mgr.save_best_model_checkpoint(
+            model=build_test_model(), metric_value=0.5, metric_name="v", epoch=1
+        )
+        self.assertTrue(saved["saved"])
+
     def test_best_file_of_other_metric_is_not_adopted(self) -> None:
         mgr = self._make_manager()
         self._run_with_best(mgr, 0.4)
