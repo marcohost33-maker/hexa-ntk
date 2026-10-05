@@ -187,6 +187,17 @@ def validate_bundle(
             f"manifest must list exactly the DCP metadata file {DCP_METADATA!r}, "
             f"got {metadata_entries!r}"
         )
+    # Closed inventory (Codex PR #58 round 2): every file under dcp/ must be
+    # listed, otherwise an omitted shard could be corrupted and still be
+    # consumed by dcp.load while the bundle validates.
+    on_disk = {
+        item.relative_to(bundle_path).as_posix()
+        for item in (bundle_path / "dcp").rglob("*")
+        if item.is_file() or item.is_symlink()
+    }
+    unlisted = sorted(on_disk - set(paths))
+    if unlisted:
+        raise RuntimeError(f"files under dcp/ missing from the manifest: {unlisted}")
     dcp_root = (bundle_path / "dcp").resolve()
     for entry in files:
         path = bundle_path / entry["path"]

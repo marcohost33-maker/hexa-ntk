@@ -51,7 +51,7 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
 | Provenance | `python scripts/verify_sources.py` | 26 Toolkit- + 3 Spec-Eintraege + 8 Script-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 523 Tests, OK, exit 0 (Skips je Plattform: Gate-Log) |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 528 Tests, OK, exit 0 (Skips je Plattform: Gate-Log) |
 | Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
 | Mutation | `python scripts/mutation_probe.py` | 21/22 Mutanten getoetet (Baseline gruen), exit 1: M02 ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped) — Lauf 2026-09-28, im Integrationslauf 2026-10-05 nicht wiederholt |
 
@@ -67,10 +67,15 @@ als historische Evidenz stehen. Die Zaehlangaben dieses Abschnitts zum aktuellen
 (Tests, Provenance-Eintraege, Doctests, Mutanten) nagelt `TestDocsContract` in
 `src/toolkit/test_hex_timestep_contract.py` am Baum selbst fest.
 
-**Resume ist vollstaendig (seit 2026-09-27).** `HexTrainingRunner.maybe_resume()` laedt
-exakt `config.resume_from` (fail-closed bei fehlender Datei, PR #31) und stellt neben
-Modell/Optimizer/Scheduler/RNG jetzt auch den **EMA-Mittelwert** und den **Best-Wert**
-wieder her. Vorher startete das EMA nach einem Resume neu, und der Best-Wert begann bei
+**Resume an der Epochengrenze (seit 2026-09-27, Loader-Generator seit 2026-10-05).**
+`HexTrainingRunner.maybe_resume()` laedt exakt `config.resume_from` (fail-closed bei
+fehlender Datei, PR #31) und stellt neben Modell/Optimizer/Scheduler/RNG auch den
+**EMA-Mittelwert**, den **Best-Wert** und den Zustand expliziter `torch.Generator` der
+Train-/Val-Loader wieder her (z.B. aus `make_reproducible_dataloader_kwargs`; ohne ihn
+wiederholte ein Resume die erste Permutation des Seeds). Nicht Teil des Zustands: eine
+Position innerhalb einer Epoche, Worker-interner Zustand, eigene Sampler ohne `generator`.
+Aeltere Checkpoints ohne Generator-Zustand: Warnung im Log, `loader_generators_missing` im
+Bericht, der Shuffle beginnt beim Seed. Vorher startete das EMA nach einem Resume neu, und der Best-Wert begann bei
 `None` — die erste Epoche nach dem Resume ueberschrieb ein besseres `best.pt`. Quelle der
 Wahrheit ist `best.pt` im eigenen Checkpoint-Ordner: uebernommen wird dessen Wert, wenn er
 dieselbe Policy traegt und mindestens so gut ist wie der im Resume notierte (besser = spaetere
@@ -110,7 +115,7 @@ python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/wh
 python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 523 Unit-Tests (2026-10-05) + Coverage-Gate
+python -m coverage report                                      # 528 Unit-Tests (2026-10-05) + Coverage-Gate
 python scripts/mutation_probe.py                               # optional: 22 Mutanten der Review-Fixes
 ```
 
@@ -119,7 +124,7 @@ den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (523, Stand 2026-10-05) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (528, Stand 2026-10-05) unter Branch-Coverage.
 
 ## Struktur
 

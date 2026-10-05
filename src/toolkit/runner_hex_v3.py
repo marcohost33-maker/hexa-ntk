@@ -354,6 +354,61 @@ class HexTrainingRunner:
     # Resume
     # ------------------------------------------------------------------
 
+    def _loader_generators(self) -> Dict[str, torch.Generator]:
+        """Explicit torch.Generator objects of the train/val loaders.
+
+        make_reproducible_dataloader_kwargs() gives a shuffled loader its own
+        generator. Its state is part of the run: without it, a resumed run
+        repeats the seed's first permutation instead of continuing the
+        uninterrupted sequence (Codex PR #58 round 2).
+        """
+        gens: Dict[str, torch.Generator] = {}
+        for name, loader in (("train", self.train_loader), ("val", self.val_loader)):
+            gen = getattr(loader, "generator", None)
+            if isinstance(gen, torch.Generator):
+                gens[name] = gen
+        return gens
+
+    def _restore_loader_generators(
+        self, report: Dict[str, Any], resume_path: Path
+    ) -> None:
+        """Restore loader generator states saved by _save_checkpoints.
+
+        Checkpoints written before this field existed carry no state: the
+        loaders then continue from their seed (the first-epoch permutation
+        repeats), which is logged and reported, not silently accepted.
+        """
+        saved = (report.get("dataloader_state_dict") or {}).get("generator_states") or {}
+        restored, missing = [], []
+        for name, gen in self._loader_generators().items():
+            state = saved.get(name)
+            if state is None:
+                missing.append(name)
+                continue
+            if not (torch.is_tensor(state) and state.dtype == torch.uint8):
+                raise ValueError(
+                    f"Resume checkpoint {resume_path}: generator state for the "
+                    f"{name} loader is not a uint8 tensor"
+                )
+            gen.set_state(state)
+            restored.append(name)
+        report["loader_generators_restored"] = restored
+        report["loader_generators_missing"] = missing
+        if missing:
+            logger.warning(
+                "Resume checkpoint %s carries no generator state for the %s "
+                "loader(s) (written before loader state was saved); their "
+                "shuffle order restarts from the seed instead of continuing.",
+                resume_path,
+                ", ".join(missing),
+            )
+
+    def _loader_generator_payload(self) -> Optional[Dict[str, Any]]:
+        gens = self._loader_generators()
+        if not gens:
+            return None
+        return {"generator_states": {name: gen.get_state() for name, gen in gens.items()}}
+
     def maybe_resume(self) -> Optional[Dict[str, Any]]:
         """Resume from ``config.resume_from`` if configured.
 
@@ -388,6 +443,7 @@ class HexTrainingRunner:
                 "restarts from the resumed weights.",
                 resume_path,
             )
+        self._restore_loader_generators(report, resume_path)
         self.start_epoch = report["epoch"] + 1
         if report.get("global_step") is not None:
             self.global_step = report["global_step"]
@@ -890,6 +946,7 @@ class HexTrainingRunner:
                 self.ema_model.state_dict() if self.ema_model is not None else None
             ),
             ema_decay=self.config.ema_decay if self.ema_model is not None else None,
+            include_dataloader_state=self._loader_generator_payload(),
             extra={
                 "train_loss": train_report["mean_loss"],
                 "val_loss": val_report["val_loss"],

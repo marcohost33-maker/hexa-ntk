@@ -490,6 +490,35 @@ class TestRestoreOrderBehaviour(unittest.TestCase):
             self.assertIn(name, detected)
 
 
+class TestOracleRestoreOrder(unittest.TestCase):
+    """Spec 8.3 also binds the StatefulDataLoader evidence oracle (Codex PR #58
+    round 2): objects constructed first, then optimizer before scheduler.
+    Checked on the source, because the oracle imports torchdata."""
+
+    def test_oracle_constructs_then_loads_optimizer_before_scheduler(self) -> None:
+        import ast
+        src = (Path(__file__).resolve().parents[2] / "scripts" / "oracles"
+               / "stateful_loader_resume_oracle.py").read_text(encoding="utf-8")
+        func = next(n for n in ast.walk(ast.parse(src))
+                    if isinstance(n, ast.FunctionDef) and n.name == "run_oracle")
+
+        def load_line(obj: str) -> int:
+            lines = [n.lineno for n in ast.walk(func)
+                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                     and n.func.attr == "load_state_dict"
+                     and isinstance(n.func.value, ast.Name) and n.func.value.id == obj]
+            self.assertEqual(len(lines), 1, obj)
+            return lines[0]
+
+        construct = [n.lineno for n in ast.walk(func) if isinstance(n, ast.Assign)
+                     and any(isinstance(t, ast.Tuple) and any(
+                         isinstance(e, ast.Name) and e.id == "res_sched" for e in t.elts)
+                         for t in n.targets)]
+        self.assertEqual(len(construct), 1)
+        self.assertLess(construct[0], load_line("res_opt"))
+        self.assertLess(load_line("res_opt"), load_line("res_sched"))
+
+
 class TestRestoreRngStates(unittest.TestCase):
     def test_empty_payload_restores_nothing(self) -> None:
         self.assertEqual(

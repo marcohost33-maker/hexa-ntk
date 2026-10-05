@@ -402,3 +402,14 @@
 
 | 36D725225BF19466 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R2-codex-pr58-tests: test_benchmark_hex_v3.py |
 | CEE8332E93D341A9 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R2-codex-pr58-tests: test_distributed_checkpoint_bundle_v1.py |
+
+## Integration R3-codex-pr58-round2 (append-only, 2026-10-05, vero/hexa-integration-2026-10-05)
+
+> Pins for the integrated bytes of this block. Prior rows remain lineage.
+
+| AF58C837A63847CD | 2026-10-05 00:00 | scripts/oracles | in-repo derived, integration R3-codex-pr58-round2: distributed_checkpoint_bundle_v1.py |
+| 120C32D0DC287451 | 2026-10-05 00:00 | scripts/oracles | in-repo derived, integration R3-codex-pr58-round2: stateful_loader_resume_oracle.py |
+| FCD004306D3AEB06 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R3-codex-pr58-round2: runner_hex_v3.py |
+| 6C34E8424D5800F1 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R3-codex-pr58-round2: test_distributed_checkpoint_bundle_v1.py |
+| FF8594FFD085E64D | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R3-codex-pr58-round2: test_resume_utils_hex_v3.py |
+| D061AF66600A09C6 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R3-codex-pr58-round2: test_runner_hex_v3.py |

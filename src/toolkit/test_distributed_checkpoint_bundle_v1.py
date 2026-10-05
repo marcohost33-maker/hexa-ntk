@@ -145,6 +145,14 @@ class TestValidateBundle(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "exactly the DCP metadata file"):
             bundle.validate_bundle(self.bdir)
 
+    def test_unlisted_shard_is_rejected(self) -> None:
+        # Manifest lists only dcp/.metadata (consistent digest + marker) while a
+        # shard file exists under dcp/: the inventory must be closed.
+        _rewrite_manifest(self.bdir, lambda m: m.__setitem__(
+            "files", [f for f in m["files"] if f["path"] == "dcp/.metadata"]))
+        with self.assertRaisesRegex(RuntimeError, "missing from the manifest"):
+            bundle.validate_bundle(self.bdir)
+
     def test_source_sha_mismatch_is_rejected(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "source_sha"):
             bundle.validate_bundle(self.bdir, expected_source_sha="0" * 40)

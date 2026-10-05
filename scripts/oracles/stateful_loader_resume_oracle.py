@@ -174,9 +174,11 @@ def run_oracle(num_workers: int, *, seed: int = 20261004, interrupt_after: int =
     res_model, res_opt, res_sched, res_ema = make_objects(seed)
     resumed_loader = make_loader(dataset, seed=seed, num_workers=num_workers)
     resumed_loader.load_state_dict(loader_state)
+    # Spec section 8.3: all objects are constructed above (make_objects), then
+    # model -> optimizer -> scheduler (Codex PR #58 round 2).
     res_model.load_state_dict(model_state)
-    res_sched.load_state_dict(scheduler_state)
     res_opt.load_state_dict(optimizer_state)
+    res_sched.load_state_dict(scheduler_state)
     res_ema.load_state_dict(ema_state)
     torch.random.set_rng_state(rng_state)
 

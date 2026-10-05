@@ -22,6 +22,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
+from dataloader_utils_hex_v3 import make_reproducible_dataloader_kwargs
 from operator_adapter_hex_v3 import OperatorAdapterV3, OperatorBatchContext
 from resume_utils_hex_v3 import EMADecayError, save_resume_checkpoint
 from runner_hex_v3 import (
@@ -1087,6 +1088,81 @@ class TestCheckpointSchedule(unittest.TestCase):
             self.assertEqual(saved, [True, False, False, True, True])
             payload = torch.load(runner.ckpt_mgr.resume_path, weights_only=False)
             self.assertEqual(payload["epoch"], 4)
+
+
+def _shuffled_runner(out: Path, cfg: RunnerConfig) -> HexTrainingRunner:
+    torch.manual_seed(0)
+    model = _TinyModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.05, momentum=0.9)
+    return HexTrainingRunner(
+        cfg,
+        model,
+        optimizer,
+        DataLoader(_SeededDataset(8, seed=0), batch_size=2, shuffle=True,
+                   **make_reproducible_dataloader_kwargs(seed=123)),
+        DataLoader(_SeededDataset(6, seed=1), batch_size=2),
+        device="cpu",
+    )
+
+
+class TestLoaderGeneratorResume(unittest.TestCase):
+    """Codex PR #58 round 2: the generator of a reproducible shuffled loader is
+    part of the resume state; batch order after resume equals the
+    uninterrupted run."""
+
+    def _cfg(self, out: Path, epochs: int, **kw) -> RunnerConfig:
+        return RunnerConfig(output_dir=str(out), num_epochs=epochs, ema_decay=0.9,
+                            log_every_n_steps=0, **kw)
+
+    def _resume_cfg(self, out: Path, epochs: int) -> RunnerConfig:
+        return self._cfg(out, epochs, resume_from=str(out / "checkpoints" / "resume_last.pt"),
+                         resume_trusted=True)
+
+    def test_shuffled_loader_resume_equals_uninterrupted_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            full_dir, res_dir = Path(tmpdir) / "full", Path(tmpdir) / "res"
+            full = _shuffled_runner(full_dir, self._cfg(full_dir, 4))
+            full.run()
+            _shuffled_runner(res_dir, self._cfg(res_dir, 2)).run()
+            resumed = _shuffled_runner(res_dir, self._resume_cfg(res_dir, 4))
+            summary = resumed.run()
+            self.assertEqual(summary["resume_report"]["loader_generators_restored"], ["train"])
+            self.assertEqual(summary["resume_report"]["loader_generators_missing"], [])
+            for name, value in full.model.state_dict().items():
+                self.assertTrue(torch.equal(value, resumed.model.state_dict()[name]), msg=name)
+            for name, value in full.ema_model.state_dict().items():
+                self.assertTrue(torch.equal(value, resumed.ema_model.state_dict()[name]),
+                                msg=f"ema {name}")
+            # Batch order of the next epoch is identical as well.
+            self.assertEqual(list(iter(full.train_loader.sampler)),
+                             list(iter(resumed.train_loader.sampler)))
+
+    def test_legacy_checkpoint_without_generator_state_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            _shuffled_runner(out, self._cfg(out, 1)).run()
+            path = out / "checkpoints" / "resume_last.pt"
+            payload = torch.load(path, weights_only=False)
+            self.assertIn("generator_states", payload["dataloader_state_dict"])
+            del payload["dataloader_state_dict"]
+            torch.save(payload, path)
+            resumed = _shuffled_runner(out, self._resume_cfg(out, 2))
+            with self.assertLogs("runner_hex_v3", level="WARNING") as logs:
+                report = resumed.maybe_resume()
+            self.assertEqual(report["loader_generators_missing"], ["train"])
+            self.assertEqual(report["loader_generators_restored"], [])
+            self.assertTrue(any("no generator state" in m for m in logs.output))
+
+    def test_malformed_generator_state_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            _shuffled_runner(out, self._cfg(out, 1)).run()
+            path = out / "checkpoints" / "resume_last.pt"
+            payload = torch.load(path, weights_only=False)
+            payload["dataloader_state_dict"]["generator_states"]["train"] = torch.zeros(3)
+            torch.save(payload, path)
+            with self.assertRaisesRegex(ValueError, "not a uint8 tensor"):
+                _shuffled_runner(out, self._resume_cfg(out, 2)).maybe_resume()
 
 
 class TestFullResumeEquivalence(unittest.TestCase):
