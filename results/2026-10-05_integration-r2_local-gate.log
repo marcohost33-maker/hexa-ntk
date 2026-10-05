@@ -1,0 +1,169 @@
+# HexaNTK integration gate log, Codex round on PR #58 — vero/hexa-integration-2026-10-05
+# Tested commit: ea4fadd0b1dbfaaec746de3313bbf451628b08dd   (base main e4a0e5e5f402f4b1df67443e090d6d2276fc8aba, previous head 65b9f5ee88c0910c7ebaa2260495ac5437d25cd6)
+# Environment: Windows 11, Python 3.12.10 torch 2.6.0+cpu numpy 2.5.3 coverage 7.15.4 torchdata 0.11.0+cpu, ruff 0.16.4
+# Chain mirrors .github/workflows/ci.yml (gate + tests (cpu)); CI runs Linux. Claim: local green, CI open for this head.
+
+## Chain summary (exit codes as observed)
+LABEL=20_r2_final HEAD=ea4fadd0b1dbfaaec746de3313bbf451628b08dd date=2026-10-05T14:26:30+02:00
+status-porcelain-lines=0
+IMPORT <scratch>\wt-probe\src\toolkit\resume_utils_hex_v3.py 2.6.0+cpu
+All checks passed!
+RC ruff=0
+RC compileall=0
+RC verify_sources=0
+
+[VERIFY-SOURCES] 26 Toolkit-Eintraege + 3 Spec-Eintraege + 8 Script-Eintraege | Dateiliste: git (37 Dateien) | PASS
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC engine_gate=0
+RC unittest=0
+Ran 523 tests in 47.878s
+OK (skipped=6)
+RC coverage_report=0
+TOTAL                                           1792    130    704     89    91%
+fail_under = 87
+
+## coverage report
+Name                                           Stmts   Miss Branch BrPart  Cover
+--------------------------------------------------------------------------------
+src\toolkit\benchmark_hex_v3.py                  354     29    120     28    88%
+src\toolkit\checkpoint_integration_hex_v3.py     224     28     70      6    87%
+src\toolkit\dataloader_utils_hex_v3.py            22      0      2      0   100%
+src\toolkit\dataset_split_hex_v3.py              190      5     86      6    96%
+src\toolkit\ema_hex_v3.py                         40      0     10      0   100%
+src\toolkit\failure_signature_hex_v3.py           41      3      0      0    93%
+src\toolkit\operator_adapter_hex_v3.py           128     11     94     11    90%
+src\toolkit\resume_utils_hex_v3.py               149      3     80      2    98%
+src\toolkit\runner_hex_v3.py                     308     19    100     11    92%
+src\toolkit\stress_hex_v3.py                     207     25     92     23    84%
+src\toolkit\warmstart_utils_hex_v3.py            129      7     50      2    95%
+--------------------------------------------------------------------------------
+TOTAL                                           1792    130    704     89    91%
+
+## unittest tail
+----------------------------------------------------------------------
+Ran 523 tests in 47.878s
+
+OK (skipped=6)
+
+## Evidence lanes on the same commit (Windows surrogate)
+### stateful_loader --num-workers 0 -> exit 0
+{
+  "all_exact": true,
+  "claim_ceiling": "CPU, deterministic map-style dataset, in_order=True; no rank-wise distributed claim and no stochastic worker-transform RNG claim",
+  "interrupt_after": 3,
+  "num_workers": 0,
+  "same_batch_sequence": true,
+  "same_ema": true,
+  "same_losses": true,
+  "same_model": true,
+  "same_optimizer": true,
+  "same_scheduler": true,
+  "torch_version": "2.6.0+cpu"
+}
+### stateful_loader --num-workers 2 -> 3 runs on this commit, all failed on Windows worker spawn/IPC:
+#   run 1 exit 1: RuntimeError: DataLoader timed out after 60.0 seconds
+#   run 2 exit 127: OSError: [WinError 87] (invalid parameter, multiprocessing spawn)
+#   run 3 exit 1: RuntimeError: DataLoader worker (pid(s) 14248) exited unexpectedly
+#   The oracle bytes are unchanged since 22ede52 (nw2 exit 0 there, all_exact true); on PR #58 head 65b9f5e the Linux lane
+#   stateful-loader-cpu (2) passed (run 37301594286). Classified as a Windows-only multiprocessing flake, not a regression.
+### dcp_2rank_gloo_oracle -> exit 0
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+{
+  "all_ranks_exact": true,
+  "backend": "gloo",
+  "claim_ceiling": "two-rank single-node CPU/gloo DDP model+Adam DCP roundtrip and one-next-step differential; no FSDP, GPU/NCCL, elastic, or loader-state claim",
+  "rank_results": [
+    {
+      "after_one_step_model_equal": true,
+      "after_one_step_optimizer_equal": true,
+      "all_exact": true,
+      "before_model_equal": true,
+      "before_optimizer_equal": true,
+      "next_loss_equal": true,
+      "rank": 0
+    },
+    {
+      "after_one_step_model_equal": true,
+      "after_one_step_optimizer_equal": true,
+      "all_exact": true,
+      "before_model_equal": true,
+      "before_optimizer_equal": true,
+      "next_loss_equal": true,
+      "rank": 1
+    }
+  ],
+  "torch_version": "2.6.0+cpu",
+  "world_size": 2,
+  "wrapper": "DistributedDataParallel"
+}
+### dcp_worldsize_change_oracle -> exit 0
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\state_dict_loader.py:144: UserWarning: torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process.
+  warnings.warn(
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\state_dict_saver.py:143: UserWarning: torch.distributed is unavailable or uninitialized, assuming the intent is to save in a single process.
+  warnings.warn(
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+{
+  "all_exact": true,
+  "backend": "gloo",
+  "claim_ceiling": "single-node CPU/gloo topology-change control for replicated DDP/plain model+Adam; not FSDP sharded resharding, elastic training, GPU/NCCL, or loader state",
+  "one_plain_to_two_rank_ddp": {
+    "all_ranks_exact": true,
+    "rank_results": [
+      {
+        "all_exact": true,
+        "model_equal": true,
+        "optimizer_equal": true,
+        "rank": 0
+      },
+      {
+        "all_exact": true,
+        "model_equal": true,
+        "optimizer_equal": true,
+        "rank": 1
+      }
+    ]
+  },
+  "torch_version": "2.6.0+cpu",
+  "two_rank_ddp_to_one_plain": {
+    "all_exact": true,
+    "model_equal": true,
+    "optimizer_equal": true
+  }
+}
+### dcp_bundle_2rank_oracle -> exit 0
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+{
+  "all_negative_controls_rejected": true,
+  "claim_ceiling": "shared-filesystem two-rank CPU/gloo DCP commit/digest protocol; no object-store transactional guarantee",
+  "manifest_file_count": 3,
+  "missing_commit_rejected": "RuntimeError: checkpoint bundle is not committed",
+  "non_committed_state_rejected": "RuntimeError: bundle marker state is 'WRITING', not 'COMMITTED'",
+  "source_sha": "ea4fadd0b1dbfaaec746de3313bbf451628b08dd",
+  "source_sha_mismatch_rejected": "RuntimeError: checkpoint source_sha does not match expected source_sha",
+  "tampered_shard_rejected": "RuntimeError: checkpoint size mismatch: dcp/__0_0.distcp",
+  "valid_bundle": true
+}
+
+## Discrimination (Vero Tools/diskriminierung.py, ledger Data/diskriminierung_runs.jsonl)
+  R2-1 0/0 nRMSE is nan (revert to 0.0)                                                 DISKRIMINIERT
+  R2-2 rank-2 single sample promotion                                                   DISKRIMINIERT
+  R2-3 path rule layer (helper disabled)                                                DISKRIMINIERT  [subTest: 13 rot von 13 beurteilt, erwartet 13]
+  R2-3 decoy outside dcp (dcp-root rule)                                                DISKRIMINIERT
+  R2-3 exactly dcp/.metadata                                                            DISKRIMINIERT
+  R2-3 resolved-path confinement layer alone (expected blind: path rule still catches)  BLIND
+  R2-4 exclude_initial_state must be bool                                               DISKRIMINIERT  [subTest: 5 rot von 5 beurteilt, erwartet 5]
+6/7 diskriminieren.
+Lauf    -> run_id DK-20261005T122413-47fa275ff1cb
+Stand   -> spec_sha256 856b63bad88b…  head 1c404ebc7305
+Stufe   -> provenienz_klasse VOLL
