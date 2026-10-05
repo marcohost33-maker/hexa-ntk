@@ -601,6 +601,48 @@ class TestFullRun(unittest.TestCase):
             self.assertTrue((ckpt_dir / "resume_last.pt").exists())
 
 
+class TestZeroReferenceValidation(unittest.TestCase):
+    """Codex PR #58: all-zero targets AND predictions make the relative
+    metric 0/0. It must be nan (no best, failure signature), never a perfect
+    0.0 that blocks every later real value."""
+
+    def test_zero_over_zero_is_never_best_and_later_value_is(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner = _make_runner(out, config=RunnerConfig(output_dir=str(out), use_ema=False))
+            with torch.no_grad():
+                for p in runner.model.parameters():
+                    p.zero_()
+            runner.val_loader = [{"input": torch.zeros(2, 4), "target": torch.zeros(2, 2)}]
+            report = runner._validate(epoch=0)
+            self.assertEqual(report["val_loss"], 0.0)
+            self.assertTrue(math.isnan(report["val_nrmse"]))
+            first = runner._save_checkpoints(
+                epoch=0, val_report=report, train_report={"mean_loss": 1.0})
+            self.assertEqual((first["best"]["saved"], first["best"]["reason"]),
+                             (False, "non_finite_metric"))
+            self.assertIsNone(runner.ckpt_mgr.best_metric_value)
+            sigs = list((out / "failures").glob("*NaN_or_Inf_Metric*.json"))
+            self.assertEqual(len(sigs), 1)
+            later = runner._save_checkpoints(
+                epoch=1,
+                val_report={"epoch": 1, "val_loss": 0.3, "val_nrmse": 0.5,
+                            "n_batches": 1, "used_ema": False},
+                train_report={"mean_loss": 1.0})
+            self.assertTrue(later["best"]["saved"])
+            self.assertEqual(runner.ckpt_mgr.best_metric_value, 0.5)
+
+    def test_nonzero_error_over_zero_reference_is_inf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner = _make_runner(out, config=RunnerConfig(output_dir=str(out), use_ema=False))
+            with torch.no_grad():
+                for p in runner.model.parameters():
+                    p.fill_(1.0)
+            runner.val_loader = [{"input": torch.zeros(2, 4), "target": torch.zeros(2, 2)}]
+            self.assertEqual(runner._validate(epoch=0)["val_nrmse"], float("inf"))
+
+
 class TestLazyEmaCopyForBest(unittest.TestCase):
     """Codex review on #46 (T6): the EMA host copy for best.pt is built only
     when the best policy accepted the metric, not on every epoch."""
@@ -1179,7 +1221,9 @@ class TestValidationNrmse(unittest.TestCase):
             self.assertAlmostEqual(report["val_loss"], expected_mse, places=5)
             self.assertNotAlmostEqual(report["val_nrmse"], report["val_loss"], places=3)
 
-    def test_perfect_prediction_of_zero_target_is_zero(self) -> None:
+    def test_zero_target_gives_undefined_metric(self) -> None:
+        # Contract changed with the Codex round on PR #58 (decision 2026-10-05):
+        # 0/0 is undefined -> nan (was 0.0, which became an unbeatable best).
         with tempfile.TemporaryDirectory() as tmpdir:
             out = Path(tmpdir)
             runner = _seeded_runner(out, RunnerConfig(output_dir=str(out), use_ema=False))
@@ -1188,7 +1232,7 @@ class TestValidationNrmse(unittest.TestCase):
             with torch.no_grad():
                 runner.model.lin.weight.zero_()
                 runner.model.lin.bias.zero_()
-            self.assertEqual(runner._validate(epoch=0)["val_nrmse"], 0.0)
+            self.assertTrue(math.isnan(runner._validate(epoch=0)["val_nrmse"]))
             with torch.no_grad():
                 runner.model.lin.bias.fill_(1.0)
             self.assertEqual(runner._validate(epoch=0)["val_nrmse"], float("inf"))

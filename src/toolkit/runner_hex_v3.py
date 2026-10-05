@@ -660,13 +660,16 @@ class HexTrainingRunner:
 
         if val_losses:
             mean_val_loss = sum(val_losses) / len(val_losses)
-            # sq_ref_sum == 0 (all-zero targets) gives inf/nan: the metric is
-            # undefined there and the best-checkpoint skip path records it.
-            val_nrmse = (
-                math.sqrt(sq_err_sum / sq_ref_sum)
-                if sq_ref_sum > 0
-                else (0.0 if sq_err_sum == 0 else float("inf"))
-            )
+            # sq_ref_sum == 0 (all-zero targets): the relative metric is
+            # undefined -- nan for 0/0, inf for e/0. Both are non-finite, so
+            # the best-checkpoint skip path records them; 0/0 must never
+            # become a "perfect" best value (Codex PR #58).
+            if sq_ref_sum > 0:
+                val_nrmse = math.sqrt(sq_err_sum / sq_ref_sum)
+            elif sq_err_sum == 0:
+                val_nrmse = float("nan")
+            else:
+                val_nrmse = float("inf")
         else:
             # No validation batch: no measurement. 0.0 used to become the
             # best value and blocked every later real improvement.

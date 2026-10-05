@@ -12,6 +12,7 @@ die Semantik stand vorher nur im Code). Ergaenzt §3.4 von
 | Feld | Wert | Regel |
 |---|---|---|
 | `name` | `"mean_nrmse"` | fest; jeder andere Wert -> `ValueError` |
+| `exclude_initial_state` | `bool` | nur echtes `bool`; `"false"`, `1` u.ae. -> `TypeError` |
 | `version` | `"4.0"` | fest; jeder andere Wert -> `ValueError` |
 | `metric_spec_digest` | SHA-256 ueber `to_dict()` (JSON, sortierte Schluessel, kompakt) | identifiziert die Konfiguration |
 
@@ -20,7 +21,10 @@ berechnet.
 
 ## 2. Stichproben-Reduktion (`sample_reduction`)
 
-Nur `"mean_of_ratios"`: je Zeitschritt `t` und Stichprobe `b` (Felder `[T, DOF]` gelten als eine Stichprobe)
+Nur `"mean_of_ratios"`: je Zeitschritt `t` und Stichprobe `b`. Eingabeformen
+(praezisiert 2026-10-05, Codex PR #58): `[T, DOF]` = eine Stichprobe (identisch
+zu `[T, 1, DOF]`); `[T, N, C]` = eine Stichprobe mit `N*C` Freiheitsgraden;
+`[T, B, N, C]` = `B` Stichproben.
 
     nRMSE[t, b] = ||pred[t, b] - target[t, b]||_2 / ||target[t, b]||_2
 

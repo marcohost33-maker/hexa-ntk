@@ -822,6 +822,24 @@ class TestMetricSpecV4(unittest.TestCase):
         self.assertIn("crossing_step=none", line)
         self.assertNotIn("div_step=?", line)
 
+    def test_rank2_single_sample_equals_explicit_batch_of_one(self) -> None:
+        torch.manual_seed(0)
+        target = torch.rand(5, 7, dtype=torch.float64) + 0.5
+        pred = target + 0.1 * torch.rand(5, 7, dtype=torch.float64)
+        pred[0] = target[0]
+        two_d = evaluate_rollout_v4(pred, target)
+        explicit = evaluate_rollout_v4(pred.unsqueeze(1), target.unsqueeze(1))
+        self.assertEqual(two_d, explicit)
+        self.assertTrue(torch.equal(compute_mean_nrmse_per_step(pred, target),
+                                    compute_mean_nrmse_per_step(pred.unsqueeze(1),
+                                                                target.unsqueeze(1))))
+
+    def test_exclude_initial_state_must_be_bool(self) -> None:
+        for bad in ("false", "true", 1, 0, None):
+            with self.subTest(value=bad), self.assertRaises(TypeError):
+                MetricSpecV4(exclude_initial_state=bad)
+        self.assertFalse(MetricSpecV4(exclude_initial_state=False).exclude_initial_state)
+
     def test_legacy_report_is_not_silently_relabelled(self) -> None:
         migrated = preserve_legacy_report_without_relabeling(
             {"metrics": {"nrmse_mean": 0.12, "divergence_step": 7}}

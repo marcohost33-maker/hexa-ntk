@@ -83,6 +83,54 @@ class TestValidateBundle(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, r"\.metadata"):
             bundle.validate_bundle(self.bdir)
 
+    def _add_entry(self, rel: str, file_path: Path, *, replace_metadata: bool = False) -> None:
+        data = file_path.read_bytes()
+        entry = {"path": rel, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+        def mutate(manifest):
+            files = manifest["files"]
+            if replace_metadata:
+                files[:] = [f for f in files if not f["path"].endswith(".metadata")]
+            files.append(entry)
+        _rewrite_manifest(self.bdir, mutate)
+
+    def test_absolute_manifest_path_is_rejected(self) -> None:
+        outside = Path(self._tmp.name) / "outside.bin"
+        outside.write_bytes(b"x")
+        self._add_entry(outside.resolve().as_posix(), outside)
+        with self.assertRaisesRegex(RuntimeError, "manifest path"):
+            bundle.validate_bundle(self.bdir)
+
+    def test_traversal_manifest_path_is_rejected(self) -> None:
+        escaped = self.bdir / "outside.bin"
+        escaped.write_bytes(b"x")
+        for rel in ("dcp/../outside.bin", "../bundle/outside.bin"):
+            with self.subTest(rel=rel):
+                self._rewrite_files_without(rel)
+                self._add_entry(rel, escaped)
+                with self.assertRaisesRegex(RuntimeError, "manifest path"):
+                    bundle.validate_bundle(self.bdir)
+
+    def _rewrite_files_without(self, rel: str) -> None:
+        _rewrite_manifest(self.bdir, lambda m: m.__setitem__(
+            "files", [f for f in m["files"] if f["path"] != rel]))
+
+    def test_decoy_metadata_outside_dcp_is_rejected(self) -> None:
+        decoy = self.bdir / "other" / ".metadata"
+        decoy.parent.mkdir()
+        decoy.write_bytes(b"meta")
+        self._add_entry("other/.metadata", decoy, replace_metadata=True)
+        with self.assertRaisesRegex(RuntimeError, "manifest path must lie under dcp/"):
+            bundle.validate_bundle(self.bdir)
+
+    def test_nested_decoy_metadata_inside_dcp_is_rejected(self) -> None:
+        decoy = self.bdir / "dcp" / "sub" / ".metadata"
+        decoy.parent.mkdir()
+        decoy.write_bytes(b"meta")
+        self._add_entry("dcp/sub/.metadata", decoy, replace_metadata=True)
+        with self.assertRaisesRegex(RuntimeError, "exactly the DCP metadata file"):
+            bundle.validate_bundle(self.bdir)
+
     def test_source_sha_mismatch_is_rejected(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "source_sha"):
             bundle.validate_bundle(self.bdir, expected_source_sha="0" * 40)

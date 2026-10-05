@@ -377,3 +377,15 @@
 | 35931254F6B5D720 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B2-B3-thread-fixes: test_distributed_checkpoint_bundle_v1.py |
 | 1A5842152C2CD33E | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B2-B3-thread-fixes: test_resume_utils_cov_hex_v3.py |
 | ACDCAA5B545E7CEC | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B2-B3-thread-fixes: test_runner_hex_v3.py |
+
+## Integration R2-codex-pr58 (append-only, 2026-10-05, vero/hexa-integration-2026-10-05)
+
+> Pins for the integrated bytes of this block. Prior rows remain lineage.
+
+| 2922F97F47844325 | 2026-10-05 00:00 | scripts/oracles | in-repo derived, integration R2-codex-pr58: distributed_checkpoint_bundle_v1.py |
+| 7B75D532ED7CE67A | 2026-10-05 00:00 | spec | in-repo derived, integration R2-codex-pr58: METRIC_SPEC_v4.md |
+| BFDF3E26044116C0 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R2-codex-pr58: benchmark_hex_v3.py |
+| 0F9EEA942316B6BA | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R2-codex-pr58: runner_hex_v3.py |
+| E1B87B6B8B1D549E | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R2-codex-pr58: test_benchmark_hex_v3.py |
+| 87144BAAED06222C | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R2-codex-pr58: test_distributed_checkpoint_bundle_v1.py |
+| BB9F68C9BE2146D3 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R2-codex-pr58: test_runner_hex_v3.py |

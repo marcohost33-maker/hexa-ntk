@@ -541,6 +541,14 @@ class MetricSpecV4:
             raise ValueError("MetricSpecV4 requires name='mean_nrmse'")
         if self.version != "4.0":
             raise ValueError("MetricSpecV4 requires version='4.0'")
+        # A truthy non-bool ("false", 1) would exclude index 0 while the
+        # serialized spec still shows the raw value (Codex PR #58).
+        if type(self.exclude_initial_state) is not bool:
+            raise TypeError(
+                "MetricSpecV4.exclude_initial_state must be a bool, got "
+                f"{type(self.exclude_initial_state).__name__} "
+                f"{self.exclude_initial_state!r}"
+            )
         if self.sample_reduction != "mean_of_ratios":
             raise ValueError("MetricSpecV4 requires sample_reduction='mean_of_ratios'")
         if self.time_aggregation not in {"geometric_mean", "arithmetic_mean", "max"}:
@@ -562,6 +570,15 @@ def metric_spec_digest(spec: MetricSpecV4) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _v4_promote_single_sample(field: Any) -> Any:
+    """MetricSpec v4 accepts a single-sample rollout [T, DOF]; it is the
+    explicit [T, 1, DOF] form (spec/METRIC_SPEC_v4.md section 2). Other ranks
+    pass through unchanged and are validated by _validate_rollout_pair."""
+    if torch.is_tensor(field) and field.ndim == 2:
+        return field.unsqueeze(1)
+    return field
+
+
 def _as_t_b_dof(field: torch.Tensor) -> torch.Tensor:
     if field.ndim == 3:
         return field.unsqueeze(1).reshape(field.shape[0], 1, -1)
@@ -575,6 +592,8 @@ def compute_mean_nrmse_per_step(
     zero_reference_policy: str = "error",
 ) -> torch.Tensor:
     """Return mean-of-per-sample relative L2 error for each timestep."""
+    pred = _v4_promote_single_sample(pred)
+    target = _v4_promote_single_sample(target)
     _validate_rollout_pair(pred, target)
     if zero_reference_policy not in {"error", "zero_if_both_zero"}:
         raise ValueError("unsupported zero_reference_policy")
@@ -675,6 +694,8 @@ def evaluate_rollout_v4(
     rollouts pass ``MetricSpecV4(exclude_initial_state=False)``.
     """
     spec = spec or MetricSpecV4()
+    pred = _v4_promote_single_sample(pred)
+    target = _v4_promote_single_sample(target)
     mean_nrmse = compute_mean_nrmse_per_step(
         pred,
         target,

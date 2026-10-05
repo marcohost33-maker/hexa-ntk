@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import tempfile
 from typing import Any, Mapping
 
@@ -46,6 +46,28 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
         raise
 
 
+DCP_METADATA = "dcp/.metadata"
+
+
+def checked_manifest_path(raw: object) -> str:
+    """Return a manifest path only if it is a normalized relative POSIX path
+    strictly below ``dcp/`` (Codex PR #58): no absolute or drive paths, no
+    backslashes, no empty/./.. components, no decoys outside the DCP tree."""
+    if not isinstance(raw, str) or not raw:
+        raise RuntimeError(f"manifest path must be a non-empty string, got {raw!r}")
+    if "\\" in raw or ":" in raw:
+        raise RuntimeError(f"manifest path must be POSIX without drive or colon: {raw!r}")
+    posix = PurePosixPath(raw)
+    if posix.is_absolute() or PureWindowsPath(raw).is_absolute():
+        raise RuntimeError(f"manifest path must be relative: {raw!r}")
+    parts = raw.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        raise RuntimeError(f"manifest path must be normalized: {raw!r}")
+    if len(parts) < 2 or parts[0] != "dcp":
+        raise RuntimeError(f"manifest path must lie under dcp/: {raw!r}")
+    return raw
+
+
 def fsync_directory(path: Path) -> None:
     """Persist directory entries (POSIX). No-op where directories cannot be opened."""
     if os.name != "posix":
@@ -81,7 +103,7 @@ def build_manifest(
         )
     if not files:
         raise ValueError("dcp directory contains no checkpoint files")
-    if not any(Path(item["path"]).name == ".metadata" for item in files):
+    if not any(item["path"] == DCP_METADATA for item in files):
         raise ValueError("DCP checkpoint is missing .metadata")
     return {
         "schema": SCHEMA,
@@ -155,10 +177,21 @@ def validate_bundle(
     # or without the DCP .metadata file is not valid.
     if not isinstance(files, list) or not files:
         raise RuntimeError("manifest lists no checkpoint files")
-    if not any(Path(str(entry.get("path", ""))).name == ".metadata" for entry in files):
-        raise RuntimeError("manifest lacks the DCP .metadata file")
+    paths = [checked_manifest_path(entry.get("path") if isinstance(entry, dict) else None)
+             for entry in files]
+    if len(set(paths)) != len(paths):
+        raise RuntimeError("manifest lists a path more than once")
+    metadata_entries = [p for p in paths if PurePosixPath(p).name == ".metadata"]
+    if metadata_entries != [DCP_METADATA]:
+        raise RuntimeError(
+            f"manifest must list exactly the DCP metadata file {DCP_METADATA!r}, "
+            f"got {metadata_entries!r}"
+        )
+    dcp_root = (bundle_path / "dcp").resolve()
     for entry in files:
         path = bundle_path / entry["path"]
+        if not path.resolve().is_relative_to(dcp_root):
+            raise RuntimeError(f"manifest path escapes dcp/: {entry['path']}")
         if not path.is_file():
             raise RuntimeError(f"checkpoint file missing: {entry['path']}")
         if path.stat().st_size != entry["size"]:
