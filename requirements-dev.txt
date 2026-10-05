@@ -5,5 +5,5 @@
 # - numpy wird im Testjob separat installiert,
 # - torch nutzt den dedizierten CPU-Wheel-Index,
 # - das Repo bleibt ein Forschungs-Repo, kein distributierbares Package.
-ruff==0.16.4
-coverage==7.15.4
+ruff==0.16.9
+coverage==7.16.2
