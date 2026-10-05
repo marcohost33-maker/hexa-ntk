@@ -327,3 +327,12 @@
 | 9A325FE96FA64572 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration probe step03_pr50 (merged bytes): test_ema_hex_v3.py |
 | 665DC949ADA471EA | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration probe step03_pr50 (merged bytes): test_warmstart_utils_cov_hex_v3.py |
 | 53663241136220FA | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration probe step03_pr50 (merged bytes): test_warmstart_utils_hex_v3.py |
+
+## src/toolkit/ — MetricSpec v4 2026-10-04 (Codex)
+
+> Adds explicit mean-of-per-sample nRMSE, forecast-only time aggregation,
+> threshold-crossing terminology, a metric-spec digest, and legacy-report
+> preservation. Existing v3 functions remain available for reproduction.
+
+| DD71A9F23937E5D7 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/metricspec-v4: benchmark_hex_v3.py |
+| 1EA2A54085C9C5A4 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/metricspec-v4: test_benchmark_hex_v3.py |
