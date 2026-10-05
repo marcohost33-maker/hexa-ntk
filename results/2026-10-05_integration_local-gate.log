@@ -1,0 +1,232 @@
+# HexaNTK integration gate log — vero/hexa-integration-2026-10-05
+# Tested commit: 22ede52e4920bb5d5f6f6b7f98c4f958602411cc   (base main e4a0e5e5f402f4b1df67443e090d6d2276fc8aba)
+# Environment: Windows 11, Python 3.12.10 torch 2.6.0+cpu numpy 2.5.3 coverage 7.15.4 torchdata 0.11.0+cpu, ruff 0.16.4
+# Chain mirrors .github/workflows/ci.yml (gate + tests (cpu)); CI itself runs Linux. Claim: local green, CI open.
+# Commands: ruff check src scripts | python -m compileall -q src | python scripts/verify_sources.py | python scripts/engine_gate.py | python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" | python -m coverage report
+
+## Chain summary (exit codes as observed)
+LABEL=10_final HEAD=22ede52e4920bb5d5f6f6b7f98c4f958602411cc date=2026-10-05T12:55:17+02:00
+status-porcelain-lines=0
+IMPORT <scratch>\wt-probe\src\toolkit\resume_utils_hex_v3.py 2.6.0+cpu
+All checks passed!
+RC ruff=0
+RC compileall=0
+RC verify_sources=0
+
+[VERIFY-SOURCES] 26 Toolkit-Eintraege + 3 Spec-Eintraege + 8 Script-Eintraege | Dateiliste: git (37 Dateien) | PASS
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC engine_gate=0
+RC unittest=0
+Ran 512 tests in 48.615s
+OK (skipped=5)
+RC coverage_report=0
+TOTAL                                           1778    131    696     90    91%
+fail_under = 87
+
+## verify_sources full output
+[ OK ] src/toolkit/benchmark_hex_v3.py: 319D9E0A8CB1697A
+[ OK ] src/toolkit/checkpoint_integration_hex_v3.py: A77713B3C2F450AB
+[ OK ] src/toolkit/dataloader_utils_hex_v3.py: A8ACCD446EC287D6
+[ OK ] src/toolkit/dataset_split_hex_v3.py: 8C279370377CAE96
+[ OK ] src/toolkit/ema_hex_v3.py: 4790DFE7CBA298A2
+[ OK ] src/toolkit/failure_signature_hex_v3.py: B4B2D20101A4A8CA
+[ OK ] src/toolkit/operator_adapter_hex_v3.py: D0192688CE5222F1
+[ OK ] src/toolkit/resume_utils_hex_v3.py: 854EBC8CB813E22E
+[ OK ] src/toolkit/runner_hex_v3.py: 4F1DE45D7416AAB8
+[ OK ] src/toolkit/stress_hex_v3.py: 0B0A80BFDC117DC1
+[ OK ] src/toolkit/test_benchmark_hex_v3.py: 45F2096FCADED21E
+[ OK ] src/toolkit/test_checkpoint_integration_hex_v3.py: 39C298784E6824E9
+[ OK ] src/toolkit/test_dataloader_utils_hex_v3.py: 54FE8C5313B45824
+[ OK ] src/toolkit/test_dataset_split_hex_v3.py: 4CC7EC1399C817F1
+[ OK ] src/toolkit/test_distributed_checkpoint_bundle_v1.py: 35931254F6B5D720
+[ OK ] src/toolkit/test_ema_hex_v3.py: 9A325FE96FA64572
+[ OK ] src/toolkit/test_hex_timestep_contract.py: ED29A89E81B871F6
+[ OK ] src/toolkit/test_operator_adapter_hex_v3.py: C0EAD8D722BCE4D4
+[ OK ] src/toolkit/test_resume_utils_cov_hex_v3.py: 1A5842152C2CD33E
+[ OK ] src/toolkit/test_resume_utils_hex_v3.py: A8DD8B9F987443AB
+[ OK ] src/toolkit/test_runner_hex_v3.py: ACDCAA5B545E7CEC
+[ OK ] src/toolkit/test_stress_hex_v3.py: EE8D734CA0F9567A
+[ OK ] src/toolkit/test_verify_sources_gate.py: EEFE5FBCEEB67ADE
+[ OK ] src/toolkit/test_warmstart_utils_cov_hex_v3.py: 665DC949ADA471EA
+[ OK ] src/toolkit/test_warmstart_utils_hex_v3.py: 53663241136220FA
+[ OK ] src/toolkit/warmstart_utils_hex_v3.py: 45DE93FC82AEA5ED
+[ OK ] spec/HexaNTK_Review_Gehaertet.md: B54757BA32C68E50
+[ OK ] spec/METRIC_SPEC_v4.md: B18E21FADC714D84
+[ OK ] spec/STRESS_SHIFT_CONTRACT_v1.md: 95100B4D8B668153
+[ OK ] scripts/engine_gate.py: 40161F27978DC8D3
+[ OK ] scripts/mutation_probe.py: AA0904D57AF71012
+[ OK ] scripts/verify_sources.py: 36D3CBADC59CE6C3
+[ OK ] scripts/oracles/dcp_2rank_gloo_oracle.py: 1FDD515C48BE308B
+[ OK ] scripts/oracles/dcp_bundle_2rank_oracle.py: 02F3C8E1BE282F1C
+[ OK ] scripts/oracles/dcp_worldsize_change_oracle.py: 7C7806D9817628E9
+[ OK ] scripts/oracles/distributed_checkpoint_bundle_v1.py: 688BCE7FF32501CA
+[ OK ] scripts/oracles/stateful_loader_resume_oracle.py: F33D9BBD8B056B3B
+
+[VERIFY-SOURCES] 26 Toolkit-Eintraege + 3 Spec-Eintraege + 8 Script-Eintraege | Dateiliste: git (37 Dateien) | PASS
+
+## coverage report
+Name                                           Stmts   Miss Branch BrPart  Cover
+--------------------------------------------------------------------------------
+src\toolkit\benchmark_hex_v3.py                  344     30    116     29    87%
+src\toolkit\checkpoint_integration_hex_v3.py     224     28     70      6    87%
+src\toolkit\dataloader_utils_hex_v3.py            22      0      2      0   100%
+src\toolkit\dataset_split_hex_v3.py              190      5     86      6    96%
+src\toolkit\ema_hex_v3.py                         40      0     10      0   100%
+src\toolkit\failure_signature_hex_v3.py           41      3      0      0    93%
+src\toolkit\operator_adapter_hex_v3.py           128     11     94     11    90%
+src\toolkit\resume_utils_hex_v3.py               149      3     80      2    98%
+src\toolkit\runner_hex_v3.py                     304     19     96     11    92%
+src\toolkit\stress_hex_v3.py                     207     25     92     23    84%
+src\toolkit\warmstart_utils_hex_v3.py            129      7     50      2    95%
+--------------------------------------------------------------------------------
+TOTAL                                           1778    131    696     90    91%
+
+## unittest tail
+----------------------------------------------------------------------
+Ran 512 tests in 48.615s
+
+OK (skipped=5)
+
+## Evidence lanes on the same commit (Windows surrogate; CI lanes run ubuntu)
+### stateful_loader_resume_oracle --num-workers 0 --batch-timeout-s 60 --total-timeout-s 600 -> exit 0
+{
+  "all_exact": true,
+  "claim_ceiling": "CPU, deterministic map-style dataset, in_order=True; no rank-wise distributed claim and no stochastic worker-transform RNG claim",
+  "interrupt_after": 3,
+  "num_workers": 0,
+  "same_batch_sequence": true,
+  "same_ema": true,
+  "same_losses": true,
+  "same_model": true,
+  "same_optimizer": true,
+  "same_scheduler": true,
+  "torch_version": "2.6.0+cpu"
+}
+### stateful_loader_resume_oracle --num-workers 2 --batch-timeout-s 60 --total-timeout-s 600 -> exit 0
+{
+  "all_exact": true,
+  "claim_ceiling": "CPU, deterministic map-style dataset, in_order=True; no rank-wise distributed claim and no stochastic worker-transform RNG claim",
+  "interrupt_after": 3,
+  "num_workers": 2,
+  "same_batch_sequence": true,
+  "same_ema": true,
+  "same_losses": true,
+  "same_model": true,
+  "same_optimizer": true,
+  "same_scheduler": true,
+  "torch_version": "2.6.0+cpu"
+}
+### dcp_2rank_gloo_oracle -> exit 0
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+{
+  "all_ranks_exact": true,
+  "backend": "gloo",
+  "claim_ceiling": "two-rank single-node CPU/gloo DDP model+Adam DCP roundtrip and one-next-step differential; no FSDP, GPU/NCCL, elastic, or loader-state claim",
+  "rank_results": [
+    {
+      "after_one_step_model_equal": true,
+      "after_one_step_optimizer_equal": true,
+      "all_exact": true,
+      "before_model_equal": true,
+      "before_optimizer_equal": true,
+      "next_loss_equal": true,
+      "rank": 0
+    },
+    {
+      "after_one_step_model_equal": true,
+      "after_one_step_optimizer_equal": true,
+      "all_exact": true,
+      "before_model_equal": true,
+      "before_optimizer_equal": true,
+      "next_loss_equal": true,
+      "rank": 1
+    }
+  ],
+  "torch_version": "2.6.0+cpu",
+  "world_size": 2,
+  "wrapper": "DistributedDataParallel"
+}
+### dcp_worldsize_change_oracle -> exit 0
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\state_dict_loader.py:144: UserWarning: torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process.
+  warnings.warn(
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\state_dict_saver.py:143: UserWarning: torch.distributed is unavailable or uninitialized, assuming the intent is to save in a single process.
+  warnings.warn(
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+{
+  "all_exact": true,
+  "backend": "gloo",
+  "claim_ceiling": "single-node CPU/gloo topology-change control for replicated DDP/plain model+Adam; not FSDP sharded resharding, elastic training, GPU/NCCL, or loader state",
+  "one_plain_to_two_rank_ddp": {
+    "all_ranks_exact": true,
+    "rank_results": [
+      {
+        "all_exact": true,
+        "model_equal": true,
+        "optimizer_equal": true,
+        "rank": 0
+      },
+      {
+        "all_exact": true,
+        "model_equal": true,
+        "optimizer_equal": true,
+        "rank": 1
+      }
+    ]
+  },
+  "torch_version": "2.6.0+cpu",
+  "two_rank_ddp_to_one_plain": {
+    "all_exact": true,
+    "model_equal": true,
+    "optimizer_equal": true
+  }
+}
+### dcp_bundle_2rank_oracle -> exit 0
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+<scratch>\venv312\Lib\site-packages\torch\distributed\checkpoint\filesystem.py:116: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  if tensor.storage().size() != tensor.numel():
+{
+  "all_negative_controls_rejected": true,
+  "claim_ceiling": "shared-filesystem two-rank CPU/gloo DCP commit/digest protocol; no object-store transactional guarantee",
+  "manifest_file_count": 3,
+  "missing_commit_rejected": "RuntimeError: checkpoint bundle is not committed",
+  "non_committed_state_rejected": "RuntimeError: bundle marker state is 'WRITING', not 'COMMITTED'",
+  "source_sha": "22ede52e4920bb5d5f6f6b7f98c4f958602411cc",
+  "source_sha_mismatch_rejected": "RuntimeError: checkpoint source_sha does not match expected source_sha",
+  "tampered_shard_rejected": "RuntimeError: checkpoint size mismatch: dcp/__0_0.distcp",
+  "valid_bundle": true
+}
+
+## Discrimination (G:/Meine Ablage/Vero/Tools/diskriminierung.py, ledger Data/diskriminierung_runs.jsonl)
+  E1 default best metric val_nrmse                                            DISKRIMINIERT
+  E1 missing metric -> KeyError (revert = silent val_loss fallback)           DISKRIMINIERT
+  E3 stored counter fail-closed with explanation                              DISKRIMINIERT  [subTest: 1 rot von 2 beurteilt, erwartet 2]
+  E4 scheduler constructed after optimizer load (constructor step simulated)  DISKRIMINIERT  [subTest: 5 rot von 7 beurteilt, erwartet 7]
+  E5 scripts target                                                           DISKRIMINIERT
+  E5 longest target wins (scripts/oracles)                                    DISKRIMINIERT
+  #46 T5 reset stale best on restore                                          DISKRIMINIERT
+  #46 T6 lazy EMA copy                                                        DISKRIMINIERT
+  #52 T1 shared initial state check                                           DISKRIMINIERT
+  #52 T2 identity name fixed                                                  DISKRIMINIERT  [subTest: 1 rot von 2 beurteilt, erwartet 2]
+  #52 T2 identity version fixed                                               DISKRIMINIERT  [subTest: 1 rot von 2 beurteilt, erwartet 2]
+  #52 T3 migration carries threshold                                          DISKRIMINIERT
+  #52 T4 summary reads v4                                                     DISKRIMINIERT
+  #52 T5 Eq32 label only for geometric forecast-only                          DISKRIMINIERT
+  #54 T2 marker state COMMITTED                                               DISKRIMINIERT  [subTest: 2 rot von 2 beurteilt, erwartet 2]
+  #54 T3 non-empty inventory                                                  ROT, ART-UNBESTIMMT  [subTest: 2 rot von 2 beurteilt, erwartet 2]
+  #54 T3 .metadata required                                                   DISKRIMINIERT
+  #54 T0 source SHA identity check                                            DISKRIMINIERT
+  O4 shard dir fsync before manifest                                          DISKRIMINIERT
+18/19 diskriminieren.
+  davon ROT, ART-UNBESTIMMT  [subTest: 2 rot von 2 beurteilt, erwartet 2]: 1
+Lauf    -> run_id DK-20261005T104841-d9c47bb221b4
+Stand   -> spec_sha256 f5a18e5c901b…  head fa3a23c785e7
+Stufe   -> provenienz_klasse VOLL
