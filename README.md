@@ -44,21 +44,23 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 - **Kein Nachweis physikalischer Korrektheit** einer PDE-Loesung. Die Gates pruefen
   Software-Integritaet (Determinismus, Round-Trips, Shapes), nicht Physik.
 
-## Reifegrad / Evidenz (Lauf 2026-09-28, lokal, Exit-Codes gesehen)
+## Reifegrad / Evidenz (Lauf 2026-10-05, lokal, Exit-Codes gesehen)
 
 | Gate | Kommando | Ergebnis |
 |---|---|---|
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
 | Provenance | `python scripts/verify_sources.py` | 26 Toolkit- + 3 Spec-Eintraege + 8 Script-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 512 Tests, OK (5 skipped: 3 POSIX-only, 2 Symlink-Recht unter Windows), exit 0 |
-| Coverage | `python -m coverage run ... && python -m coverage report` | 88,9 % gesamt (Branch, `fail_under = 87`), exit 0 |
-| Mutation | `python scripts/mutation_probe.py` | 21/22 Mutanten getoetet (Baseline gruen), exit 1: M02 ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped) |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 512 Tests, OK, exit 0 (Skips je Plattform: Gate-Log) |
+| Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
+| Mutation | `python scripts/mutation_probe.py` | 21/22 Mutanten getoetet (Baseline gruen), exit 1: M02 ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped) — Lauf 2026-09-28, im Integrationslauf 2026-10-05 nicht wiederholt |
 
 Lokale Umgebung dieses Laufs: Windows 11, Python 3.12.10, `torch` 2.6.0+cpu, `numpy` 2.5.3;
-Stand nach dem Merge von `main` (e4a0e5e, Engine 3.0.1 aus PR #45) plus den Fixes der
-Codex-Threads auf #46. Die CI faehrt dieselbe Kette auf **Python 3.12** mit `torch==2.6.0`
-(CPU-Wheel, Linux). Log: `results/2026-09-28_codex46-review_local-gate.log`. Fruehere Laeufe
+Stand: Integrationszweig `vero/hexa-integration-2026-10-05` (PRs #46, #48, #50, #52, #53, #54
+auf `main` e4a0e5e, Entscheide E1-E6, Codex-Thread-Fixes). Die CI faehrt dieselbe Kette auf
+**Python 3.12** mit `torch==2.6.0` (CPU-Wheel, Linux). Log:
+`results/2026-10-05_integration_local-gate.log` (Commit-SHA, Kommandos, Exit-Codes, Zahlen).
+Vorlauf 2026-09-28: `results/2026-09-28_codex46-review_local-gate.log`. Fruehere Laeufe
 (2026-09-27: 378 Tests, 19/19 Mutanten; 2026-08-26: 166 Tests, 82 %) bleiben in ihren Logs
 als historische Evidenz stehen. Die Zaehlangaben dieses Abschnitts zum aktuellen Baum
 (Tests, Provenance-Eintraege, Doctests, Mutanten) nagelt `TestDocsContract` in
@@ -107,7 +109,7 @@ python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/wh
 python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 512 Unit-Tests (2026-09-28) + Coverage-Gate
+python -m coverage report                                      # 512 Unit-Tests (2026-10-05) + Coverage-Gate
 python scripts/mutation_probe.py                               # optional: 22 Mutanten der Review-Fixes
 ```
 
@@ -116,7 +118,7 @@ den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (512, Stand 2026-09-28) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (512, Stand 2026-10-05) unter Branch-Coverage.
 
 ## Struktur
 
