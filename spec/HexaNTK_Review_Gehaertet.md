@@ -149,7 +149,7 @@ Besser noch: `pred = loss = None` am Anfang initialisieren (wie in Doc2 V2 schon
 
 ### 2.6 LÜCKE: Scheduler-Restore-Reihenfolge inkonsistent
 
-**Problem:** Doc3 dokumentiert korrekt die Reihenfolge: Scheduler vor Optimizer laden. Die Implementierung in `load_resume_checkpoint` setzt das um. Aber Doc1 und Doc2 beachten diese Reihenfolge nicht in ihren Checkpoint-Integration-Designs.
+**Problem:** Doc3 dokumentiert die Reihenfolge Optimizer vor Scheduler laden; die Implementierung in `load_resume_checkpoint` setzt das um. Aber Doc1 und Doc2 beachten diese Reihenfolge nicht in ihren Checkpoint-Integration-Designs. *(Korrigiert 2026-10-05, E4: der Satz lautete vorher "Scheduler vor Optimizer laden" und widersprach der Korrektur unten und §8.3.)*
 
 **Korrektur:** In der kanonischen `CheckpointIntegrationManager.load_resume` muss die Reihenfolge verbindlich sein:
 
@@ -495,6 +495,27 @@ Die aktuelle Best Practice laut PyTorch-Dokumentation und Community-Erfahrung:
 5. RNG-States (Python, NumPy, PyTorch, CUDA)
 6. DataLoader-State (optional)
 ```
+
+**Vorbedingung (präzisiert 2026-10-05, E4):** Optimizer UND Scheduler sind
+konstruiert, BEVOR irgendein State geladen wird. Der Scheduler-Konstruktor ruft
+einen ersten `step()` auf und schreibt dabei die Lernrate in die
+Optimizer-Gruppen; wird der Scheduler erst nach `optimizer.load_state_dict`
+konstruiert, überschreibt er die wiederhergestellte Lernrate. Das ist der
+eigentliche Defekt, gegen den diese Regel schützt.
+
+Für die PyTorch-Standard-Scheduler ist die Reihenfolge der beiden *Loads*
+zustandsgleich: `LRScheduler.load_state_dict` aktualisiert nur das eigene
+`__dict__` (torch 2.6.0, `lr_scheduler.py:166-173`), `Optimizer.load_state_dict`
+übernimmt die gespeicherten Gruppenwerte ausser `params` (`optimizer.py:925-933`).
+Die Reihenfolge Optimizer → Scheduler bleibt trotzdem verbindlich, damit eigene
+Scheduler, deren `load_state_dict` Optimizer-Gruppen anfasst, das letzte Wort
+haben.
+
+Prüforakel: Verhalten, nicht Aufruf-Reihenfolge — nach Resume ist die Lernrate
+gleich der im Checkpoint, und Lernraten-Verlauf und Gewichte sind bitgleich zu
+einem ununterbrochenen Lauf (mehrere Scheduler-Typen); die Negativkontrolle
+"Scheduler nach `optimizer.load_state_dict` konstruiert" muss dabei auffallen
+(`TestRestoreOrderBehaviour` in `src/toolkit/test_resume_utils_hex_v3.py`).
 
 ---
 

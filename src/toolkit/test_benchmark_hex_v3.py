@@ -20,13 +20,19 @@ import torch
 import benchmark_hex_v3 as benchmark
 from benchmark_hex_v3 import (
     BenchmarkReport,
+    MetricSpecV4,
+    aggregate_forecast_metric,
     aggregate_over_time,
     compute_divergence_step,
     compute_h1_rmse_per_step,
     compute_h1_nrmse_per_step,
+    compute_mean_nrmse_per_step,
     compute_nrmse_per_step,
     compute_rmse_per_step,
+    compute_threshold_crossing_step,
     evaluate_rollout,
+    evaluate_rollout_v4,
+    preserve_legacy_report_without_relabeling,
 )
 
 T, N, C = 10, 7, 2
@@ -713,6 +719,138 @@ class TestBinary64OverflowContract(unittest.TestCase):
                 self.assertEqual(
                     compute_divergence_step(nrmse, threshold=value), T
                 )
+
+
+
+
+class TestMetricSpecV4(unittest.TestCase):
+    def test_eq31_mean_of_sample_ratios_differs_from_legacy_batch_flattening(self) -> None:
+        target = torch.tensor([[[[1.0]], [[100.0]]]], dtype=torch.float64)
+        pred = torch.tensor([[[[2.0]], [[110.0]]]], dtype=torch.float64)
+        corrected = compute_mean_nrmse_per_step(pred, target)
+        legacy = compute_nrmse_per_step(pred, target, eps=1e-12)
+        self.assertAlmostEqual(float(corrected[0]), 0.55, places=12)
+        self.assertGreater(abs(float(corrected[0] - legacy[0])), 0.4)
+
+    def test_forecast_aggregation_excludes_shared_initial_state(self) -> None:
+        values = torch.tensor([0.0, 0.5, 2.0], dtype=torch.float64)
+        self.assertAlmostEqual(
+            aggregate_forecast_metric(values, exclude_initial_state=True),
+            1.0,
+            places=12,
+        )
+
+    def test_v4_report_is_versioned_and_uses_threshold_crossing_label(self) -> None:
+        x = torch.ones((3, 2, 4, 1), dtype=torch.float64)
+        result = evaluate_rollout_v4(
+            x,
+            x,
+            spec=MetricSpecV4(zero_reference_policy="zero_if_both_zero"),
+        )
+        self.assertEqual(result["metric_spec_version"], "4.0")
+        self.assertEqual(len(result["metric_spec_digest"]), 64)
+        self.assertEqual(result["aggregated_mean_nrmse"], 0.0)
+        self.assertIsNone(result["threshold_crossing_step"])
+        self.assertNotIn("divergence_step", result)
+
+    def test_threshold_crossing_returns_none_when_no_alarm_occurs(self) -> None:
+        values = torch.tensor([0.0, 0.2, 0.9])
+        self.assertIsNone(compute_threshold_crossing_step(values, 1.0))
+        self.assertEqual(
+            compute_threshold_crossing_step(torch.tensor([0.0, 1.1, 0.9]), 1.0),
+            1,
+        )
+
+    def test_zero_reference_policy_fails_on_nonzero_error(self) -> None:
+        target = torch.zeros((2, 1, 2, 1), dtype=torch.float64)
+        pred = target.clone()
+        pred[1] = 1.0
+        with self.assertRaises(ZeroDivisionError):
+            compute_mean_nrmse_per_step(
+                pred,
+                target,
+                zero_reference_policy="zero_if_both_zero",
+            )
+
+    def test_identity_fields_are_fixed(self) -> None:
+        for kwargs in ({"name": "rmse"}, {"version": "99"}):
+            with self.subTest(**kwargs), self.assertRaises(ValueError):
+                MetricSpecV4(**kwargs)
+
+    def test_index_zero_dropped_only_for_shared_initial_state(self) -> None:
+        target = torch.ones((3, 2, 4, 1), dtype=torch.float64)
+        pred = target.clone()
+        pred[0] = 5.0  # forecast-only input: index 0 is a prediction
+        pred[1:] = 1.5
+        with self.assertRaisesRegex(ValueError, "shared initial state"):
+            evaluate_rollout_v4(pred, target)
+        forecast_only = evaluate_rollout_v4(
+            pred, target, spec=MetricSpecV4(exclude_initial_state=False))
+        self.assertGreater(forecast_only["aggregated_mean_nrmse"], 0.0)
+
+    def test_semantics_label_follows_aggregation(self) -> None:
+        x = torch.ones((3, 2, 4, 1), dtype=torch.float64)
+        labels = {
+            agg: evaluate_rollout_v4(x, x, spec=MetricSpecV4(time_aggregation=agg))[
+                "metric_semantics"]
+            for agg in ("geometric_mean", "arithmetic_mean", "max")
+        }
+        self.assertIn("; Eq32_geometric_mean_forecast_only", labels["geometric_mean"])
+        for agg in ("arithmetic_mean", "max"):
+            self.assertIn(f"not_Eq32_{agg}", labels[agg])
+            self.assertNotIn("; Eq32", labels[agg])
+        all_steps = evaluate_rollout_v4(
+            x, x, spec=MetricSpecV4(exclude_initial_state=False))["metric_semantics"]
+        self.assertIn("not_Eq32_geometric_mean_all_steps", all_steps)
+
+    def test_legacy_migration_carries_interpretation_parameters(self) -> None:
+        migrated = preserve_legacy_report_without_relabeling({"metrics": {
+            "nrmse_mean": 0.3, "divergence_step": 10, "num_steps": 10,
+            "aggregation_method": "max", "divergence_threshold": 0.5}})
+        self.assertEqual(migrated["legacy_num_steps"], 10)
+        self.assertEqual(migrated["legacy_aggregation_method"], "max")
+        self.assertEqual(migrated["legacy_divergence_threshold"], 0.5)
+        self.assertTrue(migrated["legacy_divergence_step_is_no_crossing_sentinel"])
+
+    def test_summary_reads_v4_result(self) -> None:
+        x = torch.ones((3, 2, 4, 1), dtype=torch.float64)
+        y = x.clone()
+        y[1:] = 1.5
+        metrics = evaluate_rollout_v4(y, x)
+        line = BenchmarkReport(model_name="m", dataset_name="d", metrics=metrics).summary()
+        self.assertIn(f"mean_nRMSE_v4.0={metrics['aggregated_mean_nrmse']:.4f}", line)
+        self.assertIn("crossing_step=none", line)
+        self.assertNotIn("div_step=?", line)
+
+    def test_rank2_single_sample_equals_explicit_batch_of_one(self) -> None:
+        torch.manual_seed(0)
+        target = torch.rand(5, 7, dtype=torch.float64) + 0.5
+        pred = target + 0.1 * torch.rand(5, 7, dtype=torch.float64)
+        pred[0] = target[0]
+        try:
+            two_d = evaluate_rollout_v4(pred, target)
+        except (TypeError, ValueError) as exc:  # contract: [T, DOF] is accepted
+            self.fail(f"[T, DOF] input rejected: {exc}")
+        explicit = evaluate_rollout_v4(pred.unsqueeze(1), target.unsqueeze(1))
+        self.assertEqual(two_d, explicit)
+        self.assertTrue(torch.equal(compute_mean_nrmse_per_step(pred, target),
+                                    compute_mean_nrmse_per_step(pred.unsqueeze(1),
+                                                                target.unsqueeze(1))))
+
+    def test_exclude_initial_state_must_be_bool(self) -> None:
+        for bad in ("false", "true", 1, 0, None):
+            with self.subTest(value=bad), self.assertRaises(TypeError):
+                MetricSpecV4(exclude_initial_state=bad)
+        self.assertFalse(MetricSpecV4(exclude_initial_state=False).exclude_initial_state)
+
+    def test_legacy_report_is_not_silently_relabelled(self) -> None:
+        migrated = preserve_legacy_report_without_relabeling(
+            {"metrics": {"nrmse_mean": 0.12, "divergence_step": 7}}
+        )
+        self.assertEqual(migrated["legacy_nrmse_mean"], 0.12)
+        self.assertEqual(migrated["legacy_divergence_step"], 7)
+        self.assertIsNone(migrated["corrected_aggregated_mean_nrmse"])
+        self.assertIsNone(migrated["threshold_crossing_step"])
 
 
 if __name__ == "__main__":

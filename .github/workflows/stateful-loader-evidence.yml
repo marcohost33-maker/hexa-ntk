@@ -1,0 +1,60 @@
+name: stateful-loader-evidence
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    # E6 (2026-10-05): run only when the oracle or this lane changes (the oracle
+    # imports torch/torchdata only, no repository module).
+    paths:
+      - "scripts/oracles/stateful_loader_resume_oracle.py"
+      - ".github/workflows/stateful-loader-evidence.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  stateful-loader-cpu:
+    name: stateful-loader-cpu
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        num-workers: [0, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: install pinned recovery stack
+        run: |
+          python -m pip install --upgrade pip
+          # Pinned CPU torch FIRST: torchdata 0.11.0 declares torch>=2, so the
+          # reverse order downloads an unpinned PyPI torch that is then replaced.
+          # torchdata 0.11.0 (2025-02-20) is its last release; compatibility is
+          # confirmed only up to torch 2.6. This lane is an optional differential
+          # track; the repo's own resume state is the core contract.
+          pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
+          pip install "numpy==2.5.3" "torchdata==0.11.0"
+      - name: environment evidence
+        run: |
+          python --version
+          python - <<'PY'
+          import numpy
+          import torch
+          import torchdata
+          print("numpy", numpy.__version__)
+          print("torch", torch.__version__)
+          print("torchdata", torchdata.__version__)
+          PY
+      - name: StatefulDataLoader differential oracle
+        run: |
+          # Hard bound outside the interpreter: the in-process watchdog is
+          # best-effort (measured on Windows: it can stall when it fires mid-import).
+          timeout --kill-after=30s 660s python scripts/oracles/stateful_loader_resume_oracle.py \
+            --num-workers ${{ matrix.num-workers }} \
+            --batch-timeout-s 60 --total-timeout-s 600 \
+            --output stateful-loader-${{ matrix.num-workers }}.json

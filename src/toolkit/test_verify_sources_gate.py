@@ -213,6 +213,38 @@ class TestVerifySourcesFilesystem(_GateLayout):
         self.assertEqual(rc, 2, out)
         self.assertIn("spec/sub/HIDDEN.yaml: verschachtelte Datei", out)
 
+    # --- dimension: scripts/ targets (E5, 2026-10-05) ---------------------
+    def test_unpinned_script_is_a_gap(self) -> None:
+        self._add("scripts/tool.py", MODULE)
+        rc, out = self._run()
+        self.assertEqual(rc, 2, out)
+        self.assertIn("[GAP ] scripts/tool.py: Datei ohne SOURCES.md-Eintrag", out)
+
+    def test_unpinned_oracle_is_a_gap(self) -> None:
+        self._add("scripts/oracles/oracle.py", MODULE)
+        rc, out = self._run(self._row("scripts", MODULE, "oracle.py"))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("[GAP ] scripts/oracles/oracle.py: Datei ohne SOURCES.md-Eintrag", out)
+
+    def test_pinned_scripts_and_oracles_pass_and_drift_is_caught(self) -> None:
+        self._add("scripts/tool.py", MODULE)
+        self._add("scripts/oracles/oracle.py", CONTRACT)
+        rows = (self._row("scripts", MODULE, "tool.py"),
+                self._row("scripts/oracles", CONTRACT, "oracle.py"))
+        rc, out = self._run(*rows)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("2 Script-Eintraege", out)
+        (self.root / "scripts" / "oracles" / "oracle.py").write_bytes(CONTRACT + b"#\n")
+        rc, out = self._run(*rows)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("[FAIL] scripts/oracles/oracle.py", out)
+
+    def test_nested_below_oracles_is_a_gap(self) -> None:
+        self._add("scripts/oracles/deep/x.py", MODULE)
+        rc, out = self._run()
+        self.assertEqual(rc, 2, out)
+        self.assertIn("scripts/oracles/deep/x.py: verschachtelte Datei", out)
+
     def test_documented_exclusions_only(self) -> None:
         self._add("src/toolkit/__init__.py", b"")
         self._add("src/toolkit/__pycache__/mod.cpython-312.pyc", b"\x00")
@@ -251,6 +283,13 @@ class TestVerifySourcesGit(_GateLayout):
         rc, out = self._run(self._row("spec", CONTRACT, "LINK.md"))
         self.assertEqual(rc, 2, out)
         self.assertIn("[GAP ] spec/LINK.md: symbolischer Link", out)
+
+    def test_untracked_script_is_a_gap_before_git_add(self) -> None:
+        (self.root / "scripts").mkdir()
+        (self.root / "scripts" / "gate.py").write_bytes(MODULE)
+        rc, out = self._run()
+        self.assertEqual(rc, 2, out)
+        self.assertIn("[GAP ] scripts/gate.py", out)
 
     def test_nested_tracked_file_is_a_gap(self) -> None:
         self._add("src/toolkit/sub/extra.py", MODULE)

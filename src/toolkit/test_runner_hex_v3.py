@@ -12,6 +12,7 @@ Focuses on testable units without requiring GPU or full model:
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,7 +22,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from resume_utils_hex_v3 import save_resume_checkpoint
+from dataloader_utils_hex_v3 import make_reproducible_dataloader_kwargs
+from operator_adapter_hex_v3 import OperatorAdapterV3, OperatorBatchContext
+from resume_utils_hex_v3 import EMADecayError, save_resume_checkpoint
 from runner_hex_v3 import (
     HexTrainingRunner,
     RunnerConfig,
@@ -224,6 +227,7 @@ class TestRunnerConfig(unittest.TestCase):
         self.assertIsNone(cfg.resume_from)
         self.assertEqual(cfg.warmup_steps, 0)
         self.assertEqual(cfg.warmup_start_factor, 0.01)
+        self.assertEqual(cfg.best_metric_name, "val_nrmse")
 
     def test_custom_values(self) -> None:
         cfg = RunnerConfig(
@@ -502,7 +506,9 @@ class TestEpochAndValidation(unittest.TestCase):
             runner = _make_runner(Path(tmpdir))
             report = runner._validate(epoch=0)
             self.assertIn("val_loss", report)
+            # #46 computes a real pooled nRMSE (E1=B).
             self.assertIn("val_nrmse", report)
+            self.assertTrue(math.isfinite(report["val_nrmse"]))
             self.assertTrue(report["used_ema"])
             self.assertEqual(report["n_batches"], 2)
 
@@ -514,6 +520,64 @@ class TestEpochAndValidation(unittest.TestCase):
             report = runner._validate(epoch=0)
             self.assertFalse(report["used_ema"])
             self.assertGreaterEqual(report["val_loss"], 0.0)
+
+    def test_validate_empty_loader_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = _make_runner(Path(tmpdir))
+            runner.val_loader = []
+            # E1=B: #46 semantics -- an empty
+            # validation is no measurement (nan) and is never promoted; see
+            # test_empty_validation_never_becomes_best.
+            report = runner._validate(epoch=0)
+            self.assertEqual(report["n_batches"], 0)
+            self.assertTrue(math.isnan(report["val_loss"]))
+            self.assertTrue(math.isnan(report["val_nrmse"]))
+
+    def test_validate_uses_canonical_adapter_path(self) -> None:
+        class _ContextModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.bias = nn.Parameter(torch.zeros(()))
+
+            def forward(
+                self,
+                x: torch.Tensor,
+                *,
+                edge_index: torch.Tensor,
+                sdf: torch.Tensor,
+                boundary_mask: torch.Tensor,
+            ) -> torch.Tensor:
+                self.last_edge_index = edge_index
+                self.last_sdf = sdf
+                self.last_boundary_mask = boundary_mask
+                return x + self.bias
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            model = _ContextModel()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+            x = torch.randn(2, 3, 2)
+            target = torch.randn(2, 3, 2)
+            edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long)
+            sdf = torch.randn(3, 1)
+            boundary_mask = torch.zeros(3, 1)
+            ctx = OperatorBatchContext(
+                edge_index=edge_index,
+                extra={"sdf": sdf, "boundary_mask": boundary_mask},
+            )
+            runner = HexTrainingRunner(
+                RunnerConfig(output_dir=str(out), use_ema=False),
+                model,
+                optimizer,
+                [],
+                [{"input": x, "target": target, "context": ctx}],
+                adapter=OperatorAdapterV3(model, "graph_operator_v3"),
+                device="cpu",
+            )
+            report = runner._validate(epoch=0)
+            self.assertEqual(report["n_batches"], 1)
+            self.assertIs(model.last_sdf, sdf)
+            self.assertIs(model.last_boundary_mask, boundary_mask)
 
 
 class TestFullRun(unittest.TestCase):
@@ -538,6 +602,79 @@ class TestFullRun(unittest.TestCase):
             self.assertTrue((ckpt_dir / "resume_last.pt").exists())
 
 
+class TestZeroReferenceValidation(unittest.TestCase):
+    """Codex PR #58: all-zero targets AND predictions make the relative
+    metric 0/0. It must be nan (no best, failure signature), never a perfect
+    0.0 that blocks every later real value."""
+
+    def test_zero_over_zero_is_never_best_and_later_value_is(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner = _make_runner(out, config=RunnerConfig(output_dir=str(out), use_ema=False))
+            with torch.no_grad():
+                for p in runner.model.parameters():
+                    p.zero_()
+            runner.val_loader = [{"input": torch.zeros(2, 4), "target": torch.zeros(2, 2)}]
+            report = runner._validate(epoch=0)
+            self.assertEqual(report["val_loss"], 0.0)
+            self.assertTrue(math.isnan(report["val_nrmse"]))
+            first = runner._save_checkpoints(
+                epoch=0, val_report=report, train_report={"mean_loss": 1.0})
+            self.assertEqual((first["best"]["saved"], first["best"]["reason"]),
+                             (False, "non_finite_metric"))
+            self.assertIsNone(runner.ckpt_mgr.best_metric_value)
+            sigs = list((out / "failures").glob("*NaN_or_Inf_Metric*.json"))
+            self.assertEqual(len(sigs), 1)
+            later = runner._save_checkpoints(
+                epoch=1,
+                val_report={"epoch": 1, "val_loss": 0.3, "val_nrmse": 0.5,
+                            "n_batches": 1, "used_ema": False},
+                train_report={"mean_loss": 1.0})
+            self.assertTrue(later["best"]["saved"])
+            self.assertEqual(runner.ckpt_mgr.best_metric_value, 0.5)
+
+    def test_nonzero_error_over_zero_reference_is_inf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner = _make_runner(out, config=RunnerConfig(output_dir=str(out), use_ema=False))
+            with torch.no_grad():
+                for p in runner.model.parameters():
+                    p.fill_(1.0)
+            runner.val_loader = [{"input": torch.zeros(2, 4), "target": torch.zeros(2, 2)}]
+            self.assertEqual(runner._validate(epoch=0)["val_nrmse"], float("inf"))
+
+
+class TestLazyEmaCopyForBest(unittest.TestCase):
+    """Codex review on #46 (T6): the EMA host copy for best.pt is built only
+    when the best policy accepted the metric, not on every epoch."""
+
+    @staticmethod
+    def _report(value: float) -> dict:
+        return {"epoch": 0, "val_loss": 1.0, "val_nrmse": value, "n_batches": 2,
+                "used_ema": True}
+
+    def test_non_improving_epoch_does_not_copy_ema(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner = _make_runner(out)
+            self.assertIsNotNone(runner.ema_model)
+            with mock.patch.object(
+                runner, "_ema_state_snapshot", wraps=runner._ema_state_snapshot
+            ) as snap:
+                first = runner._save_checkpoints(
+                    epoch=0, val_report=self._report(0.2), train_report={"mean_loss": 1.0},
+                    save_state=False)
+                self.assertTrue(first["best"]["saved"])
+                self.assertEqual(snap.call_count, 1)
+                worse = runner._save_checkpoints(
+                    epoch=1, val_report=self._report(0.9), train_report={"mean_loss": 1.0},
+                    save_state=False)
+                self.assertFalse(worse["best"]["saved"])
+                self.assertEqual(snap.call_count, 1)
+            payload = torch.load(runner.ckpt_mgr.best_model_path, weights_only=True)
+            self.assertIn("ema_model_state_dict", payload)
+
+
 class TestNonFiniteValidationMetric(unittest.TestCase):
     """A NaN/inf validation metric never becomes the best checkpoint (#37).
 
@@ -550,7 +687,7 @@ class TestNonFiniteValidationMetric(unittest.TestCase):
     def _val_report(value: float) -> dict:
         return {
             "epoch": 0,
-            "val_loss": value,
+            "val_loss": 1.0,
             "val_nrmse": value,
             "n_batches": 2,
             "used_ema": True,
@@ -613,6 +750,23 @@ class TestNonFiniteValidationMetric(unittest.TestCase):
                 [(False, "non_finite_metric"), (True, "improved")],
             )
             self.assertEqual(runner.ckpt_mgr.best_metric_value, 0.5)
+
+    def test_missing_configured_metric_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            cfg = RunnerConfig(output_dir=str(out), best_metric_name="missing_metric")
+            runner = _make_runner(out, config=cfg)
+            with self.assertRaisesRegex(KeyError, "missing_metric"):
+                runner._save_checkpoints(
+                    epoch=0,
+                    val_report={
+                        "epoch": 0,
+                        "val_loss": 0.5,
+                        "n_batches": 2,
+                        "used_ema": True,
+                    },
+                    train_report={"mean_loss": 1.0},
+                )
 
 
 # ------------------------------------------------------------------
@@ -778,6 +932,388 @@ class TestResume(unittest.TestCase):
                     torch.equal(value, runner.model.state_dict()[key]),
                     msg=f"Mismatch in {key}",
                 )
+
+
+
+# ------------------------------------------------------------------
+# Review 2026-09-27: config/detector contracts, empty validation,
+# best every epoch, final-epoch state, full resume, real nRMSE
+# ------------------------------------------------------------------
+
+
+class _SeededDataset(Dataset):
+    def __init__(self, n: int, seed: int) -> None:
+        g = torch.Generator().manual_seed(seed)
+        self.x = torch.randn(n, 4, generator=g)
+        self.y = torch.randn(n, 2, generator=g)
+
+    def __len__(self) -> int:
+        return len(self.x)
+
+    def __getitem__(self, idx: int):
+        return {"input": self.x[idx], "target": self.y[idx]}
+
+
+def _seeded_runner(out: Path, cfg: RunnerConfig, *, val_n: int = 6) -> HexTrainingRunner:
+    torch.manual_seed(0)
+    model = _TinyModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.05, momentum=0.9)
+    return HexTrainingRunner(
+        cfg,
+        model,
+        optimizer,
+        DataLoader(_SeededDataset(8, seed=0), batch_size=2),
+        DataLoader(_SeededDataset(val_n, seed=1), batch_size=2),
+        device="cpu",
+    )
+
+
+class TestDetectorContract(unittest.TestCase):
+    def test_small_windows_do_not_crash(self) -> None:
+        # window_size=1 called statistics.median([]) on the first loss.
+        for window in (1, 2, 3):
+            with self.subTest(window=window):
+                det = TrainingAnomalyDetector(spike_multiplier=2.0, window_size=window)
+                self.assertEqual(det.check_loss(1.0), (False, ""))
+                self.assertTrue(det.check_loss(10.0)[0])
+
+    def test_invalid_window_rejected(self) -> None:
+        for window in (0, -1, 2.5, True):
+            with self.subTest(window=window):
+                with self.assertRaises(ValueError):
+                    TrainingAnomalyDetector(window_size=window)
+
+    def test_non_finite_spike_multiplier_rejected(self) -> None:
+        for mult in (float("nan"), float("inf")):
+            with self.subTest(mult=mult):
+                with self.assertRaises(ValueError):
+                    TrainingAnomalyDetector(spike_multiplier=mult)
+
+
+class TestRunnerConfigContract(unittest.TestCase):
+    def test_invalid_values_rejected_at_construction(self) -> None:
+        for field, value in (
+            ("save_every_n_epochs", 0),
+            ("num_epochs", -1),
+            ("num_epochs", 2.0),
+            ("log_every_n_steps", -1),
+            ("warmup_steps", -5),
+            ("spike_window_size", 0),
+            ("grad_clip_max_norm", float("nan")),
+            ("grad_clip_max_norm", 0.0),
+            ("warmup_start_factor", 0.0),
+            ("warmup_start_factor", 1.5),
+            ("ema_decay", 1.5),
+            ("ema_decay", float("nan")),
+            ("amp_dtype", "fp8"),
+        ):
+            with self.subTest(field=field, value=value):
+                with self.assertRaises(ValueError):
+                    RunnerConfig(**{field: value})
+
+    def test_inf_clip_norm_allowed(self) -> None:
+        self.assertEqual(RunnerConfig(grad_clip_max_norm=float("inf")).grad_clip_max_norm, float("inf"))
+
+
+class TestEmptyValidationAndTrainEpoch(unittest.TestCase):
+    def test_empty_validation_never_becomes_best(self) -> None:
+        # Before: val_loss 0.0 became best and blocked every real value.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner = _seeded_runner(out, RunnerConfig(output_dir=str(out), num_epochs=1), val_n=0)
+            summary = runner.run()
+            val = summary["history"]["val"][0]
+            self.assertEqual(val["n_batches"], 0)
+            self.assertTrue(math.isnan(val["val_loss"]))
+            self.assertTrue(math.isnan(val["val_nrmse"]))
+            best = summary["history"]["checkpoints"][0]["best"]
+            self.assertEqual((best["saved"], best["reason"]), (False, "empty_validation"))
+            self.assertIsNone(runner.ckpt_mgr.best_metric_value)
+            self.assertFalse(Path(runner.ckpt_mgr.best_model_path).exists())
+            sigs = list((out / "failures").glob("*Empty_Validation*.json"))
+            self.assertEqual(len(sigs), 1)
+            self.assertTrue(summary["history"]["checkpoints"][0]["resume"]["saved"])
+
+    def test_epoch_without_healthy_step_reports_nan_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner = _seeded_runner(out, RunnerConfig(output_dir=str(out), num_epochs=1))
+            runner.loss_fn = lambda pred, target: ((pred - target) ** 2).mean() * float("nan")
+            report = runner._train_one_epoch(0)
+            self.assertEqual(report["n_batches"], 0)
+            self.assertEqual(report["n_anomalies"], 4)
+            self.assertTrue(math.isnan(report["mean_loss"]))
+            self.assertTrue(math.isnan(report["mean_grad_norm"]))
+
+
+class TestCheckpointSchedule(unittest.TestCase):
+    @staticmethod
+    def _val(value: float) -> dict:
+        return {"epoch": 0, "val_loss": value, "val_nrmse": value, "n_batches": 2, "used_ema": True}
+
+    def _run(self, out: Path, cfg: RunnerConfig, metrics):
+        runner = _seeded_runner(out, cfg)
+        it = iter([self._val(m) for m in metrics])
+        with mock.patch.object(runner, "_validate", side_effect=lambda epoch: next(it)):
+            summary = runner.run()
+        return runner, summary
+
+    def test_best_is_evaluated_every_epoch(self) -> None:
+        # Before: with save_every_n_epochs=2 the best model of epoch 1 was
+        # never considered.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner, summary = self._run(
+                out, RunnerConfig(output_dir=str(out), num_epochs=3, save_every_n_epochs=2),
+                [0.9, 0.5, 0.7],
+            )
+            ckpts = summary["history"]["checkpoints"]
+            self.assertEqual(len(ckpts), 3)
+            self.assertEqual([c["best"]["reason"] for c in ckpts], ["improved", "improved", "not_improved"])
+            self.assertEqual(runner.ckpt_mgr.best_metric_value, 0.5)
+            best_extra = torch.load(runner.ckpt_mgr.best_model_path, weights_only=True)["extra"]
+            self.assertEqual(best_extra["epoch"], 1)
+            self.assertEqual([c["last"]["saved"] for c in ckpts], [True, False, True])
+            self.assertEqual(ckpts[1]["resume"]["reason"], "not_scheduled")
+
+    def test_final_epoch_state_is_always_saved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner, summary = self._run(
+                out, RunnerConfig(output_dir=str(out), num_epochs=5, save_every_n_epochs=3),
+                [0.9, 0.8, 0.7, 0.6, 0.5],
+            )
+            # Epoch 4 is not on the 3-epoch schedule; it was dropped before.
+            saved = [c["resume"]["saved"] for c in summary["history"]["checkpoints"]]
+            self.assertEqual(saved, [True, False, False, True, True])
+            payload = torch.load(runner.ckpt_mgr.resume_path, weights_only=False)
+            self.assertEqual(payload["epoch"], 4)
+
+
+def _shuffled_runner(out: Path, cfg: RunnerConfig) -> HexTrainingRunner:
+    torch.manual_seed(0)
+    model = _TinyModel()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.05, momentum=0.9)
+    return HexTrainingRunner(
+        cfg,
+        model,
+        optimizer,
+        DataLoader(_SeededDataset(8, seed=0), batch_size=2, shuffle=True,
+                   **make_reproducible_dataloader_kwargs(seed=123)),
+        DataLoader(_SeededDataset(6, seed=1), batch_size=2),
+        device="cpu",
+    )
+
+
+class TestLoaderGeneratorResume(unittest.TestCase):
+    """Codex PR #58 round 2: the generator of a reproducible shuffled loader is
+    part of the resume state; batch order after resume equals the
+    uninterrupted run."""
+
+    def _cfg(self, out: Path, epochs: int, **kw) -> RunnerConfig:
+        return RunnerConfig(output_dir=str(out), num_epochs=epochs, ema_decay=0.9,
+                            log_every_n_steps=0, **kw)
+
+    def _resume_cfg(self, out: Path, epochs: int) -> RunnerConfig:
+        return self._cfg(out, epochs, resume_from=str(out / "checkpoints" / "resume_last.pt"),
+                         resume_trusted=True)
+
+    def test_shuffled_loader_resume_equals_uninterrupted_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            full_dir, res_dir = Path(tmpdir) / "full", Path(tmpdir) / "res"
+            full = _shuffled_runner(full_dir, self._cfg(full_dir, 4))
+            full.run()
+            _shuffled_runner(res_dir, self._cfg(res_dir, 2)).run()
+            resumed = _shuffled_runner(res_dir, self._resume_cfg(res_dir, 4))
+            summary = resumed.run()
+            self.assertEqual(summary["resume_report"]["loader_generators_restored"], ["train"])
+            self.assertEqual(summary["resume_report"]["loader_generators_missing"], [])
+            for name, value in full.model.state_dict().items():
+                self.assertTrue(torch.equal(value, resumed.model.state_dict()[name]), msg=name)
+            for name, value in full.ema_model.state_dict().items():
+                self.assertTrue(torch.equal(value, resumed.ema_model.state_dict()[name]),
+                                msg=f"ema {name}")
+            # Batch order of the next epoch is identical as well.
+            self.assertEqual(list(iter(full.train_loader.sampler)),
+                             list(iter(resumed.train_loader.sampler)))
+
+    def test_legacy_checkpoint_without_generator_state_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            _shuffled_runner(out, self._cfg(out, 1)).run()
+            path = out / "checkpoints" / "resume_last.pt"
+            payload = torch.load(path, weights_only=False)
+            self.assertIn("generator_states", payload["dataloader_state_dict"])
+            del payload["dataloader_state_dict"]
+            torch.save(payload, path)
+            resumed = _shuffled_runner(out, self._resume_cfg(out, 2))
+            with self.assertLogs("runner_hex_v3", level="WARNING") as logs:
+                report = resumed.maybe_resume()
+            self.assertEqual(report["loader_generators_missing"], ["train"])
+            self.assertEqual(report["loader_generators_restored"], [])
+            self.assertTrue(any("no generator state" in m for m in logs.output))
+
+    def test_malformed_generator_state_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            _shuffled_runner(out, self._cfg(out, 1)).run()
+            path = out / "checkpoints" / "resume_last.pt"
+            payload = torch.load(path, weights_only=False)
+            payload["dataloader_state_dict"]["generator_states"]["train"] = torch.zeros(3)
+            torch.save(payload, path)
+            with self.assertRaises(Exception) as ctx:
+                _shuffled_runner(out, self._resume_cfg(out, 2)).maybe_resume()
+            self.assertIs(type(ctx.exception), ValueError)
+            self.assertIn("not a uint8 tensor", str(ctx.exception))
+
+
+class TestFullResumeEquivalence(unittest.TestCase):
+    """Resume must continue the run, not restart parts of it.
+
+    Before: the EMA average restarted from the resumed weights and the best
+    value restarted at None (next epoch overwrote a better best.pt).
+    """
+
+    def _cfg(self, out: Path, epochs: int, **kw) -> RunnerConfig:
+        return RunnerConfig(output_dir=str(out), num_epochs=epochs, ema_decay=0.9,
+                            log_every_n_steps=0, **kw)
+
+    def test_interrupted_run_equals_uninterrupted_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            full_dir, res_dir = Path(tmpdir) / "full", Path(tmpdir) / "res"
+            full = _seeded_runner(full_dir, self._cfg(full_dir, 4))
+            full.run()
+
+            _seeded_runner(res_dir, self._cfg(res_dir, 2)).run()
+            resumed = _seeded_runner(res_dir, self._cfg(
+                res_dir, 4,
+                resume_from=str(res_dir / "checkpoints" / "resume_last.pt"),
+                resume_trusted=True,
+            ))
+            summary = resumed.run()
+
+            self.assertTrue(summary["resume_report"]["ema_restored"])
+            self.assertEqual(resumed.global_step, full.global_step)
+            for name, value in full.model.state_dict().items():
+                self.assertTrue(torch.equal(value, resumed.model.state_dict()[name]), msg=name)
+            for name, value in full.ema_model.state_dict().items():
+                self.assertTrue(torch.equal(value, resumed.ema_model.state_dict()[name]), msg=f"ema {name}")
+            self.assertEqual(resumed.ckpt_mgr.best_metric_value, full.ckpt_mgr.best_metric_value)
+            full_best = torch.load(full.ckpt_mgr.best_model_path, weights_only=True)["extra"]
+            res_best = torch.load(resumed.ckpt_mgr.best_model_path, weights_only=True)["extra"]
+            self.assertEqual(
+                (res_best["metric_value"], res_best["epoch"]),
+                (full_best["metric_value"], full_best["epoch"]),
+            )
+
+    def test_resume_with_other_ema_decay_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            first = _seeded_runner(out, self._cfg(out, 1))
+            first.run()
+            cfg = RunnerConfig(output_dir=str(out), num_epochs=2, ema_decay=0.5,
+                               resume_from=first.ckpt_mgr.resume_path, resume_trusted=True)
+            with self.assertRaisesRegex(ValueError, "decay"):
+                _seeded_runner(out, cfg).maybe_resume()
+
+    def test_resume_checkpoint_records_config_decay(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            first = _seeded_runner(out, self._cfg(out, 1))
+            first.run()
+            payload = torch.load(first.ckpt_mgr.resume_path, weights_only=False)
+            self.assertIn("ema_state_dict", payload)
+            self.assertEqual(payload["ema_decay"], 0.9)
+
+    def test_legacy_resume_without_decay_is_rejected_with_ema(self) -> None:
+        # Decision on Codex review #46 (PRRT_kwDOSwvSC86m2eei): a resume
+        # checkpoint with EMA state but no recorded decay fails closed while
+        # the EMA is on; with use_ema=False the resume still works.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            first = _seeded_runner(out, self._cfg(out, 1))
+            first.run()
+            path = first.ckpt_mgr.resume_path
+            payload = torch.load(path, weights_only=False)
+            del payload["ema_decay"]
+            torch.save(payload, path)
+            cfg = RunnerConfig(output_dir=str(out), num_epochs=2, ema_decay=0.9,
+                               resume_from=path, resume_trusted=True)
+            with self.assertRaisesRegex(EMADecayError, "without the decay"):
+                _seeded_runner(out, cfg).maybe_resume()
+            cfg = RunnerConfig(output_dir=str(out), num_epochs=2, use_ema=False,
+                               resume_from=path, resume_trusted=True)
+            report = _seeded_runner(out, cfg).maybe_resume()
+            self.assertFalse(report["ema_restored"])
+
+    def test_resume_with_other_best_metric_does_not_adopt_foreign_best(self) -> None:
+        # Runner half of the Codex-T1 fix on #46 (Equalita H7): the runner must
+        # hand its best_metric_name to load_resume. With metric_name=None the
+        # val_nrmse best of the first run was adopted into a val_loss run and
+        # then blocked every val_loss best.pt (compared across metrics).
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            first = _seeded_runner(out, self._cfg(out, 2, best_metric_name="val_nrmse"))
+            first.run()
+            self.assertIsNotNone(first.ckpt_mgr.best_metric_value)
+
+            second = _seeded_runner(out, self._cfg(
+                out, 3, best_metric_name="val_loss",
+                resume_from=first.ckpt_mgr.resume_path, resume_trusted=True))
+            report = second.maybe_resume()
+            self.assertFalse(report["best_metric_restored"])
+            self.assertEqual(report["best_metric_restore_reason"], "metric_name_mismatch")
+            self.assertIsNone(second.ckpt_mgr.best_metric_value)
+
+            second.run()
+            best_extra = torch.load(second.ckpt_mgr.best_model_path, weights_only=True)["extra"]
+            self.assertEqual(best_extra["metric_name"], "val_loss")
+            self.assertEqual(best_extra["epoch"], 2)
+
+    def test_resume_report_exposes_best_restore(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            first = _seeded_runner(out, self._cfg(out, 2))
+            first.run()
+            second = _seeded_runner(out, self._cfg(
+                out, 3, resume_from=first.ckpt_mgr.resume_path, resume_trusted=True))
+            report = second.maybe_resume()
+            self.assertTrue(report["best_metric_restored"])
+            self.assertEqual(second.ckpt_mgr.best_metric_value, first.ckpt_mgr.best_metric_value)
+
+
+class TestValidationNrmse(unittest.TestCase):
+    def test_val_nrmse_is_pooled_relative_l2(self) -> None:
+        # Before: val_nrmse was a copy of the MSE val_loss ("placeholder").
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner = _seeded_runner(out, RunnerConfig(output_dir=str(out), use_ema=False))
+            report = runner._validate(epoch=0)
+            ds = runner.val_loader.dataset
+            with torch.no_grad():
+                pred = runner.model(ds.x).double()
+            target = ds.y.double()
+            expected = math.sqrt(float(((pred - target) ** 2).sum() / (target ** 2).sum()))
+            self.assertAlmostEqual(report["val_nrmse"], expected, places=12)
+            expected_mse = float(((pred - target) ** 2).mean())
+            self.assertAlmostEqual(report["val_loss"], expected_mse, places=5)
+            self.assertNotAlmostEqual(report["val_nrmse"], report["val_loss"], places=3)
+
+    def test_zero_target_gives_undefined_metric(self) -> None:
+        # Contract changed with the Codex round on PR #58 (decision 2026-10-05):
+        # 0/0 is undefined -> nan (was 0.0, which became an unbeatable best).
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner = _seeded_runner(out, RunnerConfig(output_dir=str(out), use_ema=False))
+            ds = runner.val_loader.dataset
+            ds.y = torch.zeros_like(ds.y)
+            with torch.no_grad():
+                runner.model.lin.weight.zero_()
+                runner.model.lin.bias.zero_()
+            self.assertTrue(math.isnan(runner._validate(epoch=0)["val_nrmse"]))
+            with torch.no_grad():
+                runner.model.lin.bias.fill_(1.0)
+            self.assertEqual(runner._validate(epoch=0)["val_nrmse"], float("inf"))
 
 
 if __name__ == "__main__":

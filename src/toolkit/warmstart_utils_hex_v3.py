@@ -12,7 +12,11 @@ Design invariants:
 - Falls back to safe_globals whitelisting for legacy checkpoints
 - Supports prefix stripping (DDP "module." prefix)
 - Supports prefix mapping (architecture migration)
+- Prefix transforms fail closed on key collisions ("module.w" and "w" both
+  becoming "w" silently dropped one tensor before)
 - Supports dtype mismatch tolerance
+- Optional skipping of shape-mismatched tensors (resized heads/embeddings),
+  reported per key; default off, so a mismatch still raises
 
 PyTorch 2.6+ compatibility:
 - weights_only=True is the default since PyTorch 2.6
@@ -27,7 +31,7 @@ __all__ = [
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -68,11 +72,13 @@ def _load_payload_safe(
             from torch.serialization import safe_globals
 
             # Whitelist numpy types commonly found in legacy checkpoints.
-            # NumPy 2.0 reorganized internals: np.core -> np._core
+            # NumPy 2.0 reorganized internals: np.core -> np._core. Try the
+            # new name first; touching np.core on NumPy 2 emits a
+            # DeprecationWarning, so it is only the NumPy < 2 fallback.
             allowed_globals = []
             for attr_path in (
-                "core.multiarray.scalar",
                 "_core.multiarray.scalar",
+                "core.multiarray.scalar",
             ):
                 parts = attr_path.split(".")
                 obj = np
@@ -80,6 +86,7 @@ def _load_payload_safe(
                     for p in parts:
                         obj = getattr(obj, p)
                     allowed_globals.append(obj)
+                    break
                 except AttributeError:
                     pass
 
@@ -142,33 +149,93 @@ def _extract_state_dict(payload: Any) -> Dict[str, torch.Tensor]:
     )
 
 
+def _rename_keys(
+    state_dict: Dict[str, Any],
+    origins: Dict[str, str],
+    rename: Any,
+) -> Dict[str, Any]:
+    """Apply ``rename`` to every key; raise ValueError on a collision.
+
+    ``origins`` maps current keys to the original checkpoint keys and is
+    updated in place, so the error names the checkpoint's own keys.
+    """
+    result: Dict[str, Any] = {}
+    new_origins: Dict[str, str] = {}
+    for key, value in state_dict.items():
+        new_key = rename(key)
+        if new_key in result:
+            raise ValueError(
+                f"Prefix transform maps both {new_origins[new_key]!r} and "
+                f"{origins[key]!r} to {new_key!r}; one tensor would be "
+                "silently dropped. Adjust strip_prefixes/prefix_map."
+            )
+        result[new_key] = value
+        new_origins[new_key] = origins[key]
+    origins.clear()
+    origins.update(new_origins)
+    return result
+
+
 def _apply_prefix_transforms(
     state_dict: Dict[str, torch.Tensor],
     strip_prefixes: Optional[List[str]],
     prefix_map: Optional[Dict[str, str]],
 ) -> Dict[str, torch.Tensor]:
-    """Apply prefix stripping and mapping to state_dict keys."""
+    """Apply prefix stripping and mapping to state_dict keys.
+
+    Raises ValueError if two checkpoint keys end up under the same name.
+    """
     result = dict(state_dict)
+    origins = {key: key for key in result}
 
     # Strip prefixes (e.g. "module." from DDP checkpoints)
     if strip_prefixes:
         for prefix in strip_prefixes:
-            result = {
-                k[len(prefix) :] if k.startswith(prefix) else k: v
-                for k, v in result.items()
-            }
+            result = _rename_keys(
+                result,
+                origins,
+                lambda k, p=prefix: k[len(p):] if k.startswith(p) else k,
+            )
 
     # Map prefixes (e.g. "encoder." -> "backbone.")
     if prefix_map:
         for old_prefix, new_prefix in prefix_map.items():
-            result = {
-                new_prefix + k[len(old_prefix) :]
-                if k.startswith(old_prefix)
-                else k: v
-                for k, v in result.items()
-            }
+            result = _rename_keys(
+                result,
+                origins,
+                lambda k, o=old_prefix, n=new_prefix: (
+                    n + k[len(o):] if k.startswith(o) else k
+                ),
+            )
 
     return result
+
+
+def _split_shape_mismatches(
+    state_dict: Dict[str, Any],
+    model: nn.Module,
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """Remove tensors whose shape differs from the model's; report them."""
+    model_sd = model.state_dict()
+    kept: Dict[str, Any] = {}
+    skipped: List[Dict[str, Any]] = []
+    for key, value in state_dict.items():
+        target = model_sd.get(key)
+        if (
+            target is not None
+            and torch.is_tensor(value)
+            and tuple(value.shape) != tuple(target.shape)
+        ):
+            skipped.append(
+                {
+                    "key": key,
+                    "checkpoint_shape": list(value.shape),
+                    "model_shape": list(target.shape),
+                }
+            )
+            continue
+        kept[key] = value
+    return kept, skipped
 
 
 def _handle_dtype_mismatches(
@@ -180,7 +247,7 @@ def _handle_dtype_mismatches(
     result = dict(state_dict)
 
     for key in result:
-        if key in model_sd:
+        if key in model_sd and torch.is_tensor(result[key]):
             if result[key].dtype != model_sd[key].dtype:
                 logger.info(
                     "Warmstart dtype cast: %s %s -> %s",
@@ -202,6 +269,7 @@ def load_partial_checkpoint(
     prefix_map: Optional[Dict[str, str]] = None,
     allow_dtype_mismatch: bool = True,
     strict: bool = False,
+    skip_shape_mismatch: bool = False,
 ) -> Dict[str, Any]:
     """
     Load model weights from a checkpoint (warmstart).
@@ -231,6 +299,12 @@ def load_partial_checkpoint(
     strict :
         If True, require exact key match between checkpoint and model.
         Default False for warmstart (partial loading expected).
+    skip_shape_mismatch :
+        If True, tensors whose shape differs from the model's are left out
+        (the model keeps its own initialisation for them) and listed in
+        ``shape_mismatches``. If False (default), load_state_dict raises on
+        a shape mismatch, as before. Combined with strict=True the skipped
+        keys then count as missing and raise.
 
     Returns
     -------
@@ -244,6 +318,7 @@ def load_partial_checkpoint(
         - missing_keys: list of keys in model but not in checkpoint
         - unexpected_keys: list of keys in checkpoint but not in model
         - dtype_casts: number of dtype conversions performed
+        - shape_mismatches: skipped keys with both shapes (skip mode only)
         - warning: reminder that optimizer/scheduler were intentionally dropped
     """
     checkpoint_path = Path(checkpoint_path)
@@ -260,12 +335,20 @@ def load_partial_checkpoint(
     # Apply prefix transforms
     state_dict = _apply_prefix_transforms(state_dict, strip_prefixes, prefix_map)
 
+    shape_mismatches: List[Dict[str, Any]] = []
+    if skip_shape_mismatch:
+        state_dict, shape_mismatches = _split_shape_mismatches(state_dict, model)
+
     # Handle dtype mismatches
     dtype_casts = 0
     if allow_dtype_mismatch:
         model_sd = model.state_dict()
         for key in state_dict:
-            if key in model_sd and state_dict[key].dtype != model_sd[key].dtype:
+            if (
+                key in model_sd
+                and torch.is_tensor(state_dict[key])
+                and state_dict[key].dtype != model_sd[key].dtype
+            ):
                 dtype_casts += 1
         state_dict = _handle_dtype_mismatches(state_dict, model)
 
@@ -281,6 +364,7 @@ def load_partial_checkpoint(
         "missing_keys": list(incompat.missing_keys),
         "unexpected_keys": list(incompat.unexpected_keys),
         "dtype_casts": dtype_casts,
+        "shape_mismatches": shape_mismatches,
         "warning": (
             "Optimizer and scheduler states were INTENTIONALLY dropped for warmstart."
         ),

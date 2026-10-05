@@ -1,0 +1,38 @@
+name: distributed-checkpoint-evidence
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    # E6 (2026-10-05): run only when the oracles or this lane change.
+    paths:
+      - "scripts/oracles/dcp_*.py"
+      - "scripts/oracles/distributed_checkpoint_bundle_v1.py"
+      - ".github/workflows/distributed-checkpoint-evidence.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  distributed-checkpoint-cpu:
+    name: distributed-checkpoint-cpu
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: install canonical torch
+        run: |
+          python -m pip install --upgrade pip
+          pip install "numpy==2.5.3"
+          pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
+      - name: 2-rank DDP DCP next-step differential
+        run: python scripts/oracles/dcp_2rank_gloo_oracle.py
+      - name: DCP topology-change control
+        run: python scripts/oracles/dcp_worldsize_change_oracle.py
+      - name: DCP bundle commit and digest protocol
+        run: python scripts/oracles/dcp_bundle_2rank_oracle.py

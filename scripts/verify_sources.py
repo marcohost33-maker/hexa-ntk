@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """verify_sources.py — fail-closed Provenance-Gate fuer SOURCES.md.
 
-Vertrag (AGENTS.md "Provenance"): JEDE Datei unter ``src/toolkit/`` und ``spec/``
-braucht in SOURCES.md eine Zeile mit dem 16-hex SHA-256-Prefix ihrer aktuellen,
+Vertrag (AGENTS.md "Provenance"): JEDE Datei unter ``src/toolkit/``, ``spec/``,
+``scripts/`` und ``scripts/oracles/`` (seit 2026-10-05, E5) braucht in SOURCES.md
+eine Zeile mit dem 16-hex SHA-256-Prefix ihrer aktuellen,
 LF-normalisierten Bytes. Mehrere Zeilen fuer denselben Dateinamen sind Lineage
 (append-only); massgeblich ist die LETZTE.
 
@@ -55,13 +56,23 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 TARGETS: dict[str, str] = {
     "src/toolkit": "src/toolkit",
     "spec": "spec",
+    # E5 (2026-10-05): gate and evidence scripts are provenance sources too.
+    # scripts/oracles is its own target, so a SOURCES row names the file
+    # relative to exactly one directory (the longest matching target wins).
+    "scripts": "scripts",
+    "scripts/oracles": "scripts/oracles",
 }
 # Dokumentierte Ausnahmen (repo-relative POSIX-Pfade).
 EXCLUDED: frozenset[str] = frozenset({"src/toolkit/__init__.py"})
 
 # Zeilen der Form: | <SHA16> | <mtime> | <ziel> | ...\<datei>[ (...)] |
+_TARGET_ALTERNATION = "|".join(
+    re.escape(t) for t in sorted(TARGETS, key=len, reverse=True)
+)
 ROW = re.compile(
-    r"^\|\s*([0-9A-Fa-f]{16})\s*\|[^|]*\|\s*(src/toolkit|spec)\s*\|\s*(.+?)\s*\|\s*$"
+    r"^\|\s*([0-9A-Fa-f]{16})\s*\|[^|]*\|\s*("
+    + _TARGET_ALTERNATION
+    + r")\s*\|\s*(.+?)\s*\|\s*$"
 )
 # Dateiname am Ende des Quell-Pfads (vor optionalem " (in-repo ...)"-Suffix).
 FILENAME = re.compile(r"([^\\/ ]+\.[A-Za-z0-9]+)(?:\s*\(.*\))?\s*$")
@@ -234,8 +245,10 @@ def main(root: pathlib.Path = ROOT) -> int:
             print(f"[GAP ] {rel}: Zielverzeichnis ist symbolischer Link")
             gap = True
             continue
-        target = next(
-            (t for t, d in TARGETS.items() if rel.startswith(d + "/")), None
+        target = max(
+            (t for t, d in TARGETS.items() if rel.startswith(d + "/")),
+            key=lambda t: len(TARGETS[t]),
+            default=None,
         )
         if target is None:  # defensive: git returned a path outside the targets
             print(f"[GAP ] {rel}: ausserhalb der Ziele gelistet")
@@ -277,7 +290,9 @@ def main(root: pathlib.Path = ROOT) -> int:
 
     print(
         f"\n[VERIFY-SOURCES] {len(expected['src/toolkit'])} Toolkit-Eintraege + "
-        f"{len(expected['spec'])} Spec-Eintraege | Dateiliste: {mode} "
+        f"{len(expected['spec'])} Spec-Eintraege + "
+        f"{len(expected['scripts']) + len(expected['scripts/oracles'])} Script-Eintraege "
+        f"| Dateiliste: {mode} "
         f"({len(files)} Dateien) | {'FAIL' if drift else 'PASS'}"
     )
     return 1 if drift else 0

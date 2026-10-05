@@ -13,7 +13,8 @@ KI-Coding-Agent-Anweisungen. Reihenfolge: §1 Working agreements > §2 Conventio
 - **Stack:** Python >= 3.12 (py3.10/3.11 gedroppt, Commit 7e06ad9; CI faehrt 3.12 mit torch==2.6.0 CPU-Wheel).
 - **Provenance:** `SOURCES.md` ist der Provenance-/Integritaets-Index — Quelle + mtime + ein
   16-hex **SHA-256-Prefix** (64 bit, LF-normalisiert) der **aktuellen Repo-Bytes** jeder
-  Datei unter `src/toolkit/` und `spec/` — jede Endung, gezaehlt per `git ls-files`
+  Datei unter `src/toolkit/`, `spec/`, `scripts/` und `scripts/oracles/` (scripts seit
+  2026-10-05, E5) — jede Endung, gezaehlt per `git ls-files`
   (getrackt + ungetrackt-nicht-ignoriert); einzige Ausnahmen `src/toolkit/__init__.py` und
   `__pycache__/`. `scripts/verify_sources.py` (CI-Job `gate`) prueft ihn fail-closed: Drift,
   Luecke, Unterordner, Symlink oder nicht ausdrueckbarer Dateiname -> exit != 0. Append-only: eine

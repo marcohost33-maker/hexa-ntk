@@ -4,11 +4,12 @@ benchmark_hex_v3.py
 Canonical benchmark metrics for HexaNTK PDE operator evaluation.
 
 Metric conventions:
-- nRMSE(t): normalized RMSE per rollout timestep (APEBench Eq.31)
-- H1 RMSE: discrete hex H¹ proxy using the gradient seminorm of the error field
-- H1 nRMSE: normalized discrete H¹ proxy (not a continuum Sobolev certificate)
-- divergence_step: first timestep where nRMSE exceeds threshold
-- Aggregation over time: geometric mean (APEBench Eq.32)
+- Legacy nRMSE(t): historical ratio-of-aggregate-RMS semantics retained for reproducibility.
+- MetricSpecV4 mean-nRMSE: normalize each sample first, then average samples (APEBench Eq.31).
+- H1 RMSE: discrete hex H¹ proxy using the gradient seminorm of the error field.
+- H1 nRMSE: normalized discrete H¹ proxy (not a continuum Sobolev certificate).
+- Legacy divergence_step remains for old reports; v4 uses threshold_crossing_step.
+- MetricSpecV4 forecast aggregation excludes t=0 when it is the shared initial state (APEBench Eq.32).
 
 References:
 - APEBench (NeurIPS 2024 D&B): nRMSE, Sobolev metrics, rollout evaluation
@@ -24,21 +25,29 @@ from __future__ import annotations
 
 __all__ = [
     "compute_nrmse_per_step",
+    "compute_mean_nrmse_per_step",
     "compute_rmse_per_step",
     "compute_h1_rmse_per_step",
     "compute_h1_nrmse_per_step",
     "compute_divergence_step",
+    "compute_threshold_crossing_step",
     "aggregate_over_time",
+    "aggregate_forecast_metric",
+    "MetricSpecV4",
+    "metric_spec_digest",
     "evaluate_rollout",
+    "evaluate_rollout_v4",
+    "preserve_legacy_report_without_relabeling",
     "BenchmarkReport",
 ]
 
+import hashlib
 import json
 import math
 import numbers
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Mapping, Optional, Union
 
 import torch
 
@@ -503,6 +512,257 @@ def aggregate_over_time(
         raise ValueError(f"Unknown aggregation method: {method}")
 
 
+
+# ------------------------------------------------------------------
+# MetricSpec v4: explicit sample reduction + forecast aggregation
+# ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class MetricSpecV4:
+    """Versioned scientific metric contract.
+
+    sample_reduction='mean_of_ratios' normalizes each batch sample by its own
+    reference norm before averaging samples. exclude_initial_state=True excludes
+    rollout index 0 from time aggregation when it is the shared initial condition.
+    """
+
+    name: str = "mean_nrmse"
+    version: str = "4.0"
+    sample_reduction: str = "mean_of_ratios"
+    time_aggregation: str = "geometric_mean"
+    exclude_initial_state: bool = True
+    zero_reference_policy: str = "error"
+
+    def __post_init__(self) -> None:
+        # Identity fields are part of the digest; a report must not declare a
+        # metric or version other than the one it computes (Codex #52 T2).
+        if self.name != "mean_nrmse":
+            raise ValueError("MetricSpecV4 requires name='mean_nrmse'")
+        if self.version != "4.0":
+            raise ValueError("MetricSpecV4 requires version='4.0'")
+        # A truthy non-bool ("false", 1) would exclude index 0 while the
+        # serialized spec still shows the raw value (Codex PR #58).
+        if type(self.exclude_initial_state) is not bool:
+            raise TypeError(
+                "MetricSpecV4.exclude_initial_state must be a bool, got "
+                f"{type(self.exclude_initial_state).__name__} "
+                f"{self.exclude_initial_state!r}"
+            )
+        if self.sample_reduction != "mean_of_ratios":
+            raise ValueError("MetricSpecV4 requires sample_reduction='mean_of_ratios'")
+        if self.time_aggregation not in {"geometric_mean", "arithmetic_mean", "max"}:
+            raise ValueError("unsupported MetricSpecV4 time_aggregation")
+        if self.zero_reference_policy not in {"error", "zero_if_both_zero"}:
+            raise ValueError("unsupported MetricSpecV4 zero_reference_policy")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def metric_spec_digest(spec: MetricSpecV4) -> str:
+    payload = json.dumps(
+        spec.to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _v4_promote_single_sample(field: Any) -> Any:
+    """MetricSpec v4 accepts a single-sample rollout [T, DOF]; it is the
+    explicit [T, 1, DOF] form (spec/METRIC_SPEC_v4.md section 2). Other ranks
+    pass through unchanged and are validated by _validate_rollout_pair."""
+    if torch.is_tensor(field) and field.ndim == 2:
+        return field.unsqueeze(1)
+    return field
+
+
+def _as_t_b_dof(field: torch.Tensor) -> torch.Tensor:
+    if field.ndim == 3:
+        return field.unsqueeze(1).reshape(field.shape[0], 1, -1)
+    return field.reshape(field.shape[0], field.shape[1], -1)
+
+
+def compute_mean_nrmse_per_step(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    zero_reference_policy: str = "error",
+) -> torch.Tensor:
+    """Return mean-of-per-sample relative L2 error for each timestep."""
+    pred = _v4_promote_single_sample(pred)
+    target = _v4_promote_single_sample(target)
+    _validate_rollout_pair(pred, target)
+    if zero_reference_policy not in {"error", "zero_if_both_zero"}:
+        raise ValueError("unsupported zero_reference_policy")
+    dtype = _accumulation_dtype(pred.dtype, target.dtype)
+    p = _as_t_b_dof(pred.to(dtype))
+    y = _as_t_b_dof(target.to(dtype))
+    err_norm = torch.linalg.vector_norm(p - y, dim=-1)
+    ref_norm = torch.linalg.vector_norm(y, dim=-1)
+    zero_ref = ref_norm == 0
+
+    if bool(zero_ref.any().item()):
+        if zero_reference_policy == "error":
+            loc = zero_ref.nonzero(as_tuple=False)[0].tolist()
+            raise ZeroDivisionError(
+                f"mean nRMSE undefined for zero reference norm at [t,b]={loc}"
+            )
+        bad = zero_ref & (err_norm != 0)
+        if bool(bad.any().item()):
+            loc = bad.nonzero(as_tuple=False)[0].tolist()
+            raise ZeroDivisionError(
+                f"mean nRMSE undefined for nonzero error over zero reference at [t,b]={loc}"
+            )
+        ratios = torch.where(
+            zero_ref,
+            torch.zeros_like(err_norm),
+            err_norm / ref_norm,
+        )
+    else:
+        ratios = err_norm / ref_norm
+    return ratios.mean(dim=1)
+
+
+def _geometric_mean_nonnegative(values: torch.Tensor) -> float:
+    _validate_nonnegative_metric_vector(values, name="values")
+    if bool((values == 0).any().item()):
+        return 0.0
+    return float(torch.exp(torch.mean(torch.log(values))).item())
+
+
+def aggregate_forecast_metric(
+    metric_per_step: torch.Tensor,
+    *,
+    method: str = "geometric_mean",
+    exclude_initial_state: bool = True,
+) -> float:
+    _validate_nonnegative_metric_vector(metric_per_step, name="metric_per_step")
+    values = metric_per_step[1:] if exclude_initial_state else metric_per_step
+    if values.numel() == 0:
+        raise ValueError("no forecast timesteps remain after excluding initial state")
+    if method == "geometric_mean":
+        return _geometric_mean_nonnegative(values)
+    if method == "arithmetic_mean":
+        return float(torch.mean(values).item())
+    if method == "max":
+        return float(torch.max(values).item())
+    raise ValueError(f"Unknown aggregation method: {method}")
+
+
+def compute_threshold_crossing_step(
+    metric_per_step: torch.Tensor,
+    threshold: float = 1.0,
+) -> Optional[int]:
+    """Return first strict threshold crossing, or None if no crossing occurs."""
+    _validate_nonnegative_metric_vector(metric_per_step, name="metric_per_step")
+    threshold_value = _validate_nonnegative_finite(threshold, name="threshold")
+    exceeded = (metric_per_step > threshold_value).nonzero(as_tuple=False)
+    return None if exceeded.numel() == 0 else int(exceeded[0, 0].item())
+
+
+def metric_semantics_label(spec: MetricSpecV4) -> str:
+    """Provenance label derived from the spec, never hard-coded (Codex #52 T5).
+
+    APEBench Eq. 32 is the geometric mean over forecast steps; only that
+    combination carries the Eq32 label.
+    """
+    steps = "forecast_only" if spec.exclude_initial_state else "all_steps"
+    time_part = f"{spec.time_aggregation}_{steps}_time_aggregation"
+    if spec.time_aggregation == "geometric_mean" and spec.exclude_initial_state:
+        time_part = "Eq32_" + time_part
+    else:
+        time_part = "not_Eq32_" + time_part
+    return f"APEBench_Eq31_mean_of_sample_ratios; {time_part}"
+
+
+def evaluate_rollout_v4(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    spec: Optional[MetricSpecV4] = None,
+    threshold: float = 1.0,
+) -> Dict[str, Any]:
+    """Evaluate a rollout under MetricSpec v4 (spec/METRIC_SPEC_v4.md).
+
+    With ``exclude_initial_state=True`` index 0 is dropped from time
+    aggregation, which is only valid if index 0 is the shared initial
+    condition. That is checked, fail-closed: ``pred[0]`` must equal
+    ``target[0]`` exactly, otherwise ValueError (Codex #52 T1). Forecast-only
+    rollouts pass ``MetricSpecV4(exclude_initial_state=False)``.
+    """
+    spec = spec or MetricSpecV4()
+    pred = _v4_promote_single_sample(pred)
+    target = _v4_promote_single_sample(target)
+    mean_nrmse = compute_mean_nrmse_per_step(
+        pred,
+        target,
+        zero_reference_policy=spec.zero_reference_policy,
+    )
+    if spec.exclude_initial_state and not torch.equal(pred[0], target[0]):
+        raise ValueError(
+            "MetricSpecV4.exclude_initial_state=True drops index 0, which requires "
+            "a shared initial state (pred[0] == target[0] exactly); index 0 of this "
+            "rollout differs. For forecast-only rollouts use "
+            "MetricSpecV4(exclude_initial_state=False)."
+        )
+    rmse = compute_rmse_per_step(pred, target)
+    return {
+        "metric_spec": spec.to_dict(),
+        "metric_spec_digest": metric_spec_digest(spec),
+        "metric_spec_version": spec.version,
+        "metric_semantics": metric_semantics_label(spec),
+        "mean_nrmse_per_step": [float(x) for x in mean_nrmse.tolist()],
+        "rmse_per_step": [float(x) for x in rmse.tolist()],
+        "aggregated_mean_nrmse": aggregate_forecast_metric(
+            mean_nrmse,
+            method=spec.time_aggregation,
+            exclude_initial_state=spec.exclude_initial_state,
+        ),
+        "aggregated_rmse": aggregate_forecast_metric(
+            rmse,
+            method=spec.time_aggregation,
+            exclude_initial_state=spec.exclude_initial_state,
+        ),
+        "threshold_crossing_step": compute_threshold_crossing_step(
+            mean_nrmse,
+            threshold,
+        ),
+        "threshold": float(threshold),
+        "num_timesteps": int(pred.shape[0]),
+    }
+
+
+def preserve_legacy_report_without_relabeling(
+    report: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Preserve legacy aggregates without pretending they are MetricSpec-v4 values."""
+    metrics_obj = report.get("metrics", {})
+    metrics = metrics_obj if isinstance(metrics_obj, Mapping) else {}
+    legacy_step = metrics.get("divergence_step")
+    legacy_num_steps = metrics.get("num_steps")
+    no_crossing = (
+        None
+        if legacy_step is None or legacy_num_steps is None
+        else legacy_step == legacy_num_steps
+    )
+    return {
+        "migration_status": "legacy_non_convertible_without_per_sample_raw_values",
+        "legacy_metric_spec": "hexantk_v3_ratio_of_aggregate_rms",
+        "legacy_nrmse_mean": metrics.get("nrmse_mean"),
+        "legacy_divergence_step": legacy_step,
+        # Parameters needed to interpret the copied values (Codex #52 T3).
+        # Legacy divergence_step == num_steps is the old no-crossing sentinel.
+        "legacy_num_steps": legacy_num_steps,
+        "legacy_aggregation_method": metrics.get("aggregation_method"),
+        "legacy_divergence_threshold": metrics.get("divergence_threshold"),
+        "legacy_divergence_step_is_no_crossing_sentinel": no_crossing,
+        "corrected_aggregated_mean_nrmse": None,
+        "threshold_crossing_step": None,
+    }
+
 # ------------------------------------------------------------------
 # Full rollout evaluation
 # ------------------------------------------------------------------
@@ -642,6 +902,17 @@ class BenchmarkReport:
     def summary(self) -> str:
         """One-line summary string."""
         m = self.metrics
+        if "aggregated_mean_nrmse" in m:  # MetricSpec v4 result (Codex #52 T4)
+            value = m["aggregated_mean_nrmse"]
+            crossing = m.get("threshold_crossing_step")
+            parts = [
+                f"model={self.model_name}",
+                f"dataset={self.dataset_name}",
+                f"mean_nRMSE_v{m.get('metric_spec_version', '?')}={value:.4f}"
+                if isinstance(value, float) else "",
+                f"crossing_step={'none' if crossing is None else crossing}",
+            ]
+            return " | ".join(p for p in parts if p)
         parts = [
             f"model={self.model_name}",
             f"dataset={self.dataset_name}",

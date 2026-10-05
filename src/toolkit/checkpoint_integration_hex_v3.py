@@ -13,7 +13,11 @@ Design invariants:
 - Atomic writing for ALL checkpoint types
 - Best-model always loaded via safe path (weights_only=True)
 - Resume payload built via build_resume_payload for composability
-- Scheduler restored BEFORE optimizer (PyTorch best practice)
+- Restore order optimizer -> scheduler (PyTorch checkpoint recipe)
+- Resume carries the best-metric state and (optionally) the EMA state, so a
+  resumed run neither overwrites a better best.pt nor restarts its average
+- In-memory best value always matches best.pt: committed after the write,
+  and also when the file was replaced but the directory fsync failed
 
 PyTorch 2.6+ compatibility:
 - weights_only=True is the default
@@ -24,22 +28,27 @@ from __future__ import annotations
 __all__ = [
     "BestCheckpointPolicy",
     "AtomicCheckpointWriter",
+    "CheckpointDurabilityError",
     "CheckpointIntegrationManager",
 ]
 
 import logging
 import math
+import numbers
 import os
 import tempfile
+import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 
 from resume_utils_hex_v3 import (
+    as_step_count,
     build_resume_payload,
+    check_ema_save_metadata,
     load_resume_checkpoint,
 )
 from warmstart_utils_hex_v3 import load_partial_checkpoint
@@ -86,8 +95,17 @@ class BestCheckpointPolicy:
     def __post_init__(self) -> None:
         if self.mode not in ("min", "max"):
             raise ValueError(f"Unsupported mode: {self.mode}. Use 'min' or 'max'.")
-        if self.min_delta < 0:
-            raise ValueError("min_delta must be >= 0.")
+        # NaN passed "< 0" and then blocked every improvement (nan compares
+        # False); inf did the same (issue #40).
+        if (
+            isinstance(self.min_delta, bool)
+            or not isinstance(self.min_delta, numbers.Real)
+            or not math.isfinite(self.min_delta)
+            or self.min_delta < 0
+        ):
+            raise ValueError(
+                f"min_delta must be a finite number >= 0, got {self.min_delta!r}"
+            )
 
     def is_improved(self, current: float, best: Optional[float]) -> bool:
         """Check if current metric is an improvement over best."""
@@ -101,6 +119,21 @@ class BestCheckpointPolicy:
 # ------------------------------------------------------------------
 # Atomic writer
 # ------------------------------------------------------------------
+
+
+class CheckpointDurabilityError(OSError):
+    """The target file was replaced, but making the rename durable failed.
+
+    Raised when os.replace() already succeeded and the parent-directory
+    fsync failed afterwards: the new checkpoint IS at ``path`` (visible to
+    readers), only its crash-durability is not guaranteed. Callers that
+    track state derived from the file must treat it as written.
+    """
+
+    def __init__(self, message: str, *, path: str) -> None:
+        super().__init__(message)
+        self.path = path
+        self.replaced = True
 
 
 class AtomicCheckpointWriter:
@@ -128,6 +161,7 @@ class AtomicCheckpointWriter:
         )
         os.close(fd)
         tmp_path = Path(tmp_path_str)
+        replaced = False
 
         try:
             torch.save(payload, tmp_path)
@@ -146,6 +180,7 @@ class AtomicCheckpointWriter:
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_path, path)
+            replaced = True
             # fsync the parent directory so the rename (the filename entry)
             # itself is durable. POSIX-only: os.fsync() on a directory descriptor
             # raises OSError(EACCES/EISDIR) on Windows, so it is skipped there.
@@ -163,12 +198,20 @@ class AtomicCheckpointWriter:
                     os.fsync(dir_fd)
                 finally:
                     os.close(dir_fd)
-        except Exception:
+        except Exception as exc:
             if tmp_path.exists():
                 try:
                     tmp_path.unlink()
                 except OSError:
                     pass
+            if replaced:
+                # The new bytes are already at `path`; report that explicitly
+                # so callers do not roll back state that matches the file.
+                raise CheckpointDurabilityError(
+                    f"Checkpoint written to {path}, but the directory fsync "
+                    f"after the rename failed: {exc}",
+                    path=str(path),
+                ) from exc
             raise
 
         return str(path)
@@ -218,6 +261,11 @@ class CheckpointIntegrationManager:
         Policy for deciding best-model updates.
     is_main_process :
         DDP guard. If False, save operations are skipped.
+    run_id :
+        Identity of the training run, written into best.pt and the resume
+        record. A fresh manager gets a random id; load_resume() adopts the id
+        of the resumed run, so best.pt of that run is recognised and a best.pt
+        of any other run in the same directory is not.
     """
 
     def __init__(
@@ -226,12 +274,16 @@ class CheckpointIntegrationManager:
         *,
         best_policy: Optional[BestCheckpointPolicy] = None,
         is_main_process: bool = True,
+        run_id: Optional[str] = None,
     ) -> None:
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self.best_policy = best_policy or BestCheckpointPolicy(mode="min", min_delta=0.0)
         self.best_metric_value: Optional[float] = None
+        self.best_metric_name: Optional[str] = None
         self.is_main_process = is_main_process
+        # DDP: pass the same run_id on every rank if the ranks' ids must agree.
+        self.run_id = run_id if run_id is not None else uuid.uuid4().hex
 
     # ------------------------------------------------------------------
     # Paths
@@ -259,6 +311,8 @@ class CheckpointIntegrationManager:
             "root_dir": str(self.root_dir),
             "best_policy": asdict(self.best_policy),
             "best_metric_value": self.best_metric_value,
+            "best_metric_name": self.best_metric_name,
+            "run_id": self.run_id,
             "is_main_process": self.is_main_process,
             "paths": {
                 "best_model_path": self.best_model_path,
@@ -280,17 +334,25 @@ class CheckpointIntegrationManager:
         epoch: int,
         global_step: Optional[int] = None,
         extra: Optional[Dict[str, Any]] = None,
-        ema_model_state: Optional[Dict[str, Any]] = None,
+        ema_model_state: Optional[
+            Union[Dict[str, Any], Callable[[], Dict[str, Any]]]
+        ] = None,
     ) -> Dict[str, Any]:
         """
         Save a best-model checkpoint if the metric has improved.
+
+        ``ema_model_state`` may be a zero-argument callable; it is then called
+        only when this rank actually writes best.pt (improved metric, main
+        process), so a non-improving epoch never copies the EMA to the host.
 
         Returns a report dict with saved=True/False.
 
         Raises ValueError (before any state change) if ``metric_value`` is not
         a finite real number: NaN compares False against everything, so a NaN
         best value would block every later improvement. ``best_metric_value``
-        is committed only after the checkpoint write succeeded.
+        is committed only after the checkpoint write succeeded, or when the
+        file was already replaced and only the directory fsync failed
+        (CheckpointDurabilityError, re-raised): memory must match best.pt.
         """
         metric = _finite_metric_value(metric_value)
         improved = self.best_policy.is_improved(metric, self.best_metric_value)
@@ -311,15 +373,21 @@ class CheckpointIntegrationManager:
         payload_extra = {
             "metric_name": metric_name,
             "metric_value": metric,
-            "epoch": int(epoch),
-            "global_step": int(global_step) if global_step is not None else None,
+            "epoch": as_step_count(epoch, name="epoch"),
+            "global_step": (
+                as_step_count(global_step, name="global_step")
+                if global_step is not None
+                else None
+            ),
             "best_policy": asdict(self.best_policy),
+            "run_id": self.run_id,
         }
         if extra is not None:
             payload_extra["user_extra"] = extra
 
         if not self.is_main_process:
             self.best_metric_value = metric
+            self.best_metric_name = metric_name
             return {
                 "saved": False,
                 "reason": "not_main_process",
@@ -327,16 +395,26 @@ class CheckpointIntegrationManager:
                 "metric_value": metric_value,
             }
 
-        AtomicCheckpointWriter.save_model_state_dict_atomic(
-            self.best_model_path,
-            model=model,
-            extra=payload_extra,
-            ema_model_state=ema_model_state,
-            checkpoint_type="best_model",
-        )
+        if callable(ema_model_state):
+            ema_model_state = ema_model_state()
+        try:
+            AtomicCheckpointWriter.save_model_state_dict_atomic(
+                self.best_model_path,
+                model=model,
+                extra=payload_extra,
+                ema_model_state=ema_model_state,
+                checkpoint_type="best_model",
+            )
+        except CheckpointDurabilityError:
+            # best.pt already holds the new model (#40 P3-3): keeping the old
+            # value would let a later, worse metric overwrite it.
+            self.best_metric_value = metric
+            self.best_metric_name = metric_name
+            raise
         # Commit only after the durable write: a failed save must not move
         # the best value, or the same improvement would never be saved.
         self.best_metric_value = metric
+        self.best_metric_name = metric_name
 
         return {
             "saved": True,
@@ -366,6 +444,10 @@ class CheckpointIntegrationManager:
 
         last.pt MUST NEVER be interpreted as a resume checkpoint.
         """
+        epoch = as_step_count(epoch, name="epoch")
+        if global_step is not None:
+            global_step = as_step_count(global_step, name="global_step")
+
         if not self.is_main_process:
             return {
                 "saved": False,
@@ -374,8 +456,8 @@ class CheckpointIntegrationManager:
             }
 
         payload_extra = {
-            "epoch": int(epoch),
-            "global_step": int(global_step) if global_step is not None else None,
+            "epoch": epoch,
+            "global_step": global_step,
         }
         if extra is not None:
             payload_extra["user_extra"] = extra
@@ -391,8 +473,8 @@ class CheckpointIntegrationManager:
             "saved": True,
             "checkpoint_semantics": "last_model_only",
             "path": path,
-            "epoch": int(epoch),
-            "global_step": int(global_step) if global_step is not None else None,
+            "epoch": epoch,
+            "global_step": global_step,
         }
 
     # ------------------------------------------------------------------
@@ -413,13 +495,26 @@ class CheckpointIntegrationManager:
         include_numpy_rng: bool = True,
         include_torch_rng: bool = True,
         include_dataloader_state: Optional[Dict[str, Any]] = None,
+        ema_state_dict: Optional[Dict[str, Any]] = None,
+        ema_decay: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Save a full resume checkpoint atomically.
 
         Uses build_resume_payload() + AtomicCheckpointWriter for
-        atomic writing with unique temp file names.
+        atomic writing with unique temp file names. The payload also records
+        the manager's best-metric state (``checkpoint_manager_state``) so
+        load_resume() can restore it, and ``ema_state_dict`` (from
+        ``AveragedModel.state_dict()``) if given. ``ema_decay`` is required
+        with ``ema_state_dict`` (EMADecayError otherwise); like epoch and
+        global_step it is validated on every rank, so a bad call fails the
+        same way everywhere instead of only on the main process.
         """
+        epoch = as_step_count(epoch, name="epoch")
+        if global_step is not None:
+            global_step = as_step_count(global_step, name="global_step")
+        check_ema_save_metadata(ema_state_dict, ema_decay)
+
         if not self.is_main_process:
             return {
                 "saved": False,
@@ -439,7 +534,15 @@ class CheckpointIntegrationManager:
             include_numpy_rng=include_numpy_rng,
             include_torch_rng=include_torch_rng,
             include_dataloader_state=include_dataloader_state,
+            ema_state_dict=ema_state_dict,
+            ema_decay=ema_decay,
         )
+        payload["checkpoint_manager_state"] = {
+            "best_metric_value": self.best_metric_value,
+            "best_metric_name": self.best_metric_name,
+            "best_policy_mode": self.best_policy.mode,
+            "run_id": self.run_id,
+        }
 
         AtomicCheckpointWriter.save_torch_payload_atomic(self.resume_path, payload)
 
@@ -450,8 +553,9 @@ class CheckpointIntegrationManager:
             "checkpoint_path": self.resume_path,
             "checkpoint_type": "resume",
             "checkpoint_semantics": "resume_full",
-            "epoch": int(epoch),
-            "global_step": int(global_step) if global_step is not None else None,
+            "epoch": epoch,
+            "global_step": global_step,
+            "has_ema_state": ema_state_dict is not None,
             "requires_trusted_load": requires_trusted_load,
         }
 
@@ -535,13 +639,29 @@ class CheckpointIntegrationManager:
         strict: bool = True,
         trusted: bool = False,
         path: Optional[Union[str, Path]] = None,
+        ema_model: Optional[torch.optim.swa_utils.AveragedModel] = None,
+        ema_decay: Optional[float] = None,
+        metric_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Load a resume checkpoint.
 
         Delegates to load_resume_checkpoint from resume_utils_hex_v3.py
         which handles the correct restore order:
-        1. model, 2. optimizer, 3. scheduler, 4. grad_scaler, 5. RNG
+        1. model, 2. optimizer, 3. scheduler, 4. grad_scaler, 5. EMA, 6. RNG
+
+        Afterwards the best-metric state recorded by save_resume() is
+        restored from this manager's best.pt, if best.pt is consistent with
+        the record (see _restore_best_metric). Without it a resumed run
+        started with best=None and its first epoch replaced a better best.pt
+        (issue #40). ``metric_name``, if given, must equal the recorded best
+        metric's name; a resume that switches the selection metric starts a
+        fresh best. The manager adopts the resumed run's ``run_id``.
+
+        With ``ema_model`` and a checkpoint that carries EMA state,
+        ``ema_decay`` is required and must equal the decay recorded next to
+        the EMA state; a missing decay on either side or a mismatch raises
+        EMADecayError (a ValueError) before anything is restored.
 
         path explicitly selects the resume checkpoint. If omitted, the
         manager-owned resume_path is used. Callers that expose a configurable
@@ -549,7 +669,7 @@ class CheckpointIntegrationManager:
         also the file that is actually loaded.
         """
         checkpoint_path = Path(path) if path is not None else self.resume_path
-        return load_resume_checkpoint(
+        report = load_resume_checkpoint(
             checkpoint_path,
             model=model,
             optimizer=optimizer,
@@ -559,7 +679,89 @@ class CheckpointIntegrationManager:
             restore_rng=restore_rng,
             strict=strict,
             trusted=trusted,
+            ema_model=ema_model,
+            ema_decay=ema_decay,
         )
+        state = report.get("checkpoint_manager_state")
+        if isinstance(state, dict) and isinstance(state.get("run_id"), str):
+            # Resuming continues that run: later saves carry its identity.
+            self.run_id = state["run_id"]
+        # A manager that already tracked a best value (e.g. an earlier run in
+        # this process) must not compare the resumed run against it: start
+        # fresh and let a successful restore set the value (Codex #46 T5).
+        self.best_metric_value = None
+        self.best_metric_name = None
+        restored, reason = self._restore_best_metric(state, metric_name=metric_name)
+        report["best_metric_restored"] = restored
+        report["best_metric_restore_reason"] = reason
+        report["best_metric_value"] = self.best_metric_value
+        if not restored and reason not in ("absent", "no_best_recorded"):
+            logger.warning(
+                "Resume: best metric not restored (%s); the next improvement "
+                "check starts from %r.",
+                reason,
+                self.best_metric_value,
+            )
+        return report
+
+    def _restore_best_metric(
+        self, state: Any, *, metric_name: Optional[str] = None
+    ) -> Tuple[bool, str]:
+        """Restore best_metric_value from best.pt, if the resume record allows it.
+
+        best.pt in this manager's root_dir is the source of truth (memory must
+        match the file). It is adopted when it carries the same policy mode
+        and a metric at least as good as the one recorded in the resume
+        checkpoint: equal = the state at save time; better = a later epoch of
+        the same run improved best.pt after the last periodic resume save
+        ("restored_from_newer_best"). Identity is checked first: best.pt must
+        carry the recorded run_id and metric name, and the metric name must
+        equal ``metric_name`` if the caller names it. A best.pt of another
+        run, of another metric, a worse or a missing one is not trusted, so it
+        cannot block saving a new best model. Returns (restored, reason).
+        """
+        if not isinstance(state, dict):
+            return False, "absent"
+        recorded = state.get("best_metric_value")
+        if recorded is None:
+            return False, "no_best_recorded"
+        if state.get("best_policy_mode") != self.best_policy.mode:
+            return False, "policy_mode_mismatch"
+        recorded_name = state.get("best_metric_name")
+        if metric_name is not None and recorded_name != metric_name:
+            return False, "metric_name_mismatch"
+        try:
+            value = _finite_metric_value(recorded)
+        except (TypeError, ValueError):
+            return False, "invalid_record"
+
+        best_path = Path(self.best_model_path)
+        if not best_path.exists():
+            return False, "best_checkpoint_missing"
+        try:
+            # mmap: read the metadata without materialising the weights.
+            best_extra = torch.load(
+                best_path, map_location="cpu", weights_only=True, mmap=True
+            )["extra"]
+            on_disk = _finite_metric_value(best_extra["metric_value"])
+            disk_mode = best_extra.get("best_policy", {}).get("mode", self.best_policy.mode)
+            disk_run_id = best_extra.get("run_id")
+            disk_name = best_extra.get("metric_name")
+        except Exception:  # unreadable/legacy best.pt: do not trust the record
+            return False, "best_checkpoint_unreadable"
+        if disk_run_id is None or disk_run_id != state.get("run_id"):
+            return False, "run_id_mismatch"
+        if disk_name != recorded_name:
+            return False, "metric_name_mismatch"
+        if disk_mode != self.best_policy.mode:
+            return False, "policy_mode_mismatch"
+        at_least_as_good = on_disk <= value if self.best_policy.mode == "min" else on_disk >= value
+        if not at_least_as_good:
+            return False, "best_checkpoint_mismatch"
+
+        self.best_metric_value = on_disk
+        self.best_metric_name = disk_name
+        return True, "restored" if on_disk == value else "restored_from_newer_best"
 
     # ------------------------------------------------------------------
     # Load: warmstart
@@ -575,6 +777,7 @@ class CheckpointIntegrationManager:
         prefix_map: Optional[Dict[str, str]] = None,
         allow_dtype_mismatch: bool = True,
         strict: bool = False,
+        skip_shape_mismatch: bool = False,
     ) -> Dict[str, Any]:
         """
         Load a warmstart checkpoint (weights only, NEVER optimizer).
@@ -589,4 +792,5 @@ class CheckpointIntegrationManager:
             prefix_map=prefix_map,
             allow_dtype_mismatch=allow_dtype_mismatch,
             strict=strict,
+            skip_shape_mismatch=skip_shape_mismatch,
         )

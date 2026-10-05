@@ -6,9 +6,15 @@ Training resume checkpoint utilities for HexaNTK pipeline.
 Key design decisions:
 - build_resume_payload() separated from save for composability
 - Safe vs trusted loading paths (PyTorch 2.6+)
-- Scheduler restored BEFORE optimizer (PyTorch best practice)
+- Restore order: model, optimizer, scheduler, grad_scaler, EMA, RNG
+  (optimizer before scheduler, as in the PyTorch checkpoint recipe)
+- Optional EMA (AveragedModel) state: without it a resumed run restarts
+  the average from the resumed weights and is no longer equivalent to an
+  uninterrupted run
 - Optional DataLoader state for mid-epoch resume readiness
 - requires_trusted_load flag in save report
+- epoch / global_step are validated as non-negative integers (as_step_count)
+  before anything is written or any state is restored
 
 Safe load path:
     Checkpoint contains only tensors, primitives, dicts.
@@ -21,18 +27,102 @@ Trusted load path:
 from __future__ import annotations
 
 __all__ = [
+    "EMADecayError",
+    "as_step_count",
+    "check_ema_save_metadata",
     "build_resume_payload",
     "save_resume_checkpoint",
     "restore_rng_states",
     "load_resume_checkpoint",
 ]
 
+import math
+import numbers
 import random
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 import numpy as np
 import torch
+
+
+# ------------------------------------------------------------------
+# Counter contract
+# ------------------------------------------------------------------
+
+
+def as_step_count(value: Any, *, name: str) -> int:
+    """Return ``value`` as a non-negative int, or raise.
+
+    int() alone raised a raw OverflowError for inf and silently truncated
+    1.5 to 1 (issue #40). Accepted: ints, integral reals (2.0,
+    Fraction(4, 2)), single-element tensors/numpy values. bool and
+    non-numeric types raise TypeError; non-integral, non-finite or negative
+    values raise ValueError.
+    """
+    item = getattr(value, "item", None)
+    if callable(item) and getattr(value, "shape", None) is not None:
+        if math.prod(value.shape) != 1:
+            raise ValueError(f"{name} must be a scalar, got shape {tuple(value.shape)}")
+        value = item()
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise TypeError(f"{name} must be a non-negative integer, got {value!r}")
+    message = f"{name} must be a non-negative integer, got {value!r}"
+    try:
+        count = int(value)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if count != value or count < 0:
+        raise ValueError(message)
+    return count
+
+
+# ------------------------------------------------------------------
+# EMA decay contract
+# ------------------------------------------------------------------
+
+
+class EMADecayError(ValueError):
+    """EMA resume state and its averaging decay do not travel together.
+
+    ``AveragedModel.state_dict()`` holds the averaged weights and the
+    ``n_averaged`` counter, but not the averaging function. Continuing an
+    average that was accumulated with another decay yields a hybrid EMA that
+    matches neither run, silently. So the decay is part of the contract:
+    required whenever EMA state is saved, required (and compared) whenever
+    EMA state is restored. Subclass of ValueError for existing callers.
+    """
+
+
+def _as_ema_decay(value: Any, *, name: str) -> float:
+    """Return ``value`` as a float in [0, 1], or raise EMADecayError."""
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise EMADecayError(f"{name} must be a real number in [0, 1], got {value!r}")
+    decay = float(value)
+    if not (math.isfinite(decay) and 0.0 <= decay <= 1.0):
+        raise EMADecayError(f"{name} must be a real number in [0, 1], got {value!r}")
+    return decay
+
+
+def check_ema_save_metadata(
+    ema_state_dict: Optional[Dict[str, Any]], ema_decay: Any
+) -> Optional[float]:
+    """Validate the decay that must accompany saved EMA state.
+
+    Returns the decay as float if ``ema_state_dict`` is given (None
+    otherwise); raises EMADecayError if it is given without a decay or with
+    one outside [0, 1]. Every resume save path calls this before writing.
+    """
+    if ema_state_dict is None:
+        return None
+    if ema_decay is None:
+        raise EMADecayError(
+            "ema_state_dict is given without ema_decay: the decay the EMA "
+            "averages with is not part of AveragedModel.state_dict(), and "
+            "without it a resume cannot detect a different decay (silent "
+            "hybrid EMA). Pass the decay the EMA was built with."
+        )
+    return _as_ema_decay(ema_decay, name="ema_decay")
 
 
 # ------------------------------------------------------------------
@@ -53,9 +143,20 @@ def build_resume_payload(
     include_numpy_rng: bool = True,
     include_torch_rng: bool = True,
     include_dataloader_state: Optional[Dict[str, Any]] = None,
+    ema_state_dict: Optional[Dict[str, Any]] = None,
+    ema_decay: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Build a resume checkpoint payload dict without writing to disk.
+
+    ``ema_state_dict`` is ``AveragedModel.state_dict()`` (averaged weights
+    plus the ``n_averaged`` counter); it holds tensors only, so it does not
+    affect the safe (weights_only=True) load path. The averaging function is
+    not part of it, so ``ema_decay`` is REQUIRED with it (EMADecayError
+    otherwise, before anything is built), stored next to it as a float in
+    [0, 1] and checked on load: continuing with another decay would silently
+    produce a hybrid average. Without ``ema_state_dict`` the decay is not
+    stored.
 
     This function is separated from save_resume_checkpoint so that
     callers (e.g. CheckpointIntegrationManager) can use their own
@@ -66,17 +167,22 @@ def build_resume_payload(
     Dict[str, Any]
         Complete payload ready for torch.save().
     """
+    epoch = as_step_count(epoch, name="epoch")
+    if global_step is not None:
+        global_step = as_step_count(global_step, name="global_step")
+    checked_decay = check_ema_save_metadata(ema_state_dict, ema_decay)
+
     payload: Dict[str, Any] = {
         "checkpoint_type": "resume",
         "checkpoint_semantics": "resume_full",
         "schema_version": "1.0",
-        "epoch": int(epoch),
+        "epoch": epoch,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
     }
 
     if global_step is not None:
-        payload["global_step"] = int(global_step)
+        payload["global_step"] = global_step
 
     if scheduler is not None:
         payload["scheduler_state_dict"] = scheduler.state_dict()
@@ -97,6 +203,10 @@ def build_resume_payload(
 
     if include_dataloader_state is not None:
         payload["dataloader_state_dict"] = include_dataloader_state
+
+    if ema_state_dict is not None:
+        payload["ema_state_dict"] = ema_state_dict
+        payload["ema_decay"] = checked_decay
 
     if extra is not None:
         payload["extra"] = extra
@@ -123,6 +233,8 @@ def save_resume_checkpoint(
     include_numpy_rng: bool = True,
     include_torch_rng: bool = True,
     include_dataloader_state: Optional[Dict[str, Any]] = None,
+    ema_state_dict: Optional[Dict[str, Any]] = None,
+    ema_decay: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Save a training resume checkpoint.
@@ -145,6 +257,8 @@ def save_resume_checkpoint(
         include_numpy_rng=include_numpy_rng,
         include_torch_rng=include_torch_rng,
         include_dataloader_state=include_dataloader_state,
+        ema_state_dict=ema_state_dict,
+        ema_decay=ema_decay,
     )
 
     torch.save(payload, path)
@@ -155,14 +269,15 @@ def save_resume_checkpoint(
         "checkpoint_path": str(path),
         "checkpoint_type": "resume",
         "checkpoint_semantics": "resume_full",
-        "epoch": int(epoch),
-        "global_step": int(global_step) if global_step is not None else None,
+        "epoch": payload["epoch"],
+        "global_step": payload.get("global_step"),
         "has_scheduler": scheduler is not None,
         "has_grad_scaler": grad_scaler is not None,
         "has_torch_rng": include_torch_rng,
         "has_python_rng": include_python_rng,
         "has_numpy_rng": include_numpy_rng,
         "has_dataloader_state": include_dataloader_state is not None,
+        "has_ema_state": ema_state_dict is not None,
         "requires_trusted_load": requires_trusted_load,
     }
 
@@ -223,6 +338,28 @@ def _load_checkpoint_payload(
     return payload
 
 
+def _stored_step_count(payload: Dict[str, Any], key: str, path: Path) -> int:
+    """Validate a counter read from a stored checkpoint, fail-closed (E3=A).
+
+    Writers before the counter contract (schema_version "1.0") could store
+    negative or fractional counters (e.g. epoch=-1 as a pre-training
+    sentinel). Such a checkpoint is rejected before any state is restored;
+    there is no silent coercion, because the training loop would resume at a
+    position the original run never reached.
+    """
+    try:
+        return as_step_count(payload[key], name=key)
+    except (TypeError, ValueError) as exc:
+        raise type(exc)(
+            f"{exc}. Resume checkpoint {path} stores {key}={payload[key]!r} "
+            f"(schema_version={payload.get('schema_version')!r}); resume "
+            "requires a non-negative integer and nothing was restored. "
+            "Checkpoints from writers before the counter contract are not "
+            f"migrated automatically: re-save the checkpoint with a valid {key} "
+            "if the true position is known, or start a fresh run."
+        ) from exc
+
+
 def load_resume_checkpoint(
     path: Union[str, Path],
     *,
@@ -234,6 +371,8 @@ def load_resume_checkpoint(
     restore_rng: bool = True,
     strict: bool = True,
     trusted: bool = False,
+    ema_model: Optional[torch.optim.swa_utils.AveragedModel] = None,
+    ema_decay: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Load a training resume checkpoint.
@@ -243,13 +382,29 @@ def load_resume_checkpoint(
     trusted :
         If False (default), uses weights_only=True (safe path).
         If True, uses weights_only=False (for checkpoints with Python RNG states).
+    ema_model :
+        Optional AveragedModel, built with the same decay as when saving.
+        Restored from ``ema_state_dict`` if the checkpoint carries one;
+        ``report["ema_restored"]`` says whether it did.
+    ema_decay :
+        The decay ``ema_model`` averages with. Required when ``ema_model`` is
+        given and the checkpoint carries EMA state; the checkpoint must then
+        record its ``ema_decay`` and both must be equal. Any violation raises
+        EMADecayError (a ValueError) before anything is restored (no silent
+        hybrid EMA). A checkpoint written without decay metadata can only be
+        resumed without ``ema_model``.
 
     Restore order (PyTorch convention):
         1. model state
         2. optimizer state
         3. scheduler state
         4. grad_scaler state
-        5. RNG states
+        5. EMA state
+        6. RNG states
+
+    The required fields and the epoch/global_step contract are validated
+    before step 1, so a malformed checkpoint raises without touching the
+    model or optimizer.
     """
     path = Path(path)
     if not path.exists():
@@ -266,6 +421,40 @@ def load_resume_checkpoint(
         raise ValueError("Resume checkpoint is missing 'optimizer_state_dict'.")
     if "epoch" not in payload:
         raise ValueError("Resume checkpoint is missing 'epoch'.")
+    epoch = _stored_step_count(payload, "epoch", path)
+    global_step = (
+        _stored_step_count(payload, "global_step", path)
+        if payload.get("global_step") is not None
+        else None
+    )
+    recorded_decay = payload.get("ema_decay")
+    if ema_model is not None and "ema_state_dict" in payload:
+        # Fail-closed decay contract (Codex review #46): both sides must be
+        # known and equal, otherwise nothing is restored.
+        if ema_decay is None:
+            raise EMADecayError(
+                "Resume checkpoint carries EMA state, but ema_decay was not "
+                "given: the restored average could not be checked against the "
+                "decay ema_model averages with. Pass ema_decay (or resume "
+                "without ema_model)."
+            )
+        current_decay = _as_ema_decay(ema_decay, name="ema_decay")
+        if recorded_decay is None:
+            raise EMADecayError(
+                f"Resume checkpoint {path} carries EMA state without the decay "
+                "it was averaged with (written before decay metadata became "
+                "mandatory); continuing it could silently mix two averages. "
+                "Resume without ema_model (the EMA restarts from the resumed "
+                "weights), or, if the original decay is known for certain, "
+                "re-save the checkpoint with payload['ema_decay'] set to it."
+            )
+        recorded = _as_ema_decay(recorded_decay, name="checkpoint ema_decay")
+        if recorded != current_decay:
+            raise EMADecayError(
+                f"Resume checkpoint EMA was averaged with decay {recorded_decay!r}, "
+                f"but the current EMA uses {ema_decay!r}; continuing would mix two "
+                "averages. Resume with the same ema_decay (or without ema_model)."
+            )
 
     # 1. Model
     model_incompat = model.load_state_dict(payload["model_state_dict"], strict=strict)
@@ -285,7 +474,13 @@ def load_resume_checkpoint(
         grad_scaler.load_state_dict(payload["grad_scaler_state_dict"])
         grad_scaler_restored = True
 
-    # 5. RNG states
+    # 5. EMA
+    ema_restored = False
+    if ema_model is not None and "ema_state_dict" in payload:
+        ema_model.load_state_dict(payload["ema_state_dict"], strict=strict)
+        ema_restored = True
+
+    # 6. RNG states
     rng_report: Dict[str, bool] = {
         "python_random_state": False,
         "numpy_random_state": False,
@@ -299,10 +494,8 @@ def load_resume_checkpoint(
         "checkpoint_path": str(path),
         "checkpoint_type": payload.get("checkpoint_type", "unknown"),
         "checkpoint_semantics": payload.get("checkpoint_semantics", "resume_full"),
-        "epoch": int(payload["epoch"]),
-        "global_step": (
-            int(payload["global_step"]) if "global_step" in payload else None
-        ),
+        "epoch": epoch,
+        "global_step": global_step,
         "strict": strict,
         "trusted": trusted,
         "model_load_result": {
@@ -312,6 +505,9 @@ def load_resume_checkpoint(
         "optimizer_restored": True,
         "scheduler_restored": scheduler_restored,
         "grad_scaler_restored": grad_scaler_restored,
+        "has_ema_state": "ema_state_dict" in payload,
+        "ema_restored": ema_restored,
+        "ema_decay": recorded_decay,
         "rng_restored": rng_report,
         "has_dataloader_state": "dataloader_state_dict" in payload,
         "has_extra": "extra" in payload,
@@ -322,5 +518,9 @@ def load_resume_checkpoint(
 
     if "extra" in payload:
         report["extra"] = payload["extra"]
+
+    # Written by CheckpointIntegrationManager.save_resume (best-metric state).
+    if "checkpoint_manager_state" in payload:
+        report["checkpoint_manager_state"] = payload["checkpoint_manager_state"]
 
     return report

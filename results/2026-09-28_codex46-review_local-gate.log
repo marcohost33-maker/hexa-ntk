@@ -1,0 +1,265 @@
+# Gate-Log 2026-09-28 -- Codex review #46 after merging main (H1 README counts, H2 EMA decay)
+# local Windows run; CI mirror of jobs gate + tests (cpu), plus the optional mutation probe
+# local paths replaced: interpreter -> python, work tree -> <repo>, temp dirs -> <tmp>
+# mutation probe exit 1: M02 targets TestDurabilityErrorAfterReplace, which is POSIX-only
+#   (all 3 tests skipped on Windows), so the mutant cannot be killed here; same result on the
+#   pre-change tree 36c5080 (18/19). Not re-run on Linux.
+# HexaNTK local gate chain 2026-09-28T20:55:08Z
+# HEAD 16a784562c9d57825418db1f9d573a3f44ac8267 dirty=0
+# Python 3.12.10; torch 2.6.0+cpu numpy 2.5.3 coverage 7.15.4 platform win32
+# ruff ruff 0.16.4
+
+===== STEP ruff: python -m ruff check src scripts
+All checks passed!
+===== EXIT ruff = 0
+
+===== STEP compileall: python -m compileall src
+Listing 'src'...
+Listing 'src\\toolkit'...
+===== EXIT compileall = 0
+
+===== STEP verify_sources: python scripts/verify_sources.py
+[ OK ] src/toolkit/benchmark_hex_v3.py: 929022D78BCA8E15
+[ OK ] src/toolkit/checkpoint_integration_hex_v3.py: BA047FF01BB4E3F5
+[ OK ] src/toolkit/dataloader_utils_hex_v3.py: A8ACCD446EC287D6
+[ OK ] src/toolkit/dataset_split_hex_v3.py: 8C279370377CAE96
+[ OK ] src/toolkit/ema_hex_v3.py: 4790DFE7CBA298A2
+[ OK ] src/toolkit/failure_signature_hex_v3.py: B4B2D20101A4A8CA
+[ OK ] src/toolkit/operator_adapter_hex_v3.py: D0192688CE5222F1
+[ OK ] src/toolkit/resume_utils_hex_v3.py: B9FD4DF90F15C832
+[ OK ] src/toolkit/runner_hex_v3.py: 4721CC2E0CA4A9E4
+[ OK ] src/toolkit/stress_hex_v3.py: 0B0A80BFDC117DC1
+[ OK ] src/toolkit/test_benchmark_hex_v3.py: 4C18ACC89FDB92A9
+[ OK ] src/toolkit/test_checkpoint_integration_hex_v3.py: 48AC0F8C6AA0A75C
+[ OK ] src/toolkit/test_dataloader_utils_hex_v3.py: 54FE8C5313B45824
+[ OK ] src/toolkit/test_dataset_split_hex_v3.py: 4CC7EC1399C817F1
+[ OK ] src/toolkit/test_ema_hex_v3.py: 89BE5BA18AED0777
+[ OK ] src/toolkit/test_hex_timestep_contract.py: ED29A89E81B871F6
+[ OK ] src/toolkit/test_operator_adapter_hex_v3.py: C0EAD8D722BCE4D4
+[ OK ] src/toolkit/test_resume_utils_hex_v3.py: 1D9EF5DEA81373F6
+[ OK ] src/toolkit/test_runner_hex_v3.py: 5FB2BB8609C96209
+[ OK ] src/toolkit/test_stress_hex_v3.py: EE8D734CA0F9567A
+[ OK ] src/toolkit/test_verify_sources_gate.py: 8051560D9B84B2F8
+[ OK ] src/toolkit/test_warmstart_utils_hex_v3.py: 53663241136220FA
+[ OK ] src/toolkit/warmstart_utils_hex_v3.py: 45DE93FC82AEA5ED
+[ OK ] spec/HexaNTK_Review_Gehaertet.md: FA25DE9F8A724345
+[ OK ] spec/STRESS_SHIFT_CONTRACT_v1.md: 95100B4D8B668153
+
+[VERIFY-SOURCES] 23 Toolkit-Eintraege + 2 Spec-Eintraege | Dateiliste: git (25 Dateien) | PASS
+===== EXIT verify_sources = 0
+
+===== STEP engine_gate: python scripts/engine_gate.py
+======================================================================
+HexaNTK v3.0.1 (L014) -- Manuscript Test Suite
+  Module hash: 2a30d3057e6f646a...
+  Tests: 26 (covers P0.1-P0.5, P1.1, P1.2)
+======================================================================
+
+[TEST] module hash stable
+  hash: 2a30d3057e6f646a...
+  -> PASS (0.000s)
+
+[TEST] FailureSignature basic
+  failure registered, fields intact
+  -> PASS (0.003s)
+
+[TEST] AtomicWriter basic
+  atomic write survives; no tempfile leak
+  -> PASS (0.008s)
+
+[TEST] AtomicWriter crash safety
+  crash leaves no target file and no tempfile leak
+  -> PASS (0.007s)
+
+[TEST] build_resume_payload fields
+  resume payload fields correct
+  -> PASS (0.000s)
+
+[TEST] BestPolicy min-mode
+  min-mode policy correct
+  -> PASS (0.000s)
+
+[TEST] BestPolicy max-mode
+  max-mode policy correct
+  -> PASS (0.000s)
+
+[TEST] BestPolicy invalid args
+  invalid policy args rejected
+  -> PASS (0.000s)
+
+[TEST] CkptMgr: best roundtrip
+  save/load best roundtrip with policy gates
+  -> PASS (0.017s)
+
+[TEST] CkptMgr: resume roundtrip
+  resume roundtrip + semantics validation
+  -> PASS (0.010s)
+
+[TEST] CkptMgr: bad semantics rejected
+  wrong-semantics resume rejected
+  -> PASS (0.000s)
+
+[TEST] CkptMgr: DDP guard
+  DDP non-main guard works
+  -> PASS (0.000s)
+
+[TEST] Warmstart drops optimizer
+  dropped: ['optimizer_state_dict', 'scheduler_state_dict', 'grad_scaler_state_dict', 'rng_states']
+  -> PASS (0.000s)
+
+[TEST] Warmstart prefix transforms
+  prefix transforms: ['backbone.layer.w', 'decoder.layer.w']
+  -> PASS (0.000s)
+
+[TEST] Hex Laplacian + CFL correct
+  hex stencil=2/3; L2 default dt=0.2833; positivity dt=0.2500; centre(default)=-0.1333
+  -> PASS (0.000s)
+
+[TEST] safe_train_step: success
+  ok path
+  -> PASS (0.000s)
+
+[TEST] safe_train_step: NaN
+  NaN path records failure
+  -> PASS (0.006s)
+
+[TEST] safe_train_step: OOM pre-assignment
+  OOM-before-assignment handled without NameError
+  -> PASS (0.006s)
+
+[TEST] OperatorContext: valid GINO
+  valid GINO ctx passes
+  -> PASS (0.000s)
+
+[TEST] OperatorContext: non-shared GINO
+  non-shared GINO rejected
+  -> PASS (0.000s)
+
+[TEST] OperatorContext: missing edge GNO
+  GNO without edge_index rejected
+  -> PASS (0.000s)
+
+[TEST] OperatorContext: shape validations
+  3 shape mismatches rejected
+  -> PASS (0.000s)
+
+[TEST] GAOT config defaults match paper
+  GAOTConfig defaults confirmed vs arXiv:2505.18781 Table 4
+  -> PASS (0.000s)
+
+[TEST] GAOT config validation
+  5/5 invalid configurations rejected
+  -> PASS (0.000s)
+
+[TEST] GAOT context requires config
+  GAOT rejected without gaot_config
+  -> PASS (0.000s)
+
+[TEST] GAOT context dim mismatch caught
+  2D-vs-3D mismatch caught, 2D paper-default passes
+  -> PASS (0.012s)
+
+======================================================================
+Results: 26/26 PASS
+ALL TESTS PASSED -- HexaNTK v3.0.1 manuscript-ready.
+======================================================================
+
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+===== EXIT engine_gate = 0
+
+===== STEP coverage_run: python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p test_*.py
+......................................................................................sss...........Resume: best metric not restored (metric_name_mismatch); the next improvement check starts from None.
+..Resume: best metric not restored (run_id_mismatch); the next improvement check starts from None.
+.Resume: best metric not restored (best_checkpoint_missing); the next improvement check starts from None.
+....Resume: best metric not restored (policy_mode_mismatch); the next improvement check starts from None.
+.Resume: best metric not restored (best_checkpoint_missing); the next improvement check starts from None.
+.Resume: best metric not restored (best_checkpoint_mismatch); the next improvement check starts from None.
+...Resume: best metric not restored (metric_name_mismatch); the next improvement check starts from None.
+...............................................................................................................................................................................................Empty_Validation: val_nrmse=nan at epoch 0; best checkpoint not updated
+.Anomaly at step 0: NaN_or_Inf_Loss
+Anomaly at step 1: NaN_or_Inf_Loss
+Anomaly at step 2: NaN_or_Inf_Loss
+Anomaly at step 3: NaN_or_Inf_Loss
+..........Resume: best metric not restored (metric_name_mismatch); the next improvement check starts from None.
+Resume: best metric not restored (metric_name_mismatch); the next improvement check starts from None.
+...NaN_or_Inf_Metric: val_nrmse=nan at epoch 0; best checkpoint not updated
+.NaN_or_Inf_Metric: val_nrmse=nan at epoch 0; best checkpoint not updated
+NaN_or_Inf_Metric: val_nrmse=inf at epoch 0; best checkpoint not updated
+NaN_or_Inf_Metric: val_nrmse=-inf at epoch 0; best checkpoint not updated
+.......Resume checkpoint <tmp>\elsewhere\resume.pt carries no EMA state; the EMA average restarts from the resumed weights.
+..Resume checkpoint <tmp>\elsewhere\resume.pt carries no EMA state; the EMA average restarts from the resumed weights.
+.............Anomaly at step 0: Loss_Spike (val=3.910325, median=0.001000)
+.Anomaly at step 0: NaN_or_Inf_Loss
+..CUDA OOM at step 0! Attempting rescue...
+.................................................ss.....................Warmstart: weights_only=True failed for <tmp>\ckpt.pt. Attempting safe_globals whitelisting for numpy types...
+safe_globals whitelisting also failed. Checkpoint may contain unsupported Python objects.
+....Warmstart: weights_only=True failed for <tmp>\ckpt.pt. Attempting safe_globals whitelisting for numpy types...
+..........
+----------------------------------------------------------------------
+Ran 429 tests in 8.400s
+
+OK (skipped=5)
+===== EXIT coverage_run = 0
+
+===== STEP coverage_report: python -m coverage report
+Name                                           Stmts   Miss Branch BrPart  Cover
+--------------------------------------------------------------------------------
+src\toolkit\benchmark_hex_v3.py                  246     20     80     20    88%
+src\toolkit\checkpoint_integration_hex_v3.py     220     28     68      6    87%
+src\toolkit\dataloader_utils_hex_v3.py            22      0      2      0   100%
+src\toolkit\dataset_split_hex_v3.py              190      5     86      6    96%
+src\toolkit\ema_hex_v3.py                         40      5     10      1    88%
+src\toolkit\failure_signature_hex_v3.py           41      3      0      0    93%
+src\toolkit\operator_adapter_hex_v3.py           128     12     94     12    89%
+src\toolkit\resume_utils_hex_v3.py               144      6     80      5    95%
+src\toolkit\runner_hex_v3.py                     318     38    110     13    84%
+src\toolkit\stress_hex_v3.py                     207     25     92     23    84%
+src\toolkit\warmstart_utils_hex_v3.py            129      8     50      3    94%
+--------------------------------------------------------------------------------
+TOTAL                                           1685    150    672     89    89%
+===== EXIT coverage_report = 0
+
+===== STEP coverage_report_precision1: python -m coverage report --precision=1
+Name                                           Stmts   Miss Branch BrPart  Cover
+--------------------------------------------------------------------------------
+src\toolkit\benchmark_hex_v3.py                  246     20     80     20  87.7%
+src\toolkit\checkpoint_integration_hex_v3.py     220     28     68      6  86.8%
+src\toolkit\dataloader_utils_hex_v3.py            22      0      2      0 100.0%
+src\toolkit\dataset_split_hex_v3.py              190      5     86      6  96.0%
+src\toolkit\ema_hex_v3.py                         40      5     10      1  88.0%
+src\toolkit\failure_signature_hex_v3.py           41      3      0      0  92.7%
+src\toolkit\operator_adapter_hex_v3.py           128     12     94     12  89.2%
+src\toolkit\resume_utils_hex_v3.py               144      6     80      5  95.1%
+src\toolkit\runner_hex_v3.py                     318     38    110     13  83.9%
+src\toolkit\stress_hex_v3.py                     207     25     92     23  83.9%
+src\toolkit\warmstart_utils_hex_v3.py            129      8     50      3  93.9%
+--------------------------------------------------------------------------------
+TOTAL                                           1685    150    672     89  88.9%
+===== EXIT coverage_report_precision1 = 0
+
+===== STEP mutation_probe: python scripts/mutation_probe.py
+M01 KILLED    checkpoint_integration_hex_v3.py -> TestNonMainRankStoresValidatedFloat
+M02 SURVIVED  checkpoint_integration_hex_v3.py -> TestDurabilityErrorAfterReplace
+M03 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M04 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M05 KILLED    resume_utils_hex_v3.py -> TestResumeEmaState
+M06 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M07 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M08 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M09 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M10 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M11 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M12 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M13 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M14 KILLED    runner_hex_v3.py -> TestDetectorContract
+M15 KILLED    runner_hex_v3.py -> TestFullResumeEquivalence
+M16 KILLED    runner_hex_v3.py -> TestCheckpointSchedule
+M17 KILLED    runner_hex_v3.py -> TestEmptyValidationAndTrainEpoch
+M18 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M19 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M20 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M21 KILLED    warmstart_utils_hex_v3.py -> TestPrefixTransforms
+M22 KILLED    ema_hex_v3.py -> TestDecayContract
+[MUTATION-PROBE] baseline green | 21/22 killed | FAIL
+===== EXIT mutation_probe = 1
+# END HEAD 16a784562c9d57825418db1f9d573a3f44ac8267 dirty=0
