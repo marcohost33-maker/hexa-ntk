@@ -50,7 +50,7 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 |---|---|---|
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
-| Provenance | `python scripts/verify_sources.py` | 23 Toolkit- + 2 Spec-Eintraege, exit 0 |
+| Provenance | `python scripts/verify_sources.py` | 24 Toolkit- + 2 Spec-Eintraege, exit 0 |
 | Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 464 Tests, OK (5 skipped: 3 POSIX-only, 2 Symlink-Recht unter Windows), exit 0 |
 | Coverage | `python -m coverage run ... && python -m coverage report` | 88,9 % gesamt (Branch, `fail_under = 87`), exit 0 |
 | Mutation | `python scripts/mutation_probe.py` | 21/22 Mutanten getoetet (Baseline gruen), exit 1: M02 ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped) |
