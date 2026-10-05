@@ -295,3 +295,19 @@
 | 1D9EF5DEA81373F6 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: TestEmaDecayContract: test_resume_utils_hex_v3.py |
 | 5FB2BB8609C96209 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: runner records decay, legacy resume rejected with EMA: test_runner_hex_v3.py |
 | ED29A89E81B871F6 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: README counts pinned to the tree: test_hex_timestep_contract.py |
+
+## src/toolkit/ — Runner evidence semantics 2026-10-04 (Codex)
+
+> Validation no longer aliases loss to nRMSE, empty validation fails closed,
+> configured best metrics must exist, and EMA/raw validation shares the canonical
+> OperatorAdapter path. Prior rows remain lineage.
+
+| C51BEA39593F07A7 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/runner-evidence-semantics-p0: runner_hex_v3.py |
+| BFD8DC30774789CF | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/runner-evidence-semantics-p0: test_runner_hex_v3.py |
+
+## Integration probe step02_pr48 (append-only, 2026-10-05, vero/hexa-integration-probe)
+
+> Probe-only pins for merged bytes. Prior rows remain lineage.
+
+| 6E571FB9C282E945 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration probe step02_pr48 (merged bytes): runner_hex_v3.py |
+| B40A2DCCC489FCCC | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration probe step02_pr48 (merged bytes): test_runner_hex_v3.py |

@@ -200,7 +200,8 @@ class RunnerConfig:
 
     # Checkpointing
     save_every_n_epochs: int = 1
-    best_metric_name: str = "val_nrmse"
+    # Probe (E1 pending): #48 default; #46 also emits a real val_nrmse.
+    best_metric_name: str = "val_loss"
     best_metric_mode: str = "min"
     best_metric_min_delta: float = 1e-4
 
@@ -635,32 +636,13 @@ class HexTrainingRunner:
             x = batch["input"].to(self.device)
             target = batch["target"].to(self.device)
 
-            # If adapter is available, use it for input validation
-            # and kwargs construction, but with the eval model
+            # Rebind the canonical adapter to the actual evaluation module.
+            # This keeps raw and EMA validation on the same context, dispatch,
+            # and output-shape contract as training instead of duplicating it.
             if self.adapter is not None and "context" in batch:
                 ctx = batch["context"]
-                # Validate inputs (shape checks etc.)
-                self.adapter.validate_context(x, ctx)
-                # Build kwargs and call eval model directly
-                # (bypasses adapter's model reference, uses eval_module)
-                if self.adapter.model_type == "graph_operator_v3":
-                    kwargs: Dict[str, Any] = {"edge_index": ctx.edge_index}
-                    if ctx.coords is not None:
-                        kwargs["coords"] = ctx.coords
-                    if ctx.dt is not None:
-                        kwargs["dt"] = ctx.dt
-                    pred = eval_module(x, **kwargs)
-                elif self.adapter.model_type in {"gino_hex_v3", "gino_hex_v3_v2"}:
-                    kwargs = {"coords_cart": ctx.coords}
-                    if ctx.dt is not None:
-                        kwargs["dt"] = ctx.dt
-                    if "sdf" in ctx.extra:
-                        kwargs["sdf"] = ctx.extra["sdf"]
-                    if "boundary_mask" in ctx.extra:
-                        kwargs["boundary_mask"] = ctx.extra["boundary_mask"]
-                    pred = eval_module(x, **kwargs)
-                else:
-                    pred = eval_module(x)
+                eval_adapter = OperatorAdapterV3(eval_module, self.adapter.model_type)
+                pred = eval_adapter(x, ctx)
             else:
                 pred = eval_module(x)
 
@@ -828,9 +810,12 @@ class HexTrainingRunner:
         """
         reports: Dict[str, Any] = {}
 
-        metric_value = val_report.get(
-            self.config.best_metric_name, val_report.get("val_loss", float("inf"))
-        )
+        if self.config.best_metric_name not in val_report:
+            raise KeyError(
+                f"configured best metric {self.config.best_metric_name!r} "
+                "is absent from validation report"
+            )
+        metric_value = val_report[self.config.best_metric_name]
 
         # EMA state for best model
         ema_state = None
