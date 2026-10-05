@@ -136,6 +136,23 @@ class TestValidateBundle(unittest.TestCase):
             bundle.validate_bundle(self.bdir, expected_source_sha="0" * 40)
 
 
+class TestCheckedManifestPath(unittest.TestCase):
+    """First layer of the path confinement (Codex PR #58). validate_bundle
+    additionally checks that every resolved path stays inside dcp/."""
+
+    def test_unsafe_forms_are_rejected(self) -> None:
+        bad = ["/abs/dcp/x", "C:/dcp/x", "c:dcp/x", "dcp" + chr(92) + "x", "dcp/../x",
+               "dcp/./x", "dcp//x", "dcp/x/", "other/.metadata", "dcp", "", None, 5]
+        for raw in bad:
+            with self.subTest(raw=raw), self.assertRaises(RuntimeError):
+                bundle.checked_manifest_path(raw)
+
+    def test_normalized_paths_under_dcp_pass(self) -> None:
+        for raw in ("dcp/.metadata", "dcp/__0_0.distcp", "dcp/sub/shard.bin"):
+            with self.subTest(raw=raw):
+                self.assertEqual(bundle.checked_manifest_path(raw), raw)
+
+
 class TestFinalizeDurabilityOrder(unittest.TestCase):
     def test_shard_directory_fsynced_before_manifest_and_marker(self) -> None:
         events = []
