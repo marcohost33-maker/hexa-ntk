@@ -200,8 +200,10 @@ class RunnerConfig:
 
     # Checkpointing
     save_every_n_epochs: int = 1
-    # Probe (E1 pending): #48 default; #46 also emits a real val_nrmse.
-    best_metric_name: str = "val_loss"
+    # Model selection uses the pooled relative L2 error computed in _validate
+    # (E1=B, 2026-10-05). A configured metric missing from the validation
+    # report raises KeyError instead of silently falling back to val_loss.
+    best_metric_name: str = "val_nrmse"
     best_metric_mode: str = "min"
     best_metric_min_delta: float = 1e-4
 

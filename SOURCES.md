@@ -336,3 +336,28 @@
 
 | DD71A9F23937E5D7 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/metricspec-v4: benchmark_hex_v3.py |
 | 1EA2A54085C9C5A4 | 2026-10-04 23:00 | src/toolkit | in-repo derived, codex/metricspec-v4: test_benchmark_hex_v3.py |
+
+## Integration B1-decisions-E1-E6 (append-only, 2026-10-05, vero/hexa-integration-2026-10-05)
+
+> Pins for the integrated bytes of this block. Prior rows remain lineage.
+
+| 40161F27978DC8D3 | 2026-10-05 00:00 | scripts | in-repo derived, integration B1-decisions-E1-E6: engine_gate.py |
+| AA0904D57AF71012 | 2026-10-05 00:00 | scripts | in-repo derived, integration B1-decisions-E1-E6: mutation_probe.py |
+| 1FDD515C48BE308B | 2026-10-05 00:00 | scripts/oracles | in-repo derived, integration B1-decisions-E1-E6: dcp_2rank_gloo_oracle.py |
+| 5E189A1FC5A73D07 | 2026-10-05 00:00 | scripts/oracles | in-repo derived, integration B1-decisions-E1-E6: dcp_bundle_2rank_oracle.py |
+| 7C7806D9817628E9 | 2026-10-05 00:00 | scripts/oracles | in-repo derived, integration B1-decisions-E1-E6: dcp_worldsize_change_oracle.py |
+| 29DFF31B34EFD286 | 2026-10-05 00:00 | scripts/oracles | in-repo derived, integration B1-decisions-E1-E6: distributed_checkpoint_bundle_v1.py |
+| F33D9BBD8B056B3B | 2026-10-05 00:00 | scripts/oracles | in-repo derived, integration B1-decisions-E1-E6: stateful_loader_resume_oracle.py |
+| 83500C7EEC1D5B12 | 2026-10-05 00:00 | scripts | in-repo derived, integration B1-decisions-E1-E6: verify_sources.py |
+| B54757BA32C68E50 | 2026-10-05 00:00 | spec | in-repo derived, integration B1-decisions-E1-E6: HexaNTK_Review_Gehaertet.md |
+| 854EBC8CB813E22E | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B1-decisions-E1-E6: resume_utils_hex_v3.py |
+| 9A238491660B94CA | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B1-decisions-E1-E6: runner_hex_v3.py |
+| A8DD8B9F987443AB | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B1-decisions-E1-E6: test_resume_utils_hex_v3.py |
+| D52C7C4AA03DD105 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B1-decisions-E1-E6: test_runner_hex_v3.py |
+| EEFE5FBCEEB67ADE | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration B1-decisions-E1-E6: test_verify_sources_gate.py |
+
+## Integration B1-decisions-E1-E6-final (append-only, 2026-10-05, vero/hexa-integration-2026-10-05)
+
+> Pins for the integrated bytes of this block. Prior rows remain lineage.
+
+| 36D3CBADC59CE6C3 | 2026-10-05 00:00 | scripts | in-repo derived, integration B1-decisions-E1-E6-final: verify_sources.py |

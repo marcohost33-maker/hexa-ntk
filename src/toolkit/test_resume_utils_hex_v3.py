@@ -353,6 +353,143 @@ class TestValidateBeforeMutation(unittest.TestCase):
                                  epoch=float("inf"))
 
 
+class TestLegacyNegativeCounters(unittest.TestCase):
+    """E3=A (2026-10-05): a schema-1.0 checkpoint whose writer stored a
+    negative counter (e.g. epoch=-1 as a pre-training sentinel) is rejected
+    before anything is restored, with a message naming file, field, value and
+    the way out. No silent migration."""
+
+    def test_negative_counter_fails_closed_with_explanation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "legacy.pt"
+            donor = _model()
+            opt = torch.optim.SGD(donor.parameters(), lr=0.1)
+            poisoned = {k: torch.full_like(v, 7.0) for k, v in donor.state_dict().items()}
+            for field in ("epoch", "global_step"):
+                payload = {"checkpoint_type": "resume", "schema_version": "1.0",
+                           "model_state_dict": poisoned,
+                           "optimizer_state_dict": opt.state_dict(),
+                           "epoch": 0, "global_step": 0}
+                payload[field] = -1
+                torch.save(payload, path)
+                target = _model()
+                before = {k: v.clone() for k, v in target.state_dict().items()}
+                with self.subTest(field=field):
+                    with self.assertRaises(ValueError) as ctx:
+                        load_resume_checkpoint(path, model=target,
+                                               optimizer=torch.optim.SGD(target.parameters(), lr=0.1))
+                    msg = str(ctx.exception)
+                    self.assertIn(f"stores {field}=-1", msg)
+                    self.assertIn("schema_version='1.0'", msg)
+                    self.assertIn("nothing was restored", msg)
+                    self.assertIn(str(path), msg)
+                    for k, v in before.items():
+                        self.assertTrue(torch.equal(v, target.state_dict()[k]), msg=k)
+
+
+def _sched_factories():
+    L = torch.optim.lr_scheduler
+    return {
+        "StepLR": lambda o: L.StepLR(o, step_size=2, gamma=0.5),
+        "LambdaLR": lambda o: L.LambdaLR(o, lr_lambda=lambda e: 0.9 ** e),
+        "CosineAnnealingLR": lambda o: L.CosineAnnealingLR(o, T_max=10),
+        "OneCycleLR": lambda o: L.OneCycleLR(o, max_lr=0.5, total_steps=20),
+        "CosineAnnealingWarmRestarts": lambda o: L.CosineAnnealingWarmRestarts(o, T_0=3),
+        "SequentialLR": lambda o: L.SequentialLR(
+            o, [L.LinearLR(o, start_factor=0.1, total_iters=3), L.ExponentialLR(o, gamma=0.8)],
+            milestones=[3]),
+        "CyclicLR": lambda o: L.CyclicLR(o, base_lr=0.01, max_lr=0.1, step_size_up=2),
+    }
+
+
+class TestRestoreOrderBehaviour(unittest.TestCase):
+    """E4=B (2026-10-05), spec section 8.3: optimizer AND scheduler are
+    constructed before any state is loaded; then optimizer -> scheduler.
+
+    Behavioural oracle instead of a call-order mock: after resume the
+    learning rate equals the checkpoint's, and the continued LR trajectory and
+    weights are bit-identical to an uninterrupted run. The negative control
+    (scheduler constructed AFTER optimizer.load_state_dict, whose constructor
+    step overwrites the restored lr) must be detected by the same comparison.
+    """
+
+    N_PRE, N_POST = 7, 6
+
+    @staticmethod
+    def _build(factory):
+        torch.manual_seed(0)
+        model = nn.Linear(3, 1)
+        opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        return model, opt, factory(opt)
+
+    @staticmethod
+    def _step(model, opt, sched, i):
+        x = torch.full((4, 3), float(i + 1))
+        loss = (model(x) ** 2).mean()
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+        sched.step()
+        return [g["lr"] for g in opt.param_groups]
+
+    def _uninterrupted(self, factory):
+        model, opt, sched = self._build(factory)
+        traj = [self._step(model, opt, sched, i) for i in range(self.N_PRE + self.N_POST)]
+        return traj[self.N_PRE:], [p.detach().clone() for p in model.parameters()]
+
+    def _resumed(self, factory, path, *, construct_scheduler_after_load=False):
+        model, opt, sched = self._build(factory)
+        for i in range(self.N_PRE):
+            self._step(model, opt, sched, i)
+        save_resume_checkpoint(path, model=model, optimizer=opt, epoch=self.N_PRE,
+                               scheduler=sched, include_python_rng=False,
+                               include_numpy_rng=False, include_torch_rng=False)
+        ckpt_lr = [g["lr"] for g in opt.param_groups]
+        model2, opt2, sched2 = self._build(factory)
+        if construct_scheduler_after_load:
+            # The hazard: build the scheduler only after the optimizer state is in.
+            load_resume_checkpoint(path, model=model2, optimizer=opt2, restore_rng=False)
+            sched2 = factory(opt2)
+            sched2.load_state_dict(torch.load(path, weights_only=True)["scheduler_state_dict"])
+        else:
+            load_resume_checkpoint(path, model=model2, optimizer=opt2, scheduler=sched2,
+                                   restore_rng=False)
+        lr_after = [g["lr"] for g in opt2.param_groups]
+        traj = [self._step(model2, opt2, sched2, self.N_PRE + i) for i in range(self.N_POST)]
+        return ckpt_lr, lr_after, traj, [p.detach().clone() for p in model2.parameters()]
+
+    def _matches(self, ref, resumed):
+        ckpt_lr, lr_after, traj, weights = resumed
+        return (lr_after == ckpt_lr and traj == ref[0]
+                and all(torch.equal(a, b) for a, b in zip(weights, ref[1])))
+
+    def test_resume_equals_uninterrupted_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, factory in _sched_factories().items():
+                with self.subTest(scheduler=name):
+                    ref = self._uninterrupted(factory)
+                    resumed = self._resumed(factory, Path(tmp) / f"{name}.pt")
+                    self.assertEqual(resumed[1], resumed[0], "lr after resume != checkpoint lr")
+                    self.assertEqual(resumed[2], ref[0], "LR trajectory diverged")
+                    for a, b in zip(resumed[3], ref[1]):
+                        self.assertTrue(torch.equal(a, b), "weights diverged")
+
+    def test_oracle_detects_scheduler_constructed_after_optimizer_load(self) -> None:
+        # Negative control: the comparison above must be able to fail.
+        detected = []
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, factory in _sched_factories().items():
+                ref = self._uninterrupted(factory)
+                bad = self._resumed(factory, Path(tmp) / f"{name}_bad.pt",
+                                    construct_scheduler_after_load=True)
+                if not self._matches(ref, bad):
+                    detected.append(name)
+        # Measured with torch 2.6.0: closed-form/stateful-cycle schedulers are hit.
+        for name in ("LambdaLR", "OneCycleLR", "CosineAnnealingWarmRestarts",
+                     "SequentialLR", "CyclicLR"):
+            self.assertIn(name, detected)
+
+
 class TestRestoreRngStates(unittest.TestCase):
     def test_empty_payload_restores_nothing(self) -> None:
         self.assertEqual(

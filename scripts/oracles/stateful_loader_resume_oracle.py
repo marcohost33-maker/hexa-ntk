@@ -8,6 +8,7 @@ claim rank-wise distributed recovery or stochastic worker-transform recovery.
 from __future__ import annotations
 
 import argparse
+import faulthandler
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -90,6 +91,18 @@ def make_objects(seed: int):
     return model, optimizer, scheduler, ema
 
 
+# Seconds a worker may take to deliver one batch before the loader raises
+# (DataLoader ``timeout``; only valid with worker processes). Set by main().
+_BATCH_TIMEOUT_S: float = 60.0
+
+
+def _positive_seconds(text: str) -> float:
+    value = float(text)
+    if not value > 0 or value != value or value == float("inf"):
+        raise argparse.ArgumentTypeError(f"must be a finite number > 0, got {text!r}")
+    return value
+
+
 def make_loader(dataset: Dataset, *, seed: int, num_workers: int) -> StatefulDataLoader:
     kwargs: dict[str, Any] = {
         "dataset": dataset,
@@ -102,6 +115,8 @@ def make_loader(dataset: Dataset, *, seed: int, num_workers: int) -> StatefulDat
     }
     if num_workers > 0:
         kwargs["prefetch_factor"] = 2
+        # A stalled or dead worker raises instead of hanging the lane (O1).
+        kwargs["timeout"] = _BATCH_TIMEOUT_S
     return StatefulDataLoader(**kwargs)
 
 
@@ -200,8 +215,22 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--num-workers", type=int, choices=(0, 2), required=True)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--batch-timeout-s", type=_positive_seconds, default=60.0,
+                        help="per-batch worker timeout (num_workers > 0)")
+    parser.add_argument("--total-timeout-s", type=_positive_seconds, default=600.0,
+                        help="hard wall-clock limit; dumps tracebacks and exits non-zero")
     args = parser.parse_args()
-    result = run_oracle(args.num_workers)
+    global _BATCH_TIMEOUT_S
+    _BATCH_TIMEOUT_S = args.batch_timeout_s
+    # Best-effort watchdog: a hang (worker spawn, collation, IPC) dumps all
+    # tracebacks and exits 1. Measured 2026-10-05 on Windows: when it fires
+    # during an import the process can stall, so the CI step also carries an
+    # external `timeout`; this flag is not the hard bound.
+    faulthandler.dump_traceback_later(args.total_timeout_s, exit=True)
+    try:
+        result = run_oracle(args.num_workers)
+    finally:
+        faulthandler.cancel_dump_traceback_later()
     payload = json.dumps(result, indent=2, sort_keys=True)
     if args.output:
         args.output.write_text(payload + "\n", encoding="utf-8")

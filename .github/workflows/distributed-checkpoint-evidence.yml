@@ -4,6 +4,11 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
+    # E6 (2026-10-05): run only when the oracles or this lane change.
+    paths:
+      - "scripts/oracles/dcp_*.py"
+      - "scripts/oracles/distributed_checkpoint_bundle_v1.py"
+      - ".github/workflows/distributed-checkpoint-evidence.yml"
 
 permissions:
   contents: read
@@ -12,6 +17,7 @@ jobs:
   distributed-checkpoint-cpu:
     name: distributed-checkpoint-cpu
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

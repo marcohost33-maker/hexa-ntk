@@ -226,7 +226,7 @@ class TestRunnerConfig(unittest.TestCase):
         self.assertIsNone(cfg.resume_from)
         self.assertEqual(cfg.warmup_steps, 0)
         self.assertEqual(cfg.warmup_start_factor, 0.01)
-        self.assertEqual(cfg.best_metric_name, "val_loss")
+        self.assertEqual(cfg.best_metric_name, "val_nrmse")
 
     def test_custom_values(self) -> None:
         cfg = RunnerConfig(
@@ -505,7 +505,7 @@ class TestEpochAndValidation(unittest.TestCase):
             runner = _make_runner(Path(tmpdir))
             report = runner._validate(epoch=0)
             self.assertIn("val_loss", report)
-            # Probe resolution (E1 pending): #46 computes a real pooled nRMSE.
+            # #46 computes a real pooled nRMSE (E1=B).
             self.assertIn("val_nrmse", report)
             self.assertTrue(math.isfinite(report["val_nrmse"]))
             self.assertTrue(report["used_ema"])
@@ -524,7 +524,7 @@ class TestEpochAndValidation(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             runner = _make_runner(Path(tmpdir))
             runner.val_loader = []
-            # Probe resolution (E1 pending): #46 semantics -- an empty
+            # E1=B: #46 semantics -- an empty
             # validation is no measurement (nan) and is never promoted; see
             # test_empty_validation_never_becomes_best.
             report = runner._validate(epoch=0)
@@ -613,7 +613,8 @@ class TestNonFiniteValidationMetric(unittest.TestCase):
     def _val_report(value: float) -> dict:
         return {
             "epoch": 0,
-            "val_loss": value,
+            "val_loss": 1.0,
+            "val_nrmse": value,
             "n_batches": 2,
             "used_ema": True,
         }
@@ -640,7 +641,7 @@ class TestNonFiniteValidationMetric(unittest.TestCase):
                 record = json.loads(signatures[0].read_text(encoding="utf-8"))
                 self.assertEqual(record["kind"], "NaN_or_Inf_Metric")
                 self.assertEqual(record["locus"], "save_checkpoints_best_metric")
-                self.assertEqual(record["extra"], {"epoch": 0, "metric_name": "val_loss"})
+                self.assertEqual(record["extra"], {"epoch": 0, "metric_name": "val_nrmse"})
 
     def test_unrepresentable_metric_reaches_manager_contract(self) -> None:
         # Only NaN/inf are skipped; a value math.isfinite() cannot judge is

@@ -338,6 +338,28 @@ def _load_checkpoint_payload(
     return payload
 
 
+def _stored_step_count(payload: Dict[str, Any], key: str, path: Path) -> int:
+    """Validate a counter read from a stored checkpoint, fail-closed (E3=A).
+
+    Writers before the counter contract (schema_version "1.0") could store
+    negative or fractional counters (e.g. epoch=-1 as a pre-training
+    sentinel). Such a checkpoint is rejected before any state is restored;
+    there is no silent coercion, because the training loop would resume at a
+    position the original run never reached.
+    """
+    try:
+        return as_step_count(payload[key], name=key)
+    except (TypeError, ValueError) as exc:
+        raise type(exc)(
+            f"{exc}. Resume checkpoint {path} stores {key}={payload[key]!r} "
+            f"(schema_version={payload.get('schema_version')!r}); resume "
+            "requires a non-negative integer and nothing was restored. "
+            "Checkpoints from writers before the counter contract are not "
+            f"migrated automatically: re-save the checkpoint with a valid {key} "
+            "if the true position is known, or start a fresh run."
+        ) from exc
+
+
 def load_resume_checkpoint(
     path: Union[str, Path],
     *,
@@ -399,9 +421,9 @@ def load_resume_checkpoint(
         raise ValueError("Resume checkpoint is missing 'optimizer_state_dict'.")
     if "epoch" not in payload:
         raise ValueError("Resume checkpoint is missing 'epoch'.")
-    epoch = as_step_count(payload["epoch"], name="epoch")
+    epoch = _stored_step_count(payload, "epoch", path)
     global_step = (
-        as_step_count(payload["global_step"], name="global_step")
+        _stored_step_count(payload, "global_step", path)
         if payload.get("global_step") is not None
         else None
     )

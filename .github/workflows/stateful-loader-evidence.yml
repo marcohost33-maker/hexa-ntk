@@ -4,6 +4,11 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
+    # E6 (2026-10-05): run only when the oracle or this lane changes (the oracle
+    # imports torch/torchdata only, no repository module).
+    paths:
+      - "scripts/oracles/stateful_loader_resume_oracle.py"
+      - ".github/workflows/stateful-loader-evidence.yml"
 
 permissions:
   contents: read
@@ -12,6 +17,7 @@ jobs:
   stateful-loader-cpu:
     name: stateful-loader-cpu
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -26,8 +32,13 @@ jobs:
       - name: install pinned recovery stack
         run: |
           python -m pip install --upgrade pip
-          pip install "numpy==2.5.3" "torchdata==0.11.0"
+          # Pinned CPU torch FIRST: torchdata 0.11.0 declares torch>=2, so the
+          # reverse order downloads an unpinned PyPI torch that is then replaced.
+          # torchdata 0.11.0 (2025-02-20) is its last release; compatibility is
+          # confirmed only up to torch 2.6. This lane is an optional differential
+          # track; the repo's own resume state is the core contract.
           pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
+          pip install "numpy==2.5.3" "torchdata==0.11.0"
       - name: environment evidence
         run: |
           python --version
@@ -41,6 +52,9 @@ jobs:
           PY
       - name: StatefulDataLoader differential oracle
         run: |
-          python scripts/oracles/stateful_loader_resume_oracle.py \
+          # Hard bound outside the interpreter: the in-process watchdog is
+          # best-effort (measured on Windows: it can stall when it fires mid-import).
+          timeout --kill-after=30s 660s python scripts/oracles/stateful_loader_resume_oracle.py \
             --num-workers ${{ matrix.num-workers }} \
+            --batch-timeout-s 60 --total-timeout-s 600 \
             --output stateful-loader-${{ matrix.num-workers }}.json

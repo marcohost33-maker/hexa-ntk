@@ -51,7 +51,7 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
 | Provenance | `python scripts/verify_sources.py` | 24 Toolkit- + 2 Spec-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 470 Tests, OK (5 skipped: 3 POSIX-only, 2 Symlink-Recht unter Windows), exit 0 |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 478 Tests, OK (5 skipped: 3 POSIX-only, 2 Symlink-Recht unter Windows), exit 0 |
 | Coverage | `python -m coverage run ... && python -m coverage report` | 88,9 % gesamt (Branch, `fail_under = 87`), exit 0 |
 | Mutation | `python scripts/mutation_probe.py` | 21/22 Mutanten getoetet (Baseline gruen), exit 1: M02 ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped) |
 
@@ -107,7 +107,7 @@ python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/wh
 python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 470 Unit-Tests (2026-09-28) + Coverage-Gate
+python -m coverage report                                      # 478 Unit-Tests (2026-09-28) + Coverage-Gate
 python scripts/mutation_probe.py                               # optional: 22 Mutanten der Review-Fixes
 ```
 
@@ -116,7 +116,7 @@ den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (470, Stand 2026-09-28) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (478, Stand 2026-09-28) unter Branch-Coverage.
 
 ## Struktur
 
