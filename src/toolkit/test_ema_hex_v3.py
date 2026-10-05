@@ -101,5 +101,78 @@ class TestSaveLoadEMA(unittest.TestCase):
             )
 
 
+
+class TestDecayContract(unittest.TestCase):
+    def test_out_of_range_or_non_finite_decay_rejected(self) -> None:
+        # decay > 1 diverges, < 0 oscillates, NaN poisons every parameter.
+        for decay in (-0.1, 1.0001, 2.0, float("nan"), float("inf"), True, "0.9", None):
+            with self.subTest(decay=repr(decay)):
+                with self.assertRaises(ValueError):
+                    create_ema_model(DummyModel(), decay=decay)
+
+    def test_boundary_decays_accepted(self) -> None:
+        for decay in (0.0, 1.0, 0.5):
+            with self.subTest(decay=decay):
+                self.assertIsNotNone(create_ema_model(DummyModel(), decay=decay))
+
+    def test_decay_formula(self) -> None:
+        torch.manual_seed(0)
+        model = DummyModel()
+        ema = create_ema_model(model, decay=0.75)
+        ema.update_parameters(model)  # first update copies
+        start = ema.module.linear.weight.detach().clone()
+        with torch.no_grad():
+            model.linear.weight.add_(1.0)
+        ema.update_parameters(model)
+        expected = 0.75 * start + 0.25 * model.linear.weight.detach()
+        self.assertTrue(torch.allclose(ema.module.linear.weight, expected))
+
+
+class TestLoadEmaStatePaths(unittest.TestCase):
+    def _trained_ema(self):
+        torch.manual_seed(0)
+        model = DummyModel()
+        ema = create_ema_model(model, decay=0.9)
+        for _ in range(3):
+            with torch.no_grad():
+                model.linear.weight.add_(0.1)
+            ema.update_parameters(model)
+        return ema
+
+    def test_full_state_roundtrip_reports_keys(self) -> None:
+        ema = self._trained_ema()
+        state = save_ema_state(ema)
+        target = create_ema_model(DummyModel(), decay=0.9)
+        report = load_ema_state(target, state)
+        self.assertEqual(report["loaded_via"], "ema_full_state_dict")
+        self.assertEqual(report["n_averaged"], 3)
+        self.assertEqual((report["missing_keys"], report["unexpected_keys"]), ([], []))
+
+    def test_full_state_honours_strict_false(self) -> None:
+        # strict used to be ignored on this path.
+        state = save_ema_state(self._trained_ema())
+        full = dict(state["ema_full_state_dict"])
+        full.pop("module.linear.bias")
+        target = create_ema_model(DummyModel(), decay=0.9)
+        with self.assertRaises(RuntimeError):
+            load_ema_state(target, {"ema_full_state_dict": full})
+        report = load_ema_state(target, {"ema_full_state_dict": full}, strict=False)
+        self.assertEqual(report["missing_keys"], ["module.linear.bias"])
+
+    def test_module_state_path_sets_counter(self) -> None:
+        state = save_ema_state(self._trained_ema())
+        target = create_ema_model(DummyModel(), decay=0.9)
+        report = load_ema_state(
+            target,
+            {"ema_model_state_dict": state["ema_model_state_dict"], "n_averaged": 3},
+        )
+        self.assertEqual(report["loaded_via"], "ema_model_state_dict")
+        self.assertEqual(report["n_averaged"], 3)
+
+    def test_unknown_state_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            load_ema_state(create_ema_model(DummyModel()), {"weights": {}})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -230,3 +230,68 @@
 > result raises (e.g. h=10**400, D_v=10**800 -> exactly 0.25). Prior rows remain lineage.
 
 | 9BF8C7A71221F307 | 2026-09-28 00:00 | src/toolkit | in-repo derived, PR #47 Codex follow-up (exact operand validation): test_hex_timestep_contract.py |
+
+## src/toolkit/ — review hardening 2026-09-27 (append-only, issues #40, #42)
+
+> Review of main 9538e87: every finding reproduced before the fix
+> (results/2026-09-27_review-hardening_local-gate.log). Resume now restores
+> the EMA average and the best metric (verified against best.pt); the runner
+> evaluates best every epoch and saves the final epoch; val_nrmse is the
+> pooled relative L2 error; epoch/global_step/min_delta/decay/dt/trajectory_id
+> contracts fail closed. Two new test modules (resume utils, warmstart utils)
+> need their first rows here (SHA-First). Prior rows remain lineage.
+
+| 42D60044E19B8342 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 #40 min_delta/step-count contract, durability commit, best+EMA resume state: checkpoint_integration_hex_v3.py |
+| 00A84DBEEAE647D2 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 #42 precision-split dt keys fail closed, #40 trajectory_id numpy/bool/str contract: dataset_split_hex_v3.py |
+| 4790DFE7CBA298A2 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 EMA decay contract [0, 1], strict on full-state load: ema_hex_v3.py |
+| B4B2D20101A4A8CA | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 Empty_Validation kind documented: failure_signature_hex_v3.py |
+| A39A16D67EFFAC0C | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 as_step_count, validate-before-restore, EMA resume state: resume_utils_hex_v3.py |
+| D8A9ECF8874EF347 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 full resume (EMA + best), best every epoch, final-epoch state, real val_nrmse, config contract: runner_hex_v3.py |
+| 2DEBCC0F014D7F11 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 regressions #40 counters/durability/resume best+EMA: test_checkpoint_integration_hex_v3.py |
+| A072FA6B50E991D5 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 regressions #42 and #40 P3-1/5/6: test_dataset_split_hex_v3.py |
+| 89BE5BA18AED0777 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 EMA decay and load-path tests: test_ema_hex_v3.py |
+| B8A76790A0B83F81 | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 new test module (resume utils had none): test_resume_utils_hex_v3.py |
+| 54C56D743B99827C | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 regressions resume equivalence, schedule, empty validation, nRMSE, config: test_runner_hex_v3.py |
+| 53663241136220FA | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 new test module (warmstart 43% coverage): test_warmstart_utils_hex_v3.py |
+| 45DE93FC82AEA5ED | 2026-09-27 00:00 | src/toolkit | in-repo derived, review 2026-09-27 fail-closed prefix collisions, skip_shape_mismatch, numpy._core first: warmstart_utils_hex_v3.py |
+
+## src/toolkit/ — Codex review round on PR #46 (append-only, 2026-09-27)
+
+> Three P2 findings, all reproduced and fixed: (1) a numerically better best.pt
+> of another run or metric was adopted on resume -> run_id and metric name are
+> now recorded and must match; (2) resuming with another ema_decay silently
+> mixed two averages -> decay recorded, mismatch raises before any restore;
+> (3) scripts/mutation_probe.py counted any nonzero exit as a kill -> baseline
+> must be green and a kill needs executed, failing tests. Rows above remain lineage.
+
+| F06CE491B62990BA | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: run_id + metric-name identity for best restore, ema_decay record: checkpoint_integration_hex_v3.py |
+| 56735A1D24018408 | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: ema_decay recorded and checked before restore: resume_utils_hex_v3.py |
+| 4721CC2E0CA4A9E4 | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: passes ema_decay and best_metric_name on resume: runner_hex_v3.py |
+| 9B5DA9254E8CA458 | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: regressions foreign best.pt, metric switch, decay mismatch: test_checkpoint_integration_hex_v3.py |
+| 0425499B2E3F9453 | 2026-09-27 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: regression resume with other ema_decay: test_runner_hex_v3.py |
+
+## src/toolkit/ — review of PR #46, E0927-03 + H7 (append-only, 2026-09-28)
+
+> Owner decision E0927-03 (issue #42): no trajectory in train AND val, always,
+> independent of dt types and group_by_dt. The split unit is now the trajectory;
+> dt groups of one trajectory stay together (before: 28/50 seeds split one
+> trajectory under group_by_dt with dt 0.1+0.2). Runner test for resume with a
+> switched best metric (Equalita H7). Rows above remain lineage.
+
+| 8C279370377CAE96 | 2026-09-28 00:00 | src/toolkit | in-repo derived, E0927-03 trajectory is the split unit, override may not split a trajectory: dataset_split_hex_v3.py |
+| 4CC7EC1399C817F1 | 2026-09-28 00:00 | src/toolkit | in-repo derived, E0927-03 invariant tests over seeds, single-dt split pinned: test_dataset_split_hex_v3.py |
+| 8D8857A4ED6CF6F8 | 2026-09-28 00:00 | src/toolkit | in-repo derived, H7 regression resume with switched best metric: test_runner_hex_v3.py |
+
+## src/toolkit/ — Codex review of PR #46 after merging main (append-only, 2026-09-28)
+
+> PRRT_kwDOSwvSC86m2eei: EMA resume state now requires its decay on save and the
+> current decay on load (EMADecayError, fail-closed; checkpoints without decay
+> metadata resume only without EMA). PRRT_kwDOSwvSC86m2eeU: README counts pinned
+> to the tree in TestDocsContract. Rows above remain lineage.
+
+| BA047FF01BB4E3F5 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: save_resume validates the EMA decay on every rank: checkpoint_integration_hex_v3.py |
+| B9FD4DF90F15C832 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: EMADecayError, decay mandatory on save and load: resume_utils_hex_v3.py |
+| 48AC0F8C6AA0A75C | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: manager round-trip with decay, save/load/legacy decay contract: test_checkpoint_integration_hex_v3.py |
+| 1D9EF5DEA81373F6 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: TestEmaDecayContract: test_resume_utils_hex_v3.py |
+| 5FB2BB8609C96209 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: runner records decay, legacy resume rejected with EMA: test_runner_hex_v3.py |
+| ED29A89E81B871F6 | 2026-09-28 00:00 | src/toolkit | in-repo derived, Codex review on PR #46: README counts pinned to the tree: test_hex_timestep_contract.py |

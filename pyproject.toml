@@ -31,7 +31,7 @@ select = ["E", "F", "W"]
 # Branch-Coverage als ehrlichere Metrik (Scientific-Python-Guide). Nur die hier
 # gepflegten Toolkit-Module zaehlen; die kanonische Engine src/hexantk_v3.py ist
 # wie beim Lint-Gate ausgenommen (Pflege via coworker-dde), ihre Abdeckung
-# liefert das Engine-Gate (47 Doctests + 26 Selftests) separat.
+# liefert das Engine-Gate (49 Doctests + 26 Selftests) separat.
 [tool.coverage.run]
 branch = true
 source = ["src/toolkit"]
@@ -39,8 +39,9 @@ source = ["src/toolkit"]
 [tool.coverage.report]
 # Testfiles selbst zaehlen nicht als abzudeckender Code.
 omit = ["*/test_*.py"]
-# Ratchet-Schwelle: Ist-Wert 82% (verified 2026-07-03 nach runner_hex_v3-Tests
-# 25%->79%, results/), Schwelle knapp darunter — Best Practice: unter Ist setzen
+# Ratchet-Schwelle: Ist-Wert 89.6% (verified 2026-09-27 nach warmstart/ema/
+# resume-Tests, results/2026-09-27_review-hardening_local-gate.log; vorher 82-83%
+# bei fail_under 79), Schwelle knapp darunter — Best Practice: unter Ist setzen
 # und mit neuen Tests hochziehen, nie ueber Ist wuenschen (Gate darf nicht durch
 # Absenken erschlichen werden). Zielkorridor: 80-90% (docs/ROADMAP.md).
-fail_under = 79
+fail_under = 87

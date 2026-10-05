@@ -14,6 +14,7 @@ The engine is loaded by path (it is not a toolkit module).
 """
 from __future__ import annotations
 
+import doctest
 import importlib.util
 import random
 import re
@@ -221,6 +222,49 @@ class TestDocsContract(unittest.TestCase):
         block = "\n".join(lines[a - 1:b])
         self.assertIn("This config is a FUTURE-EXTENSION HOOK", lines[a - 1])
         self.assertIn("GAOT-ready.", block)
+
+    # Codex review #46 (PRRT_kwDOSwvSC86m2eeU): after merging main the README
+    # still said 378 unit tests while 409 ran. Every count the README states
+    # about the current tree is pinned to the tree itself; a reworded or
+    # removed statement fails here too (each must be found exactly once).
+
+    def _readme_counts(self, pattern: str) -> list:
+        readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+        found = re.findall(pattern, readme)
+        self.assertEqual(len(found), 1, f"README: {pattern!r} found {len(found)}x")
+        return [int(x) for x in (found[0] if isinstance(found[0], tuple) else (found[0],))]
+
+    def test_readme_unit_test_count_current(self):
+        toolkit = _ROOT / "src" / "toolkit"
+        suite = unittest.defaultTestLoader.discover(
+            start_dir=str(toolkit), pattern="test_*.py", top_level_dir=str(toolkit))
+        n = suite.countTestCases()
+        for pattern in (r"\| Toolkit-Tests \|[^\n]*\| (\d+) Tests, ",
+                        r"# (\d+) Unit-Tests \(",
+                        r"Toolkit-Unit-Tests \((\d+), Stand"):
+            with self.subTest(pattern=pattern):
+                self.assertEqual(self._readme_counts(pattern), [n])
+
+    def test_readme_provenance_counts_current(self):
+        toolkit = [p for p in (_ROOT / "src" / "toolkit").iterdir()
+                   if p.is_file() and p.name != "__init__.py"]
+        spec = [p for p in (_ROOT / "spec").iterdir() if p.is_file()]
+        self.assertEqual(self._readme_counts(r"(\d+) Toolkit- \+ (\d+) Spec-Eintraege"),
+                         [len(toolkit), len(spec)])
+
+    def test_readme_doctest_count_current(self):
+        n = sum(len(t.examples) for t in doctest.DocTestFinder().find(engine))
+        self.assertEqual(self._readme_counts(r"\| (\d+)/\d+ Doctests"), [n])
+        self.assertEqual(self._readme_counts(r"# (\d+) Doctests \+"), [n])
+
+    def test_readme_mutant_count_current(self):
+        path = _ROOT / "scripts" / "mutation_probe.py"
+        spec = importlib.util.spec_from_file_location("mutation_probe_count", path)
+        assert spec is not None and spec.loader is not None
+        probe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(probe)
+        self.assertEqual(self._readme_counts(r"\| \d+/(\d+) Mutanten getoetet"), [len(probe.MUTANTS)])
+        self.assertEqual(self._readme_counts(r"optional: (\d+) Mutanten"), [len(probe.MUTANTS)])
 
     def test_readme_engine_line_count_current(self):
         readme = (_ROOT / "README.md").read_text(encoding="utf-8")
