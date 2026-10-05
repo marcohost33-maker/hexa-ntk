@@ -1161,8 +1161,10 @@ class TestLoaderGeneratorResume(unittest.TestCase):
             payload = torch.load(path, weights_only=False)
             payload["dataloader_state_dict"]["generator_states"]["train"] = torch.zeros(3)
             torch.save(payload, path)
-            with self.assertRaisesRegex(ValueError, "not a uint8 tensor"):
+            with self.assertRaises(Exception) as ctx:
                 _shuffled_runner(out, self._resume_cfg(out, 2)).maybe_resume()
+            self.assertIs(type(ctx.exception), ValueError)
+            self.assertIn("not a uint8 tensor", str(ctx.exception))
 
 
 class TestFullResumeEquivalence(unittest.TestCase):

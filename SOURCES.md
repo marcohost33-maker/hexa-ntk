@@ -413,3 +413,9 @@
 | 6C34E8424D5800F1 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R3-codex-pr58-round2: test_distributed_checkpoint_bundle_v1.py |
 | FF8594FFD085E64D | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R3-codex-pr58-round2: test_resume_utils_hex_v3.py |
 | D061AF66600A09C6 | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R3-codex-pr58-round2: test_runner_hex_v3.py |
+
+## Integration R3-test-assertion (append-only, 2026-10-05, vero/hexa-integration-2026-10-05)
+
+> Pins for the integrated bytes of this block. Prior rows remain lineage.
+
+| 99FA3780E73F53DA | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R3-test-assertion: test_runner_hex_v3.py |
