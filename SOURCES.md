@@ -441,3 +441,11 @@
 
 | 892D90A81D2DE830 | 2026-09-23 00:00 | src/toolkit | in-repo created, ReferenceSpec v1: reference_spec_hex_v3.py |
 | 74158FD15466A368 | 2026-09-23 00:00 | src/toolkit | in-repo created, ReferenceSpec v1 tests: test_reference_spec_hex_v3.py |
+
+## ReferenceSpec v1 integration (PR #33) (append-only, 2026-10-07, claude/hexa-ntk-project-overview-mzkd4p)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| 1BE50B493049465C | 2026-10-07 00:00 | spec | in-repo derived, PR #33 ReferenceSpec v1 contract, merged into the issue #59 / Phase 0 branch: REFERENCE_SPEC_v1.md |
+| 84A83BFDA8185621 | 2026-10-07 00:00 | src/toolkit | in-repo derived, PR #33 ReferenceSpec v1 contract at head 932e9f9 (the 2026-09-23 pins predate its last hardening commits): reference_spec_hex_v3.py |
+| 8E5CFC60C7267FAC | 2026-10-07 00:00 | src/toolkit | in-repo derived, PR #33 ReferenceSpec v1 contract at head 932e9f9 (the 2026-09-23 pins predate its last hardening commits): test_reference_spec_hex_v3.py |

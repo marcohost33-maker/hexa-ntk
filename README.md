@@ -50,8 +50,8 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 |---|---|---|
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
-| Provenance | `python scripts/verify_sources.py` | 26 Toolkit- + 3 Spec-Eintraege + 8 Script-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 536 Tests, OK, exit 0 (Skips je Plattform: Gate-Log) |
+| Provenance | `python scripts/verify_sources.py` | 28 Toolkit- + 4 Spec-Eintraege + 8 Script-Eintraege, exit 0 |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 554 Tests, OK, exit 0 (Skips je Plattform: Gate-Log) |
 | Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
 | Mutation | `python scripts/mutation_probe.py` | 27/27 Mutanten getoetet (Baseline gruen), exit 0 — Lauf 2026-10-07 unter Linux. Unter Windows ist M02 nicht messbar (Testklasse POSIX-only, alle skipped; Lauf 2026-09-28 dort: 21/22, exit 1) |
 
@@ -103,9 +103,10 @@ in `spec/`, offene Lint-/Test-Schuld in `docs/ROADMAP.md`.
 
 - **Engine:** `src/hexantk_v3.py` (1772 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
   Train-Step, Operator-Vertraege, 26 Selftests inline)
-- **Toolkit:** `src/toolkit/` — 11 Module + 15 Testmodule (Benchmark, Checkpoint-Integration,
-  Dataloader-Utils, Dataset-Split, EMA, Failure-Signature, Operator-Adapter, Resume-Utils,
-  Runner, Stress, Warmstart-Utils; dazu die Tests des Provenance-Gates und des Zeitschritt-Vertrags)
+- **Toolkit:** `src/toolkit/` — 12 Module + 16 Testmodule (Benchmark, Checkpoint-Integration,
+  Dataloader-Utils, Dataset-Split, EMA, Failure-Signature, Operator-Adapter, ReferenceSpec,
+  Resume-Utils, Runner, Stress, Warmstart-Utils; dazu die Tests des Provenance-Gates, des
+  DCP-Bundle-Protokolls und des Zeitschritt-Vertrags)
 
 ## Reproduzieren
 
@@ -117,7 +118,7 @@ python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/wh
 python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 536 Unit-Tests (2026-10-07) + Coverage-Gate
+python -m coverage report                                      # 554 Unit-Tests (2026-10-07) + Coverage-Gate
 python scripts/mutation_probe.py                               # optional: 27 Mutanten der Review-Fixes
 ```
 
@@ -126,7 +127,7 @@ den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (536, Stand 2026-10-07) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (554, Stand 2026-10-07) unter Branch-Coverage.
 
 ## Struktur
 
