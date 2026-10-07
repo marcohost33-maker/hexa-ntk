@@ -80,11 +80,9 @@ accurately and assess the asymptotic range.
 
 If an observed order is recorded, it MUST be finite and positive and it is
 **not trusted as caller metadata**. ReferenceSpec v1 recomputes the order from
-the three finest levels using the constant-refinement-ratio Richardson form
+the three finest levels using the constant-refinement-ratio Richardson form:
 
-[
-p = rac{ln |(f_3-f_2)/(f_2-f_1)|}{ln r}.
-]
+`p = ln(|(f3 - f2)/(f2 - f1)|) / ln(r)`.
 
 The three finest levels MUST therefore have the same refinement ratio (within
 floating-point tolerance) and monotone, non-degenerate successive

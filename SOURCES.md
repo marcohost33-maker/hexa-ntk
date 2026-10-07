@@ -509,4 +509,5 @@
 | 9EBBA2DBC6724B91 | 2026-10-07 00:00 | spec | in-repo derived, independent PR #61 preregistration hardening: PREREGISTRATION_PHASE1_v1.md |
 | 8142EE80BA07B24E | 2026-10-07 00:00 | src/toolkit | in-repo derived, independent PR #61 T1 evidence hardening: heat_operator_task_hex_v3.py |
 | 9905598D73DAB0B1 | 2026-10-07 00:00 | src/toolkit | in-repo derived, independent PR #61 T1 evidence hardening: test_heat_operator_task_hex_v3.py |
+| E8BA656865FF9032 | 2026-10-07 00:00 | spec | in-repo derived, independent PR #61 formula-text correction after CI review: REFERENCE_SPEC_v1.md |
 
