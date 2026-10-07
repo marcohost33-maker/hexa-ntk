@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """mutation_probe.py - reproducible mutation probe for the 2026-09-27 review fixes.
 
-Each mutant reverts one fix (issues #40, #42, #59 and the review findings) in
-place in a toolkit module (or, for a path with a "/", a repo-relative file such
-as an oracle under scripts/), runs the named test class, and restores the file. A
+Each mutant reverts one fix (issues #40, #42, #59, the #60 reference case and
+the review findings) in place in a toolkit module (or, for a path with a "/", a
+repo-relative file such as an oracle under scripts/), runs the named test class,
+and restores the file. A
 mutant must turn its test class red ("KILLED"); a surviving mutant means the
 tests do not pin that fix.
 
@@ -46,6 +47,7 @@ CK = "checkpoint_integration_hex_v3.py"
 DS = "dataset_split_hex_v3.py"
 RU = "runner_hex_v3.py"
 DCP = "scripts/oracles/distributed_checkpoint_bundle_v1.py"
+RC = "reference_case_hex_v3.py"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -138,6 +140,21 @@ MUTANTS = (
     # #59 P3: raw bit patterns compared, so -0.0 and 0.0 count as different.
     Mutant(DS, 'struct.unpack("<f", bits_lower)[0] == struct.unpack("<f", bits_upper)[0]',
            "bits_lower == bits_upper", "test_dataset_split_hex_v3.TestDtPrecisionSplitIssue42"),
+    # Reality Anchor Phase 0a (hex-heat-tri, #60): operator, analysis, gate.
+    Mutant(RC, "    return weight * (gathered.sum(axis=1) - 6.0 * arr)\n",
+           "    return weight * (gathered.sum(axis=1) - (nb >= 0).sum(axis=1) * arr)\n",
+           "test_reference_case_hex_v3.TestLameModesAreExactDiscreteEigenvectors"),
+    Mutant(RC, "    p = abs(math.log(abs(quotient))) / math.log(r)\n", "    p = abs(math.log(abs(quotient)))\n",
+           "test_reference_case_hex_v3.TestConvergenceAnalysis"),
+    Mutant(RC, '        "C5_observed_order": _within(celik_fine["observed_order"], ORDER_BAND),\n',
+           '        "C5_observed_order": True,\n', "test_reference_case_hex_v3.TestGateDiscrimination"),
+    Mutant(RC, '        "C9_gci_covers_exact_error": celik_fine["gci_fine"] >= exact_rel_error_fine,\n',
+           '        "C9_gci_covers_exact_error": True,\n', "test_reference_case_hex_v3.TestGateDiscrimination"),
+    Mutant(RC, "        if all(criteria[k] for k in code_keys)\n", "        if True\n",
+           "test_reference_case_hex_v3.TestGateDiscrimination"),
+    Mutant(RC, "    if np.any(off_arr < 0.0):\n", "    if False:\n",
+           "test_reference_case_hex_v3.TestPositivityGateIssue60"),
+    Mutant(RC, "    if dt > bound:\n", "    if False:\n", "test_reference_case_hex_v3.TestPositivityGateIssue60"),
 )
 
 

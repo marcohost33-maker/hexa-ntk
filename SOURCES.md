@@ -449,3 +449,13 @@
 | 1BE50B493049465C | 2026-10-07 00:00 | spec | in-repo derived, PR #33 ReferenceSpec v1 contract, merged into the issue #59 / Phase 0 branch: REFERENCE_SPEC_v1.md |
 | 84A83BFDA8185621 | 2026-10-07 00:00 | src/toolkit | in-repo derived, PR #33 ReferenceSpec v1 contract at head 932e9f9 (the 2026-09-23 pins predate its last hardening commits): reference_spec_hex_v3.py |
 | 8E5CFC60C7267FAC | 2026-10-07 00:00 | src/toolkit | in-repo derived, PR #33 ReferenceSpec v1 contract at head 932e9f9 (the 2026-09-23 pins predate its last hardening commits): test_reference_spec_hex_v3.py |
+
+## Reality Anchor Phase 0a hex-heat-tri (#60) (append-only, 2026-10-07, claude/hexa-ntk-project-overview-mzkd4p)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| B907BF72F3A9D6D3 | 2026-10-07 00:00 | spec | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: REFERENCE_CASE_HEX_HEAT_TRI_v1.md |
+| A2C90CF65D11EE6F | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: reference_case_hex_v3.py |
+| 7D5D372881BB4A20 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: test_reference_case_hex_v3.py |
+| 5BE5EBA7E235317E | 2026-10-07 00:00 | scripts/oracles | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: hex_heat_tri_reference_oracle.py |
+| 4C43E5DAA853E381 | 2026-10-07 00:00 | scripts | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: mutation_probe.py |
