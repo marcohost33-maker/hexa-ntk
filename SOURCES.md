@@ -519,3 +519,12 @@
 | 3C9695B66E17255F | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 dt quantisation contract: dataset_split_hex_v3.py |
 | 64C9F1BDB1FD7B49 | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 dt quantisation contract: test_dataset_split_hex_v3.py |
 
+## Phase-1 external GINO adapter v1 — GPT-5.6 Sol (append-only, 2026-10-07)
+
+> Optional neuraloperator==2.0.0 adapter, synthetic forward smoke and explicit
+> geometry/claim contract. No training or held-out test access.
+
+| BF4314F84A2CC2A0 | 2026-10-07 00:00 | spec | in-repo derived, Phase-1 external GINO adapter contract: GINO_ADAPTER_PHASE1_v1.md |
+| 1C275A6198354313 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase-1 external GINO adapter: gino_adapter_hex_v3.py |
+| FBF08A0858F074F0 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase-1 GINO adapter contract/smoke tests: test_gino_adapter_hex_v3.py |
+

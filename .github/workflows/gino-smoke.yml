@@ -1,0 +1,35 @@
+name: gino-smoke
+
+on:
+  pull_request:
+    paths:
+      - "src/toolkit/gino_adapter_hex_v3.py"
+      - "src/toolkit/test_gino_adapter_hex_v3.py"
+      - "spec/GINO_ADAPTER_PHASE1_v1.md"
+      - "requirements-operator.txt"
+      - ".github/workflows/gino-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gino-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-operator.txt
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy
+          pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-operator.txt
+      - name: real GINO forward smoke
+        run: python -m unittest discover -s src/toolkit -t src/toolkit -p "test_gino_adapter_hex_v3.py" -v
