@@ -391,6 +391,7 @@ class TestGateDiscrimination(unittest.TestCase):
 class TestConfigContract(unittest.TestCase):
     def test_invalid_configs(self) -> None:
         for kwargs in ({"levels": (16, 32, 64)}, {"levels": (16, 32, 64, 100)}, {"levels": [16, 32, 64, 128]},
+                       {"levels": (16, 20, 25, 31.25)}, {"levels": (64, 80, 100, 125)},
                        {"levels": (2, 4, 8, 16)}, {"kappa": 0.0}, {"t_final": float("inf")}, {"modes": ()},
                        {"modes": ((LameMode(1, 1), 0.0),)}):
             with self.subTest(kwargs=kwargs), self.assertRaises((ValueError, TypeError)):

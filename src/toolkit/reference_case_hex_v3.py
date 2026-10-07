@@ -87,6 +87,7 @@ _RAYLEIGH_TOL = 1e-10
 _COEFFICIENT_BAND = (0.99, 1.01)
 _ASYMPTOTIC_TOL = 0.05
 _GCI_SAFETY_FACTOR = 1.25  # Celik et al. 2008, three or more grids
+_MIN_REFINEMENT_RATIO = 1.3  # Celik et al. 2008: r should exceed 1.3
 
 _SQRT3 = math.sqrt(3.0)
 _REFERENCE_ID = "hex-heat-tri/v1"
@@ -436,8 +437,11 @@ class HexHeatTriConfig:
             raise ValueError("levels must be a tuple of at least four N values")
         levels = [_positive_int(n, name="level", minimum=3) for n in self.levels]
         ratios = {levels[i + 1] / levels[i] for i in range(len(levels) - 1)}
-        if len(ratios) != 1 or next(iter(ratios)) <= 1.0:
-            raise ValueError("levels must increase with one constant refinement ratio")
+        if len(ratios) != 1 or next(iter(ratios)) <= _MIN_REFINEMENT_RATIO:
+            raise ValueError(
+                f"levels must increase with one constant refinement ratio > {_MIN_REFINEMENT_RATIO} "
+                "(Celik et al. 2008)"
+            )
         _positive_finite(self.kappa, name="kappa")
         _positive_finite(self.t_final, name="t_final")
         if not isinstance(self.modes, tuple) or not self.modes:

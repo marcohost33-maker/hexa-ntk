@@ -459,3 +459,11 @@
 | 7D5D372881BB4A20 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: test_reference_case_hex_v3.py |
 | 5BE5EBA7E235317E | 2026-10-07 00:00 | scripts/oracles | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: hex_heat_tri_reference_oracle.py |
 | 4C43E5DAA853E381 | 2026-10-07 00:00 | scripts | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: mutation_probe.py |
+
+## Phase 0a self-review: Celik refinement ratio (append-only, 2026-10-07, claude/hexa-ntk-project-overview-mzkd4p)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| E97EDC20216DC873 | 2026-10-07 00:00 | spec | in-repo derived, Phase 0a self-review, refinement ratio r > 1.3 (Celik 2008): REFERENCE_CASE_HEX_HEAT_TRI_v1.md |
+| A84C3F4971B1B6AD | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0a self-review, refinement ratio r > 1.3 (Celik 2008): reference_case_hex_v3.py |
+| 1B1D7386C8E3952A | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0a self-review, refinement ratio r > 1.3 (Celik 2008): test_reference_case_hex_v3.py |

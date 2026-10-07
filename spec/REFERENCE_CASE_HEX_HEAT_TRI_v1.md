@@ -81,7 +81,8 @@ has one sign in the interior.
 
 ## 5. Verification protocol and gate
 
-Levels `N = 16, 32, 64, 128` (refinement ratio `r = 2`).
+Levels `N = 16, 32, 64, 128` (refinement ratio `r = 2`). Other configurations need at
+least four levels with one constant ratio `r > 1.3` (Celik et al. 2008).
 
 **Recorded per level:**
 - `h` and the number of nodes;
