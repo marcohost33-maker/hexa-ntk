@@ -494,3 +494,19 @@
 | 1FC5DA42498FCF93 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: test_hex_fv_solver_hex_v3.py |
 | C11A3434A3C95697 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: heat_operator_task_hex_v3.py |
 | 57B53E08ECBFAE83 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: test_heat_operator_task_hex_v3.py |
+
+## Independent PR #61 hardening — GPT-5.6 Sol (append-only, 2026-10-07)
+
+> Independent review of exact head 1acca25: recompute ReferenceSpec observed
+> order, bind T1 lattice/coefficients into dataset integrity, fail closed on
+> negative H1 energy, and remove the confounded pure-BC label from the torus
+> OOD axis. Prior rows remain lineage.
+
+| F386BDF9F14F6022 | 2026-10-07 00:00 | spec | in-repo derived, independent PR #61 credibility hardening: REFERENCE_SPEC_v1.md |
+| 84DAB72D604BCA2B | 2026-10-07 00:00 | src/toolkit | in-repo derived, independent PR #61 credibility hardening: reference_spec_hex_v3.py |
+| 012B910B89916082 | 2026-10-07 00:00 | src/toolkit | in-repo derived, independent PR #61 credibility hardening: test_reference_spec_hex_v3.py |
+| C441BBE421F690A7 | 2026-10-07 00:00 | spec | in-repo derived, independent PR #61 T1 evidence hardening: HEAT_OPERATOR_TASK_v1.md |
+| 9EBBA2DBC6724B91 | 2026-10-07 00:00 | spec | in-repo derived, independent PR #61 preregistration hardening: PREREGISTRATION_PHASE1_v1.md |
+| 8142EE80BA07B24E | 2026-10-07 00:00 | src/toolkit | in-repo derived, independent PR #61 T1 evidence hardening: heat_operator_task_hex_v3.py |
+| 9905598D73DAB0B1 | 2026-10-07 00:00 | src/toolkit | in-repo derived, independent PR #61 T1 evidence hardening: test_heat_operator_task_hex_v3.py |
+

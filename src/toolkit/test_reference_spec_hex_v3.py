@@ -39,11 +39,11 @@ def three_level_study(axis: ConvergenceAxis) -> ConvergenceStudy:
         quantity_of_interest="drag_coefficient",
         levels=(
             RefinementLevel("fine", 0.25, 0.9710),
-            RefinementLevel("medium", 0.5, 0.9690),
-            RefinementLevel("coarse", 1.0, 0.9630),
+            RefinementLevel("medium", 0.5, 0.9670),
+            RefinementLevel("coarse", 1.0, 0.9510),
         ),
         evidence_ref=f"results/{axis.value}_convergence.json",
-        observed_order=1.8,
+        observed_order=2.0,
         fine_grid_relative_error_estimate=0.0012,
         asymptotic_range_checked=True,
     )
@@ -74,6 +74,46 @@ class TestConvergenceStudy(unittest.TestCase):
                     RefinementLevel("coarse", 1.0, 1.1),
                 ),
                 evidence_ref="results/two_grid.json",
+                observed_order=2.0,
+            )
+
+    def test_observed_order_is_recomputed_from_levels(self) -> None:
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            ConvergenceStudy(
+                axis=ConvergenceAxis.SPATIAL,
+                quantity_of_interest="drag_coefficient",
+                levels=(
+                    RefinementLevel("fine", 0.25, 0.9710),
+                    RefinementLevel("medium", 0.5, 0.9670),
+                    RefinementLevel("coarse", 1.0, 0.9510),
+                ),
+                evidence_ref="results/false_order.json",
+                observed_order=1.0,
+            )
+
+    def test_observed_order_rejects_oscillatory_or_unequal_ratio_levels(self) -> None:
+        with self.assertRaisesRegex(ValueError, "monotone"):
+            ConvergenceStudy(
+                axis=ConvergenceAxis.SPATIAL,
+                quantity_of_interest="drag_coefficient",
+                levels=(
+                    RefinementLevel("fine", 0.25, 1.00),
+                    RefinementLevel("medium", 0.5, 1.10),
+                    RefinementLevel("coarse", 1.0, 1.05),
+                ),
+                evidence_ref="results/oscillatory.json",
+                observed_order=2.0,
+            )
+        with self.assertRaisesRegex(ValueError, "equal refinement ratios"):
+            ConvergenceStudy(
+                axis=ConvergenceAxis.SPATIAL,
+                quantity_of_interest="drag_coefficient",
+                levels=(
+                    RefinementLevel("fine", 0.2, 1.00),
+                    RefinementLevel("medium", 0.5, 1.04),
+                    RefinementLevel("coarse", 1.0, 1.20),
+                ),
+                evidence_ref="results/unequal_ratio.json",
                 observed_order=2.0,
             )
 

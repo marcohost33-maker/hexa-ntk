@@ -78,7 +78,21 @@ This is a project-level conservative rule. NASA guidance notes that GCI can be
 computed from two grids, but recommends three levels to estimate observed order
 accurately and assess the asymptotic range.
 
-If an observed order is recorded, it MUST be finite and positive.
+If an observed order is recorded, it MUST be finite and positive and it is
+**not trusted as caller metadata**. ReferenceSpec v1 recomputes the order from
+the three finest levels using the constant-refinement-ratio Richardson form
+
+[
+p = rac{ln |(f_3-f_2)/(f_2-f_1)|}{ln r}.
+]
+
+The three finest levels MUST therefore have the same refinement ratio (within
+floating-point tolerance) and monotone, non-degenerate successive
+differences. A supplied `observed_order` inconsistent with that recomputation
+is rejected. Unequal-r studies remain representable as raw refinement evidence,
+but v1 does not permit them to claim a verified observed order; a generalized
+Richardson treatment belongs in a future contract version.
+
 A reported `fine_grid_relative_error_estimate` is a non-negative **fraction**
 (not percent) associated with the finest level.
 
@@ -215,7 +229,7 @@ References:
 
 ReferenceSpec v1 is an evidence-structure and claim-ceiling contract. It does not:
 
-- perform a convergence study automatically;
+- generate refinement data or independently establish the asymptotic range;
 - prove a code is correct;
 - decide whether the underlying physical model is adequate;
 - validate a trained neural operator;

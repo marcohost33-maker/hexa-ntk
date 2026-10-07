@@ -209,8 +209,20 @@ def generate_dataset(
     return data
 
 
-def _sample_digest(u0: np.ndarray, u_t: np.ndarray) -> str:
+def _lattice_digest(lattice: HexLattice) -> str:
     digest = hashlib.sha256()
+    digest.update(lattice.domain.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(np.asarray([lattice.n], dtype="<i8").tobytes())
+    digest.update(np.asarray([lattice.h], dtype="<f8").tobytes())
+    digest.update(np.ascontiguousarray(lattice.coords, dtype="<f8").tobytes())
+    digest.update(np.ascontiguousarray(lattice.neighbors, dtype="<i8").tobytes())
+    return digest.hexdigest()
+
+
+def _sample_digest(coefficients: np.ndarray, u0: np.ndarray, u_t: np.ndarray) -> str:
+    digest = hashlib.sha256()
+    digest.update(np.ascontiguousarray(coefficients, dtype="<f8").tobytes())
     digest.update(np.ascontiguousarray(u0, dtype="<f8").tobytes())
     digest.update(np.ascontiguousarray(u_t, dtype="<f8").tobytes())
     return digest.hexdigest()
@@ -223,8 +235,14 @@ def _module_digest() -> str:
 def dataset_manifest(config: HeatOperatorTaskConfig, data: Dict[str, Any], *, dataset_seed: int) -> Dict[str, Any]:
     """Canonical manifest with per-sample and dataset SHA-256 digests (spec section 4)."""
     lattice = data["lattice"]
-    sample_digests = [_sample_digest(u0, u_t) for u0, u_t in zip(data["u0"], data["uT"])]
+    sample_digests = [
+        _sample_digest(coeff, u0, u_t)
+        for coeff, u0, u_t in zip(data["coefficients"], data["u0"], data["uT"])
+    ]
     config_sha = config.digest()
+    lattice_sha = _lattice_digest(lattice)
+    dataset_seed = _non_negative_int(dataset_seed, name="dataset_seed")
+    sample_ids = [int(s) for s in data["sample_ids"]]
     basis = mode_basis(config)
     return {
         "schema": _SCHEMA,
@@ -232,41 +250,134 @@ def dataset_manifest(config: HeatOperatorTaskConfig, data: Dict[str, Any], *, da
         "domain": config.domain,
         "n": lattice.n,
         "num_nodes": lattice.num_nodes,
+        "lattice_sha256": lattice_sha,
         "config": config.canonical(),
         "config_sha256": config_sha,
-        "dataset_seed": _non_negative_int(dataset_seed, name="dataset_seed"),
-        "sample_ids": [int(s) for s in data["sample_ids"]],
+        "dataset_seed": dataset_seed,
+        "sample_ids": sample_ids,
         "basis": [[mode.key, mode.eigenvalue] for mode in basis],
         "sample_sha256": sample_digests,
-        "dataset_sha256": _sha256_json({"config_sha256": config_sha, "n": lattice.n, "samples": sample_digests}),
+        "dataset_sha256": _sha256_json({
+            "config_sha256": config_sha,
+            "dataset_seed": dataset_seed,
+            "sample_ids": sample_ids,
+            "lattice_sha256": lattice_sha,
+            "samples": sample_digests,
+        }),
         "generator_sha256": _module_digest(),
         "numpy_version": np.__version__,
     }
 
 
 def verify_dataset(manifest: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
-    """Integrity (digests of the given bytes) and reproducibility (regenerate within 1e-12)."""
+    """Verify content integrity and cross-platform reproducibility fail-closed."""
     if not isinstance(manifest, dict) or manifest.get("schema") != _SCHEMA:
         raise ValueError(f"manifest must be a {_SCHEMA} manifest")
     config = HeatOperatorTaskConfig(**manifest["config"])
     if config.digest() != manifest["config_sha256"]:
         raise ValueError("config digest mismatch")
-    digests = [_sample_digest(u0, u_t) for u0, u_t in zip(data["u0"], data["uT"])]
+
+    lattice = data.get("lattice")
+    if not isinstance(lattice, HexLattice):
+        raise ValueError("data must contain a HexLattice")
+    coords = np.asarray(lattice.coords)
+    neighbors = np.asarray(lattice.neighbors)
+    if (
+        coords.ndim != 2
+        or coords.shape[1:] != (2,)
+        or neighbors.shape != (lattice.num_nodes, 6)
+        or not np.all(np.isfinite(coords))
+        or not np.issubdtype(neighbors.dtype, np.integer)
+        or np.any(neighbors < -1)
+        or np.any(neighbors >= lattice.num_nodes)
+    ):
+        return {
+            "integrity": False,
+            "reproducible": False,
+            "max_relative_deviation": math.inf,
+            "bitwise_identical": False,
+        }
+
+    sample_ids = [int(s) for s in data["sample_ids"]]
+    coefficients = np.asarray(data["coefficients"], dtype=np.float64)
+    u0 = np.asarray(data["u0"], dtype=np.float64)
+    u_t = np.asarray(data["uT"], dtype=np.float64)
+    expected_shape = (len(sample_ids), lattice.num_nodes)
+    expected_coeff_shape = (len(sample_ids), len(mode_basis(config)))
+    if (
+        u0.shape != expected_shape
+        or u_t.shape != expected_shape
+        or coefficients.shape != expected_coeff_shape
+        or not np.all(np.isfinite(coefficients))
+        or not np.all(np.isfinite(u0))
+        or not np.all(np.isfinite(u_t))
+    ):
+        return {
+            "integrity": False,
+            "reproducible": False,
+            "max_relative_deviation": math.inf,
+            "bitwise_identical": False,
+        }
+
+    lattice_sha = _lattice_digest(lattice)
+    digests = [
+        _sample_digest(coeff, initial, final)
+        for coeff, initial, final in zip(coefficients, u0, u_t)
+    ]
+    dataset_sha = _sha256_json({
+        "config_sha256": manifest["config_sha256"],
+        "dataset_seed": int(manifest["dataset_seed"]),
+        "sample_ids": sample_ids,
+        "lattice_sha256": lattice_sha,
+        "samples": digests,
+    })
+    expected_basis = [[mode.key, mode.eigenvalue] for mode in mode_basis(config)]
     integrity = (
-        digests == manifest["sample_sha256"]
-        and [int(s) for s in data["sample_ids"]] == manifest["sample_ids"]
-        and _sha256_json({"config_sha256": manifest["config_sha256"], "n": manifest["n"], "samples": digests})
-        == manifest["dataset_sha256"]
+        manifest.get("domain") == config.domain == lattice.domain
+        and manifest.get("n") == lattice.n
+        and manifest.get("num_nodes") == lattice.num_nodes
+        and manifest.get("lattice_sha256") == lattice_sha
+        and sample_ids == manifest["sample_ids"]
+        and manifest.get("basis") == expected_basis
+        and digests == manifest["sample_sha256"]
+        and dataset_sha == manifest["dataset_sha256"]
     )
-    regenerated = generate_dataset(config, n=manifest["n"], sample_ids=manifest["sample_ids"],
-                                   dataset_seed=manifest["dataset_seed"])
+
+    regenerated = generate_dataset(
+        config,
+        n=manifest["n"],
+        sample_ids=manifest["sample_ids"],
+        dataset_seed=manifest["dataset_seed"],
+    )
+    fresh_lattice = regenerated["lattice"]
+    if not np.array_equal(lattice.neighbors, fresh_lattice.neighbors):
+        return {
+            "integrity": bool(integrity),
+            "reproducible": False,
+            "max_relative_deviation": math.inf,
+            "bitwise_identical": False,
+        }
+
     worst = 0.0
-    for key in ("u0", "uT"):
-        given, fresh = np.asarray(data[key]), regenerated[key]
+    coord_scale = max(float(np.max(np.abs(fresh_lattice.coords))), np.finfo(float).tiny)
+    worst = max(
+        worst,
+        float(np.max(np.abs(lattice.coords - fresh_lattice.coords)) / coord_scale),
+    )
+    for key, given in (("coefficients", coefficients), ("u0", u0), ("uT", u_t)):
+        fresh = np.asarray(regenerated[key])
         if given.shape != fresh.shape:
-            return {"integrity": integrity, "reproducible": False, "max_relative_deviation": math.inf}
+            return {
+                "integrity": bool(integrity),
+                "reproducible": False,
+                "max_relative_deviation": math.inf,
+                "bitwise_identical": False,
+            }
         scale = np.maximum(np.max(np.abs(fresh), axis=1), np.finfo(float).tiny)
-        worst = max(worst, float(np.max(np.max(np.abs(given - fresh), axis=1) / scale)))
+        worst = max(
+            worst,
+            float(np.max(np.max(np.abs(given - fresh), axis=1) / scale)),
+        )
     return {
         "integrity": bool(integrity),
         "reproducible": worst <= _REPRODUCIBILITY_RTOL,
@@ -325,8 +436,17 @@ def relative_l2(pred: Any, truth: Any, lattice: HexLattice) -> np.ndarray:
 
 
 def _energy_seminorm(v: np.ndarray, lattice: HexLattice) -> np.ndarray:
-    values = [-lattice.cell_area * float(row @ apply_hex_laplacian(row, lattice)) for row in v]
-    return np.sqrt(np.maximum(np.asarray(values), 0.0))
+    values = np.asarray(
+        [-lattice.cell_area * float(row @ apply_hex_laplacian(row, lattice)) for row in v],
+        dtype=np.float64,
+    )
+    if not np.all(np.isfinite(values)):
+        raise ValueError("discrete H1 energy must be finite")
+    scale = max(1.0, float(np.max(np.abs(values))))
+    tolerance = 64.0 * np.finfo(np.float64).eps * scale
+    if np.any(values < -tolerance):
+        raise ValueError("discrete H1 energy must be non-negative")
+    return np.sqrt(np.maximum(values, 0.0))
 
 
 def relative_h1_seminorm(pred: Any, truth: Any, lattice: HexLattice) -> np.ndarray:

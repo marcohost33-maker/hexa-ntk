@@ -143,6 +143,36 @@ class RefinementLevel:
         )
 
 
+def _observed_order_from_finest_three(
+    levels: tuple[RefinementLevel, ...],
+) -> float:
+    """Recompute p for the three finest levels using geometric refinement.
+
+    ReferenceSpec v1 deliberately supports the auditable constant-r
+    Richardson form only. Unequal-r studies need a future generalized
+    contract rather than trusting a caller-supplied order.
+    """
+    fine, medium, coarse = levels[:3]
+    r21 = medium.characteristic_size / fine.characteristic_size
+    r32 = coarse.characteristic_size / medium.characteristic_size
+    if not math.isclose(r21, r32, rel_tol=1e-10, abs_tol=1e-12):
+        raise ValueError(
+            "observed_order validation requires equal refinement ratios "
+            "on the three finest levels in ReferenceSpec v1"
+        )
+    d21 = medium.quantity_value - fine.quantity_value
+    d32 = coarse.quantity_value - medium.quantity_value
+    if d21 == 0.0 or d32 == 0.0 or (d21 > 0.0) != (d32 > 0.0):
+        raise ValueError(
+            "observed_order requires monotone, non-degenerate convergence "
+            "on the three finest levels"
+        )
+    order = math.log(abs(d32 / d21)) / math.log(r21)
+    if not math.isfinite(order) or order <= 0.0:
+        raise ValueError("recomputed observed_order must be finite and > 0")
+    return order
+
+
 @dataclass(frozen=True)
 class ConvergenceStudy:
     axis: ConvergenceAxis
@@ -194,6 +224,18 @@ class ConvergenceStudy:
             if len(self.levels) < 3:
                 raise ValueError(
                     "observed_order requires at least three refinement levels"
+                )
+            recomputed_order = _observed_order_from_finest_three(self.levels)
+            if not math.isclose(
+                order,
+                recomputed_order,
+                rel_tol=1e-9,
+                abs_tol=1e-12,
+            ):
+                raise ValueError(
+                    "observed_order does not match the value recomputed "
+                    f"from the three finest levels: {order!r} vs "
+                    f"{recomputed_order!r}"
                 )
             object.__setattr__(self, "observed_order", order)
 

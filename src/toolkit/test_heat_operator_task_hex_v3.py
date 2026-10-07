@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 
 import heat_operator_task_hex_v3 as task
 from dataset_split_hex_v3 import split_dataset_by_trajectory, summarize_group_split
-from hex_fv_solver_hex_v3 import apply_hex_laplacian, torus_hex_lattice, triangle_hex_lattice
+from hex_fv_solver_hex_v3 import HexLattice, apply_hex_laplacian, torus_hex_lattice, triangle_hex_lattice
 from heat_operator_task_hex_v3 import (
     HeatOperatorDataset,
     HeatOperatorTaskConfig,
@@ -146,6 +146,33 @@ class TestManifest(unittest.TestCase):
         tampered["uT"][3, 7] += 1e-6
         self.assertFalse(verify_dataset(self.data["manifest"], tampered)["reproducible"])
 
+    def test_lattice_and_coefficients_are_integrity_bound(self) -> None:
+        tampered_coeff = dict(self.data, coefficients=self.data["coefficients"].copy())
+        tampered_coeff["coefficients"][0, 0] = np.nextafter(
+            tampered_coeff["coefficients"][0, 0], np.inf
+        )
+        report = verify_dataset(self.data["manifest"], tampered_coeff)
+        self.assertFalse(report["integrity"])
+        self.assertTrue(report["reproducible"])
+
+        lattice = self.data["lattice"]
+        coords = lattice.coords.copy()
+        coords[0, 0] += 1e-6
+        coords.flags.writeable = False
+        tampered_lattice = HexLattice(
+            n=lattice.n,
+            h=lattice.h,
+            domain=lattice.domain,
+            coords=coords,
+            neighbors=lattice.neighbors,
+        )
+        report = verify_dataset(
+            self.data["manifest"],
+            dict(self.data, lattice=tampered_lattice),
+        )
+        self.assertFalse(report["integrity"])
+        self.assertFalse(report["reproducible"])
+
     def test_digests_are_order_and_resolution_sensitive(self) -> None:
         reordered = generate_dataset(TRI, n=24, sample_ids=list(range(12))[::-1], dataset_seed=5)
         self.assertNotEqual(reordered["manifest"]["dataset_sha256"], self.data["manifest"]["dataset_sha256"])
@@ -222,6 +249,17 @@ class TestMetrics(unittest.TestCase):
             for fn in (relative_l2, relative_h1_seminorm, relative_max):
                 with self.subTest(metric=fn.__name__), self.assertRaises(ValueError):
                     fn(pred, truth, lat)
+
+    def test_h1_rejects_materially_negative_discrete_energy(self) -> None:
+        lat = triangle_hex_lattice(8)
+        v = LameMode(1, 1).evaluate(lat.coords)
+        original = task.apply_hex_laplacian
+        try:
+            task.apply_hex_laplacian = lambda row, lattice: np.asarray(row)
+            with self.assertRaisesRegex(ValueError, "non-negative"):
+                task._energy_seminorm(v[None], lat)
+        finally:
+            task.apply_hex_laplacian = original
 
 
 class TestMechanisticBaseline(unittest.TestCase):

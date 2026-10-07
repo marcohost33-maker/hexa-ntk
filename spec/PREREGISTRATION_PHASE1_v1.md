@@ -31,8 +31,8 @@ Reality Anchor, preregistration/OOD protocol, backend and baseline rules
 - reach the baseline's accuracy at lower cost, or
 - reach higher accuracy at equal cost,
 
-in distribution and under the two preregistered shifts (resolution and
-boundary-condition family)?
+in distribution and under the two preregistered shifts (resolution and a
+composite domain/topology/boundary-condition shift)?
 
 **H0 (default, kept unless rejected by section 6):** no advantage, at equal
 accuracy or at equal runtime (McGreivy & Hakim, Nat. Mach. Intell. 6:1256
@@ -61,7 +61,7 @@ whatever their sign.
 | train pool | `0..1999` | triangle | 32 |
 | ID test | `100000..100499` | triangle | 32 |
 | resolution OOD | `100000..100499` (same functions as ID test) | triangle | 16, 64, 128 |
-| BC-family OOD | `200000..200499` | torus | 32 |
+| composite domain/topology/BC OOD | `200000..200499` | torus | 32 |
 
 - The train pool is split 90/10 into train and validation with
   `split_dataset_by_trajectory(val_fraction=0.1, seed=0)`. This split is
@@ -72,8 +72,12 @@ whatever their sign.
   from #60 (ReNO, arXiv 2305.19913).
 
 **Deviation from #60, stated now [D6].** #60 names periodic **and Neumann** as
-the BC-family OOD. The v1 solver layer has no Neumann lattice, so v1 tests
-periodic only. Adding Neumann means a v2 of this file, written before any run.
+a BC-family OOD. The v1 torus changes topology/domain geometry as well as the
+boundary condition, so it MUST NOT be reported as a pure BC-family effect.
+v1 therefore names this axis a **composite domain/topology/BC OOD**. A pure
+BC-family test requires the same domain and mesh geometry with an alternate
+boundary condition (for example triangle Neumann/Robin); that is deferred to a
+v2 written before any such run.
 
 **Recording.** Before training, every `dataset_sha256` goes into the run
 manifest (section 7), and `verify_dataset` must report `integrity` and
@@ -128,9 +132,18 @@ on the same test inputs. Per point it records the mean `rel_l2` and the median
 wall time per sample.
 
 **Timing protocol.**
-- same machine;
-- single process;
-- 3 warm-up runs, then the median of 5 repeats.
+- Primary algorithmic comparison: GINO and the mechanistic baseline run on the
+  **same CPU machine and thread policy**. GPU-vs-CPU numbers may be reported
+  only as a separate deployment/system comparison, never as an algorithmic
+  speed claim.
+- single process; fixed thread counts recorded in the manifest;
+- 3 warm-up runs, then 10 measured repeats; report median and a 95 % bootstrap
+  interval for latency;
+- CUDA timing, when reported secondarily, synchronizes immediately before and
+  after the timed region (or uses CUDA events) so asynchronous execution cannot
+  under-report latency;
+- batch size 1 is the latency comparison. Batch 500 is reported separately as
+  throughput and is not substituted for latency.
 
 **GINO cost.** Recorded separately:
 - inference time per sample, at batch size 1 and at batch size 500;
@@ -149,10 +162,16 @@ plus data cost is amortised.
 
 **Per seed and test set:** the mean and the median over the samples.
 
-**Across seeds:**
-- the IQM, plus a 95 % stratified bootstrap confidence interval (strata = test
-  set; 10 000 resamples; Agarwal et al., NeurIPS 2021);
-- every individual seed and every test set is reported.
+**Across seeds and samples:**
+- the decision statistic is the IQM of the five seed-level mean errors;
+- its 95 % interval uses a two-stage paired bootstrap with 10 000 resamples:
+  resample training seeds, then sample ids; for the resolution axis the same
+  resampled sample ids are used jointly at N=16/32/64/128 so the known pairing
+  is preserved;
+- no CI is pooled across different test sets for a per-test decision;
+- every individual seed and every test set is reported. This adapts the
+  IQM/bootstrap principle to the clustered PDE design instead of treating
+  correlated seed-by-sample cells as independent.
 
 **Negative results** (no advantage, OOD failure) are reported with the same
 prominence as positive ones (AGENTS.md: first-class).
@@ -162,13 +181,16 @@ prominence as positive ones (AGENTS.md: first-class).
 **Equal runtime.**
 - `t_NO` is GINO's median inference time per sample at batch size 1, with
   batch 500 reported as well.
-- `e_base(t_NO)` is the baseline error at `t_NO`, interpolated log-log on its
-  cost-accuracy curve.
+- `e_base(t_NO)` is the baseline error at `t_NO`, interpolated log-log on
+  the **Pareto-efficient** part of its cost-accuracy curve. No extrapolation is
+  allowed; if `t_NO` lies outside the measured range, no equal-runtime claim
+  is made.
 - GINO is "more accurate at equal runtime" only if the upper 95 % CI bound of
   its IQM `rel_l2` is below `e_base(t_NO)`.
 
 **Equal accuracy.**
-- `t_base(e)` is the baseline time needed to reach error `e`.
+- `t_base(e)` is the baseline time needed to reach error `e`, from the
+  Pareto-efficient measured curve only; no extrapolation is allowed.
 - GINO is "faster at equal accuracy" only if `t_NO < t_base(e)`, where `e` is
   the upper 95 % CI bound of GINO's IQM `rel_l2`.
 - If the baseline cannot reach `e` on that lattice, the comparison is reported
@@ -206,7 +228,7 @@ reported.
 | D3 | Sample counts | train pool 2000 (1800/200), 500 per test set |
 | D4 | GINO grid and epoch budget | grid of 8 configurations, fixed in the approved version |
 | D5 | Hardware and compute budget | name the machine; GPU if available, otherwise CPU (`N = 32`, 465 nodes) |
-| D6 | BC-family axis periodic only in v1 | accept (Neumann in v2), or build a Neumann lattice first |
+| D6 | Torus shift naming | treat it as composite domain/topology/BC OOD in v1; reserve "BC-family" for same-domain Neumann/Robin in v2 |
 | D7 | Add `neuraloperator==2.0.0` as an optional dependency | accept (MIT) |
 | D8 | Optional licence request to the GAOT/GINOT authors (#60) | external action, Marco's call |
 

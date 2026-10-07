@@ -75,28 +75,35 @@ operator, `|v|_{1,h}^2 = -A * v . (L_h v)`.
 **Fail-closed rules:**
 - shapes must match;
 - values must be finite;
-- a zero truth norm raises `ValueError`.
+- a zero truth norm raises `ValueError`;
+- materially negative discrete energy raises `ValueError`; only a
+  floating-point roundoff band of `64 * eps * max(1, |energy|)` may be
+  clamped to zero.
 
 ## 4. Manifest and digests
 
 `dataset_manifest` records:
 - the schema and task id;
 - the domain and `N`;
+- `lattice_sha256`, over the domain, `N`, `h`, coordinates and neighbour
+  topology in canonical little-endian encodings;
 - the canonical configuration and its SHA-256;
 - `dataset_seed` and the ordered `sample_ids`;
 - the basis (keys and eigenvalues);
-- one SHA-256 per sample, over the little-endian float64 bytes of `u0`
-  followed by `uT`;
-- `dataset_sha256`, the SHA-256 of the canonical JSON of
-  `{config_sha256, n, sample digests}`;
+- one SHA-256 per sample, over the little-endian float64 bytes of the sampled
+  coefficients, `u0`, and `uT`;
+- `dataset_sha256`, the SHA-256 of the canonical JSON binding
+  `config_sha256`, seed, ordered sample ids, lattice digest and sample
+  digests;
 - the SHA-256 of the generator module's LF-normalised bytes;
 - the numpy version.
 
 **Integrity vs. reproducibility.**
-- **Integrity:** `verify_dataset` recomputes the digests of the given arrays.
-  Any change of a byte fails.
-- **Reproducibility:** `verify_dataset` also regenerates the samples and
-  compares them within `1e-12` relative max-norm.
+- **Integrity:** `verify_dataset` recomputes the digests of the lattice,
+  coefficients and solution arrays. Any content change fails.
+- **Reproducibility:** `verify_dataset` regenerates the lattice and samples;
+  neighbour topology must match exactly and floating arrays must agree within
+  `1e-12` relative max-norm.
 - Bitwise equality across machines is NOT promised. numpy's `sin`/`cos` are
   not guaranteed to be correctly rounded and may differ in the last bit
   between CPU dispatch paths.
