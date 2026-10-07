@@ -5,6 +5,22 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Reality Anchor Phase 0a: Referenzfall `hex-heat-tri` + ReferenceSpec v1 (#60, #33,
+  W1-K08, 2026-10-07).** ReferenceSpec v1 aus Draft #33 per Merge-Commit uebernommen (Commits
+  erhalten; dessen CI-Rot: fehlender SOURCES-Eintrag fuer `spec/REFERENCE_SPEC_v1.md` und Pins
+  vor den letzten Haertungs-Commits -> append-only nachgezogen). Neuer Vertrag
+  `spec/REFERENCE_CASE_HEX_HEAT_TRI_v1.md`, Modul `reference_case_hex_v3.py`: Lame-Moden (m, n,
+  sin/cos) sind exakte diskrete Eigenvektoren des 7-Punkt-Hex-Laplace (Engine-Gewicht) auf dem
+  Dirichlet-Dreieck; Studie N = 16..128 reproduziert die Zahlen aus #60 (lambda_h 51.9649 ...
+  52.6273, Celik p 1.998 / 1.993), Waermeloesung Ordnung 2.00, GCI_fine 2.51e-4 >= exakter
+  Fehler 2.01e-4, alle Kriterien C1-C9 gruen, abgeleitete Decke `verified_numerical_reference`
+  nur fuer diesen Context of Use. Positivitaets-Gate auf dem assemblierten Operator (#60 Punkt
+  1): Vorzeichenstruktur + `dt <= h^2/(4 kappa)`, gegen `hex_positivity_max_dt` geprueft.
+  Diskriminierung: 1-%-Gewichtsfehler, Gewichtsfehler erster Ordnung, Neumann-artige Slots und
+  ein zu kleiner GCI-Sicherheitsfaktor fallen durch; Mutationsprobe 34/34.
+  _Evidenz:_ `results/2026-10-07_phase0-hex-heat-tri_local-gate.log`,
+  `results/2026-10-07_hex-heat-tri_reference.json` (study_sha256 6a366cdb..., Quelle d23dec8).
+
 - [x] **Issue #59: Folgepunkte aus PR #58 (2026-10-07).**
   _DCP-Bundle (P2):_ `finalize_bundle` fsynct den Inhalt jeder im Manifest gelisteten Datei
   (`fsync_file`, `rb+`-Handle, Windows-tauglich), dann die Shard-Verzeichnisse, dann Manifest
@@ -141,6 +157,20 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Offen
 
+- [ ] **Reality Anchor Phase 0b (#60).** MMS mit variablem Koeffizienten + Quelle (allgemeine
+  Codepfade, Salari & Knupp) und periodischer Hex-Torus (zweite Randbedingungs-Familie), je mit
+  ReferenceSpec und Ordnungs-Gate. Danach Phase 1: Vorregistrierung (Splits, >= 5 Seeds, Metriken,
+  OOD-Achsen Aufloesung/BC-Familie; gehasht vor jedem Tuning), GINO (`neuraloperator`, MIT) gegen
+  den mechanistischen Loeser nach McGreivy & Hakim (gleiche Genauigkeit oder gleiche Laufzeit,
+  Kosten-Genauigkeits-Kurve). Kein Lern-Backend-Claim vor gruener Phase 0.
+- [ ] **ReferenceSpec v1 (#33), Review-Befund.** `ConvergenceStudy.observed_order` wird nur auf
+  endlich/positiv geprueft, nicht gegen die Werte der Levels nachgerechnet; ein Aufrufer kann eine
+  Ordnung behaupten, die die Daten nicht tragen. Vorschlag: bei konstantem r und >= 3 Levels
+  Konsistenz gegen die Celik-Ordnung verlangen (Vertragsaenderung -> Owner-Entscheid).
+  `reference_spec_hex_v3.py` hat 82 % Branch-Coverage (Gesamt-Gate 87 % gilt global).
+- [ ] **dt-Gruppierung als deklarierter Quantisierungsvertrag (#59).** `dt_round_ndigits=-1` wird
+  akzeptiert; Vertrag fuer zulaessige Werte und Semantik fehlt.
+
 - [x] ~~**Coverage-Ratchet Richtung 80–90%.**~~ Erledigt 2026-09-27: 89,6 % Branch-Coverage,
   `fail_under = 87` (siehe oben). Schwaechste Module jetzt `runner_hex_v3.py` / `stress_hex_v3.py`
   (je 84 %). Draft-PR #20 (aelterer Ratchet-Versuch 79->91 + resume_from-Fix) ist damit inhaltlich
@@ -154,7 +184,9 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   Skript im Repo (Beispiel: `scripts/mutation_probe.py`).
 - [ ] **`tests (cpu)` als Required Check.** Laut externem Bericht (2026-09-21) ist nur `gate`
   Required Check; ein roter Testjob blockiert den Merge also nicht. Nur der Repo-Owner kann das
-  im Branch-Schutz aendern.
+  im Branch-Schutz aendern. Nachtrag 2026-10-07: ein Session-Handoff vom 2026-10-05 (Drive)
+  meldet "Required gate + tests (cpu)" als gesetzt; aus dem Repo/der Agent-Sitzung nicht
+  pruefbar (keine Branch-Protection-API) -> Owner bestaetigt, dann diesen Punkt schliessen.
 - [ ] **Mid-Epoch-Resume.** `dataloader_state_dict` wird gespeichert/geladen, der Runner nutzt es
   aber nicht (Resume nur an Epochengrenzen). Fuer lange Epochen auf Preemptible-Clustern relevant
   (Muster: `torchdata.StatefulDataLoader`).
