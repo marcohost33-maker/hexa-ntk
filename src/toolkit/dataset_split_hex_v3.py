@@ -28,6 +28,10 @@ whether group_by_dt is set. The unit of the split is the trajectory.
   resolution" means: both round to the same finite float32, or they agree
   within a relative 2**-20 (issue #59; the relative test alone never
   matched near zero, e.g. 0.0 vs 1e-46). Set dt_round_ndigits to merge them.
+  Quantisation contract: None means no decimal quantisation; otherwise
+  dt_round_ndigits is a non-negative number of decimal places in dt's native
+  unit. Negative values are rejected because they can collapse distinct small
+  step sizes (for example 0.1 and 0.2 both round to 0.0 at ndigits=-1).
 With one dt per trajectory the split for a given seed is identical to the
 one before E0927-03.
 
@@ -201,6 +205,11 @@ def _validate_dt_round_ndigits(dt_round_ndigits: Optional[int]) -> None:
     ):
         raise TypeError(
             f"dt_round_ndigits must be None or an int, got {dt_round_ndigits!r}"
+        )
+    if dt_round_ndigits < 0:
+        raise ValueError(
+            "dt_round_ndigits must be non-negative; negative decimal rounding "
+            "can collapse distinct time-step groups"
         )
 
 

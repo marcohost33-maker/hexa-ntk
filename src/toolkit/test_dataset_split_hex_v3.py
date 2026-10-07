@@ -1058,16 +1058,25 @@ class TestDtInputContract(unittest.TestCase):
         )
         self.assertEqual(len(train) + len(val), len(ds))
 
-    def test_rounding_overflow_raises_value_error(self) -> None:
+    def test_dt_round_ndigits_non_negative_contract(self) -> None:
         ds = FakeTrajectoryDataset(
-            [{"trajectory_id": 0, "dt": 1.797e308}, {"trajectory_id": 1, "dt": 0.1}]
+            [{"trajectory_id": 0, "dt": 0.1}, {"trajectory_id": 1, "dt": 0.2}]
         )
-        with self.assertRaises(Exception) as ctx:
-            split_dataset_by_trajectory(
-                ds, val_fraction=0.5, seed=0, group_by_dt=True, dt_round_ndigits=-308
-            )
-        self.assertIs(type(ctx.exception), ValueError)
-        self.assertIsInstance(ctx.exception.__cause__, OverflowError)
+        for ndigits in (-1, -308, np.int64(-1)):
+            with self.subTest(ndigits=repr(ndigits)):
+                with self.assertRaisesRegex(ValueError, "non-negative"):
+                    split_dataset_by_trajectory(
+                        ds,
+                        val_fraction=0.5,
+                        seed=0,
+                        group_by_dt=True,
+                        dt_round_ndigits=ndigits,
+                    )
+
+        train, val = split_dataset_by_trajectory(
+            ds, val_fraction=0.5, seed=0, group_by_dt=True, dt_round_ndigits=0
+        )
+        self.assertEqual(len(train) + len(val), len(ds))
 
 
 if __name__ == "__main__":

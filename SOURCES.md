@@ -511,3 +511,11 @@
 | 9905598D73DAB0B1 | 2026-10-07 00:00 | src/toolkit | in-repo derived, independent PR #61 T1 evidence hardening: test_heat_operator_task_hex_v3.py |
 | E8BA656865FF9032 | 2026-10-07 00:00 | spec | in-repo derived, independent PR #61 formula-text correction after CI review: REFERENCE_SPEC_v1.md |
 
+## dt grouping quantisation contract (#59) — GPT-5.6 Sol (append-only, 2026-10-07)
+
+> Close the ambiguous negative-ndigits path: decimal quantisation is None or a
+> non-negative number of decimal places. Prior rows remain lineage.
+
+| 3C9695B66E17255F | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 dt quantisation contract: dataset_split_hex_v3.py |
+| 64C9F1BDB1FD7B49 | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 dt quantisation contract: test_dataset_split_hex_v3.py |
+
