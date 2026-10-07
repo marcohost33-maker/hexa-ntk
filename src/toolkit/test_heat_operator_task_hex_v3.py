@@ -1,0 +1,253 @@
+"""
+test_heat_operator_task_hex_v3.py
+=================================
+Contract tests for the Phase 1 instrument T1 ``hex-heat-operator``
+(spec/HEAT_OPERATOR_TASK_v1.md): basis, prior, exact truth, manifest and
+digests, split compatibility, the three metrics and the mechanistic baseline.
+"""
+
+from __future__ import annotations
+
+import math
+import unittest
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+import heat_operator_task_hex_v3 as task
+from dataset_split_hex_v3 import split_dataset_by_trajectory, summarize_group_split
+from hex_fv_solver_hex_v3 import apply_hex_laplacian, torus_hex_lattice, triangle_hex_lattice
+from heat_operator_task_hex_v3 import (
+    HeatOperatorDataset,
+    HeatOperatorTaskConfig,
+    dataset_manifest,
+    evaluate_predictions,
+    evaluate_sample,
+    generate_dataset,
+    mechanistic_baseline,
+    mode_basis,
+    relative_h1_seminorm,
+    relative_l2,
+    relative_max,
+    sample_coefficients,
+    verify_dataset,
+)
+from reference_case_hex_v3 import LameMode, TorusMode
+
+TRI = HeatOperatorTaskConfig()
+TORUS = HeatOperatorTaskConfig(domain="torus_periodic")
+
+
+class TestBasis(unittest.TestCase):
+    def test_triangle_basis_is_complete_sorted_and_without_duplicates(self) -> None:
+        basis = mode_basis(TRI)
+        expected = []
+        for m in range(1, 12):
+            for n in range(m, 12):
+                for parity in (("sin",) if m == n else ("sin", "cos")):
+                    mode = LameMode(m, n, parity)
+                    if mode.eigenvalue <= TRI.lambda_cutoff:
+                        expected.append(mode.key)
+        self.assertEqual(sorted(m.key for m in basis), sorted(expected))
+        self.assertEqual(len(basis), 15)
+        eigenvalues = [m.eigenvalue for m in basis]
+        self.assertEqual(eigenvalues, sorted(eigenvalues))
+        lat = triangle_hex_lattice(48)
+        gram = np.array([[a.evaluate(lat.coords) @ b.evaluate(lat.coords) for b in basis] for a in basis])
+        d = np.sqrt(np.diag(gram))
+        np.testing.assert_allclose(gram / np.outer(d, d), np.eye(len(basis)), atol=1e-9)
+
+    def test_torus_basis_uses_the_half_plane_and_excludes_the_constant(self) -> None:
+        basis = mode_basis(TORUS)
+        self.assertEqual(len(basis), 40)
+        keys = {(m.p, m.q) for m in basis}
+        self.assertNotIn((0, 0), keys)
+        for p, q in keys:
+            self.assertTrue(p > 0 or (p == 0 and q > 0))
+            self.assertNotIn((-p, -q), keys)
+        self.assertTrue(all(isinstance(m, TorusMode) and m.eigenvalue <= TORUS.lambda_cutoff for m in basis))
+
+    def test_config_contract(self) -> None:
+        for kwargs, exc in (({"domain": "square"}, ValueError), ({"kappa": 0.0}, ValueError),
+                            ({"t_final": float("nan")}, ValueError), ({"lambda_cutoff": 10.0}, ValueError),
+                            ({"spectral_decay": "1"}, TypeError), ({"kappa": True}, TypeError)):
+            with self.subTest(kwargs=kwargs), self.assertRaises(exc):
+                HeatOperatorTaskConfig(**kwargs)
+        self.assertEqual(len(TRI.digest()), 64)
+        self.assertNotEqual(TRI.digest(), TORUS.digest())
+
+
+class TestPriorAndTruth(unittest.TestCase):
+    def test_coefficients_depend_only_on_seed_and_sample_id(self) -> None:
+        a = sample_coefficients(TRI, 7, 3)
+        np.testing.assert_array_equal(a, sample_coefficients(TRI, 7, 3))
+        self.assertFalse(np.array_equal(a, sample_coefficients(TRI, 7, 4)))
+        self.assertFalse(np.array_equal(a, sample_coefficients(TRI, 8, 3)))
+        d1 = generate_dataset(TRI, n=16, sample_ids=[5, 3, 9], dataset_seed=7)
+        d2 = generate_dataset(TRI, n=32, sample_ids=[3], dataset_seed=7)
+        np.testing.assert_array_equal(d1["coefficients"][1], d2["coefficients"][0])
+
+    def test_prior_scale_follows_the_spectral_decay(self) -> None:
+        basis = mode_basis(TRI)
+        lam = np.array([m.eigenvalue for m in basis])
+        sigma = lam.min() / lam
+        draws = np.stack([sample_coefficients(TRI, 1, s) for s in range(4000)])
+        np.testing.assert_allclose(draws.std(axis=0) / sigma, 1.0, atol=0.06)
+        for bad in (-1, 1.5, True):
+            with self.assertRaises((TypeError, ValueError)):
+                sample_coefficients(TRI, bad, 0)
+
+    def test_truth_is_the_exact_semigroup_in_the_mode_basis(self) -> None:
+        lat = triangle_hex_lattice(20)
+        a = sample_coefficients(TRI, 2, 11)
+        u0, u_t = evaluate_sample(TRI, a, lat)
+        basis = mode_basis(TRI)
+        phis = np.stack([m.evaluate(lat.coords) for m in basis])
+        np.testing.assert_allclose(u0, a @ phis, atol=1e-12)
+        decay = np.exp(-np.array([m.eigenvalue for m in basis]) * TRI.t_final)
+        np.testing.assert_allclose(u_t, (a * decay) @ phis, atol=1e-12)
+        with self.assertRaises(ValueError):
+            evaluate_sample(TRI, a[:-1], lat)
+        with self.assertRaises(ValueError):
+            evaluate_sample(TRI, a, torus_hex_lattice(8))
+
+    def test_resolution_axis_samples_the_same_function(self) -> None:
+        coarse = generate_dataset(TRI, n=16, sample_ids=[0, 1], dataset_seed=3)
+        fine = generate_dataset(TRI, n=32, sample_ids=[0, 1], dataset_seed=3)
+        index = {tuple(np.round(c, 10)): k for k, c in enumerate(fine["lattice"].coords)}
+        rows = [index[tuple(np.round(c, 10))] for c in coarse["lattice"].coords]
+        np.testing.assert_allclose(coarse["u0"], fine["u0"][:, rows], atol=1e-12)
+        np.testing.assert_allclose(coarse["uT"], fine["uT"][:, rows], atol=1e-12)
+
+
+class TestManifest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.data = generate_dataset(TRI, n=24, sample_ids=range(12), dataset_seed=5)
+
+    def test_manifest_fields_and_reproducibility(self) -> None:
+        m = self.data["manifest"]
+        self.assertEqual(m["task_id"], "hex-heat-operator/v1")
+        self.assertEqual((m["n"], m["num_nodes"], m["dataset_seed"]), (24, 253, 5))
+        self.assertEqual(len(m["sample_sha256"]), 12)
+        self.assertEqual(m["config_sha256"], TRI.digest())
+        self.assertEqual(len(m["generator_sha256"]), 64)
+        report = verify_dataset(m, self.data)
+        self.assertTrue(report["integrity"] and report["reproducible"])
+        self.assertLessEqual(report["max_relative_deviation"], 1e-12)
+
+    def test_any_changed_byte_breaks_integrity(self) -> None:
+        tampered = dict(self.data, uT=self.data["uT"].copy())
+        tampered["uT"][3, 7] = np.nextafter(tampered["uT"][3, 7], np.inf)
+        report = verify_dataset(self.data["manifest"], tampered)
+        self.assertFalse(report["integrity"])
+        self.assertTrue(report["reproducible"])  # one ulp is within the reproducibility tolerance
+        tampered["uT"][3, 7] += 1e-6
+        self.assertFalse(verify_dataset(self.data["manifest"], tampered)["reproducible"])
+
+    def test_digests_are_order_and_resolution_sensitive(self) -> None:
+        reordered = generate_dataset(TRI, n=24, sample_ids=list(range(12))[::-1], dataset_seed=5)
+        self.assertNotEqual(reordered["manifest"]["dataset_sha256"], self.data["manifest"]["dataset_sha256"])
+        self.assertEqual(reordered["manifest"]["sample_sha256"][::-1], self.data["manifest"]["sample_sha256"])
+        other_n = generate_dataset(TRI, n=12, sample_ids=range(12), dataset_seed=5)
+        self.assertNotEqual(other_n["manifest"]["dataset_sha256"], self.data["manifest"]["dataset_sha256"])
+
+    def test_manifest_contract(self) -> None:
+        with self.assertRaises(ValueError):
+            verify_dataset({"schema": "other"}, self.data)
+        bad = dict(self.data["manifest"], config_sha256="0" * 64)
+        with self.assertRaises(ValueError):
+            verify_dataset(bad, self.data)
+        for ids in ([], [1, 1], [-1]):
+            with self.assertRaises((ValueError, TypeError)):
+                generate_dataset(TRI, n=8, sample_ids=ids, dataset_seed=0)
+        with self.assertRaises(TypeError):
+            generate_dataset({"domain": "triangle_dirichlet"}, n=8, sample_ids=[0], dataset_seed=0)
+        self.assertEqual(dataset_manifest(TRI, self.data, dataset_seed=5), self.data["manifest"])
+
+
+class TestSplitAndLoader(unittest.TestCase):
+    def test_leakage_safe_split_and_dataloader(self) -> None:
+        data = generate_dataset(TRI, n=12, sample_ids=range(20), dataset_seed=1)
+        ds = HeatOperatorDataset(data)
+        train, val = split_dataset_by_trajectory(ds, val_fraction=0.25, seed=0)
+        self.assertEqual(len(train) + len(val), 20)
+        self.assertEqual(summarize_group_split(train, val)["overlap_trajectory_ids"], [])
+        batch = next(iter(DataLoader(train, batch_size=4)))
+        self.assertEqual(tuple(batch["u0"].shape), (4, data["lattice"].num_nodes))
+        self.assertEqual(batch["u0"].dtype, torch.float64)
+        with self.assertRaises(ValueError):
+            HeatOperatorDataset(dict(data, uT=data["uT"][:-1]))
+
+
+class TestMetrics(unittest.TestCase):
+    def test_simple_values(self) -> None:
+        lat = triangle_hex_lattice(16)
+        truth = np.stack([LameMode(1, 1).evaluate(lat.coords), LameMode(1, 2, "cos").evaluate(lat.coords)])
+        for fn in (relative_l2, relative_h1_seminorm, relative_max):
+            with self.subTest(metric=fn.__name__):
+                np.testing.assert_allclose(fn(truth, truth, lat), 0.0, atol=1e-15)
+                np.testing.assert_allclose(fn(1.1 * truth, truth, lat), 0.1, rtol=1e-12)
+        report = evaluate_predictions(0.9 * truth, truth, lat)
+        self.assertEqual(sorted(report), ["rel_h1", "rel_l2", "rel_max"])
+        np.testing.assert_allclose(report["rel_l2"], [0.1, 0.1], rtol=1e-12)
+
+    def test_h1_is_the_energy_form_with_dirichlet_edges(self) -> None:
+        lat = triangle_hex_lattice(13)
+        v = np.random.default_rng(3).standard_normal(lat.num_nodes)
+        total = 0.0
+        for row in range(lat.num_nodes):
+            for slot in range(6):
+                j = lat.neighbors[row, slot]
+                if j < 0:
+                    total += v[row] ** 2  # edge to a Dirichlet node (value 0), seen once
+                elif j > row:
+                    total += (v[row] - v[j]) ** 2
+        energy = task._energy_seminorm(v[None], lat)[0] ** 2
+        self.assertAlmostEqual(energy, total / math.sqrt(3.0), delta=1e-9 * energy)
+        phi = LameMode(1, 1).evaluate(lat.coords)
+        h1_sq = task._energy_seminorm(phi[None], lat)[0] ** 2
+        self.assertAlmostEqual(h1_sq / (lat.cell_area * float(phi @ phi)), LameMode(1, 1).discrete_eigenvalue(lat.h),
+                               delta=1e-9)
+        torus = torus_hex_lattice(12)
+        w = TorusMode(1, 1).evaluate(torus.coords)
+        self.assertAlmostEqual(-torus.cell_area * float(w @ apply_hex_laplacian(w, torus)),
+                               task._energy_seminorm(w[None], torus)[0] ** 2, places=9)
+
+    def test_fail_closed(self) -> None:
+        lat = triangle_hex_lattice(8)
+        good = LameMode(1, 1).evaluate(lat.coords)
+        for pred, truth in ((good[:-1], good), (np.full_like(good, np.nan), good), (good, np.zeros_like(good))):
+            for fn in (relative_l2, relative_h1_seminorm, relative_max):
+                with self.subTest(metric=fn.__name__), self.assertRaises(ValueError):
+                    fn(pred, truth, lat)
+
+
+class TestMechanisticBaseline(unittest.TestCase):
+    def test_second_order_in_space_and_time(self) -> None:
+        errors = []
+        for n, steps in ((16, 4), (32, 8), (64, 16)):
+            data = generate_dataset(TRI, n=n, sample_ids=range(3), dataset_seed=9)
+            preds, infos = zip(*(mechanistic_baseline(TRI, u0, data["lattice"], steps=steps) for u0 in data["u0"]))
+            errors.append(float(np.mean(relative_l2(np.stack(preds), data["uT"], data["lattice"]))))
+            self.assertEqual(infos[0]["n"], n)
+            self.assertGreaterEqual(infos[0]["wall_time_s"], 0.0)
+            self.assertGreater(infos[0]["cg_iterations"], 0)
+        for coarse, fine in zip(errors, errors[1:]):
+            self.assertAlmostEqual(math.log2(coarse / fine), 2.0, delta=0.1)
+
+    def test_torus_baseline_and_contract(self) -> None:
+        data = generate_dataset(TORUS, n=16, sample_ids=[0], dataset_seed=2)
+        pred, _ = mechanistic_baseline(TORUS, data["u0"][0], data["lattice"], steps=8)
+        self.assertLess(relative_l2(pred, data["uT"][0], data["lattice"])[0], 0.05)
+        with self.assertRaises(ValueError):
+            mechanistic_baseline(TRI, data["u0"][0], data["lattice"], steps=8)
+        tri = generate_dataset(TRI, n=8, sample_ids=[0], dataset_seed=2)
+        for steps, exc in ((0, ValueError), (-1, ValueError), (2.0, TypeError)):
+            with self.subTest(steps=steps), self.assertRaises(exc):
+                mechanistic_baseline(TRI, tri["u0"][0], tri["lattice"], steps=steps)
+
+
+if __name__ == "__main__":
+    unittest.main()

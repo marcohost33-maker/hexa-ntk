@@ -5,6 +5,16 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Phase-1-Instrumente (#60, 2026-10-07).** Ohne Modell und ohne Training:
+  Crank-Nicolson mit warm gestartetem CG im Loeser (exakter Verstaerkungsfaktor auf
+  Eigenvektoren, Ordnung 2 in der Zeit, unbedingt L2-stabil, massenerhaltend auf dem Torus);
+  Aufgabe T1 `hex-heat-operator` (`spec/HEAT_OPERATOR_TASK_v1.md`): exakte Wahrheit aus der
+  Eigenfunktionsbasis ((m,n)/(n,m) als ein Eigenraum per Gram-Rang geprueft), Seeds je
+  `sample_id`, Manifest mit SHA-256, Integritaet vs. Reproduzierbarkeit getrennt, Split ueber
+  `dataset_split_hex_v3` (Integrationsbefund: der Splitter verlangt das `samples`-Attribut),
+  Metriken rel. L2/H1(Energieform)/Max, Baseline zweiter Ordnung. Vorregistrierung als DRAFT.
+  _Evidenz:_ `results/2026-10-07_phase1-instruments_local-gate.log`.
+
 - [x] **Reality Anchor Phase 0b: `hex-heat-torus` + `hex-mms-tri`, Loeserschicht (#60, W1-K08,
   2026-10-07).** Damit ist Phase 0 komplett (0a + 0b). Neue mechanistische Schicht
   `hex_fv_solver_hex_v3.py` (`spec/HEX_FV_SOLVER_v1.md`): Dreieck-Dirichlet- und periodisches
@@ -172,13 +182,13 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Offen
 
-- [ ] **Reality Anchor Phase 1 (#60).** Vorregistrierung (Splits, >= 5 Seeds, Metriken: relativer
-  L2 mit Zellflaechen, relative H1-Seminorm, Max-Norm; OOD-Achsen Aufloesung N=32 -> 16/64/128 und
-  BC-Familie Dirichlet -> periodisch; 95-%-Bootstrap-KI + IQM; gehasht vor jedem Tuning), dann
-  GINO (`neuraloperator`, MIT) gegen den verifizierten mechanistischen Loeser
-  `hex_fv_solver_hex_v3` nach McGreivy & Hakim (gleiche Genauigkeit oder gleiche Laufzeit,
-  Kosten-Genauigkeits-Kurve inkl. Datengenerierung und Training). Neue Abhaengigkeit
-  `neuraloperator` und Vorregistrierungs-Inhalte -> Owner-Freigabe vor dem ersten Training.
+- [ ] **Reality Anchor Phase 1 (#60): Owner-Freigabe der Vorregistrierung.**
+  `spec/PREREGISTRATION_PHASE1_v1.md` ist ein DRAFT mit den Entscheidungen D1-D8 (Aufgaben-Konfig,
+  Seeds, Stichprobengroessen, GINO-Raster/Budget, Hardware, BC-Achse nur periodisch in v1,
+  optionale Abhaengigkeit `neuraloperator==2.0.0`, Lizenzanfrage GAOT/GINOT). Erst nach Freigabe:
+  Datensaetze mit Manifest erzeugen, GINO-Raster auf Validierung, 5 Seeds, Testsets einmal,
+  Kosten-Genauigkeits-Kurve der Baseline, Bericht mit IQM + Bootstrap-KI. Neumann-Achse braeuchte
+  ein Neumann-Gitter im Loeser (v2).
 - [ ] **ReferenceSpec v1 (#33), Review-Befund.** `ConvergenceStudy.observed_order` wird nur auf
   endlich/positiv geprueft, nicht gegen die Werte der Levels nachgerechnet; ein Aufrufer kann eine
   Ordnung behaupten, die die Daten nicht tragen. Vorschlag: bei konstantem r und >= 3 Levels

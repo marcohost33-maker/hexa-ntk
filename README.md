@@ -52,18 +52,19 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 |---|---|---|
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
-| Provenance | `python scripts/verify_sources.py` | 32 Toolkit- + 7 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 637 Tests, OK, exit 0 (Skips je Plattform: Gate-Log) |
+| Provenance | `python scripts/verify_sources.py` | 34 Toolkit- + 9 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 659 Tests, OK, exit 0 (Skips je Plattform: Gate-Log) |
 | Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
-| Mutation | `python scripts/mutation_probe.py` | 43/43 Mutanten getoetet (Baseline gruen), exit 0 — Lauf 2026-10-07 unter Linux. Unter Windows ist M02 nicht messbar (Testklasse POSIX-only, alle skipped; Lauf 2026-09-28 dort: 21/22, exit 1) |
+| Mutation | `python scripts/mutation_probe.py` | 49/49 Mutanten getoetet (Baseline gruen), exit 0 — Lauf 2026-10-07 unter Linux. Unter Windows ist M02 nicht messbar (Testklasse POSIX-only, alle skipped; Lauf 2026-09-28 dort: 21/22, exit 1) |
 
 Lokale Umgebung dieses Laufs: Linux (Cloud-Container), Python 3.12.3, `torch` 2.6.0+cu124
 (PyPI-Wheel, CPU-Ausfuehrung ohne CUDA-Geraet; der CPU-Index download.pytorch.org war aus dem
 Container gesperrt), `numpy` 2.5.3; Stand: Zweig `claude/hexa-ntk-project-overview-mzkd4p` auf
-`main` bb4f986 (Issue #59, ReferenceSpec #33, Reality Anchor Phase 0). Die CI faehrt dieselbe
-Kette auf **Python 3.12** mit `torch==2.6.0` (CPU-Wheel, Linux). Log:
-`results/2026-10-07_phase0b_local-gate.log` (Commit-SHA, Kommandos, Exit-Codes, Zahlen);
-Vorlaeufe: `results/2026-10-07_phase0-hex-heat-tri_local-gate.log`, `results/2026-10-07_issue59_local-gate.log`. Letzter Windows-Lauf (Integration #58):
+`main` bb4f986 (Issue #59, ReferenceSpec #33, Reality Anchor Phase 0, Phase-1-Instrumente). Die CI
+faehrt dieselbe Kette auf **Python 3.12** mit `torch==2.6.0` (CPU-Wheel, Linux). Log:
+`results/2026-10-07_phase1-instruments_local-gate.log` (Commit-SHA, Kommandos, Exit-Codes, Zahlen);
+Vorlaeufe: `results/2026-10-07_phase0b_local-gate.log`, `results/2026-10-07_phase0-hex-heat-tri_local-gate.log`,
+`results/2026-10-07_issue59_local-gate.log`. Letzter Windows-Lauf (Integration #58):
 `results/2026-10-05_integration-r3_local-gate.log`; fruehere Integrationslaeufe:
 `results/2026-10-05_integration-r2_local-gate.log`, `results/2026-10-05_integration_local-gate.log`.
 Vorlauf 2026-09-28: `results/2026-09-28_codex46-review_local-gate.log`. Fruehere Laeufe
@@ -106,10 +107,11 @@ in `spec/`, offene Lint-/Test-Schuld in `docs/ROADMAP.md`.
 
 - **Engine:** `src/hexantk_v3.py` (1772 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
   Train-Step, Operator-Vertraege, 26 Selftests inline)
-- **Toolkit:** `src/toolkit/` — 14 Module + 18 Testmodule (Benchmark, Checkpoint-Integration,
+- **Toolkit:** `src/toolkit/` — 15 Module + 19 Testmodule (Benchmark, Checkpoint-Integration,
   Dataloader-Utils, Dataset-Split, EMA, Failure-Signature, Hex-FV-Loeser, Operator-Adapter,
-  Phase-0-Referenzfaelle, ReferenceSpec, Resume-Utils, Runner, Stress, Warmstart-Utils; dazu die
-  Tests des Provenance-Gates, des DCP-Bundle-Protokolls und des Zeitschritt-Vertrags)
+  Phase-0-Referenzfaelle, Phase-1-Aufgabe T1, ReferenceSpec, Resume-Utils, Runner, Stress,
+  Warmstart-Utils; dazu die Tests des Provenance-Gates, des DCP-Bundle-Protokolls und des
+  Zeitschritt-Vertrags)
 
 ## Reality Anchor Phase 0: Referenzfaelle (#60)
 
@@ -134,8 +136,27 @@ nicht-konservativer Operator und falscher Torus-Umbruch fallen durch; das arithm
 der Knoten-kappa (ebenfalls zweiter Ordnung) besteht. Positivitaets-Gate auf dem
 assemblierten Operator (#60 Punkt 1): Vorzeichenstruktur + `dt <= min 1/|diag|`, sonst
 `ValueError`. Evidenz: `python scripts/oracles/hex_phase0_reference_oracle.py` ->
-`results/2026-10-07_phase0_reference.json`. Kein Lern-Backend vor gruener Phase 0 (#60);
-naechster Schritt Phase 1 (Vorregistrierung gehasht vor jedem Tuning, GINO gegen diesen Loeser).
+`results/2026-10-07_phase0_reference.json`. Kein Lern-Backend vor gruener Phase 0 (#60).
+
+## Phase 1: Instrumente und Vorregistrierung (Entwurf)
+
+Vor jedem Training festgelegt, ohne Modell und ohne Lern-Claim:
+
+- **Aufgabe T1 `hex-heat-operator`** (`spec/HEAT_OPERATOR_TASK_v1.md`,
+  `src/toolkit/heat_operator_task_hex_v3.py`): Waerme-Halbgruppe `u0 -> u(T)` auf dem
+  Dirichlet-Dreieck (ID) und dem Hex-Torus (OOD BC-Familie). Exakte Wahrheit aus der
+  Eigenfunktionsbasis (15 bzw. 40 Moden, spektraler Prior, Seeds je `sample_id`, also
+  aufloesungsunabhaengig); ID-Manifest mit SHA-256 je Sample und Datensatz; getrennte Pruefung
+  von Integritaet (Bytes) und Reproduzierbarkeit (Neugenerierung, 1e-12 - plattformuebergreifende
+  Bitgleichheit wird nicht versprochen). Metriken relativ L2 (Zellflaechen), relativ H1
+  (Energieform des verifizierten Operators, Dirichlet-Kanten inklusive), relativ Max.
+- **Mechanistische Baseline**: Crank-Nicolson mit warm gestartetem CG (`HEX_FV_SOLVER_v1` §4),
+  verifiziert zweiter Ordnung in Raum und Zeit (rel. L2 2.2e-2 -> 5.4e-3 -> 1.3e-3 -> 3.3e-4).
+- **Vorregistrierung** `spec/PREREGISTRATION_PHASE1_v1.md`: **DRAFT, nicht bindend**. Bindend erst
+  nach Owner-Freigabe (Entscheidungen D1-D8); bis dahin kein Training/Tuning auf T1-Daten.
+  GINO (`neuraloperator==2.0.0`, MIT, auf PyPI verifiziert) gegen diese Baseline nach
+  McGreivy & Hakim (gleiche Laufzeit / gleiche Genauigkeit, Kosten-Genauigkeits-Kurve,
+  Break-even inkl. Training und Datengenerierung), >= 5 Seeds, IQM + stratifiziertes Bootstrap.
 
 ## Reproduzieren
 
@@ -147,8 +168,8 @@ python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/wh
 python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 637 Unit-Tests (2026-10-07) + Coverage-Gate
-python scripts/mutation_probe.py                               # optional: 43 Mutanten der Review-Fixes
+python -m coverage report                                      # 659 Unit-Tests (2026-10-07) + Coverage-Gate
+python scripts/mutation_probe.py                               # optional: 49 Mutanten der Review-Fixes
 python scripts/oracles/hex_phase0_reference_oracle.py         # Phase-0-Referenzfaelle (exit 0 = alle Gates gruen)
 ```
 
@@ -157,7 +178,7 @@ den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (637, Stand 2026-10-07) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (659, Stand 2026-10-07) unter Branch-Coverage.
 
 ## Struktur
 

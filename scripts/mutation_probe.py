@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """mutation_probe.py - reproducible mutation probe for the 2026-09-27 review fixes.
 
-Each mutant reverts one fix (issues #40, #42, #59, the #60 reference cases and
-solver layer, and the review findings) in place in a toolkit module (or, for a
-path with a "/", a repo-relative file such as an oracle under scripts/), runs
-the named test class, and restores the file. A mutant must turn its test class
-red ("KILLED"); a surviving mutant means the tests do not pin that fix.
+Each mutant reverts one fix (issues #40, #42, #59, the #60 reference cases,
+solver layer and Phase 1 instruments, and the review findings) in place in a
+toolkit module (or, for a path with a "/", a repo-relative file such as an
+oracle under scripts/), runs the named test class, and restores the file. A
+mutant must turn its test class red ("KILLED"); a surviving mutant means the
+tests do not pin that fix.
 
 Why this script exists: earlier ROADMAP entries cited "11/11 mutants" and
 "600/600 differential" from scripts that never entered the repo (issue #40
@@ -48,6 +49,7 @@ RU = "runner_hex_v3.py"
 DCP = "scripts/oracles/distributed_checkpoint_bundle_v1.py"
 RC = "reference_case_hex_v3.py"
 FV = "hex_fv_solver_hex_v3.py"
+T1 = "heat_operator_task_hex_v3.py"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -179,6 +181,20 @@ MUTANTS = (
     Mutant(RC, "        criteria[\"C10_conservation\"] = all(level[\"conservation_residual\"] <= _CONSERVATION_TOL for "
                "level in levels)\n",
            "        criteria[\"C10_conservation\"] = True\n", "test_reference_case_hex_v3.TestHexHeatTorusStudyGate"),
+    # Phase 1 instruments (T1 hex-heat-operator, Crank-Nicolson baseline).
+    Mutant(FV, "    half = 0.5 * dt\n", "    half = dt\n", "test_hex_fv_solver_hex_v3.TestCrankNicolson"),
+    Mutant(FV, "        r = rhs - np.asarray(apply_a(x), dtype=np.float64)\n", "        r = rhs.copy()\n",
+           "test_hex_fv_solver_hex_v3.TestConjugateGradient"),
+    Mutant(T1, "            for n in range(m, bound + 1):\n", "            for n in range(1, bound + 1):\n",
+           "test_heat_operator_task_hex_v3.TestBasis"),
+    Mutant(T1, "    sigma = (eigenvalues.min() / eigenvalues) ** float(config.spectral_decay)\n",
+           "    sigma = (eigenvalues.min() / eigenvalues) ** 0.0\n",
+           "test_heat_operator_task_hex_v3.TestPriorAndTruth"),
+    Mutant(T1, "    digest.update(np.ascontiguousarray(u_t, dtype=\"<f8\").tobytes())\n", "",
+           "test_heat_operator_task_hex_v3.TestManifest"),
+    Mutant(T1, "    values = [-lattice.cell_area * float(row @ apply_hex_laplacian(row, lattice)) for row in v]\n",
+           "    values = [lattice.cell_area * float(row @ row) for row in v]\n",
+           "test_heat_operator_task_hex_v3.TestMetrics"),
 )
 
 

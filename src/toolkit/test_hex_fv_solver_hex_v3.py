@@ -21,6 +21,7 @@ from hex_fv_solver_hex_v3 import (
     apply_hex_laplacian,
     assemble_hex_operator,
     conjugate_gradient,
+    crank_nicolson_heat,
     edge_conductances,
     explicit_euler_heat,
     positivity_max_dt,
@@ -342,6 +343,70 @@ class TestPositivityGateIssue60(unittest.TestCase):
                 explicit_euler_heat(u0, lat, **kwargs)
 
 
+def _lame_fundamental(lat):
+    """Lame mode (1,1,sin) on the triangle lattice and its discrete eigenvalue (exact eigenvector)."""
+    k = 2 * math.pi * np.array([1.0, 1 / _SQRT3])
+    rotations = [np.array([[math.cos(t), -math.sin(t)], [math.sin(t), math.cos(t)]])
+                 for t in (0, 2 * math.pi / 3, 4 * math.pi / 3)]
+    phi = sum(np.sin(lat.coords @ (g @ k)) for g in rotations)
+    phi -= sum(np.sin(lat.coords @ (g @ np.array([k[0], -k[1]]))) for g in rotations)
+    lam_h = 16 / (3 * lat.h**2) * math.sin(math.pi * lat.h) ** 2
+    return phi, lam_h
+
+
+class TestCrankNicolson(unittest.TestCase):
+    def test_one_step_factor_on_exact_eigenvectors(self) -> None:
+        tri = triangle_hex_lattice(24)
+        phi, lam_h = _lame_fundamental(tri)
+        torus = torus_hex_lattice(24)
+        k = 2 * math.pi * np.array([1.0, 2 / _SQRT3])
+        wave = np.cos(torus.coords @ k)
+        lam_t = 8 / (3 * torus.h**2) * sum(math.sin(torus.h * float(k @ fv.SLOT_DIRECTIONS[s]) / 2) ** 2
+                                           for s in range(3))
+        for lat, mode, lam in ((tri, phi, lam_h), (torus, wave, lam_t)):
+            for dt in (1e-4, 1e-2):
+                with self.subTest(domain=lat.domain, dt=dt):
+                    u, info = crank_nicolson_heat(mode, lat, kappa=1.0, dt=dt, steps=5)
+                    factor = (1 - dt * lam / 2) / (1 + dt * lam / 2)
+                    np.testing.assert_allclose(u, factor**5 * mode, atol=1e-10 * np.max(np.abs(mode)))
+                    self.assertEqual(info["steps"], 5)
+                    self.assertLessEqual(info["max_relative_residual"], 1e-12)
+
+    def test_second_order_in_time(self) -> None:
+        lat = triangle_hex_lattice(16)
+        phi, lam_h = _lame_fundamental(lat)
+        t_final = 0.02
+        errors = []
+        for steps in (4, 8, 16, 32):
+            u, _ = crank_nicolson_heat(phi, lat, kappa=1.0, dt=t_final / steps, steps=steps)
+            errors.append(np.linalg.norm(u - math.exp(-lam_h * t_final) * phi))
+        orders = [math.log2(a / b) for a, b in zip(errors, errors[1:])]
+        for order in orders[-2:]:
+            self.assertAlmostEqual(order, 2.0, delta=0.05)
+
+    def test_unconditionally_l2_stable_and_conservative(self) -> None:
+        lat = torus_hex_lattice(16)
+        c = edge_conductances(lat, _smooth_kappa)
+        u0 = np.random.default_rng(7).standard_normal(lat.num_nodes)
+        dt = 100 * positivity_max_dt(*assemble_hex_operator(lat, c))  # far beyond any explicit bound
+        u, info = crank_nicolson_heat(u0, lat, kappa=c, dt=dt, steps=20)
+        self.assertLessEqual(np.linalg.norm(u), np.linalg.norm(u0))
+        self.assertAlmostEqual(float(u.sum()), float(u0.sum()), delta=1e-9 * float(np.abs(u0).sum()))
+        self.assertGreater(info["cg_iterations"], 0)
+
+    def test_zero_steps_and_contract(self) -> None:
+        lat = triangle_hex_lattice(6)
+        u0 = np.arange(lat.num_nodes, dtype=float)
+        u, info = crank_nicolson_heat(u0, lat, kappa=1.0, dt=1e-3, steps=0)
+        np.testing.assert_array_equal(u, u0)
+        self.assertEqual(info, {"steps": 0, "cg_iterations": 0, "max_relative_residual": 0.0})
+        for kwargs, exc in (({"kappa": 1.0, "dt": 0.0, "steps": 1}, ValueError),
+                            ({"kappa": 1.0, "dt": 1e-3, "steps": -1}, ValueError),
+                            ({"kappa": -1.0, "dt": 1e-3, "steps": 1}, ValueError)):
+            with self.subTest(kwargs=kwargs), self.assertRaises(exc):
+                crank_nicolson_heat(u0, lat, **kwargs)
+
+
 class TestConjugateGradient(unittest.TestCase):
     @staticmethod
     def _spd(n: int, seed: int) -> np.ndarray:
@@ -356,6 +421,20 @@ class TestConjugateGradient(unittest.TestCase):
         self.assertLessEqual(info["relative_residual"], 1e-13)
         self.assertLessEqual(np.linalg.norm(b - a @ x), 2e-13 * np.linalg.norm(b))
         self.assertGreater(info["iterations"], 0)
+
+    def test_warm_start_converges_with_fewer_iterations(self) -> None:
+        a = self._spd(50, 3)
+        b = np.random.default_rng(4).standard_normal(50)
+        cold, info_cold = conjugate_gradient(lambda v: a @ v, b, rtol=1e-12, maxiter=500)
+        near = cold + 1e-6 * np.random.default_rng(5).standard_normal(50)
+        warm, info_warm = conjugate_gradient(lambda v: a @ v, b, rtol=1e-12, maxiter=500, x0=near)
+        np.testing.assert_allclose(warm, cold, rtol=1e-9, atol=1e-11)
+        self.assertLess(info_warm["iterations"], info_cold["iterations"])
+        exact = np.linalg.solve(a, b)
+        _, info_done = conjugate_gradient(lambda v: a @ v, b, rtol=1e-8, maxiter=5, x0=exact)
+        self.assertEqual(info_done["iterations"], 0)
+        with self.assertRaises(ValueError):
+            conjugate_gradient(lambda v: a @ v, b, rtol=1e-8, maxiter=5, x0=np.ones(49))
 
     def test_zero_rhs_returns_zero_without_iterations(self) -> None:
         x, info = conjugate_gradient(lambda v: v, np.zeros(5), rtol=1e-10, maxiter=1)

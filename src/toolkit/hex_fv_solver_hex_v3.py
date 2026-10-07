@@ -34,6 +34,7 @@ __all__ = [
     "assemble_hex_operator",
     "positivity_max_dt",
     "explicit_euler_heat",
+    "crank_nicolson_heat",
     "conjugate_gradient",
     "solve_steady_diffusion",
 ]
@@ -373,11 +374,14 @@ def conjugate_gradient(
     *,
     rtol: float,
     maxiter: int,
+    x0: Any = None,
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """Solve A x = b for symmetric positive definite A, ||b - A x|| <= rtol ||b||.
 
-    Fail-closed: non-positive curvature -> ValueError (A is not SPD); no
-    convergence within maxiter or a non-finite iterate -> ConvergenceError.
+    ``x0`` is an optional initial guess (warm start); the stopping rule stays
+    relative to ||b||. Fail-closed: non-positive curvature -> ValueError (A is
+    not SPD); no convergence within maxiter or a non-finite iterate ->
+    ConvergenceError.
     """
     if not callable(apply_a):
         raise TypeError("apply_a must be callable")
@@ -389,12 +393,20 @@ def conjugate_gradient(
         raise ValueError("rtol must be < 1")
     maxiter = _int_at_least(maxiter, name="maxiter", minimum=1)
     b_norm = float(np.linalg.norm(rhs))
-    x = np.zeros_like(rhs)
     if b_norm == 0.0:
-        return x, {"iterations": 0, "relative_residual": 0.0}
-    r = rhs.copy()
-    p = r.copy()
+        return np.zeros_like(rhs), {"iterations": 0, "relative_residual": 0.0}
+    if x0 is None:
+        x = np.zeros_like(rhs)
+        r = rhs.copy()
+    else:
+        x = np.array(x0, dtype=np.float64)
+        if x.shape != rhs.shape or not np.all(np.isfinite(x)):
+            raise ValueError("x0 must be a finite array with the shape of b")
+        r = rhs - np.asarray(apply_a(x), dtype=np.float64)
     rr = float(r @ r)
+    if math.sqrt(rr) <= rtol * b_norm:
+        return x, {"iterations": 0, "relative_residual": math.sqrt(rr) / b_norm}
+    p = r.copy()
     for iteration in range(1, maxiter + 1):
         ap = np.asarray(apply_a(p), dtype=np.float64)
         curvature = float(p @ ap)
@@ -412,6 +424,48 @@ def conjugate_gradient(
         p = r + (rr_new / rr) * p
         rr = rr_new
     raise ConvergenceError(f"conjugate_gradient: no convergence to rtol={rtol!r} in {maxiter} iterations")
+
+
+def crank_nicolson_heat(
+    u0: Any,
+    lattice: HexLattice,
+    *,
+    kappa: Coefficient,
+    dt: float,
+    steps: int,
+    rtol: float = 1e-12,
+    maxiter: int | None = None,
+) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """Crank-Nicolson for u_t = L_c u (spec section 4):
+
+        (I - dt/2 L_c) u^{n+1} = (I + dt/2 L_c) u^n,
+
+    each step solved with CG warm-started from u^n. The left operator is SPD
+    for every dt > 0 on both lattices, so the scheme is unconditionally L2
+    stable and second order in time; it is NOT positivity preserving.
+    Returns (u, info) with the total CG iterations and the worst relative
+    residual over all steps.
+    """
+    lattice = _check_lattice(lattice)
+    u = _check_field(u0, lattice, name="u0").copy()
+    dt = _positive_finite(dt, name="dt")
+    steps = _int_at_least(steps, name="steps", minimum=0)
+    diag, off = assemble_hex_operator(lattice, kappa)
+    nb = lattice.neighbors
+    half = 0.5 * dt
+    limit = 10 * lattice.num_nodes + 100 if maxiter is None else maxiter
+
+    def lhs(v: np.ndarray) -> np.ndarray:
+        return v - half * _apply_assembled(diag, off, nb, v)
+
+    iterations = 0
+    worst = 0.0
+    for _ in range(steps):
+        rhs = u + half * _apply_assembled(diag, off, nb, u)
+        u, info = conjugate_gradient(lhs, rhs, rtol=rtol, maxiter=limit, x0=u)
+        iterations += info["iterations"]
+        worst = max(worst, info["relative_residual"])
+    return u, {"steps": steps, "cg_iterations": iterations, "max_relative_residual": worst}
 
 
 def solve_steady_diffusion(

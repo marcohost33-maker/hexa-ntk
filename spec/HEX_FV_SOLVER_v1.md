@@ -89,6 +89,22 @@ forward-Euler step maps non-negative states to non-negative states.
 - **Conductance array:** only the positivity bound of the assembled operator
   applies. The engine's L2 bound covers the constant-coefficient stencil only.
 
+**Crank-Nicolson** (`crank_nicolson_heat`, added for the Phase 1 baseline):
+
+    (I - dt/2 L_c) u^{n+1} = (I + dt/2 L_c) u^n
+
+- Each step is solved with CG (`rtol`, default `1e-12`), warm-started from `u^n`.
+- `I - dt/2 L_c` is SPD for every `dt > 0` on both lattices, so the scheme is
+  unconditionally L2 stable and second order in time.
+- It is NOT positivity preserving. Use explicit Euler with the gate when
+  positivity is required.
+- On an exact discrete eigenvector with eigenvalue `-lambda_h`, one step
+  multiplies by `(1 - dt lambda_h / 2) / (1 + dt lambda_h / 2)`. The tests
+  check this factor.
+- This is the efficient implicit method that the Phase 1 baseline needs
+  (McGreivy & Hakim, rule 2). Explicit Euler, with `dt = O(h^2)`, would be a
+  weak baseline.
+
 ## 5. Linear solves
 
 `conjugate_gradient` is used for symmetric positive definite operators only.
@@ -101,6 +117,8 @@ forward-Euler step maps non-negative states to non-negative states.
   - exceeding `maxiter` raises `ConvergenceError`;
   - a non-finite iterate raises `ConvergenceError`.
 - It returns the iteration count and the achieved relative residual.
+- An optional initial guess `x0` (warm start) does not change the stopping
+  rule. If `x0` already satisfies the rule, CG returns after 0 iterations.
 
 `solve_steady_diffusion` solves `-L_c u = f`:
 - **Triangle:** solved with CG.

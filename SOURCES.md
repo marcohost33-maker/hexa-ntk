@@ -481,3 +481,16 @@
 | CA7F77E711CF94FC | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: test_hex_fv_solver_hex_v3.py |
 | 6E97268A81CF9B9D | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: reference_case_hex_v3.py |
 | 932549A2E8F158FC | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: test_reference_case_hex_v3.py |
+
+## Phase 1 instruments: Crank-Nicolson, T1 task, preregistration draft (#60) (append-only, 2026-10-07, claude/hexa-ntk-project-overview-mzkd4p)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| F9D54B4D541B71ED | 2026-10-07 00:00 | scripts | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: mutation_probe.py |
+| 7AF057326D34E5D9 | 2026-10-07 00:00 | spec | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: HEX_FV_SOLVER_v1.md |
+| CFED3030667A3155 | 2026-10-07 00:00 | spec | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: HEAT_OPERATOR_TASK_v1.md |
+| 599E9065E77427F7 | 2026-10-07 00:00 | spec | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: PREREGISTRATION_PHASE1_v1.md |
+| C79474FB3B42A241 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: hex_fv_solver_hex_v3.py |
+| 1FC5DA42498FCF93 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: test_hex_fv_solver_hex_v3.py |
+| C11A3434A3C95697 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: heat_operator_task_hex_v3.py |
+| 57B53E08ECBFAE83 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: test_heat_operator_task_hex_v3.py |
