@@ -432,3 +432,12 @@
 | 137812E571113CFC | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: test_benchmark_hex_v3.py |
 | 76572D45CAC3C78B | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: test_dataset_split_hex_v3.py |
 | B050C6EBDAD7E045 | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: test_distributed_checkpoint_bundle_v1.py |
+
+
+## src/toolkit/ — ReferenceSpec v1 2026-09-23 (append-only)
+
+> New in-repo ReferenceSpec implementation and contract tests. SHA prefixes are
+> filled from the fail-closed provenance gate before review readiness.
+
+| 892D90A81D2DE830 | 2026-09-23 00:00 | src/toolkit | in-repo created, ReferenceSpec v1: reference_spec_hex_v3.py |
+| 74158FD15466A368 | 2026-09-23 00:00 | src/toolkit | in-repo created, ReferenceSpec v1 tests: test_reference_spec_hex_v3.py |
