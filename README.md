@@ -52,7 +52,7 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 |---|---|---|
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
-| Provenance | `python scripts/verify_sources.py` | 34 Toolkit- + 9 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
+| Provenance | `python scripts/verify_sources.py` | 36 Toolkit- + 10 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
 | Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 668 Tests, OK, exit 0 (Skips je Plattform: Gate-Log) |
 | Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
 | Mutation | `python scripts/mutation_probe.py` | 49/49 Mutanten getoetet (Baseline gruen), exit 0 — Lauf 2026-10-07 unter Linux. Unter Windows ist M02 nicht messbar (Testklasse POSIX-only, alle skipped; Lauf 2026-09-28 dort: 21/22, exit 1) |
@@ -107,7 +107,7 @@ in `spec/`, offene Lint-/Test-Schuld in `docs/ROADMAP.md`.
 
 - **Engine:** `src/hexantk_v3.py` (1772 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
   Train-Step, Operator-Vertraege, 26 Selftests inline)
-- **Toolkit:** `src/toolkit/` — 15 Module + 19 Testmodule (Benchmark, Checkpoint-Integration,
+- **Toolkit:** `src/toolkit/` — 16 Module + 20 Testmodule (Benchmark, Checkpoint-Integration,
   Dataloader-Utils, Dataset-Split, EMA, Failure-Signature, Hex-FV-Loeser, Operator-Adapter,
   Phase-0-Referenzfaelle, Phase-1-Aufgabe T1, ReferenceSpec, Resume-Utils, Runner, Stress,
   Warmstart-Utils; dazu die Tests des Provenance-Gates, des DCP-Bundle-Protokolls und des
