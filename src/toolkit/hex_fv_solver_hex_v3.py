@@ -1,0 +1,436 @@
+"""
+hex_fv_solver_hex_v3.py
+=======================
+Mechanistic finite-volume layer on regular hex lattices (contract:
+spec/HEX_FV_SOLVER_v1.md). Verified by the Reality Anchor reference cases
+(reference_case_hex_v3.py) and meant as the mechanistic baseline of Phase 1
+(issue #60).
+
+Lattices: the unit equilateral triangle with homogeneous Dirichlet boundary
+nodes (slot -1 = boundary node with value 0) and the doubly periodic hex torus.
+Operator: two-point-flux FV Laplacian
+
+    (L_c u)_i = w * sum_s c_{i,s} (u_{n(i,s)} - u_i),   w = 2 / (3 h^2)
+
+with symmetric edge conductances c (a scalar kappa, or kappa at the edge
+midpoints). ``w`` comes from the engine's ``hex_laplacian_stencil_weight``.
+
+Claim boundary: regular lattices, scalar isotropic kappa, two-point flux. No
+irregular/anisotropic meshes, no discrete maximum principle beyond the
+positivity gate, no performance claim.
+"""
+
+from __future__ import annotations
+
+__all__ = [
+    "LATTICE_SLOTS",
+    "SLOT_DIRECTIONS",
+    "ConvergenceError",
+    "HexLattice",
+    "triangle_hex_lattice",
+    "torus_hex_lattice",
+    "edge_conductances",
+    "apply_hex_laplacian",
+    "assemble_hex_operator",
+    "positivity_max_dt",
+    "explicit_euler_heat",
+    "conjugate_gradient",
+    "solve_steady_diffusion",
+]
+
+import functools
+import importlib.util
+import math
+import numbers
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Dict, Tuple, Union
+
+import numpy as np
+
+#: Neighbour slots, counter-clockwise from east, as (di, dj) index offsets of
+#: the node x_ij = h * (i + j/2, j * sqrt(3)/2). Slot s and s + 3 are opposite.
+LATTICE_SLOTS: Tuple[Tuple[int, int], ...] = ((1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1))
+
+#: Unit vector of each slot (angle s * 60 degrees).
+SLOT_DIRECTIONS = np.array([[math.cos(s * math.pi / 3.0), math.sin(s * math.pi / 3.0)] for s in range(6)])
+SLOT_DIRECTIONS.flags.writeable = False
+
+_SQRT3 = math.sqrt(3.0)
+_DOMAINS = ("triangle_dirichlet", "torus_periodic")
+_ENGINE_PATH = Path(__file__).resolve().parents[1] / "hexantk_v3.py"
+
+Coefficient = Union[float, np.ndarray]
+
+
+class ConvergenceError(RuntimeError):
+    """An iterative solve did not reach its tolerance (fail-closed)."""
+
+
+@functools.lru_cache(maxsize=1)
+def _engine() -> Any:
+    """Load the canonical engine src/hexantk_v3.py (the code under test)."""
+    spec = importlib.util.spec_from_file_location("hexantk_v3_hex_fv_solver", _ENGINE_PATH)
+    if spec is None or spec.loader is None:  # pragma: no cover - broken checkout
+        raise ImportError(f"cannot load engine from {_ENGINE_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    # dataclasses resolve their module via sys.modules during class creation
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _int_at_least(value: Any, *, name: str, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
+        raise TypeError(f"{name} must be an int, got {value!r}")
+    if value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}, got {value!r}")
+    return int(value)
+
+
+def _positive_finite(value: Any, *, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise TypeError(f"{name} must be a real number, got {value!r}")
+    try:
+        result = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{name} must fit in a finite float") from exc
+    if not math.isfinite(result) or result <= 0.0:
+        raise ValueError(f"{name} must be finite and > 0, got {value!r}")
+    return result
+
+
+# ------------------------------------------------------------------
+# Lattices (spec section 2)
+# ------------------------------------------------------------------
+
+
+@dataclass(frozen=True, eq=False)
+class HexLattice:
+    """Unknown nodes of a regular hex lattice with spacing h = 1/n.
+
+    ``neighbors[i, s] == -1`` (triangle only) means the slot-``s`` neighbour is
+    a homogeneous Dirichlet boundary node (value 0), NOT a missing neighbour.
+    Arrays are read-only.
+    """
+
+    n: int
+    h: float
+    domain: str
+    coords: np.ndarray
+    neighbors: np.ndarray
+
+    @property
+    def num_nodes(self) -> int:
+        return int(self.coords.shape[0])
+
+    @property
+    def cell_area(self) -> float:
+        return _SQRT3 / 2.0 * self.h * self.h
+
+
+def _freeze(*arrays: np.ndarray) -> None:
+    for arr in arrays:
+        arr.flags.writeable = False
+
+
+def triangle_hex_lattice(n: int) -> HexLattice:
+    """Interior nodes of the unit equilateral triangle: i, j >= 1, i + j <= n - 1."""
+    n = _int_at_least(n, name="n", minimum=3)
+    index = np.full((n + 1, n + 1), -1, dtype=np.int64)
+    ii, jj = [], []
+    for j in range(1, n - 1):
+        for i in range(1, n - j):
+            index[i, j] = len(ii)
+            ii.append(i)
+            jj.append(j)
+    i_arr = np.asarray(ii, dtype=np.int64)
+    j_arr = np.asarray(jj, dtype=np.int64)
+    h = 1.0 / n
+    coords = np.stack([h * (i_arr + 0.5 * j_arr), h * j_arr * (_SQRT3 / 2.0)], axis=1)
+    neighbors = np.empty((i_arr.size, 6), dtype=np.int64)
+    for slot, (di, dj) in enumerate(LATTICE_SLOTS):
+        ni, nj = i_arr + di, j_arr + dj
+        interior = (ni >= 1) & (nj >= 1) & (ni + nj <= n - 1)
+        neighbors[:, slot] = np.where(interior, index[np.clip(ni, 0, n), np.clip(nj, 0, n)], -1)
+    _freeze(coords, neighbors)
+    return HexLattice(n=n, h=h, domain="triangle_dirichlet", coords=coords, neighbors=neighbors)
+
+
+def torus_hex_lattice(n: int) -> HexLattice:
+    """All n^2 nodes of the hex torus with periods (1, 0) and (0, sqrt(3)/2); n even.
+
+    Index identification (i, j) ~ (i + n, j) ~ (i - n/2, j + n).
+    """
+    n = _int_at_least(n, name="n", minimum=4)
+    if n % 2:
+        raise ValueError(f"the hex torus needs an even n (period (0, sqrt(3)/2) is (i - n/2, j + n)), got {n}")
+    i_arr, j_arr = (a.ravel() for a in np.meshgrid(np.arange(n), np.arange(n), indexing="ij"))
+    h = 1.0 / n
+    coords = np.stack([np.mod(h * (i_arr + 0.5 * j_arr), 1.0), h * j_arr * (_SQRT3 / 2.0)], axis=1)
+    neighbors = np.empty((n * n, 6), dtype=np.int64)
+    for slot, (di, dj) in enumerate(LATTICE_SLOTS):
+        ni, nj = i_arr + di, j_arr + dj
+        ni = np.where(nj == n, ni + n // 2, ni)
+        ni = np.where(nj == -1, ni - n // 2, ni)
+        nj = np.mod(nj, n)
+        neighbors[:, slot] = np.mod(ni, n) * n + nj
+    _freeze(coords, neighbors)
+    return HexLattice(n=n, h=h, domain="torus_periodic", coords=coords, neighbors=neighbors)
+
+
+def _check_lattice(lattice: Any) -> HexLattice:
+    if not isinstance(lattice, HexLattice) or lattice.domain not in _DOMAINS:
+        raise TypeError("lattice must be a HexLattice")
+    return lattice
+
+
+def _check_field(u: Any, lattice: HexLattice, *, name: str = "u") -> np.ndarray:
+    arr = np.asarray(u, dtype=np.float64)
+    if arr.shape != (lattice.num_nodes,):
+        raise ValueError(f"{name} must have shape ({lattice.num_nodes},), got {arr.shape}")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"{name} must be finite")
+    return arr
+
+
+# ------------------------------------------------------------------
+# Conductances and operator (spec section 3)
+# ------------------------------------------------------------------
+
+
+def edge_conductances(lattice: HexLattice, kappa: Callable[[np.ndarray], Any]) -> np.ndarray:
+    """kappa at every edge midpoint, exactly symmetric, as a read-only (M, 6) array.
+
+    ``kappa`` maps midpoint coordinates (K, 2) to K values; every value must be
+    finite and > 0.
+    """
+    lattice = _check_lattice(lattice)
+    if not callable(kappa):
+        raise TypeError("kappa must be callable on (K, 2) coordinates")
+    c = np.empty(lattice.neighbors.shape)
+    for slot in range(6):
+        midpoints = lattice.coords + 0.5 * lattice.h * SLOT_DIRECTIONS[slot]
+        values = np.asarray(kappa(midpoints), dtype=np.float64)
+        if values.shape != (lattice.num_nodes,):
+            raise ValueError(f"kappa must return shape ({lattice.num_nodes},), got {values.shape}")
+        c[:, slot] = values
+    # One value per interior edge: computed from slots 0-2, copied to the partner.
+    for slot in range(3):
+        rows = np.nonzero(lattice.neighbors[:, slot] >= 0)[0]
+        c[lattice.neighbors[rows, slot], slot + 3] = c[rows, slot]
+    if not np.all(np.isfinite(c)) or np.any(c <= 0.0):
+        raise ValueError("kappa must be finite and > 0 at every edge midpoint")
+    _freeze(c)
+    return c
+
+
+def _check_conductance(conductance: Any, lattice: HexLattice) -> np.ndarray:
+    c = np.asarray(conductance, dtype=np.float64)
+    if c.shape != lattice.neighbors.shape:
+        raise ValueError(f"conductance must have shape {lattice.neighbors.shape}, got {c.shape}")
+    if not np.all(np.isfinite(c)):
+        raise ValueError("conductance must be finite")
+    for slot in range(3):
+        rows = np.nonzero(lattice.neighbors[:, slot] >= 0)[0]
+        if not np.array_equal(c[rows, slot], c[lattice.neighbors[rows, slot], slot + 3]):
+            raise ValueError("conductance must be symmetric: c[i, s] == c[n(i, s), s + 3] on every edge")
+    return c
+
+
+def _coefficient(kappa: Any, lattice: HexLattice) -> Tuple[np.ndarray, bool]:
+    """Return (conductance array, is_scalar)."""
+    if isinstance(kappa, np.ndarray):
+        return _check_conductance(kappa, lattice), False
+    value = _positive_finite(kappa, name="kappa")
+    return np.full(lattice.neighbors.shape, value), True
+
+
+def apply_hex_laplacian(u: Any, lattice: HexLattice, kappa: Coefficient = 1.0) -> np.ndarray:
+    """(L_c u)_i = w * sum_s c_{i,s} (u_{n(i,s)} - u_i), u_{-1} = 0 (Dirichlet zero)."""
+    lattice = _check_lattice(lattice)
+    arr = _check_field(u, lattice)
+    c, scalar = _coefficient(kappa, lattice)
+    weight = float(_engine().hex_laplacian_stencil_weight(lattice.h))
+    nb = lattice.neighbors
+    gathered = np.where(nb >= 0, arr[np.clip(nb, 0, None)], 0.0)
+    if scalar:
+        # Constant coefficient: the 7-point form, bit-identical to Phase 0a.
+        return weight * float(kappa) * (gathered.sum(axis=1) - 6.0 * arr)
+    return weight * (c * (gathered - arr[:, None])).sum(axis=1)
+
+
+def assemble_hex_operator(lattice: HexLattice, kappa: Coefficient = 1.0) -> Tuple[np.ndarray, np.ndarray]:
+    """Assemble L_c as (diag[M], off[M, 6]).
+
+    (L_c u)_i = diag_i * u_i + sum_s off[i, s] * u_{n(i,s)}; a slot pointing to
+    a Dirichlet node carries off = 0 (its value is 0) but still contributes to
+    the diagonal.
+    """
+    lattice = _check_lattice(lattice)
+    c, scalar = _coefficient(kappa, lattice)
+    weight = float(_engine().hex_laplacian_stencil_weight(lattice.h))
+    if scalar:
+        coupling = float(kappa) * weight
+        off = np.where(lattice.neighbors >= 0, coupling, 0.0)
+        return np.full(lattice.num_nodes, -6.0 * coupling), off
+    coupling = weight * c
+    off = np.where(lattice.neighbors >= 0, coupling, 0.0)
+    return -coupling.sum(axis=1), off
+
+
+def _apply_assembled(diag: np.ndarray, off: np.ndarray, neighbors: np.ndarray, u: np.ndarray) -> np.ndarray:
+    return diag * u + (off * u[np.clip(neighbors, 0, None)]).sum(axis=1)
+
+
+# ------------------------------------------------------------------
+# Positivity gate and explicit Euler (spec section 4)
+# ------------------------------------------------------------------
+
+
+def positivity_max_dt(diag: Any, off: Any) -> float:
+    """Largest dt with u + dt * A u non-negative for every non-negative u (#60 item 1).
+
+    Gate on the ASSEMBLED operator A = (diag, off): requires a negative
+    diagonal and non-negative off-diagonals (-A is then an M-matrix), and
+    returns min_i 1 / |diag_i|, rounded so 1 + dt * diag_i >= 0 holds in
+    binary64. A violated sign structure raises ValueError (contract error).
+    Positivity only; not a discrete maximum principle for other schemes.
+    """
+    diag_arr = np.asarray(diag, dtype=np.float64)
+    off_arr = np.asarray(off, dtype=np.float64)
+    if diag_arr.ndim != 1 or diag_arr.size == 0:
+        raise ValueError("diag must be a non-empty 1-D array")
+    if off_arr.ndim != 2 or off_arr.shape[0] != diag_arr.size:
+        raise ValueError("off must have shape (len(diag), slots)")
+    if not (np.all(np.isfinite(diag_arr)) and np.all(np.isfinite(off_arr))):
+        raise ValueError("operator entries must be finite")
+    if np.any(diag_arr >= 0.0):
+        raise ValueError("positivity gate: every diagonal entry must be negative")
+    if np.any(off_arr < 0.0):
+        raise ValueError(
+            "positivity gate: negative off-diagonal entry, the assembled operator "
+            "does not have M-matrix sign structure"
+        )
+    largest = float(np.max(-diag_arr))
+    dt = 1.0 / largest
+    while 1.0 - dt * largest < 0.0:
+        dt = float(np.nextafter(dt, 0.0))
+    return dt
+
+
+def explicit_euler_heat(
+    u0: Any,
+    lattice: HexLattice,
+    *,
+    kappa: Coefficient,
+    dt: float,
+    steps: int,
+    require_positivity: bool = True,
+) -> np.ndarray:
+    """Forward Euler for u_t = L_c u, fail-closed on the step size (spec section 4).
+
+    Scalar kappa: dt must respect the positivity bound of the assembled operator
+    and the engine's hex_positivity_max_dt (or, with require_positivity=False,
+    the engine's sharp L2 bound hex_cfl_max_dt(h, kappa, safety=1)). Conductance
+    array: only the assembled positivity bound applies.
+    """
+    lattice = _check_lattice(lattice)
+    u = _check_field(u0, lattice, name="u0").copy()
+    dt = _positive_finite(dt, name="dt")
+    steps = _int_at_least(steps, name="steps", minimum=0)
+    if not isinstance(require_positivity, bool):
+        raise TypeError("require_positivity must be bool")
+    _, scalar = _coefficient(kappa, lattice)
+    diag, off = assemble_hex_operator(lattice, kappa)
+    engine = _engine()
+    if require_positivity:
+        bound = positivity_max_dt(diag, off)
+        if scalar:
+            bound = min(bound, engine.hex_positivity_max_dt(lattice.h, float(kappa)))
+        kind = "positivity"
+    elif scalar:
+        bound = engine.hex_cfl_max_dt(lattice.h, float(kappa), safety=1.0)
+        kind = "L2 stability"
+    else:
+        raise ValueError("a conductance array requires require_positivity=True (no sharp L2 bound in v1)")
+    if dt > bound:
+        raise ValueError(f"dt={dt!r} exceeds the {kind} bound {bound!r} of this operator")
+    for _ in range(steps):
+        u = u + dt * _apply_assembled(diag, off, lattice.neighbors, u)
+    return u
+
+
+# ------------------------------------------------------------------
+# Linear solves (spec section 5)
+# ------------------------------------------------------------------
+
+
+def conjugate_gradient(
+    apply_a: Callable[[np.ndarray], np.ndarray],
+    b: Any,
+    *,
+    rtol: float,
+    maxiter: int,
+) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """Solve A x = b for symmetric positive definite A, ||b - A x|| <= rtol ||b||.
+
+    Fail-closed: non-positive curvature -> ValueError (A is not SPD); no
+    convergence within maxiter or a non-finite iterate -> ConvergenceError.
+    """
+    if not callable(apply_a):
+        raise TypeError("apply_a must be callable")
+    rhs = np.asarray(b, dtype=np.float64)
+    if rhs.ndim != 1 or rhs.size == 0 or not np.all(np.isfinite(rhs)):
+        raise ValueError("b must be a non-empty finite 1-D array")
+    rtol = _positive_finite(rtol, name="rtol")
+    if rtol >= 1.0:
+        raise ValueError("rtol must be < 1")
+    maxiter = _int_at_least(maxiter, name="maxiter", minimum=1)
+    b_norm = float(np.linalg.norm(rhs))
+    x = np.zeros_like(rhs)
+    if b_norm == 0.0:
+        return x, {"iterations": 0, "relative_residual": 0.0}
+    r = rhs.copy()
+    p = r.copy()
+    rr = float(r @ r)
+    for iteration in range(1, maxiter + 1):
+        ap = np.asarray(apply_a(p), dtype=np.float64)
+        curvature = float(p @ ap)
+        if not curvature > 0.0:
+            raise ValueError("conjugate_gradient: non-positive curvature, the operator is not SPD")
+        alpha = rr / curvature
+        x = x + alpha * p
+        r = r - alpha * ap
+        rr_new = float(r @ r)
+        if not math.isfinite(rr_new):
+            raise ConvergenceError("conjugate_gradient: non-finite residual")
+        relative = math.sqrt(rr_new) / b_norm
+        if relative <= rtol:
+            return x, {"iterations": iteration, "relative_residual": relative}
+        p = r + (rr_new / rr) * p
+        rr = rr_new
+    raise ConvergenceError(f"conjugate_gradient: no convergence to rtol={rtol!r} in {maxiter} iterations")
+
+
+def solve_steady_diffusion(
+    lattice: HexLattice,
+    kappa: Coefficient,
+    source: Any,
+    *,
+    rtol: float = 1e-13,
+    maxiter: int | None = None,
+) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """Solve -L_c u = f on the Dirichlet triangle with CG (spec section 5).
+
+    The torus is refused: there -L_c has the constants as null space.
+    """
+    lattice = _check_lattice(lattice)
+    if lattice.domain != "triangle_dirichlet":
+        raise ValueError("solve_steady_diffusion supports the Dirichlet triangle only (singular on the torus)")
+    f = _check_field(source, lattice, name="source")
+    diag, off = assemble_hex_operator(lattice, kappa)
+    nb = lattice.neighbors
+    limit = 10 * lattice.num_nodes + 100 if maxiter is None else maxiter
+    return conjugate_gradient(lambda v: -_apply_assembled(diag, off, nb, v), f, rtol=rtol, maxiter=limit)

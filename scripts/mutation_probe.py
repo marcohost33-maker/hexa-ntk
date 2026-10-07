@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """mutation_probe.py - reproducible mutation probe for the 2026-09-27 review fixes.
 
-Each mutant reverts one fix (issues #40, #42, #59, the #60 reference case and
-the review findings) in place in a toolkit module (or, for a path with a "/", a
-repo-relative file such as an oracle under scripts/), runs the named test class,
-and restores the file. A
-mutant must turn its test class red ("KILLED"); a surviving mutant means the
-tests do not pin that fix.
+Each mutant reverts one fix (issues #40, #42, #59, the #60 reference cases and
+solver layer, and the review findings) in place in a toolkit module (or, for a
+path with a "/", a repo-relative file such as an oracle under scripts/), runs
+the named test class, and restores the file. A mutant must turn its test class
+red ("KILLED"); a surviving mutant means the tests do not pin that fix.
 
 Why this script exists: earlier ROADMAP entries cited "11/11 mutants" and
 "600/600 differential" from scripts that never entered the repo (issue #40
@@ -48,6 +47,7 @@ DS = "dataset_split_hex_v3.py"
 RU = "runner_hex_v3.py"
 DCP = "scripts/oracles/distributed_checkpoint_bundle_v1.py"
 RC = "reference_case_hex_v3.py"
+FV = "hex_fv_solver_hex_v3.py"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -141,8 +141,8 @@ MUTANTS = (
     Mutant(DS, 'struct.unpack("<f", bits_lower)[0] == struct.unpack("<f", bits_upper)[0]',
            "bits_lower == bits_upper", "test_dataset_split_hex_v3.TestDtPrecisionSplitIssue42"),
     # Reality Anchor Phase 0a (hex-heat-tri, #60): operator, analysis, gate.
-    Mutant(RC, "    return weight * (gathered.sum(axis=1) - 6.0 * arr)\n",
-           "    return weight * (gathered.sum(axis=1) - (nb >= 0).sum(axis=1) * arr)\n",
+    Mutant(FV, "        return weight * float(kappa) * (gathered.sum(axis=1) - 6.0 * arr)\n",
+           "        return weight * float(kappa) * (gathered.sum(axis=1) - (nb >= 0).sum(axis=1) * arr)\n",
            "test_reference_case_hex_v3.TestLameModesAreExactDiscreteEigenvectors"),
     Mutant(RC, "    p = abs(math.log(abs(quotient))) / math.log(r)\n", "    p = abs(math.log(abs(quotient)))\n",
            "test_reference_case_hex_v3.TestConvergenceAnalysis"),
@@ -150,11 +150,35 @@ MUTANTS = (
            '        "C5_observed_order": True,\n', "test_reference_case_hex_v3.TestGateDiscrimination"),
     Mutant(RC, '        "C9_gci_covers_exact_error": celik_fine["gci_fine"] >= exact_rel_error_fine,\n',
            '        "C9_gci_covers_exact_error": True,\n', "test_reference_case_hex_v3.TestGateDiscrimination"),
-    Mutant(RC, "        if all(criteria[k] for k in code_keys)\n", "        if True\n",
+    Mutant(RC, "    if all(criteria[k] for k in keys):\n", "    if True:\n",
            "test_reference_case_hex_v3.TestGateDiscrimination"),
-    Mutant(RC, "    if np.any(off_arr < 0.0):\n", "    if False:\n",
-           "test_reference_case_hex_v3.TestPositivityGateIssue60"),
-    Mutant(RC, "    if dt > bound:\n", "    if False:\n", "test_reference_case_hex_v3.TestPositivityGateIssue60"),
+    Mutant(FV, "    if np.any(off_arr < 0.0):\n", "    if False:\n",
+           "test_hex_fv_solver_hex_v3.TestPositivityGateIssue60"),
+    Mutant(FV, "    if dt > bound:\n", "    if False:\n", "test_hex_fv_solver_hex_v3.TestPositivityGateIssue60"),
+    # Reality Anchor Phase 0b (hex-heat-torus, hex-mms-tri, solver layer).
+    Mutant(FV, "        ni = np.where(nj == n, ni + n // 2, ni)\n", "        ni = np.where(nj == n, ni, ni)\n",
+           "test_hex_fv_solver_hex_v3.TestTorusLattice"),
+    Mutant(FV, "        midpoints = lattice.coords + 0.5 * lattice.h * SLOT_DIRECTIONS[slot]\n",
+           "        midpoints = lattice.coords + 0.0 * lattice.h * SLOT_DIRECTIONS[slot]\n",
+           "test_hex_fv_solver_hex_v3.TestEdgeConductances"),
+    Mutant(FV, "        if not np.array_equal(c[rows, slot], c[lattice.neighbors[rows, slot], slot + 3]):\n",
+           "        if False:\n", "test_hex_fv_solver_hex_v3.TestEdgeConductances"),
+    Mutant(FV, "        if not curvature > 0.0:\n", "        if False:\n",
+           "test_hex_fv_solver_hex_v3.TestConjugateGradient"),
+    Mutant(FV, '        raise ValueError("solve_steady_diffusion supports the Dirichlet triangle only (singular on the '
+               'torus)")\n',
+           "        pass\n", "test_hex_fv_solver_hex_v3.TestSteadySolve"),
+    Mutant(RC, "        return self.kappa(xy) * neg_laplacian - (self.kappa_gradient(xy) * self.solution_gradient(xy))"
+               ".sum(axis=1)\n",
+           "        return self.kappa(xy) * neg_laplacian\n", "test_reference_case_hex_v3.TestHexMmsTriStudyGate"),
+    Mutant(RC, '        "O2_source_matches_flux_divergence": source_error <= _MMS_SOURCE_TOL,\n',
+           '        "O2_source_matches_flux_divergence": True,\n',
+           "test_reference_case_hex_v3.TestMmsGateDiscrimination"),
+    Mutant(RC, '            and level["iterative_to_discretisation_ratio"] <= _MMS_ITERATIVE_RATIO\n', "",
+           "test_reference_case_hex_v3.TestMmsGateDiscrimination"),
+    Mutant(RC, "        criteria[\"C10_conservation\"] = all(level[\"conservation_residual\"] <= _CONSERVATION_TOL for "
+               "level in levels)\n",
+           "        criteria[\"C10_conservation\"] = True\n", "test_reference_case_hex_v3.TestHexHeatTorusStudyGate"),
 )
 
 

@@ -5,6 +5,21 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Reality Anchor Phase 0b: `hex-heat-torus` + `hex-mms-tri`, Loeserschicht (#60, W1-K08,
+  2026-10-07).** Damit ist Phase 0 komplett (0a + 0b). Neue mechanistische Schicht
+  `hex_fv_solver_hex_v3.py` (`spec/HEX_FV_SOLVER_v1.md`): Dreieck-Dirichlet- und periodisches
+  Torus-Gitter, Two-Point-Flux mit exakt symmetrischen Mittelpunkt-Leitfaehigkeiten,
+  Positivitaets-Gate (jetzt auch variables kappa), explizites Euler, CG (SPD, fail-closed); die
+  0a-Logik ist bitgleich umgezogen (0a-`study_sha256` unveraendert 6a366cdb...).
+  `spec/REFERENCE_CASES_HEX_PHASE0B_v1.md`: Torus mit ebenen Wellen (exakt, Erhaltung C10,
+  Isotropie in drei nicht aequivalenten Richtungen), MMS mit variablem kappa + Quelle
+  (Orakel O1-O3 inkl. unabhaengiger FD-Pruefung der Quelle, Loeser M1-M3, Celik C5-C9 auf
+  dem Zentroid-Wert, Iterationsfehler I1); zwei ReferenceSpecs fuer MMS (Orakel
+  `mathematical_oracle`, Loeser `verified_numerical_reference`). Diskriminierung u.a.: kappa am
+  Knoten (nur Ordnung 1), Quelle ohne Gradiententerm, vorzeitiger CG-Abbruch, nicht-konservativer
+  Operator; das arithmetische Mittel der Knoten-kappa (zweiter Ordnung) besteht.
+  _Evidenz:_ `results/2026-10-07_phase0b_local-gate.log`, `results/2026-10-07_phase0_reference.json`.
+
 - [x] **Reality Anchor Phase 0a: Referenzfall `hex-heat-tri` + ReferenceSpec v1 (#60, #33,
   W1-K08, 2026-10-07).** ReferenceSpec v1 aus Draft #33 per Merge-Commit uebernommen (Commits
   erhalten; dessen CI-Rot: fehlender SOURCES-Eintrag fuer `spec/REFERENCE_SPEC_v1.md` und Pins
@@ -157,12 +172,13 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Offen
 
-- [ ] **Reality Anchor Phase 0b (#60).** MMS mit variablem Koeffizienten + Quelle (allgemeine
-  Codepfade, Salari & Knupp) und periodischer Hex-Torus (zweite Randbedingungs-Familie), je mit
-  ReferenceSpec und Ordnungs-Gate. Danach Phase 1: Vorregistrierung (Splits, >= 5 Seeds, Metriken,
-  OOD-Achsen Aufloesung/BC-Familie; gehasht vor jedem Tuning), GINO (`neuraloperator`, MIT) gegen
-  den mechanistischen Loeser nach McGreivy & Hakim (gleiche Genauigkeit oder gleiche Laufzeit,
-  Kosten-Genauigkeits-Kurve). Kein Lern-Backend-Claim vor gruener Phase 0.
+- [ ] **Reality Anchor Phase 1 (#60).** Vorregistrierung (Splits, >= 5 Seeds, Metriken: relativer
+  L2 mit Zellflaechen, relative H1-Seminorm, Max-Norm; OOD-Achsen Aufloesung N=32 -> 16/64/128 und
+  BC-Familie Dirichlet -> periodisch; 95-%-Bootstrap-KI + IQM; gehasht vor jedem Tuning), dann
+  GINO (`neuraloperator`, MIT) gegen den verifizierten mechanistischen Loeser
+  `hex_fv_solver_hex_v3` nach McGreivy & Hakim (gleiche Genauigkeit oder gleiche Laufzeit,
+  Kosten-Genauigkeits-Kurve inkl. Datengenerierung und Training). Neue Abhaengigkeit
+  `neuraloperator` und Vorregistrierungs-Inhalte -> Owner-Freigabe vor dem ersten Training.
 - [ ] **ReferenceSpec v1 (#33), Review-Befund.** `ConvergenceStudy.observed_order` wird nur auf
   endlich/positiv geprueft, nicht gegen die Werte der Levels nachgerechnet; ein Aufrufer kann eine
   Ordnung behaupten, die die Daten nicht tragen. Vorschlag: bei konstantem r und >= 3 Levels

@@ -4,8 +4,10 @@
 **Status:** PROPOSED — becomes contractual after merge.
 **Decision:** issue #60, comment of 2026-10-06 (E4 = A: mechanistic baseline first);
 wave plan W1-K08. Credibility contract: `spec/REFERENCE_SPEC_v1.md`.
-**Implementation:** `src/toolkit/reference_case_hex_v3.py`; evidence writer
-`scripts/oracles/hex_heat_tri_reference_oracle.py`.
+**Implementation:** `src/toolkit/reference_case_hex_v3.py`. Its lattice and operator
+are in `src/toolkit/hex_fv_solver_hex_v3.py` (`spec/HEX_FV_SOLVER_v1.md`, since Phase 0b).
+Evidence writers: `scripts/oracles/hex_heat_tri_reference_oracle.py` for this case and
+`scripts/oracles/hex_phase0_reference_oracle.py` for all Phase 0 cases.
 
 ## 1. Purpose
 
@@ -16,7 +18,7 @@ learning-backend claim before Phase 0 is green").
 
 Phase 0a covers this case only. The MMS case (variable coefficient + source)
 and the periodic hex torus (second BC family) are Phase 0b and are NOT part of
-this contract.
+this contract; see `spec/REFERENCE_CASES_HEX_PHASE0B_v1.md`.
 
 ## 2. Problem
 

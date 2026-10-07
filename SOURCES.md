@@ -467,3 +467,17 @@
 | E97EDC20216DC873 | 2026-10-07 00:00 | spec | in-repo derived, Phase 0a self-review, refinement ratio r > 1.3 (Celik 2008): REFERENCE_CASE_HEX_HEAT_TRI_v1.md |
 | A84C3F4971B1B6AD | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0a self-review, refinement ratio r > 1.3 (Celik 2008): reference_case_hex_v3.py |
 | 1B1D7386C8E3952A | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0a self-review, refinement ratio r > 1.3 (Celik 2008): test_reference_case_hex_v3.py |
+
+## Reality Anchor Phase 0b: torus, MMS, solver layer (#60) (append-only, 2026-10-07, claude/hexa-ntk-project-overview-mzkd4p)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| 2A4C4D0DFDA9B63A | 2026-10-07 00:00 | scripts | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: mutation_probe.py |
+| 0CC4857820C31E00 | 2026-10-07 00:00 | scripts/oracles | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: hex_phase0_reference_oracle.py |
+| 7B01D64FB125C95C | 2026-10-07 00:00 | spec | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: HEX_FV_SOLVER_v1.md |
+| 591AF4505C676D73 | 2026-10-07 00:00 | spec | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: REFERENCE_CASES_HEX_PHASE0B_v1.md |
+| 4D90EEA7AECB7913 | 2026-10-07 00:00 | spec | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: REFERENCE_CASE_HEX_HEAT_TRI_v1.md |
+| E73B0159AD87B43A | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: hex_fv_solver_hex_v3.py |
+| CA7F77E711CF94FC | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: test_hex_fv_solver_hex_v3.py |
+| 6E97268A81CF9B9D | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: reference_case_hex_v3.py |
+| 932549A2E8F158FC | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: test_reference_case_hex_v3.py |
