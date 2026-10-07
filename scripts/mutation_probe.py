@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """mutation_probe.py - reproducible mutation probe for the 2026-09-27 review fixes.
 
-Each mutant reverts one fix (issues #40, #42 and the review findings) in place
-in a toolkit module, runs the named test class, and restores the file. A
+Each mutant reverts one fix (issues #40, #42, #59 and the review findings) in
+place in a toolkit module (or, for a path with a "/", a repo-relative file such
+as an oracle under scripts/), runs the named test class, and restores the file. A
 mutant must turn its test class red ("KILLED"); a surviving mutant means the
 tests do not pin that fix.
 
@@ -30,7 +31,8 @@ import subprocess
 import sys
 from typing import NamedTuple
 
-TOOLKIT = pathlib.Path(__file__).resolve().parent.parent / "src" / "toolkit"
+REPO = pathlib.Path(__file__).resolve().parent.parent
+TOOLKIT = REPO / "src" / "toolkit"
 
 
 class Mutant(NamedTuple):
@@ -43,6 +45,7 @@ class Mutant(NamedTuple):
 CK = "checkpoint_integration_hex_v3.py"
 DS = "dataset_split_hex_v3.py"
 RU = "runner_hex_v3.py"
+DCP = "scripts/oracles/distributed_checkpoint_bundle_v1.py"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -120,6 +123,21 @@ MUTANTS = (
            "test_warmstart_utils_hex_v3.TestPrefixTransforms"),
     # EMA: decay outside [0, 1] accepted.
     Mutant("ema_hex_v3.py", "    decay = _validate_decay(decay)\n", "", "test_ema_hex_v3.TestDecayContract"),
+    # #59 P2: shard contents are no longer flushed before the marker.
+    Mutant(DCP, '    for item in manifest["files"]:\n        fsync_file(bundle_path / item["path"])\n', "",
+           "test_distributed_checkpoint_bundle_v1.TestShardContentDurabilityIssue59"),
+    Mutant(DCP, '    with path.open("rb+") as stream:\n        os.fsync(stream.fileno())\n',
+           '    with path.open("rb+") as stream:\n        pass\n',
+           "test_distributed_checkpoint_bundle_v1.TestShardContentDurabilityIssue59"),
+    # #59 P2: metric_semantics_label missing from __all__ again.
+    Mutant("benchmark_hex_v3.py", '    "metric_semantics_label",\n', "",
+           "test_benchmark_hex_v3.TestPublicApiMatchesMetricSpecV4"),
+    # #59 P3: dt keys compared purely relatively again (0.0 vs 1e-46 accepted).
+    Mutant(DS, "    if bits_lower is not None and bits_upper is not None:\n", "    if False:\n",
+           "test_dataset_split_hex_v3.TestDtPrecisionSplitIssue42"),
+    # #59 P3: raw bit patterns compared, so -0.0 and 0.0 count as different.
+    Mutant(DS, 'struct.unpack("<f", bits_lower)[0] == struct.unpack("<f", bits_upper)[0]',
+           "bits_lower == bits_upper", "test_dataset_split_hex_v3.TestDtPrecisionSplitIssue42"),
 )
 
 
@@ -146,7 +164,7 @@ def run_mutant(mutant: Mutant) -> str:
     Returns "KILLED", "SURVIVED" or "INVALID" (the run failed without
     executing tests, e.g. a crash before discovery).
     """
-    path = TOOLKIT / mutant.module
+    path = (REPO if "/" in mutant.module else TOOLKIT) / mutant.module
     original = path.read_text(encoding="utf-8")
     if original.count(mutant.original) != 1:
         raise LookupError(f"{mutant.module}: mutation site not found exactly once: {mutant.original!r}")

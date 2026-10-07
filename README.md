@@ -44,24 +44,25 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 - **Kein Nachweis physikalischer Korrektheit** einer PDE-Loesung. Die Gates pruefen
   Software-Integritaet (Determinismus, Round-Trips, Shapes), nicht Physik.
 
-## Reifegrad / Evidenz (Lauf 2026-10-05, lokal, Exit-Codes gesehen)
+## Reifegrad / Evidenz (Lauf 2026-10-07, lokal, Exit-Codes gesehen)
 
 | Gate | Kommando | Ergebnis |
 |---|---|---|
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
 | Provenance | `python scripts/verify_sources.py` | 26 Toolkit- + 3 Spec-Eintraege + 8 Script-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 528 Tests, OK, exit 0 (Skips je Plattform: Gate-Log) |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 536 Tests, OK, exit 0 (Skips je Plattform: Gate-Log) |
 | Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
-| Mutation | `python scripts/mutation_probe.py` | 21/22 Mutanten getoetet (Baseline gruen), exit 1: M02 ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped) — Lauf 2026-09-28, im Integrationslauf 2026-10-05 nicht wiederholt |
+| Mutation | `python scripts/mutation_probe.py` | 27/27 Mutanten getoetet (Baseline gruen), exit 0 — Lauf 2026-10-07 unter Linux. Unter Windows ist M02 nicht messbar (Testklasse POSIX-only, alle skipped; Lauf 2026-09-28 dort: 21/22, exit 1) |
 
-Lokale Umgebung dieses Laufs: Windows 11, Python 3.12.10, `torch` 2.6.0+cpu, `numpy` 2.5.3;
-Stand: Integrationszweig `vero/hexa-integration-2026-10-05` (PRs #46, #48, #50, #52, #53, #54
-auf `main` e4a0e5e, Entscheide E1-E6, Codex-Thread-Fixes). Die CI faehrt dieselbe Kette auf
-**Python 3.12** mit `torch==2.6.0` (CPU-Wheel, Linux). Log:
-`results/2026-10-05_integration-r3_local-gate.log` (Commit-SHA, Kommandos, Exit-Codes, Zahlen;
-nach der zweiten Codex-Runde auf PR #58). Fruehere Integrationslaeufe: `results/2026-10-05_integration-r2_local-gate.log`,
-`results/2026-10-05_integration_local-gate.log`.
+Lokale Umgebung dieses Laufs: Linux (Cloud-Container), Python 3.12.3, `torch` 2.6.0+cu124
+(PyPI-Wheel, CPU-Ausfuehrung ohne CUDA-Geraet; der CPU-Index download.pytorch.org war aus dem
+Container gesperrt), `numpy` 2.5.3; Stand: Zweig `claude/hexa-ntk-project-overview-mzkd4p` auf
+`main` bb4f986 (Issue #59). Die CI faehrt dieselbe Kette auf **Python 3.12** mit
+`torch==2.6.0` (CPU-Wheel, Linux). Log: `results/2026-10-07_issue59_local-gate.log`
+(Commit-SHA, Kommandos, Exit-Codes, Zahlen). Letzter Windows-Lauf (Integration #58):
+`results/2026-10-05_integration-r3_local-gate.log`; fruehere Integrationslaeufe:
+`results/2026-10-05_integration-r2_local-gate.log`, `results/2026-10-05_integration_local-gate.log`.
 Vorlauf 2026-09-28: `results/2026-09-28_codex46-review_local-gate.log`. Fruehere Laeufe
 (2026-09-27: 378 Tests, 19/19 Mutanten; 2026-08-26: 166 Tests, 82 %) bleiben in ihren Logs
 als historische Evidenz stehen. Die Zaehlangaben dieses Abschnitts zum aktuellen Baum
@@ -116,8 +117,8 @@ python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/wh
 python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 528 Unit-Tests (2026-10-05) + Coverage-Gate
-python scripts/mutation_probe.py                               # optional: 22 Mutanten der Review-Fixes
+python -m coverage report                                      # 536 Unit-Tests (2026-10-07) + Coverage-Gate
+python scripts/mutation_probe.py                               # optional: 27 Mutanten der Review-Fixes
 ```
 
 CI (`.github/workflows/ci.yml`), beide Jobs scheitern mit exit != 0 (ob `tests (cpu)` auch
@@ -125,7 +126,7 @@ den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (528, Stand 2026-10-05) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (536, Stand 2026-10-07) unter Branch-Coverage.
 
 ## Struktur
 

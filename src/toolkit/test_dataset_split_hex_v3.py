@@ -817,7 +817,7 @@ class TestDtPrecisionSplitIssue42(unittest.TestCase):
     # resolution), yet they formed two dt groups of one trajectory.
 
     def test_values_equal_at_float32_resolution_fail_closed(self) -> None:
-        for lower, upper in ((0.0, 1e-46), (0.0, -1e-46), (1e-46, 5e-46)):
+        for lower, upper in ((0.0, 1e-46), (0.0, -1e-46), (1e-46, 5e-46), (0.0, 5e-324)):
             with self.subTest(lower=lower, upper=upper):
                 ds = FakeTrajectoryDataset(
                     [{"trajectory_id": 0, "dt": lower}, {"trajectory_id": 0, "dt": upper}]
@@ -843,7 +843,7 @@ class TestDtPrecisionSplitIssue42(unittest.TestCase):
         # 1e-40 is a nonzero float32 subnormal; 1e-30/2e-30 are distinct
         # float32 normals; 1e39/2e39 overflow float32 and must not be merged
         # as "both inf" -- there the relative check alone decides.
-        for lower, upper in ((0.0, 1e-40), (1e-30, 2e-30), (1e39, 2e39), (0.1, 0.2)):
+        for lower, upper in ((0.0, 1e-40), (0.0, 2.0**-149), (1e-30, 2e-30), (1e39, 2e39), (0.1, 0.2)):
             with self.subTest(lower=lower, upper=upper):
                 ds = FakeTrajectoryDataset(
                     [{"trajectory_id": 0, "dt": lower}, {"trajectory_id": 0, "dt": upper}]
@@ -941,7 +941,10 @@ class TestTrajectoryInvariantE092703(unittest.TestCase):
         # Random datasets in which trajectories carry 1-3 DISTINCT step sizes
         # (no precision twins, which fail closed elsewhere), float and
         # float64-tensor values; both grouping modes, with/without rounding.
-        dt_pool = (0.1, 0.2, 0.05, 1e-3, 0.0, -0.05, 1e300, 5e-324)
+        # Issue #59: 5e-324 and 0.0 round to the same float32 and are twins;
+        # 2**-149 (smallest positive float32 subnormal) keeps the subnormal
+        # edge while staying distinct from 0.0.
+        dt_pool = (0.1, 0.2, 0.05, 1e-3, 0.0, -0.05, 1e300, 2.0**-149)
         for seed in range(50):
             rng = random.Random(1000 + seed)
             samples: List[Dict[str, Any]] = []

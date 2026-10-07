@@ -419,3 +419,16 @@
 > Pins for the integrated bytes of this block. Prior rows remain lineage.
 
 | 99FA3780E73F53DA | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R3-test-assertion: test_runner_hex_v3.py |
+
+## Issue #59 follow-ups (append-only, 2026-10-07, claude/hexa-ntk-project-overview-mzkd4p)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| E7A3BD3FC8159373 | 2026-10-07 00:00 | scripts | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: mutation_probe.py |
+| F765A1425BFA7CFE | 2026-10-07 00:00 | scripts/oracles | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: distributed_checkpoint_bundle_v1.py |
+| 51013971AA5CB76F | 2026-10-07 00:00 | spec | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: METRIC_SPEC_v4.md |
+| 412AA56028E8CDBF | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: benchmark_hex_v3.py |
+| C0076272235EDB25 | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: dataset_split_hex_v3.py |
+| 137812E571113CFC | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: test_benchmark_hex_v3.py |
+| 76572D45CAC3C78B | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: test_dataset_split_hex_v3.py |
+| B050C6EBDAD7E045 | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: test_distributed_checkpoint_bundle_v1.py |

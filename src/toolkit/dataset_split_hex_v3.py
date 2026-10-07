@@ -24,8 +24,10 @@ whether group_by_dt is set. The unit of the split is the trajectory.
   produced here; it is the diagnostic for hand-built subsets.
   dt keys of one trajectory that differ only below float32 resolution
   (0.1 as float vs. float32 tensor) are one step size in two precisions and
-  still raise ValueError (inconsistent metadata, issue #42). Set
-  dt_round_ndigits to merge them.
+  still raise ValueError (inconsistent metadata, issue #42). "Below float32
+  resolution" means: both round to the same finite float32, or they agree
+  within a relative 2**-20 (issue #59; the relative test alone never
+  matched near zero, e.g. 0.0 vs 1e-46). Set dt_round_ndigits to merge them.
 With one dt per trajectory the split for a given seed is identical to the
 one before E0927-03.
 
@@ -49,6 +51,7 @@ import math
 import numbers
 import random
 import re
+import struct
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -139,6 +142,34 @@ class SampleSubsetDataset(Dataset):
 # 2**-20 leaves room for a few float32 ulps of arithmetic noise and is still
 # far below any deliberate step-size ratio (issue #42).
 _DT_SAME_STEP_RTOL = 2.0**-20
+
+
+def _float32_bits(value: float) -> Optional[bytes]:
+    """IEEE-754 binary32 encoding of ``value`` rounded to nearest, or None
+    when ``value`` lies outside the finite float32 range."""
+    try:
+        return struct.pack("<f", value)
+    except OverflowError:
+        return None
+
+
+def _same_step_at_float32_resolution(lower: float, upper: float) -> bool:
+    """True when two dt keys are one step size at float32 resolution (#59).
+
+    A purely relative comparison (``math.isclose(..., abs_tol=0.0)``) never
+    matches near zero: 0.0 and 1e-46 both round to float32 0.0, yet differ
+    by 100 % relatively. Two keys therefore count as the same step if they
+    round to the same finite float32 (-0.0 and 0.0 included), or if they
+    agree within ``_DT_SAME_STEP_RTOL``. The relative test stays because it
+    also catches arithmetic noise that straddles a float32 rounding boundary;
+    values beyond the float32 range (both would become inf) are left to it.
+    """
+    bits_lower = _float32_bits(lower)
+    bits_upper = _float32_bits(upper)
+    if bits_lower is not None and bits_upper is not None:
+        if struct.unpack("<f", bits_lower)[0] == struct.unpack("<f", bits_upper)[0]:
+            return True
+    return math.isclose(lower, upper, rel_tol=_DT_SAME_STEP_RTOL, abs_tol=0.0)
 
 # Canonical decimal integer: no sign "+", no leading zeros, no "-0", no
 # whitespace, ASCII digits only (int() also accepts "٣" and "1_2").
@@ -320,7 +351,7 @@ def _reject_precision_split_dt_keys(keys: Any) -> None:
     for trajectory_id, dts in dts_by_trajectory.items():
         dts.sort()
         for lower, upper in zip(dts, dts[1:]):
-            if math.isclose(lower, upper, rel_tol=_DT_SAME_STEP_RTOL, abs_tol=0.0):
+            if _same_step_at_float32_resolution(lower, upper):
                 raise ValueError(
                     f"trajectory_id {trajectory_id} has dt keys {lower!r} and "
                     f"{upper!r} that differ only below float32 resolution, i.e. "
