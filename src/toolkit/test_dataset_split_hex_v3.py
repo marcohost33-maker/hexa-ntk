@@ -811,6 +811,51 @@ class TestDtPrecisionSplitIssue42(unittest.TestCase):
         with self.assertRaises(ValueError):
             split_dataset_by_trajectory(ds, val_fraction=0.5, seed=0, group_by_dt=True)
 
+    # Issue #59 (P3): the guard compared with math.isclose(..., abs_tol=0.0),
+    # a purely relative test. Near zero it never matched: 0.0 and 1e-46 both
+    # round to float32 0.0 (one step size at the declared float32
+    # resolution), yet they formed two dt groups of one trajectory.
+
+    def test_values_equal_at_float32_resolution_fail_closed(self) -> None:
+        for lower, upper in ((0.0, 1e-46), (0.0, -1e-46), (1e-46, 5e-46)):
+            with self.subTest(lower=lower, upper=upper):
+                ds = FakeTrajectoryDataset(
+                    [{"trajectory_id": 0, "dt": lower}, {"trajectory_id": 0, "dt": upper}]
+                    + [{"trajectory_id": 1, "dt": 0.1}]
+                )
+                with self.assertRaises(Exception) as ctx:
+                    split_dataset_by_trajectory(ds, val_fraction=0.5, seed=0, group_by_dt=True)
+                self.assertIs(type(ctx.exception), ValueError)
+                self.assertIn("trajectory_id 0", str(ctx.exception))
+                self.assertIn("dt_round_ndigits", str(ctx.exception))
+
+    def test_float32_underflow_twins_merge_with_rounding(self) -> None:
+        ds = FakeTrajectoryDataset(
+            [{"trajectory_id": 0, "dt": 0.0}, {"trajectory_id": 0, "dt": 1e-46}]
+            + [{"trajectory_id": 1, "dt": 0.1}]
+        )
+        train, val = split_dataset_by_trajectory(
+            ds, val_fraction=0.5, seed=0, group_by_dt=True, dt_round_ndigits=6
+        )
+        self.assertEqual(len(train) + len(val), 3)
+
+    def test_values_distinct_at_float32_resolution_stay_separate(self) -> None:
+        # 1e-40 is a nonzero float32 subnormal; 1e-30/2e-30 are distinct
+        # float32 normals; 1e39/2e39 overflow float32 and must not be merged
+        # as "both inf" -- there the relative check alone decides.
+        for lower, upper in ((0.0, 1e-40), (1e-30, 2e-30), (1e39, 2e39), (0.1, 0.2)):
+            with self.subTest(lower=lower, upper=upper):
+                ds = FakeTrajectoryDataset(
+                    [{"trajectory_id": 0, "dt": lower}, {"trajectory_id": 0, "dt": upper}]
+                    + [{"trajectory_id": 1, "dt": 0.1}]
+                )
+                train, val = split_dataset_by_trajectory(
+                    ds, val_fraction=0.5, seed=0, group_by_dt=True
+                )
+                summary = summarize_group_split(train, val, group_by_dt=True)
+                self.assertEqual(summary["overlap_trajectory_ids"], [])
+                self.assertEqual(len(train) + len(val), 3)
+
     def test_same_dt_on_different_trajectories_is_fine(self) -> None:
         # The check is per trajectory; tensor(0.1) on another id is no issue.
         ds = FakeTrajectoryDataset(
