@@ -528,3 +528,13 @@
 | 1C275A6198354313 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase-1 external GINO adapter: gino_adapter_hex_v3.py |
 | FBF08A0858F074F0 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase-1 GINO adapter contract/smoke tests: test_gino_adapter_hex_v3.py |
 
+## Phase-1 GINO adapter — repo-gate SHA correction (append-only, 2026-10-07)
+
+> Authoritative prefixes below are the values computed by
+> scripts/verify_sources.py from the GitHub checkout. They supersede the
+> earlier connector-side pre-write hashes without deleting lineage.
+
+| EED780CF4C2653DE | 2026-10-07 00:00 | spec | repo-gate verified current bytes: GINO_ADAPTER_PHASE1_v1.md |
+| 953D456F86FC9276 | 2026-10-07 00:00 | src/toolkit | repo-gate verified current bytes: gino_adapter_hex_v3.py |
+| 386F8AD29D21BE33 | 2026-10-07 00:00 | src/toolkit | repo-gate verified current bytes: test_gino_adapter_hex_v3.py |
+
