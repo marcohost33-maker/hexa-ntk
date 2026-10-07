@@ -5,6 +5,23 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Issue #59: Folgepunkte aus PR #58 (2026-10-07).**
+  _DCP-Bundle (P2):_ `finalize_bundle` fsynct den Inhalt jeder im Manifest gelisteten Datei
+  (`fsync_file`, `rb+`-Handle, Windows-tauglich), dann die Shard-Verzeichnisse, dann Manifest
+  und Marker. Vorher waren nur die Verzeichniseintraege dauerhaft. DCPs `FileSystemWriter`
+  synct per Default (`sync_files=True`); das Bundle-Protokoll haengt davon nicht mehr ab.
+  _MetricSpec v4 (P2):_ `metric_semantics_label` steht in `__all__`; `spec/METRIC_SPEC_v4.md`
+  Abschnitt 0 listet die oeffentlichen Namen, ein Test liest genau diese Liste.
+  _dt-Vergleich (P3):_ zwei dt-Schluessel einer Trajektorie sind dieselbe Schrittweite, wenn
+  sie auf dasselbe endliche float32 runden oder relativ innerhalb `2**-20` liegen (vorher nur
+  relativ: 0.0 vs 1e-46 nie erkannt). Testpraemisse des Property-Tests korrigiert (0.0/5e-324
+  sind float32-Zwillinge; Pool nutzt jetzt `2**-149`).
+  _Evidenz:_ rot gegen die alten Bytes failures=5, errors=2 -> 536/536 OK; Mutationsprobe
+  27/27 (M23-M27 neu); DCP-Oracles lokal exit 0; `results/2026-10-07_issue59_local-gate.log`.
+  Weiter offen aus #59: Reality Anchor (#33/#60), dt-Gruppierung als deklarierter
+  Quantisierungsvertrag (`dt_round_ndigits=-1` wird akzeptiert), Positivitaets-Hinweis
+  (`safety=0.85` ist nicht positivitaetserhaltend; dokumentiert, kein Default verspricht es).
+
 - [x] **Codex-Review #46 nach Merge von `main` (2026-09-28).**
   _EMA-Decay (PRRT_kwDOSwvSC86m2eei):_ die oeffentlichen Resume-Helfer nahmen `ema_state_dict`
   ohne `ema_decay` an, und der Loader uebersprang den Vergleich, sobald eine Seite fehlte (stilles
