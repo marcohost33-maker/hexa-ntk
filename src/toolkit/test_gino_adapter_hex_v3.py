@@ -126,7 +126,10 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         with patch("gino_adapter_hex_v3.importlib.metadata.version", return_value="2.0.1"):
             with self.assertRaisesRegex(RuntimeError, "version mismatch"):
                 build_gino(cfg, triangle_hex_lattice(32))
-        with patch("gino_adapter_hex_v3.importlib.metadata.version", side_effect=importlib.metadata.PackageNotFoundError):
+        with patch(
+            "gino_adapter_hex_v3.importlib.metadata.version",
+            side_effect=importlib.metadata.PackageNotFoundError,
+        ):
             with self.assertRaisesRegex(RuntimeError, "optional backend missing"):
                 build_gino(cfg, triangle_hex_lattice(32))
 
