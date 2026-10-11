@@ -29,6 +29,7 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         self.assertEqual(cfg.canonical()["backend"], GINO_BACKEND_PIN)
         expected = {
             "backend": "neuraloperator==2.0.0",
+            "resource_policy": "GINO_ADAPTER_PHASE1_v2",
             "geometry_semantics": "shared-euclidean-v1",
             "latent_resolution": 32,
             "n_modes": 12,
@@ -76,6 +77,30 @@ class TestGinoPhase1Adapter(unittest.TestCase):
                 "torch.linspace", side_effect=AssertionError("allocated latent grid")
             ), self.assertRaisesRegex(ValueError, "resource limit"):
                 GinoPhase1Config(**kwargs)
+
+    def test_joint_dense_spectral_budget_rejects_giant_parameters(self) -> None:
+        # Every individual ceiling passes, but their combination would
+        # allocate >60 GiB of dense complex spectral weights alone.
+        kwargs = dict(latent_resolution=128, n_modes=63, hidden_channels=512, n_layers=16)
+        with self.assertRaisesRegex(ValueError, "combined spectral weight resource limit"):
+            GinoPhase1Config(**kwargs)
+        # The check runs *before* any backend module construction.
+        with patch("gino_adapter_hex_v3.importlib.metadata.version", side_effect=AssertionError("imported")):
+            with self.assertRaisesRegex(ValueError, "combined spectral weight resource limit"):
+                GinoPhase1Config(**kwargs)
+
+    def test_dense_spectral_budget_boundary_and_digest_policy(self) -> None:
+        # Base/preregistered geometry and architecture remain admissible.
+        self.assertEqual(GinoPhase1Config().canonical()["resource_policy"], "GINO_ADAPTER_PHASE1_v2")
+        GinoPhase1Config(latent_resolution=128, n_modes=12, hidden_channels=128, n_layers=8)
+        # Exercise a 256 MiB crossing without OOM, including odd-count rounding.
+        with self.assertRaisesRegex(ValueError, "combined spectral weight resource limit"):
+            GinoPhase1Config(latent_resolution=128, n_modes=63, hidden_channels=128, n_layers=16)
+        # Non-factorized complex64 estimate is a *lower* bound on total
+        # train-time GPU memory. Prove the default lies inside the limit.
+        m, c, layers = 12, 64, 4
+        bytes_est = layers * c**2 * m * (m // 2 + 1) * 8
+        self.assertLess(bytes_est, 256 * 1024 * 1024)
 
     def test_geometry_and_batch_contract(self) -> None:
         lattice = triangle_hex_lattice(8)
