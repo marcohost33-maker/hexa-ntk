@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import importlib.util
+import importlib.metadata
+import hashlib
+import json
 import sys
 import types
 import unittest
@@ -17,14 +20,34 @@ from gino_adapter_hex_v3 import (
     predict_gino,
     prepare_gino_batch,
 )
-from hex_fv_solver_hex_v3 import triangle_hex_lattice
+from hex_fv_solver_hex_v3 import HexLattice, torus_hex_lattice, triangle_hex_lattice
 
 
 class TestGinoPhase1Adapter(unittest.TestCase):
     def test_config_validation_and_digest(self) -> None:
         cfg = GinoPhase1Config()
         self.assertEqual(cfg.canonical()["backend"], GINO_BACKEND_PIN)
-        self.assertEqual(len(cfg.digest()), 64)
+        expected = {
+            "backend": "neuraloperator==2.0.0",
+            "geometry_semantics": "shared-euclidean-v1",
+            "latent_resolution": 32,
+            "n_modes": 12,
+            "hidden_channels": 64,
+            "n_layers": 4,
+            "radius_factor": 2.5,
+        }
+        self.assertEqual(cfg.canonical(), expected)
+        digest = hashlib.sha256(
+            json.dumps(expected, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        self.assertEqual(cfg.digest(), digest)
+        for field, other in (
+            ("latent_resolution", 64), ("n_modes", 11),
+            ("hidden_channels", 32), ("n_layers", 3),
+            ("radius_factor", 3.0),
+        ):
+            modified = GinoPhase1Config(**{field: other})
+            self.assertNotEqual(modified.digest(), digest, field)
         for kwargs in (
             {"latent_resolution": 7},
             {"n_modes": 16},
@@ -45,6 +68,14 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         self.assertEqual(tuple(batch["output_queries"].shape), (1, lattice.num_nodes, 2))
         self.assertEqual(tuple(batch["x"].shape), (2, lattice.num_nodes, 1))
         self.assertTrue(torch.isfinite(batch["latent_queries"]).all())
+        grid = batch["latent_queries"][0]
+        self.assertEqual(tuple(grid[0, 0].tolist()), (0.0, 0.0))
+        self.assertAlmostEqual(float(grid[-1, -1, 0]), 1.0, places=6)
+        self.assertAlmostEqual(float(grid[-1, -1, 1]), np.sqrt(3) / 2, places=6)
+        self.assertAlmostEqual(float(grid[1, 0, 1]), 0.0, places=6)
+        self.assertAlmostEqual(float(grid[0, 1, 0]), 0.0, places=6)
+        self.assertGreater(float(grid[1, 0, 0]), 0.0)
+        self.assertGreater(float(grid[0, 1, 1]), 0.0)
 
     def test_fail_closed_inputs(self) -> None:
         lattice = triangle_hex_lattice(8)
@@ -59,7 +90,7 @@ class TestGinoPhase1Adapter(unittest.TestCase):
             prepare_gino_batch(lattice, np.zeros(lattice.num_nodes), object())
 
     def test_factory_and_predict_contract_with_fake_backend(self) -> None:
-        lattice = triangle_hex_lattice(8)
+        lattice = triangle_hex_lattice(32)
         cfg = GinoPhase1Config(latent_resolution=8, n_modes=3, hidden_channels=8, n_layers=1)
 
         class FakeGINO:
@@ -73,7 +104,9 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         models = types.ModuleType("neuralop.models")
         models.GINO = FakeGINO
         root.models = models
-        with patch.dict(sys.modules, {"neuralop": root, "neuralop.models": models}):
+        with patch.dict(sys.modules, {"neuralop": root, "neuralop.models": models}), patch(
+            "gino_adapter_hex_v3.importlib.metadata.version", return_value="2.0.0"
+        ):
             model = build_gino(cfg, lattice)
 
         self.assertEqual(model.kwargs["gno_coord_dim"], 2)
@@ -83,9 +116,31 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         out = predict_gino(model, lattice, np.ones((2, lattice.num_nodes)), cfg)
         self.assertEqual(tuple(out.shape), (2, lattice.num_nodes))
 
+    def test_reject_wrong_training_resolution_and_backend_version(self) -> None:
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
+        for n in (8, 16, 64):
+            with self.subTest(n=n), self.assertRaisesRegex(ValueError, "N=32"):
+                build_gino(cfg, triangle_hex_lattice(n))
+        with self.assertRaisesRegex(ValueError, "N=32"):
+            build_gino(cfg, torus_hex_lattice(32))
+        with patch("gino_adapter_hex_v3.importlib.metadata.version", return_value="2.0.1"):
+            with self.assertRaisesRegex(RuntimeError, "version mismatch"):
+                build_gino(cfg, triangle_hex_lattice(32))
+        with patch("gino_adapter_hex_v3.importlib.metadata.version", side_effect=importlib.metadata.PackageNotFoundError):
+            with self.assertRaisesRegex(RuntimeError, "optional backend missing"):
+                build_gino(cfg, triangle_hex_lattice(32))
+
+    def test_reject_fabricated_topology(self) -> None:
+        lat = triangle_hex_lattice(8)
+        neighbors = lat.neighbors.copy()
+        neighbors[0, 0] = 0
+        forged = HexLattice(lat.n, lat.h, lat.domain, lat.coords, neighbors)
+        with self.assertRaisesRegex(ValueError, "canonical"):
+            prepare_gino_batch(forged, np.ones(lat.num_nodes), GinoPhase1Config())
+
     @unittest.skipUnless(importlib.util.find_spec("neuralop"), "optional neuraloperator backend not installed")
     def test_actual_backend_forward_smoke(self) -> None:
-        lattice = triangle_hex_lattice(8)
+        lattice = triangle_hex_lattice(32)
         cfg = GinoPhase1Config(
             latent_resolution=8,
             n_modes=3,
