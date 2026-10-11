@@ -18,6 +18,7 @@ import hashlib
 import importlib.metadata
 import json
 import math
+import numbers
 from dataclasses import dataclass
 from typing import Any, Dict
 
@@ -53,7 +54,12 @@ class GinoPhase1Config:
         _positive_int(self.n_layers, name="n_layers")
         if modes >= resolution / 2:
             raise ValueError("n_modes must be strictly below latent_resolution / 2 (Nyquist)")
-        radius = float(self.radius_factor)
+        if isinstance(self.radius_factor, (bool, str)) or not isinstance(self.radius_factor, numbers.Real):
+            raise TypeError("radius_factor must be a real numeric scalar")
+        try:
+            radius = float(self.radius_factor)
+        except OverflowError as exc:
+            raise ValueError("radius_factor must fit in a finite float") from exc
         if not math.isfinite(radius) or radius <= 0.0:
             raise ValueError("radius_factor must be finite and > 0")
 
@@ -105,13 +111,28 @@ def prepare_gino_batch(
     config: GinoPhase1Config,
     *,
     dtype: torch.dtype = torch.float32,
+    device: torch.device | str | None = None,
 ) -> Dict[str, torch.Tensor]:
     """Create the exact shared-geometry tensors required by GINO 2.0.0."""
     lattice = _check_lattice(lattice)
     if not isinstance(config, GinoPhase1Config):
         raise TypeError("config must be a GinoPhase1Config")
 
-    values = torch.as_tensor(u0, dtype=dtype)
+    if dtype not in (torch.float32, torch.float64):
+        raise TypeError("GINO inputs require float32 or float64")
+    raw = torch.as_tensor(u0)
+    if raw.dtype == torch.bool or raw.is_complex():
+        raise TypeError("u0 must be a real numeric field, not bool or complex")
+    if not bool(torch.isfinite(raw).all()):
+        raise ValueError("u0 must be finite before dtype conversion")
+    values = raw.to(dtype=dtype, device=device)
+    # A nonzero field value silently becoming zero is not a valid conversion.
+    if raw.is_floating_point() and raw.dtype != dtype:
+        converted_source = values.to(device=raw.device)
+        if bool(((raw != 0) & (converted_source == 0)).any()):
+            raise ValueError("u0 conversion underflows a nonzero field entry")
+    # Protect against post-validation writes through caller-owned tensor storage.
+    values = values.clone()
     if values.ndim == 1:
         values = values.unsqueeze(0)
     if values.ndim != 2 or values.shape[1] != lattice.num_nodes:
@@ -176,6 +197,27 @@ def build_gino(config: GinoPhase1Config, training_lattice: HexLattice) -> Any:
     )
 
 
+def _model_device_dtype(model: Any) -> tuple[torch.device | None, torch.dtype]:
+    """Use a Module's actual floating parameters, not a guessed CPU/float32 default.
+
+    Complex spectral weights are legal, but all parameters/buffers must live on
+    the same device. All real floating tensors must have a consistent dtype.
+    """
+    if not isinstance(model, torch.nn.Module):
+        return None, torch.float32
+    tensors = list(model.parameters()) + list(model.buffers())
+    if not tensors:
+        return None, torch.float32
+    device = tensors[0].device
+    if any(t.device != device for t in tensors):
+        raise ValueError("GINO model parameters/buffers span multiple devices")
+    floating = [t.dtype for t in tensors if t.is_floating_point()]
+    dtype = floating[0] if floating else torch.float32
+    if dtype not in (torch.float32, torch.float64) or any(d != dtype for d in floating):
+        raise ValueError("GINO model parameters/buffers have inconsistent floating dtypes")
+    return device, dtype
+
+
 def predict_gino(
     model: Any,
     lattice: HexLattice,
@@ -183,7 +225,8 @@ def predict_gino(
     config: GinoPhase1Config,
 ) -> torch.Tensor:
     """Run GINO and return shape (batch, num_nodes), failing closed on drift."""
-    batch = prepare_gino_batch(lattice, u0, config)
+    device, dtype = _model_device_dtype(model)
+    batch = prepare_gino_batch(lattice, u0, config, dtype=dtype, device=device)
     out = model(**batch)
     if not isinstance(out, torch.Tensor):
         raise TypeError("GINO backend must return a torch.Tensor")
