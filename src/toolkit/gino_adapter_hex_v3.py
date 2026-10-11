@@ -28,6 +28,12 @@ import torch
 from hex_fv_solver_hex_v3 import HexLattice, torus_hex_lattice, triangle_hex_lattice
 
 GINO_BACKEND_PIN = "neuraloperator==2.0.0"
+# Bound untrusted lattice metadata before any O(n**2) canonical reconstruction.
+_MAX_ADAPTER_N = 512
+_MAX_LATENT_RESOLUTION = 128
+_MAX_HIDDEN_CHANNELS = 512
+_MAX_LAYERS = 16
+_MAX_RADIUS_FACTOR = 16.0
 _DOMAIN_HEIGHT = math.sqrt(3.0) / 2.0
 
 
@@ -50,8 +56,11 @@ class GinoPhase1Config:
     def __post_init__(self) -> None:
         resolution = _positive_int(self.latent_resolution, name="latent_resolution", minimum=8)
         modes = _positive_int(self.n_modes, name="n_modes")
-        _positive_int(self.hidden_channels, name="hidden_channels")
-        _positive_int(self.n_layers, name="n_layers")
+        channels = _positive_int(self.hidden_channels, name="hidden_channels")
+        layers = _positive_int(self.n_layers, name="n_layers")
+        if (resolution > _MAX_LATENT_RESOLUTION or channels > _MAX_HIDDEN_CHANNELS
+                or layers > _MAX_LAYERS):
+            raise ValueError("GINO configuration exceeds adapter resource limit")
         if modes >= resolution / 2:
             raise ValueError("n_modes must be strictly below latent_resolution / 2 (Nyquist)")
         if isinstance(self.radius_factor, (bool, str)) or not isinstance(self.radius_factor, numbers.Real):
@@ -62,6 +71,8 @@ class GinoPhase1Config:
             raise ValueError("radius_factor must fit in a finite float") from exc
         if not math.isfinite(radius) or radius <= 0.0:
             raise ValueError("radius_factor must be finite and > 0")
+        if radius > _MAX_RADIUS_FACTOR:
+            raise ValueError("GINO radius_factor exceeds adapter resource limit")
 
     def canonical(self) -> Dict[str, Any]:
         return {
@@ -85,12 +96,31 @@ def _check_lattice(lattice: Any) -> HexLattice:
         raise TypeError("lattice must be a HexLattice")
     if type(lattice.n) is not int or lattice.n < 3:
         raise ValueError("lattice n must be a canonical integer")
+    n = lattice.n
+    if n > _MAX_ADAPTER_N:
+        raise ValueError(f"GINO lattice n exceeds adapter resource limit {_MAX_ADAPTER_N}")
     if lattice.domain == "triangle_dirichlet":
-        canonical = triangle_hex_lattice(lattice.n)
+        expected_nodes = (n - 1) * (n - 2) // 2
+        factory = triangle_hex_lattice
     elif lattice.domain == "torus_periodic":
-        canonical = torus_hex_lattice(lattice.n)
+        if n < 4 or n % 2:
+            raise ValueError("torus lattice n must be even and >= 4")
+        expected_nodes = n * n
+        factory = torus_hex_lattice
     else:
         raise ValueError("lattice domain is not supported")
+    # Never allocate the canonical O(n^2) lattice for malformed caller shapes.
+    if (
+        not isinstance(lattice.coords, np.ndarray)
+        or not isinstance(lattice.neighbors, np.ndarray)
+        or lattice.coords.shape != (expected_nodes, 2)
+        or lattice.neighbors.shape != (expected_nodes, 6)
+        or lattice.coords.dtype != np.dtype("float64")
+        or lattice.neighbors.dtype != np.dtype("int64")
+        or lattice.h != 1.0 / n
+    ):
+        raise ValueError("lattice must have canonical shapes, dtypes and spacing")
+    canonical = factory(n)
     if (
         lattice.h != canonical.h
         or not isinstance(lattice.coords, np.ndarray)

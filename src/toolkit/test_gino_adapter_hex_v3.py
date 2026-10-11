@@ -64,6 +64,19 @@ class TestGinoPhase1Adapter(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 GinoPhase1Config(**kwargs)
 
+    def test_reject_excessive_architecture_before_allocating_tensor(self) -> None:
+        # Prevent hostile latent-grid/model hyperparameters from exhausting RAM.
+        for kwargs in (
+            {"latent_resolution": 10**10},
+            {"hidden_channels": 10**10},
+            {"n_layers": 10**10},
+            {"radius_factor": 10**100},
+        ):
+            with self.subTest(kwargs=kwargs), patch(
+                "torch.linspace", side_effect=AssertionError("allocated latent grid")
+            ), self.assertRaisesRegex(ValueError, "resource limit"):
+                GinoPhase1Config(**kwargs)
+
     def test_geometry_and_batch_contract(self) -> None:
         lattice = triangle_hex_lattice(8)
         cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
@@ -208,6 +221,36 @@ class TestGinoPhase1Adapter(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "inconsistent floating dtypes"):
             predict_gino(MixedModel(), lattice, np.ones(lattice.num_nodes), cfg)
+
+    def test_reject_oversized_n_without_allocating_lattice(self) -> None:
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
+        for domain in ("triangle_dirichlet", "torus_periodic"):
+            forged = HexLattice(10**10, 1e-10, domain, np.zeros((1, 2)), np.zeros((1, 6), dtype=np.int64))
+            with self.subTest(domain=domain), patch(
+                "gino_adapter_hex_v3.triangle_hex_lattice",
+                side_effect=AssertionError("must not allocate"),
+            ), patch(
+                "gino_adapter_hex_v3.torus_hex_lattice",
+                side_effect=AssertionError("must not allocate"),
+            ):
+                with self.assertRaisesRegex(ValueError, "resource limit"):
+                    prepare_gino_batch(forged, np.zeros(1), cfg)
+
+    def test_reject_shape_dtype_and_spacing_before_factory(self) -> None:
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
+        base = triangle_hex_lattice(8)
+        for altered in (
+            HexLattice(32, 1 / 32, "triangle_dirichlet", base.coords, base.neighbors),
+            HexLattice(8, base.h, base.domain, base.coords.astype(np.float32), base.neighbors),
+            HexLattice(8, base.h, base.domain, base.coords, base.neighbors.astype(np.int32)),
+            HexLattice(8, base.h * 1.01, base.domain, base.coords, base.neighbors),
+        ):
+            with self.subTest(n=altered.n, shape=altered.coords.shape), patch(
+                "gino_adapter_hex_v3.triangle_hex_lattice",
+                side_effect=AssertionError("must not allocate"),
+            ):
+                with self.assertRaisesRegex(ValueError, "canonical shapes"):
+                    prepare_gino_batch(altered, np.zeros(base.num_nodes), cfg)
 
     @unittest.skipUnless(importlib.util.find_spec("neuralop"), "optional neuraloperator backend not installed")
     def test_actual_backend_backward_optimizer_smoke(self) -> None:
