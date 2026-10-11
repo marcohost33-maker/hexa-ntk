@@ -79,6 +79,20 @@ def fsync_directory(path: Path) -> None:
         os.close(directory_fd)
 
 
+def fsync_file(path: Path) -> None:
+    """Persist a file's CONTENTS to disk (POSIX). No-op on other platforms,
+    the same gate as :func:`fsync_directory`: there ``os.replace`` plus the DCP
+    writer's own flush provide the durability, so there is no portable
+    read-only fsync to perform."""
+    if os.name != "posix":
+        return
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def json_bytes(value: Mapping[str, Any]) -> bytes:
     return (
         json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
@@ -119,9 +133,14 @@ def finalize_bundle(
     """Write COMMITTED.json last, after DCP completion and the caller's barrier."""
     bundle_path = Path(bundle_dir)
     manifest = build_manifest(bundle_path, metadata)
-    # The DCP shard directory entries must be durable before the manifest and
-    # the marker claim them (O4): fsync every directory that holds a shard,
-    # then the bundle directory itself.
+    # A shard's directory entry being durable does not make its CONTENTS
+    # durable: after a power loss the commit marker could survive while a shard
+    # is lost or truncated (issue #59 P2). Persist in the order
+    # contents -> directory -> marker: fsync every shard file's contents, then
+    # every directory that holds a shard, then the bundle directory, before the
+    # manifest and the marker claim them (O4).
+    for item in manifest["files"]:
+        fsync_file(bundle_path / item["path"])
     shard_dirs = sorted({(bundle_path / item["path"]).parent for item in manifest["files"]})
     for directory in shard_dirs:
         fsync_directory(directory)

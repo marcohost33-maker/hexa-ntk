@@ -1,0 +1,74 @@
+==================================================================
+HexaNTK Gate-Run -- Issue #59 Follow-ups nach #58
+Datum:    2026-10-11
+Branch:   claude/hexa-ntk-next-steps-wwdwtz
+Basis:    origin/main bb4f986 (PR #58 Hardening-Stack + dependabot #27/#28/#29)
+Scope:    #59 P2 (DCP shard content-flush), #59 P2 (metric_semantics_label
+          Export), #59 P3 (float32-Aufloesung dt-Twin-Guard).
+Umgebung: Linux (cloud container) | Python 3.13.16 | ruff 0.16.8
+          numpy 2.5.3 | torch NICHT installierbar (CPU-Wheel-Index
+          download.pytorch.org + PyPI im Agent-Proxy 403/Timeout geblockt).
+Verifikations-Scope (ehrlich getrennt):
+  * LOKAL verifiziert (torch-frei): #59 P2 DCP (Oracle + Test sind reines
+    stdlib), sowie ruff / compileall / verify_sources ueber den ganzen Baum.
+  * CI-verifiziert: #59 P2 benchmark __all__ und #59 P3 dataset_split
+    beruehren torch-Module (benchmark_hex_v3, dataset_split_hex_v3); ihre
+    Tests laufen im CI-Job `tests (cpu)`. Logik lokal torch-frei nachgerechnet
+    (siehe [3] / [4]), aber die Suite selbst wurde hier nicht ausgefuehrt.
+==================================================================
+
+### [0/5] Baseline vor jeder Aenderung (origin/main bb4f986) ###
+cd src/toolkit && python3 -m unittest test_distributed_checkpoint_bundle_v1 -v
+  Ran 14 tests -- OK   (torch-freies Modul; DCP-Bundle-Protokoll)
+
+### [1/5] #59 P2 DCP content-flush -- Rot-Lauf (neuer Test vs. altes Oracle) ###
+# Oracle-Fix per `git stash` zurueckgestellt, nur der aktualisierte Test aktiv:
+cd src/toolkit && python3 -m unittest \
+  test_distributed_checkpoint_bundle_v1.TestFinalizeDurabilityOrder -v
+  FAILED (errors=1)
+  AttributeError: module 'distributed_checkpoint_bundle_v1' has no attribute
+                  'fsync_file'
+  -> der Recorder verlangt den Content-Flush; das alte Oracle hat ihn nicht.
+
+### [2/5] #59 P2 DCP content-flush -- Gruen-Lauf (Oracle-Fix angewandt) ###
+cd src/toolkit && python3 -m unittest test_distributed_checkpoint_bundle_v1 -v
+  Ran 14 tests -- OK
+  TestFinalizeDurabilityOrder pinnt die volle Reihenfolge:
+    [("file",".metadata"),("file","__0_0.distcp"),
+     ("fsync","dcp"),("fsync","bundle"),
+     ("write","manifest.json"),("write","COMMITTED.json")]
+  d.h. Inhalt -> Verzeichnis -> Marker. Ein Mutant ohne fsync_file-Schleife
+  verliert die ("file", ...)-Events und faellt an dieser Assertion.
+
+### [3/5] #59 P3 float32-Aufloesung -- Logik torch-frei nachgerechnet ###
+# _as_float32 (struct.pack/unpack 'f', Ueberlauf -> +/-inf) == Kern des Fixes:
+  0.0      vs 1e-46   -> float32-gleich = True   (Bug-Fall #59: jetzt erkannt)
+  0.1      vs 0.1+1e-12 -> True   (bestehender #42-Fall: weiter abgelehnt)
+  0.1      vs 0.05    -> False    (echte verschiedene Schrittweiten: erlaubt)
+  0.1      vs 0.2     -> False
+  1e300    vs 1e300   -> True     (Ueberlauf -> inf, konsistent)
+  1e-3     vs 2e-3    -> False
+# Bestehende Tests geprueft: test_mixed_precision_dt_fails_closed (Meldung
+# enthaelt weiter "trajectory_id 0" + "dt_round_ndigits"),
+# test_float64_noise_without_rounding_fails_closed (0.1 vs 0.1+1e-12 -> True),
+# single-dt-Property (ein dt je Trajektorie; 0.0/-0.0 -> ein Key) unberuehrt.
+# Multi-dt-Property-Pool: 5e-324 entfernt (teilt float32 0.0 mit 0.0 -> Twin).
+
+### [4/5] #59 P2 benchmark __all__ -- statische Pruefung ###
+# metric_semantics_label (def Z.667) jetzt in __all__; Spec METRIC_SPEC_v4.md
+# nennt die vier oeffentlichen v4-Symbole. Neuer Test pinnt Spec-Text <-> __all__
+# <-> Attribut. (Lauf im CI, benchmark_hex_v3 importiert torch.)
+
+### [5/5] Gate-Kette (lokal, torch-frei) ###
+ruff check src scripts            -> All checks passed!            (rc 0)
+python3 -m compileall -q src      -> (keine Fehler)               (rc 0)
+python3 scripts/verify_sources.py -> 26 Toolkit + 3 Spec + 8 Script
+                                     | git 37 Dateien | PASS      (rc 0)
+
+### Zahlen / Pins ###
+README Toolkit-Testzahl 528 -> 530 (netto +2 Testmethoden: #59 P2 benchmark,
+  #59 P3 dataset_split; DCP-Test in-place aktualisiert = +0). Modul-/Provenance-/
+  Doctest-/Mutanten-/Engine-Zahlen unveraendert. SOURCES.md: 6 append-only
+  Zeilen (SHA-256-Prefix, LF-normalisiert) fuer die geaenderten Dateien.
+CI-Beleg (tests (cpu) + gate) folgt auf dem PR.
+==================================================================

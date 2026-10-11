@@ -852,6 +852,27 @@ class TestMetricSpecV4(unittest.TestCase):
         self.assertIsNone(migrated["corrected_aggregated_mean_nrmse"])
         self.assertIsNone(migrated["threshold_crossing_step"])
 
+    def test_spec_v4_public_symbols_are_exported(self) -> None:
+        # Issue #59: metric_semantics_label is part of the v4 contract in
+        # spec/METRIC_SPEC_v4.md (its header names the public symbols of this
+        # module) but was missing from __all__. Pin every symbol the spec
+        # declares public to both the spec text and the module's public API,
+        # so dropping one here or there fails closed.
+        expected_public = (
+            "MetricSpecV4",
+            "evaluate_rollout_v4",
+            "metric_semantics_label",
+            "preserve_legacy_report_without_relabeling",
+        )
+        spec_text = (
+            Path(__file__).resolve().parents[2] / "spec" / "METRIC_SPEC_v4.md"
+        ).read_text(encoding="utf-8")
+        for name in expected_public:
+            with self.subTest(name=name):
+                self.assertIn(f"`{name}`", spec_text)
+                self.assertIn(name, benchmark.__all__)
+                self.assertTrue(hasattr(benchmark, name))
+
 
 if __name__ == "__main__":
     unittest.main()

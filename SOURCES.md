@@ -419,3 +419,16 @@
 > Pins for the integrated bytes of this block. Prior rows remain lineage.
 
 | 99FA3780E73F53DA | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R3-test-assertion: test_runner_hex_v3.py |
+
+## Issue #59 follow-ups (append-only, 2026-10-11, claude/hexa-ntk-next-steps-wwdwtz)
+
+> Pins for the bytes changed by the three #59 follow-up findings: DCP shard
+> content-flush before the commit marker (P2), `metric_semantics_label` export
+> (P2), float32-resolution dt twin guard (P3). Prior rows remain lineage.
+
+| 13FECACABBCA8DC9 | 2026-10-11 00:00 | scripts/oracles | in-repo derived, #59 P2 fsync shard contents before the commit marker: distributed_checkpoint_bundle_v1.py |
+| 172A1AB1D16220BE | 2026-10-11 00:00 | src/toolkit | in-repo derived, #59 P2 content-flush order recorder: test_distributed_checkpoint_bundle_v1.py |
+| 412AA56028E8CDBF | 2026-10-11 00:00 | src/toolkit | in-repo derived, #59 P2 export metric_semantics_label in __all__: benchmark_hex_v3.py |
+| 9B6BF083B0A4973B | 2026-10-11 00:00 | src/toolkit | in-repo derived, #59 P2 spec-v4 public symbols exported test: test_benchmark_hex_v3.py |
+| A36128E2F050D7E7 | 2026-10-11 00:00 | src/toolkit | in-repo derived, #59 P3 float32-resolution dt twin guard: dataset_split_hex_v3.py |
+| 6A6EF1809034C9B7 | 2026-10-11 00:00 | src/toolkit | in-repo derived, #59 P3 float32 dt twin test + multi-dt pool: test_dataset_split_hex_v3.py |

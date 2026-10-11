@@ -5,6 +5,28 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Issue #59 Follow-ups nach #58 (2026-10-11, PR aus `claude/hexa-ntk-next-steps-wwdwtz`).**
+  Die drei offenen Befunde aus #58-Codex-Runde 3, jeder mit eigenem Test:
+  _P2 Durability (`scripts/oracles/distributed_checkpoint_bundle_v1.py`):_ `finalize_bundle`
+  machte nur die Verzeichnis-Eintraege der Shards durabel, nicht deren **Inhalt** — nach einem
+  Power-Loss konnte der `COMMITTED.json`-Marker ueberleben, waehrend ein Shard verloren/abgeschnitten
+  war. Neu `fsync_file` (POSIX-gated wie `fsync_directory`); `finalize_bundle` fsynct jetzt in der
+  Reihenfolge Inhalt → Verzeichnis → Marker. `TestFinalizeDurabilityOrder` pinnt die volle
+  Ereignisfolge (ein Mutant, der den Content-Flush auslaesst, verliert die `("file", …)`-Events).
+  _P2 API (`benchmark_hex_v3.py`):_ `metric_semantics_label` ist Teil des v4-Vertrags
+  (`spec/METRIC_SPEC_v4.md`), fehlte aber in `__all__` — ergaenzt; neuer Test pinnt alle vier
+  oeffentlichen v4-Symbole gegen Spec-Text und `__all__` (fail-closed bei Drop).
+  _P3 Quantisierung (`dataset_split_hex_v3.py`):_ der Precision-Twin-Guard verglich mit
+  `math.isclose(…, abs_tol=0.0)`, sodass `0.0` und `1e-46` nie gleich waren, obwohl beide float32 `0.0`
+  sind. Jetzt float32-exakter Vergleich (`_as_float32` via `struct`, Ueberlauf → ±inf): zwei dt-Keys
+  einer Trajektorie sind derselbe Schritt gdw. sie auf denselben binary32-Wert runden. Der
+  Multi-dt-Property-Pool verliert `5e-324` (teilt float32 `0.0` mit `0.0` → waere jetzt ein Twin).
+  _Evidenz:_ Item 1 lokal verifiziert (torch-frei: DCP-Modul rot→gruen, 14/14 OK; rot = fehlendes
+  `fsync_file` am alten Oracle), `ruff`/`compileall`/`verify_sources` rc 0 lokal;
+  Items 2+3 beruehren torch-Module (`benchmark`, `dataset_split`) → im CI-`tests (cpu)`-Lauf
+  verifiziert (`torch==2.6.0` CPU hier proxy-geblockt). Gate-Log
+  `results/2026-10-11_issue59_local-gate.log`. README-Testzahl 528 → 530.
+
 - [x] **Codex-Review #46 nach Merge von `main` (2026-09-28).**
   _EMA-Decay (PRRT_kwDOSwvSC86m2eei):_ die oeffentlichen Resume-Helfer nahmen `ema_state_dict`
   ohne `ema_decay` an, und der Loader uebersprang den Vergleich, sobald eine Seite fehlte (stilles

@@ -792,6 +792,30 @@ class TestDtPrecisionSplitIssue42(unittest.TestCase):
         self.assertIn("trajectory_id 0", str(ctx.exception))
         self.assertIn("dt_round_ndigits", str(ctx.exception))
 
+    def test_float32_resolution_is_the_dt_twin_contract(self) -> None:
+        # Issue #59 P3: the precision-twin guard compares dt keys at float32
+        # resolution. 0.0 and 1e-46 both round to float32 0.0, so they are one
+        # step size reported in two precisions and must fail closed; the
+        # earlier math.isclose(..., abs_tol=0.0) treated them as two distinct
+        # step sizes (|0.0 - 1e-46| was never within a relative tolerance).
+        twin = FakeTrajectoryDataset(
+            [{"trajectory_id": 0, "dt": 0.0}, {"trajectory_id": 0, "dt": 1e-46}]
+            + [{"trajectory_id": 1, "dt": 0.0}]
+        )
+        with self.assertRaisesRegex(ValueError, "same float32 value"):
+            split_dataset_by_trajectory(twin, val_fraction=0.5, seed=0, group_by_dt=True)
+
+        # A genuinely different pair (distinct float32 values) stays two step
+        # sizes; the split keeps the trajectory whole (E0927-03) and succeeds.
+        distinct = FakeTrajectoryDataset(
+            [{"trajectory_id": 0, "dt": 1e-3}, {"trajectory_id": 0, "dt": 2e-3}]
+            + [{"trajectory_id": 1, "dt": 1e-3}]
+        )
+        train, val = split_dataset_by_trajectory(
+            distinct, val_fraction=0.5, seed=0, group_by_dt=True
+        )
+        self.assertEqual(len(train) + len(val), 3)
+
     def test_mixed_precision_dt_with_rounding_never_leaks(self) -> None:
         ds = self._mixed_precision_dataset()
         for seed in range(50):
@@ -896,7 +920,11 @@ class TestTrajectoryInvariantE092703(unittest.TestCase):
         # Random datasets in which trajectories carry 1-3 DISTINCT step sizes
         # (no precision twins, which fail closed elsewhere), float and
         # float64-tensor values; both grouping modes, with/without rounding.
-        dt_pool = (0.1, 0.2, 0.05, 1e-3, 0.0, -0.05, 1e300, 5e-324)
+        # Every pool entry has a distinct IEEE-754 binary32 image -- the
+        # resolution at which the twin guard compares dt keys (issue #59); the
+        # subnormal 5e-324 shares float32 0.0 with the plain 0.0 and would be a
+        # twin, so it is excluded from this leakage-invariant pool on purpose.
+        dt_pool = (0.1, 0.2, 0.05, 1e-3, 0.0, -0.05, 1e300)
         for seed in range(50):
             rng = random.Random(1000 + seed)
             samples: List[Dict[str, Any]] = []
