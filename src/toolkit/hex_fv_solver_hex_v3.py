@@ -257,6 +257,10 @@ def _check_conductance(conductance: Any, lattice: HexLattice) -> np.ndarray:
         raise ValueError(f"conductance must have shape {lattice.neighbors.shape}, got {c.shape}")
     if not np.all(np.isfinite(c)):
         raise ValueError("conductance must be finite")
+    # Same positivity contract as the scalar and callable paths (spec section 3):
+    # c <= 0 makes L_c anti-diffusive and I - dt/2 L_c no longer SPD.
+    if np.any(c <= 0.0):
+        raise ValueError("conductance must be > 0 on every slot")
     for slot in range(3):
         rows = np.nonzero(lattice.neighbors[:, slot] >= 0)[0]
         if not np.array_equal(c[rows, slot], c[lattice.neighbors[rows, slot], slot + 3]):

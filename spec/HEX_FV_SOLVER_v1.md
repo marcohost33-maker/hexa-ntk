@@ -64,7 +64,8 @@ Two-point-flux FV Laplacian with symmetric edge conductances `c`:
 `sum_m a_m a_m^T = (3/2) h^2 I` over its three directions, so
 `L_c u = div(kappa grad u) + O(h^2)` for smooth `kappa` and `u`.
 
-**Contract checks on a conductance array:** shape `(M, 6)`, finite, and
+**Contract checks on a conductance array:** shape `(M, 6)`, finite, `> 0` on
+every slot (as for a scalar or callable `kappa`; added 2026-10-12) and
 symmetric as above. A violation raises `ValueError`.
 
 **Conservation.** On the torus, `sum_i (L_c u)_i = 0` for every `u`, because

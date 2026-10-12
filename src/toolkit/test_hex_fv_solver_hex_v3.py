@@ -224,6 +224,29 @@ class TestEdgeConductances(unittest.TestCase):
         with self.assertRaises(ValueError):
             apply_hex_laplacian(u, lat, np.full(lat.neighbors.shape, np.inf))
 
+    def test_non_positive_conductance_arrays_are_rejected(self) -> None:
+        # Codex P2 on #61: finite + symmetric is not enough; c <= 0 is
+        # anti-diffusive and breaks the SPD claim of Crank-Nicolson.
+        lat = triangle_hex_lattice(7)
+        base = np.array(edge_conductances(lat, _smooth_kappa))
+        row = int(np.nonzero(lat.neighbors[:, 0] >= 0)[0][0])
+        partner = int(lat.neighbors[row, 0])
+        one_zero = base.copy()
+        one_zero[row, 0] = one_zero[partner, 3] = 0.0
+        boundary_negative = base.copy()
+        boundary_row = int(np.nonzero(lat.neighbors[:, 0] < 0)[0][0])
+        boundary_negative[boundary_row, 0] = -1.0
+        u = np.ones(lat.num_nodes)
+        for name, c in (("all negative", -base), ("one symmetric zero edge", one_zero),
+                        ("negative Dirichlet slot", boundary_negative)):
+            with self.subTest(case=name):
+                with self.assertRaisesRegex(ValueError, "> 0"):
+                    apply_hex_laplacian(u, lat, c)
+                with self.assertRaisesRegex(ValueError, "> 0"):
+                    assemble_hex_operator(lat, c)
+                with self.assertRaisesRegex(ValueError, "> 0"):
+                    crank_nicolson_heat(u, lat, kappa=c, dt=1e-3, steps=1)
+
 
 class TestPositivityGateIssue60(unittest.TestCase):
     def test_bound_matches_the_engine_positivity_contract(self) -> None:
