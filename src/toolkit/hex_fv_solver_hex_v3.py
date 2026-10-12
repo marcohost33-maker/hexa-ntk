@@ -396,6 +396,17 @@ def explicit_euler_heat(
 # ------------------------------------------------------------------
 
 
+def _rescaled_solution(y: np.ndarray, exponent: int) -> np.ndarray:
+    """x = y * 2^exponent, fail-closed unless x represents y exactly."""
+    x = np.ldexp(y, exponent)
+    if not (np.all(np.isfinite(x)) and np.array_equal(np.ldexp(x, -exponent), y)):
+        raise ConvergenceError(
+            "conjugate_gradient: the solution is not representable in binary64 at the scale of b "
+            "(overflow or underflow)"
+        )
+    return x
+
+
 def conjugate_gradient(
     apply_a: Callable[[np.ndarray], np.ndarray],
     b: Any,
@@ -427,9 +438,16 @@ def conjugate_gradient(
     if rtol >= 1.0:
         raise ValueError("rtol must be < 1")
     maxiter = _int_at_least(maxiter, name="maxiter", minimum=1)
-    b_norm = float(np.linalg.norm(rhs))
-    if b_norm == 0.0:
+    peak = float(np.max(np.abs(rhs)))
+    if peak == 0.0:
         return np.zeros_like(rhs), {"iterations": 0, "relative_residual": 0.0}
+    # Finite entries do not imply a representable ||b||_2 (1e200 overflows,
+    # 1e-200 underflows to 0). CG runs on the linear system scaled by a power
+    # of two, A (x / 2^e) = b / 2^e with max|b / 2^e| in [0.5, 1): the scaling
+    # is exact in binary64 and the relative residual is scale invariant.
+    exponent = math.frexp(peak)[1]
+    rhs = np.ldexp(rhs, -exponent)
+    b_norm = float(np.linalg.norm(rhs))
     if x0 is None:
         x = np.zeros_like(rhs)
         r = rhs.copy()
@@ -437,6 +455,9 @@ def conjugate_gradient(
         x = np.array(x0, dtype=np.float64)
         if x.shape != rhs.shape or not np.all(np.isfinite(x)):
             raise ValueError("x0 must be a finite array with the shape of b")
+        x = np.ldexp(x, -exponent)
+        if not np.all(np.isfinite(x)):
+            raise ValueError("x0 is not representable at the scale of b")
         r = rhs - np.asarray(apply_a(x), dtype=np.float64)
     # Here r is the true residual of x.
     rr = float(r @ r)
@@ -444,7 +465,7 @@ def conjugate_gradient(
         raise ConvergenceError("conjugate_gradient: non-finite residual")
     best, best_relative = x, math.sqrt(rr) / b_norm
     if best_relative <= rtol:
-        return x, {"iterations": 0, "relative_residual": best_relative}
+        return _rescaled_solution(x, exponent), {"iterations": 0, "relative_residual": best_relative}
     p = r.copy()
     stale = 0
     for iteration in range(1, maxiter + 1):
@@ -457,7 +478,7 @@ def conjugate_gradient(
         r = r - alpha * ap
         rr_new = float(r @ r)
         if not math.isfinite(rr_new):
-            raise ConvergenceError("conjugate_gradient: non-finite residual", best=best,
+            raise ConvergenceError("conjugate_gradient: non-finite residual", best=np.ldexp(best, exponent),
                                    best_relative_residual=best_relative, iterations=iteration)
         if math.sqrt(rr_new) > rtol * b_norm:
             p = r + (rr_new / rr) * p
@@ -467,11 +488,11 @@ def conjugate_gradient(
         r = rhs - np.asarray(apply_a(x), dtype=np.float64)
         rr = float(r @ r)
         if not math.isfinite(rr):
-            raise ConvergenceError("conjugate_gradient: non-finite residual", best=best,
+            raise ConvergenceError("conjugate_gradient: non-finite residual", best=np.ldexp(best, exponent),
                                    best_relative_residual=best_relative, iterations=iteration)
         relative = math.sqrt(rr) / b_norm
         if relative <= rtol:
-            return x, {"iterations": iteration, "relative_residual": relative}
+            return _rescaled_solution(x, exponent), {"iterations": iteration, "relative_residual": relative}
         if relative < best_relative:
             best, best_relative, stale = x, relative, 0
         else:
@@ -480,12 +501,12 @@ def conjugate_gradient(
                 raise ConvergenceError(
                     f"conjugate_gradient: true residual stagnated at {best_relative:.3e} > rtol={rtol!r} "
                     f"(no new minimum in {stale} checks, {iteration} iterations)",
-                    best=best, best_relative_residual=best_relative, iterations=iteration,
+                    best=np.ldexp(best, exponent), best_relative_residual=best_relative, iterations=iteration,
                 )
         p = r.copy()  # residual replacement: restart from the true residual
     raise ConvergenceError(
         f"conjugate_gradient: no convergence to rtol={rtol!r} in {maxiter} iterations",
-        best=best, best_relative_residual=best_relative, iterations=maxiter,
+        best=np.ldexp(best, exponent), best_relative_residual=best_relative, iterations=maxiter,
     )
 
 

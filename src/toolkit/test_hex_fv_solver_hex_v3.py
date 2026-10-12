@@ -511,6 +511,36 @@ class TestConjugateGradient(unittest.TestCase):
         self.assertAlmostEqual(exc.best_relative_residual / best_true, 1.0, places=9)
         self.assertGreater(exc.best_relative_residual, 1e-15)
 
+    def test_unrepresentable_rhs_norm_is_solved_by_exact_rescaling(self) -> None:
+        # Codex P2 on #61: ||b||_2 of finite entries can overflow (1e200 -> inf:
+        # x = 0 after 0 iterations with a NaN residual) or underflow (1e-200 ->
+        # 0: the zero vector returned as "converged").
+        a = self._spd(30, 7)
+        v = np.random.default_rng(8).standard_normal(30)
+        x_ref, info_ref = conjugate_gradient(lambda w: a @ w, v, rtol=1e-12, maxiter=300)
+        for scale in (2.0**700, 1e200, 1e-200, 2.0**-1000):
+            with self.subTest(scale=scale):
+                b = scale * v
+                self.assertTrue(np.all(np.isfinite(b)) and np.all(b != 0.0))
+                x, info = conjugate_gradient(lambda w: a @ w, b, rtol=1e-12, maxiter=300)
+                self.assertGreater(info["iterations"], 0)
+                self.assertTrue(math.isfinite(info["relative_residual"]))
+                self.assertLessEqual(info["relative_residual"], 1e-12)
+                np.testing.assert_allclose(x / scale, x_ref, rtol=1e-12, atol=0.0)
+                if math.frexp(scale)[0] == 0.5:  # exact power of two: bit-identical to the unscaled solve
+                    self.assertTrue(np.array_equal(x, scale * x_ref))
+                    self.assertEqual(info, info_ref)
+
+    def test_solution_outside_binary64_raises(self) -> None:
+        # A = 1e-300 I, b = 1e10: x = 1e310 overflows; x = 1e-320 would be subnormal.
+        b = np.full(4, 1e10)
+        with self.assertRaisesRegex(ConvergenceError, "not representable"):
+            conjugate_gradient(lambda w: 1e-300 * w, b, rtol=1e-12, maxiter=10)
+        with self.assertRaisesRegex(ConvergenceError, "not representable"):
+            conjugate_gradient(lambda w: 1e300 * w, np.full(4, 1e-20), rtol=1e-12, maxiter=10)
+        with self.assertRaisesRegex(ValueError, "x0 is not representable"):
+            conjugate_gradient(lambda w: w, np.full(4, 1e-300), rtol=1e-12, maxiter=10, x0=np.full(4, 1e300))
+
     def test_maxiter_error_carries_the_true_residual_of_the_start(self) -> None:
         a = self._spd(60, 2)
         b = np.ones(60)

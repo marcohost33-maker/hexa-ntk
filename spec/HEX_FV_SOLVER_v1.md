@@ -126,6 +126,13 @@ forward-Euler step maps non-negative states to non-negative states.
   - a stagnating true residual (no new minimum in 50 consecutive true-residual
     checks; the binary64 floor of `||b - A x||` lies above `rtol * ||b||`)
     raises `ConvergenceError`.
+  - (Added 2026-10-12.) Finite entries do not make `||b||_2` representable.
+    CG therefore runs on the system scaled by a power of two,
+    `max|b / 2^e|` in `[0.5, 1)`; this is exact in binary64 and leaves the
+    relative residual unchanged. A solution that is not exactly representable
+    at the scale of `b` (overflow or subnormal) raises `ConvergenceError`; an
+    `x0` that overflows at that scale raises `ValueError`. Only `b == 0`
+    returns the zero vector without iterating.
   - Every `ConvergenceError` from the iteration carries the iterate with the
     smallest true residual seen, that residual and the iteration count as
     diagnostics. They are never a converged result.

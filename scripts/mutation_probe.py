@@ -183,9 +183,9 @@ MUTANTS = (
            "        criteria[\"C10_conservation\"] = True\n", "test_reference_case_hex_v3.TestHexHeatTorusStudyGate"),
     # Phase 1 instruments (T1 hex-heat-operator, Crank-Nicolson baseline).
     Mutant(FV, "    half = 0.5 * dt\n", "    half = dt\n", "test_hex_fv_solver_hex_v3.TestCrankNicolson"),
-    Mutant(FV, "            raise ValueError(\"x0 must be a finite array with the shape of b\")\n"
+    Mutant(FV, "            raise ValueError(\"x0 is not representable at the scale of b\")\n"
                "        r = rhs - np.asarray(apply_a(x), dtype=np.float64)\n",
-           "            raise ValueError(\"x0 must be a finite array with the shape of b\")\n"
+           "            raise ValueError(\"x0 is not representable at the scale of b\")\n"
            "        r = rhs.copy()\n",
            "test_hex_fv_solver_hex_v3.TestConjugateGradient"),
     # 2026-10-12 P1: the stopping rule is decided on the TRUE residual b - A x.
