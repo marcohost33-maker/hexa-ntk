@@ -183,7 +183,16 @@ MUTANTS = (
            "        criteria[\"C10_conservation\"] = True\n", "test_reference_case_hex_v3.TestHexHeatTorusStudyGate"),
     # Phase 1 instruments (T1 hex-heat-operator, Crank-Nicolson baseline).
     Mutant(FV, "    half = 0.5 * dt\n", "    half = dt\n", "test_hex_fv_solver_hex_v3.TestCrankNicolson"),
-    Mutant(FV, "        r = rhs - np.asarray(apply_a(x), dtype=np.float64)\n", "        r = rhs.copy()\n",
+    Mutant(FV, "            raise ValueError(\"x0 must be a finite array with the shape of b\")\n"
+               "        r = rhs - np.asarray(apply_a(x), dtype=np.float64)\n",
+           "            raise ValueError(\"x0 must be a finite array with the shape of b\")\n"
+           "        r = rhs.copy()\n",
+           "test_hex_fv_solver_hex_v3.TestConjugateGradient"),
+    # 2026-10-12 P1: the stopping rule is decided on the TRUE residual b - A x.
+    Mutant(FV, "        # Pre-check passed: the true residual decides.\n"
+               "        r = rhs - np.asarray(apply_a(x), dtype=np.float64)\n"
+               "        rr = float(r @ r)\n",
+           "        rr = rr_new\n",
            "test_hex_fv_solver_hex_v3.TestConjugateGradient"),
     Mutant(T1, "            for n in range(m, bound + 1):\n", "            for n in range(1, bound + 1):\n",
            "test_heat_operator_task_hex_v3.TestBasis"),

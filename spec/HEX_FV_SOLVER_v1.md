@@ -111,12 +111,24 @@ forward-Euler step maps non-negative states to non-negative states.
 
 - Its stopping rule is relative to the right-hand side:
   `||b - A x||_2 <= rtol * ||b||_2`.
-- It fails closed in three cases:
+  - The rule is decided on the TRUE residual `b - A x`. The recursively
+    updated residual is only a cheap pre-check; when the true residual then
+    fails the rule, CG restarts from it (residual replacement). (Added
+    2026-10-12: the recursive residual drifts from the true one in binary64;
+    measured on the Phase 0b MMS levels, it passed `1e-13` while the true
+    residual was `1.24e-13` (N=48) to `3.20e-12` (N=192).)
+- It fails closed in four cases:
   - a non-positive curvature `p . A p <= 0` raises `ValueError` (the operator
     is not SPD);
   - exceeding `maxiter` raises `ConvergenceError`;
-  - a non-finite iterate raises `ConvergenceError`.
-- It returns the iteration count and the achieved relative residual.
+  - a non-finite iterate raises `ConvergenceError`;
+  - a stagnating true residual (no new minimum in 50 consecutive true-residual
+    checks; the binary64 floor of `||b - A x||` lies above `rtol * ||b||`)
+    raises `ConvergenceError`.
+  - Every `ConvergenceError` from the iteration carries the iterate with the
+    smallest true residual seen, that residual and the iteration count as
+    diagnostics. They are never a converged result.
+- It returns the iteration count and the achieved TRUE relative residual.
 - An optional initial guess `x0` (warm start) does not change the stopping
   rule. If `x0` already satisfies the rule, CG returns after 0 iterations.
 

@@ -451,6 +451,52 @@ class TestConjugateGradient(unittest.TestCase):
         with self.assertRaises(ConvergenceError):
             conjugate_gradient(lambda v: a @ v, np.ones(60), rtol=1e-14, maxiter=2)
 
+    @staticmethod
+    def _poisson(n: int):
+        lat = triangle_hex_lattice(n)
+        diag, off = assemble_hex_operator(lat, edge_conductances(lat, _smooth_kappa))
+
+        def apply_a(v: np.ndarray) -> np.ndarray:
+            return -fv._apply_assembled(diag, off, lat.neighbors, v)
+
+        return lat, apply_a
+
+    def test_stopping_rule_is_decided_on_the_true_residual(self) -> None:
+        # spec section 5: ||b - A x||_2 <= rtol ||b||_2. On these systems the
+        # recursive residual passes 1e-13 while the true one is still above it
+        # (measured with the old rule: 1.12e-13 and 1.34e-13).
+        lat, apply_a = self._poisson(48)
+        x_coord, y_coord = lat.coords[:, 0], lat.coords[:, 1]
+        for name, b in (("ones", np.ones(lat.num_nodes)),
+                        ("sin", np.sin(np.pi * x_coord) * np.sin(2 * np.pi * y_coord) + 1.0)):
+            with self.subTest(rhs=name):
+                x, info = conjugate_gradient(apply_a, b, rtol=1e-13, maxiter=10 * lat.num_nodes + 100)
+                true_relative = float(np.linalg.norm(b - apply_a(x)) / np.linalg.norm(b))
+                self.assertLessEqual(true_relative, 1e-13)
+                self.assertAlmostEqual(info["relative_residual"] / true_relative, 1.0, places=9)
+
+    def test_stagnating_true_residual_raises_with_the_best_iterate(self) -> None:
+        # rtol = 1e-15 lies below the binary64 floor of ||b - A x|| here.
+        lat, apply_a = self._poisson(48)
+        b = np.ones(lat.num_nodes)
+        maxiter = 10 * lat.num_nodes + 100
+        with self.assertRaisesRegex(ConvergenceError, "stagnated") as caught:
+            conjugate_gradient(apply_a, b, rtol=1e-15, maxiter=maxiter)
+        exc = caught.exception
+        self.assertLess(exc.iterations, maxiter)
+        best_true = float(np.linalg.norm(b - apply_a(exc.best)) / np.linalg.norm(b))
+        self.assertAlmostEqual(exc.best_relative_residual / best_true, 1.0, places=9)
+        self.assertGreater(exc.best_relative_residual, 1e-15)
+
+    def test_maxiter_error_carries_the_true_residual_of_the_start(self) -> None:
+        a = self._spd(60, 2)
+        b = np.ones(60)
+        with self.assertRaises(ConvergenceError) as caught:
+            conjugate_gradient(lambda v: a @ v, b, rtol=1e-14, maxiter=2)
+        self.assertEqual(caught.exception.iterations, 2)
+        self.assertTrue(np.all(caught.exception.best == 0.0))
+        self.assertEqual(caught.exception.best_relative_residual, 1.0)
+
     def test_argument_contract(self) -> None:
         for kwargs, exc in (({"rtol": 1.0, "maxiter": 5}, ValueError), ({"rtol": 0.0, "maxiter": 5}, ValueError),
                             ({"rtol": 1e-8, "maxiter": 0}, ValueError), ({"rtol": 1e-8, "maxiter": 2.0}, TypeError)):

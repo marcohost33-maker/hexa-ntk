@@ -519,3 +519,16 @@
 | 3C9695B66E17255F | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 dt quantisation contract: dataset_split_hex_v3.py |
 | 64C9F1BDB1FD7B49 | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 dt quantisation contract: test_dataset_split_hex_v3.py |
 
+> **2026-10-12, PR #61 P1 (CG stopping rule).** `conjugate_gradient` now decides
+> `||b - A x||_2 <= rtol ||b||_2` on the true residual (spec/HEX_FV_SOLVER_v1.md
+> section 5). Consequence: Phase 0b I1 fails on N=192 (true residual stagnates
+> at 2.34e-13 > 1e-13); the threshold is unchanged (owner decision). Prior rows
+> remain lineage.
+
+| CAB44CD8B761E223 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): hex_fv_solver_hex_v3.py |
+| 8A70864BFFFCE627 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): test_hex_fv_solver_hex_v3.py |
+| 0F496A82B8D39E49 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): reference_case_hex_v3.py |
+| A534D04BAAA1075B | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): test_reference_case_hex_v3.py |
+| 2CC63B7B63B566D3 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): HEX_FV_SOLVER_v1.md |
+| E7E3849689E6F44B | 2026-10-12 00:00 | scripts | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): mutation_probe.py |
+

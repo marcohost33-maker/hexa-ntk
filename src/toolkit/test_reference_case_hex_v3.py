@@ -482,6 +482,28 @@ class TestMmsGateDiscrimination(unittest.TestCase):
         self.assertFalse(study["criteria"]["M1_error_order"])
         self.assertFalse(study["passed"])
 
+    def test_non_converged_cg_fails_i1_instead_of_crashing(self) -> None:
+        # spec Phase 0b I1: "On every level CG converges at rtol = 1e-13". A
+        # ConvergenceError is evidence (I1 false), not a passed level.
+        real = rc.solve_steady_diffusion
+
+        def stalls_on_the_finest(lattice, kappa, source, *, rtol):
+            u, info = real(lattice, kappa, source, rtol=rtol)
+            if lattice.n == self.LEVELS[-1] and rtol == rc._MMS_CG_RTOL:
+                raise fv.ConvergenceError("stalled", best=u, best_relative_residual=info["relative_residual"],
+                                          iterations=info["iterations"])
+            return u, info
+
+        with mock.patch.object(rc, "solve_steady_diffusion", side_effect=stalls_on_the_finest):
+            study = self._study()
+        self.assertEqual([level["cg_converged"] for level in study["levels"]], [True, True, True, False])
+        self.assertEqual([k for k, ok in study["criteria"].items() if not ok], ["I1_iterative_error_negligible"])
+        _, solver = hex_mms_tri_reference_specs(study, evidence_ref="x")
+        self.assertIs(solver.iterative_verification.status, EvidenceStatus.FAIL)
+        with mock.patch.object(rc, "solve_steady_diffusion", side_effect=fv.ConvergenceError("no iterate")):
+            with self.assertRaisesRegex(fv.ConvergenceError, "no iterate"):
+                self._study()
+
     def test_early_cg_stop_fails_the_iterative_criterion(self) -> None:
         with mock.patch.object(rc, "_MMS_CG_RTOL", 1e-3):
             study = self._study()

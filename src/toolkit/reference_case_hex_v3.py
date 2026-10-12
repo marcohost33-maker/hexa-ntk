@@ -55,6 +55,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 
 from hex_fv_solver_hex_v3 import (
+    ConvergenceError,
     HexLattice,
     apply_hex_laplacian,
     assemble_hex_operator,
@@ -821,6 +822,22 @@ def _centroid_index(lattice: HexLattice) -> int:
     return int(hits[0])
 
 
+def _mms_solve(lattice: HexLattice, conductance: np.ndarray, source: np.ndarray,
+               rtol: float) -> Tuple[np.ndarray, Dict[str, Any], bool]:
+    """CG solve for I1: a non-converged solve is evidence (I1 fails), not a crash.
+
+    On ConvergenceError the best iterate and its TRUE relative residual are
+    reported with converged=False, so the remaining criteria stay measurable.
+    """
+    try:
+        u, info = solve_steady_diffusion(lattice, conductance, source, rtol=rtol)
+    except ConvergenceError as exc:
+        if exc.best is None or exc.best_relative_residual is None:
+            raise
+        return exc.best, {"iterations": exc.iterations, "relative_residual": exc.best_relative_residual}, False
+    return u, info, True
+
+
 def _mms_level_evidence(n: int, config: HexMmsTriConfig) -> Dict[str, Any]:
     lattice = triangle_hex_lattice(n)
     conductance = edge_conductances(lattice, config.kappa)
@@ -835,8 +852,8 @@ def _mms_level_evidence(n: int, config: HexMmsTriConfig) -> Dict[str, Any]:
     except ValueError:
         dt_bound = None
     source = config.source(lattice.coords)
-    u_tight, info_tight = solve_steady_diffusion(lattice, conductance, source, rtol=_MMS_CG_RTOL)
-    u_loose, info_loose = solve_steady_diffusion(lattice, conductance, source, rtol=_MMS_CG_RTOL_LOOSE)
+    u_tight, info_tight, converged_tight = _mms_solve(lattice, conductance, source, _MMS_CG_RTOL)
+    u_loose, info_loose, converged_loose = _mms_solve(lattice, conductance, source, _MMS_CG_RTOL_LOOSE)
     exact = config.solution(lattice.coords)
     error = u_tight - exact
     discretisation_error = float(np.max(np.abs(error)))
@@ -849,6 +866,7 @@ def _mms_level_evidence(n: int, config: HexMmsTriConfig) -> Dict[str, Any]:
         "kappa_min": float(conductance.min()),
         "conductance_symmetric": bool(symmetric),
         "positivity_dt_bound": dt_bound,
+        "cg_converged": converged_tight and converged_loose,
         "cg_iterations": info_tight["iterations"],
         "cg_relative_residual": info_tight["relative_residual"],
         "cg_iterations_loose": info_loose["iterations"],
@@ -891,7 +909,8 @@ def run_hex_mms_tri_study(config: HexMmsTriConfig | None = None) -> Dict[str, An
         "M3_positivity_gate": all(level["positivity_dt_bound"] is not None for level in levels),
         **solution,
         "I1_iterative_error_negligible": all(
-            level["cg_relative_residual"] <= _MMS_CG_RTOL
+            level["cg_converged"]
+            and level["cg_relative_residual"] <= _MMS_CG_RTOL
             and level["iterative_to_discretisation_ratio"] <= _MMS_ITERATIVE_RATIO
             for level in levels
         ),

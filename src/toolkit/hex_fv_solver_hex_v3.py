@@ -65,8 +65,32 @@ _ENGINE_PATH = Path(__file__).resolve().parents[1] / "hexantk_v3.py"
 Coefficient = Union[float, np.ndarray]
 
 
+#: Consecutive true-residual checks without a new minimum after which CG stops
+#: as stagnated (the binary64 floor of ||b - A x|| lies above rtol * ||b||).
+_CG_STAGNATION_CHECKS = 50
+
+
 class ConvergenceError(RuntimeError):
-    """An iterative solve did not reach its tolerance (fail-closed)."""
+    """An iterative solve did not reach its tolerance (fail-closed).
+
+    ``best`` is the iterate with the smallest TRUE relative residual
+    ``best_relative_residual`` seen before the stop, ``iterations`` the
+    iterations spent. All three are diagnostics (``None`` when unknown), never
+    a converged result.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        best: np.ndarray | None = None,
+        best_relative_residual: float | None = None,
+        iterations: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.best = best
+        self.best_relative_residual = best_relative_residual
+        self.iterations = iterations
 
 
 @functools.lru_cache(maxsize=1)
@@ -378,10 +402,17 @@ def conjugate_gradient(
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """Solve A x = b for symmetric positive definite A, ||b - A x|| <= rtol ||b||.
 
+    The stopping rule is decided on the TRUE residual b - A x (spec section 5).
+    The recursively updated residual drifts from it in floating point, so it
+    only serves as a cheap pre-check: once it passes, b - A x is evaluated; if
+    that fails, CG restarts from the true residual (residual replacement).
+    The returned ``relative_residual`` is the true ||b - A x|| / ||b||.
+
     ``x0`` is an optional initial guess (warm start); the stopping rule stays
     relative to ||b||. Fail-closed: non-positive curvature -> ValueError (A is
-    not SPD); no convergence within maxiter or a non-finite iterate ->
-    ConvergenceError.
+    not SPD); no convergence within maxiter, a stagnating true residual
+    (no new minimum in ``_CG_STAGNATION_CHECKS`` consecutive checks) or a
+    non-finite iterate -> ConvergenceError.
     """
     if not callable(apply_a):
         raise TypeError("apply_a must be callable")
@@ -403,10 +434,15 @@ def conjugate_gradient(
         if x.shape != rhs.shape or not np.all(np.isfinite(x)):
             raise ValueError("x0 must be a finite array with the shape of b")
         r = rhs - np.asarray(apply_a(x), dtype=np.float64)
+    # Here r is the true residual of x.
     rr = float(r @ r)
-    if math.sqrt(rr) <= rtol * b_norm:
-        return x, {"iterations": 0, "relative_residual": math.sqrt(rr) / b_norm}
+    if not math.isfinite(rr):
+        raise ConvergenceError("conjugate_gradient: non-finite residual")
+    best, best_relative = x, math.sqrt(rr) / b_norm
+    if best_relative <= rtol:
+        return x, {"iterations": 0, "relative_residual": best_relative}
     p = r.copy()
+    stale = 0
     for iteration in range(1, maxiter + 1):
         ap = np.asarray(apply_a(p), dtype=np.float64)
         curvature = float(p @ ap)
@@ -417,13 +453,36 @@ def conjugate_gradient(
         r = r - alpha * ap
         rr_new = float(r @ r)
         if not math.isfinite(rr_new):
-            raise ConvergenceError("conjugate_gradient: non-finite residual")
-        relative = math.sqrt(rr_new) / b_norm
+            raise ConvergenceError("conjugate_gradient: non-finite residual", best=best,
+                                   best_relative_residual=best_relative, iterations=iteration)
+        if math.sqrt(rr_new) > rtol * b_norm:
+            p = r + (rr_new / rr) * p
+            rr = rr_new
+            continue
+        # Pre-check passed: the true residual decides.
+        r = rhs - np.asarray(apply_a(x), dtype=np.float64)
+        rr = float(r @ r)
+        if not math.isfinite(rr):
+            raise ConvergenceError("conjugate_gradient: non-finite residual", best=best,
+                                   best_relative_residual=best_relative, iterations=iteration)
+        relative = math.sqrt(rr) / b_norm
         if relative <= rtol:
             return x, {"iterations": iteration, "relative_residual": relative}
-        p = r + (rr_new / rr) * p
-        rr = rr_new
-    raise ConvergenceError(f"conjugate_gradient: no convergence to rtol={rtol!r} in {maxiter} iterations")
+        if relative < best_relative:
+            best, best_relative, stale = x, relative, 0
+        else:
+            stale += 1
+            if stale >= _CG_STAGNATION_CHECKS:
+                raise ConvergenceError(
+                    f"conjugate_gradient: true residual stagnated at {best_relative:.3e} > rtol={rtol!r} "
+                    f"(no new minimum in {stale} checks, {iteration} iterations)",
+                    best=best, best_relative_residual=best_relative, iterations=iteration,
+                )
+        p = r.copy()  # residual replacement: restart from the true residual
+    raise ConvergenceError(
+        f"conjugate_gradient: no convergence to rtol={rtol!r} in {maxiter} iterations",
+        best=best, best_relative_residual=best_relative, iterations=maxiter,
+    )
 
 
 def crank_nicolson_heat(
