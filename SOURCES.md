@@ -539,4 +539,7 @@
 | CEEE96C6CA0BD802 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 overflow-safe CG rhs norm (exact power-of-two scaling): test_hex_fv_solver_hex_v3.py |
 | AFA0C6BFE9827222 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 overflow-safe CG rhs norm (exact power-of-two scaling): HEX_FV_SOLVER_v1.md |
 | 3ACF36EB34286B1A | 2026-10-12 00:00 | scripts | in-repo derived, 2026-10-12 PR #61 Codex P2 overflow-safe CG rhs norm (exact power-of-two scaling): mutation_probe.py |
+| 03C9A61A6B74D006 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 GPT6 W9-F01 canonical lattice contract: hex_fv_solver_hex_v3.py |
+| 22885F2D2B0CEB3A | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 GPT6 W9-F01 canonical lattice contract: test_hex_fv_solver_hex_v3.py |
+| 11815B955B7ADDA5 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 GPT6 W9-F01 canonical lattice contract: HEX_FV_SOLVER_v1.md |
 

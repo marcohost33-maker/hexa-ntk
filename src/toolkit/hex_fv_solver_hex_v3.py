@@ -205,10 +205,52 @@ def torus_hex_lattice(n: int) -> HexLattice:
     return HexLattice(n=n, h=h, domain="torus_periodic", coords=coords, neighbors=neighbors)
 
 
+@functools.lru_cache(maxsize=8)
+def _canonical_lattice(domain: str, n: int) -> HexLattice:
+    """Private reference copy of a factory lattice (never handed to callers)."""
+    return triangle_hex_lattice(n) if domain == "triangle_dirichlet" else torus_hex_lattice(n)
+
+
+def _same_array(value: Any, reference: np.ndarray) -> bool:
+    return (
+        isinstance(value, np.ndarray)
+        and value.shape == reference.shape
+        and value.dtype == reference.dtype
+        and bool(np.array_equal(value, reference))
+    )
+
+
 def _check_lattice(lattice: Any) -> HexLattice:
+    """Accept only a lattice equal to its factory output; return the private copy.
+
+    HexLattice is a plain dataclass, so n, h, coords and neighbours can be
+    forged (W9-F01: a lattice with every neighbour set to node 0 was accepted).
+    The operator trusts the topology, so it is compared field by field with
+    the canonical lattice of (domain, n), and the read-only canonical copy is
+    what the caller computes on.
+    """
     if not isinstance(lattice, HexLattice) or lattice.domain not in _DOMAINS:
         raise TypeError("lattice must be a HexLattice")
-    return lattice
+    n = lattice.n
+    if isinstance(n, bool) or not isinstance(n, numbers.Integral):
+        raise ValueError(f"lattice.n must be an int, got {n!r}")
+    try:
+        canonical = _canonical_lattice(lattice.domain, int(n))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"lattice is not a valid {lattice.domain} lattice: {exc}") from exc
+    h = lattice.h
+    if (
+        isinstance(h, bool)
+        or not isinstance(h, numbers.Real)
+        or not float(h) == canonical.h
+        or not _same_array(lattice.coords, canonical.coords)
+        or not _same_array(lattice.neighbors, canonical.neighbors)
+    ):
+        raise ValueError(
+            f"lattice does not match the canonical {lattice.domain} lattice for n={int(n)} "
+            "(h, coords or neighbors differ); build it with triangle_hex_lattice or torus_hex_lattice"
+        )
+    return canonical
 
 
 def _check_field(u: Any, lattice: HexLattice, *, name: str = "u") -> np.ndarray:

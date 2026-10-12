@@ -44,6 +44,14 @@ hexagon of area `(sqrt(3)/2) h^2`.
 Arrays are read-only. `-1` never means "missing neighbour" here. That is a
 different convention from the H1 proxy in `benchmark_hex_v3`.
 
+**Lattice contract (added 2026-10-12, GPT6 W9-F01).** Every function that
+takes a lattice accepts only one whose `n`, `h`, `coords` and `neighbors`
+(shape, dtype and values) equal the factory lattice of its domain and `n`;
+anything else raises `ValueError` (a wrong type or domain stays `TypeError`).
+The computation then runs on a private read-only copy of the factory lattice.
+The read-only flag alone is advisory, so a lattice changed after construction
+is rejected as well.
+
 ## 3. Operator
 
 Two-point-flux FV Laplacian with symmetric edge conductances `c`:

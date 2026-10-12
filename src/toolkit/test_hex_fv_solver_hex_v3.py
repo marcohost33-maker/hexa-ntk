@@ -586,6 +586,64 @@ class TestSteadySolve(unittest.TestCase):
             solve_steady_diffusion(triangle_hex_lattice(40), 1.0, np.ones(triangle_hex_lattice(40).num_nodes),
                                    maxiter=3)
 
+    def test_forged_lattice_topology_is_rejected_w9_f01(self) -> None:
+        # GPT6 W9-F01: HexLattice is a plain dataclass; a lattice whose
+        # neighbours all point to node 0 was accepted by the operator.
+        lat = triangle_hex_lattice(8)
+        u = np.random.default_rng(9).standard_normal(lat.num_nodes)
+
+        def forged(**fields):
+            values = {"n": lat.n, "h": lat.h, "domain": lat.domain, "coords": lat.coords, "neighbors": lat.neighbors}
+            values.update(fields)
+            return HexLattice(**values)
+
+        other = triangle_hex_lattice(9)
+        swapped = np.array(lat.neighbors)
+        swapped[[0, 1]] = swapped[[1, 0]]
+        cases = {
+            "neighbours all node 0": forged(neighbors=np.zeros_like(lat.neighbors)),
+            "two rows swapped": forged(neighbors=swapped),
+            "neighbours as a list": forged(neighbors=lat.neighbors.tolist()),
+            "neighbours int32": forged(neighbors=lat.neighbors.astype(np.int32)),
+            "shifted coords": forged(coords=lat.coords + 1e-12),
+            "wrong h": forged(h=0.1),
+            "nan h": forged(h=float("nan")),
+            "arrays of n=9": forged(coords=other.coords, neighbors=other.neighbors),
+            "n as float": forged(n=8.0),
+            "n as bool": forged(n=True),
+            "n too small": forged(n=2),
+            "torus with odd n": HexLattice(n=7, h=1 / 7, domain="torus_periodic", coords=lat.coords,
+                                           neighbors=lat.neighbors),
+        }
+        for name, fake in cases.items():
+            with self.subTest(case=name):
+                with self.assertRaises(ValueError):
+                    apply_hex_laplacian(u, fake)
+                with self.assertRaises(ValueError):
+                    assemble_hex_operator(fake)
+                with self.assertRaises(ValueError):
+                    edge_conductances(fake, _smooth_kappa)
+                with self.assertRaises(ValueError):
+                    solve_steady_diffusion(fake, 1.0, np.ones(lat.num_nodes))
+        # An equal lattice (numpy int n, fresh arrays) is accepted and gives the same operator.
+        twin = forged(n=np.int64(8), coords=lat.coords.copy(), neighbors=lat.neighbors.copy())
+        self.assertTrue(np.array_equal(apply_hex_laplacian(u, twin), apply_hex_laplacian(u, lat)))
+
+    def test_lattice_mutated_after_construction_is_rejected(self) -> None:
+        lat = triangle_hex_lattice(8)
+        u = np.ones(lat.num_nodes)
+        apply_hex_laplacian(u, lat)
+        original = int(lat.neighbors[0, 0])
+        lat.neighbors.flags.writeable = True  # owned array: the read-only flag is advisory
+        lat.neighbors[0, 0] = -1 if original != -1 else 0
+        with self.assertRaisesRegex(ValueError, "canonical"):
+            apply_hex_laplacian(u, lat)
+        with self.assertRaisesRegex(ValueError, "canonical"):
+            explicit_euler_heat(u, lat, kappa=1.0, dt=1e-6, steps=1)
+        with self.assertRaisesRegex(ValueError, "canonical"):
+            crank_nicolson_heat(u, lat, kappa=1.0, dt=1e-3, steps=1)
+        self.assertEqual(int(triangle_hex_lattice(8).neighbors[0, 0]), original)  # factory output unaffected
+
     def test_lattice_type_is_checked(self) -> None:
         fake = HexLattice(n=3, h=1 / 3, domain="hexagon", coords=np.zeros((1, 2)), neighbors=-np.ones((1, 6), int))
         with self.assertRaises(TypeError):
