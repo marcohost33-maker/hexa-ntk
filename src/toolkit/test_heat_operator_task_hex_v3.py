@@ -261,6 +261,33 @@ class TestMetrics(unittest.TestCase):
         finally:
             task.apply_hex_laplacian = original
 
+    def test_negative_energy_band_is_per_sample(self) -> None:
+        # Codex P2 on #61: the band was 64 eps * max over the WHOLE batch, so a
+        # high-energy sample hid a materially negative energy of another.
+        lat = triangle_hex_lattice(8)
+        loud = np.full(lat.num_nodes, 1e6)  # energy ~ 2.8e11 -> batch band ~ 4e-3
+        quiet = np.ones(lat.num_nodes)
+        original = task.apply_hex_laplacian
+
+        def fake_laplacian(row, lattice, factor):
+            row = np.asarray(row)
+            return -row if row[0] > 1.0 else factor * row
+
+        try:
+            task.apply_hex_laplacian = lambda row, lattice: fake_laplacian(row, lattice, 1e-3)
+            self.assertLess(-1e-3 * lat.cell_area * float(quiet @ quiet), -1e-4)  # materially negative
+            with self.assertRaisesRegex(ValueError, "non-negative"):
+                task._energy_seminorm(np.stack([loud, quiet]), lat)
+            with self.assertRaisesRegex(ValueError, "non-negative"):
+                task._energy_seminorm(np.stack([quiet, loud]), lat)
+            # Within its OWN band (|energy| < 1 -> 64 eps) a negative energy is clamped to 0.
+            task.apply_hex_laplacian = lambda row, lattice: fake_laplacian(row, lattice, 1e-14)
+            energies = task._energy_seminorm(np.stack([loud, quiet]), lat)
+            self.assertEqual(float(energies[1]), 0.0)
+            self.assertGreater(float(energies[0]), 0.0)
+        finally:
+            task.apply_hex_laplacian = original
+
 
 class TestMechanisticBaseline(unittest.TestCase):
     def test_second_order_in_space_and_time(self) -> None:

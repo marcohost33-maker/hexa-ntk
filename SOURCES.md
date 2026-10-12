@@ -542,4 +542,6 @@
 | 03C9A61A6B74D006 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 GPT6 W9-F01 canonical lattice contract: hex_fv_solver_hex_v3.py |
 | 22885F2D2B0CEB3A | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 GPT6 W9-F01 canonical lattice contract: test_hex_fv_solver_hex_v3.py |
 | 11815B955B7ADDA5 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 GPT6 W9-F01 canonical lattice contract: HEX_FV_SOLVER_v1.md |
+| 675C90BC29E4AC30 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 per-sample H1 negative-energy band: heat_operator_task_hex_v3.py |
+| 8FA2B49EDEAA92A6 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 per-sample H1 negative-energy band: test_heat_operator_task_hex_v3.py |
 

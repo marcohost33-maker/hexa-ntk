@@ -442,8 +442,9 @@ def _energy_seminorm(v: np.ndarray, lattice: HexLattice) -> np.ndarray:
     )
     if not np.all(np.isfinite(values)):
         raise ValueError("discrete H1 energy must be finite")
-    scale = max(1.0, float(np.max(np.abs(values))))
-    tolerance = 64.0 * np.finfo(np.float64).eps * scale
+    # Per-sample roundoff band (spec section 3): a batch-wide max would let one
+    # high-energy sample hide a materially negative energy of another.
+    tolerance = 64.0 * np.finfo(np.float64).eps * np.maximum(1.0, np.abs(values))
     if np.any(values < -tolerance):
         raise ValueError("discrete H1 energy must be non-negative")
     return np.sqrt(np.maximum(values, 0.0))
