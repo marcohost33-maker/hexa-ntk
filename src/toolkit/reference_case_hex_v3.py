@@ -840,7 +840,7 @@ def _mms_solve(lattice: HexLattice, conductance: np.ndarray, source: np.ndarray,
     """CG solve for I1: a non-converged solve is evidence (I1 fails), not a crash.
 
     On ConvergenceError the best iterate and its TRUE relative residual are
-    reported with converged=False and status "not_converged", so the remaining
+    reported with returned=False and status "not_converged", so the remaining
     criteria stay measurable. A returned V1 solve has status "converged"
     (V1 returns only at rtol); V2 reports its own status, tol_eff and eta.
     """
@@ -871,8 +871,8 @@ def _mms_level_evidence(n: int, config: HexMmsTriConfig) -> Dict[str, Any]:
         dt_bound = None
     source = config.source(lattice.coords)
     stopping = config.cg_stopping
-    u_tight, info_tight, converged_tight = _mms_solve(lattice, conductance, source, _MMS_CG_RTOL, stopping)
-    u_loose, info_loose, converged_loose = _mms_solve(lattice, conductance, source, _MMS_CG_RTOL_LOOSE, stopping)
+    u_tight, info_tight, returned_tight = _mms_solve(lattice, conductance, source, _MMS_CG_RTOL, stopping)
+    u_loose, info_loose, returned_loose = _mms_solve(lattice, conductance, source, _MMS_CG_RTOL_LOOSE, stopping)
     exact = config.solution(lattice.coords)
     error = u_tight - exact
     discretisation_error = float(np.max(np.abs(error)))
@@ -885,8 +885,11 @@ def _mms_level_evidence(n: int, config: HexMmsTriConfig) -> Dict[str, Any]:
         "kappa_min": float(conductance.min()),
         "conductance_symmetric": bool(symmetric),
         "positivity_dt_bound": dt_bound,
-        # "cg_converged": both solves returned (V2: converged or at_rounding_floor).
-        "cg_converged": converged_tight and converged_loose,
+        # "cg_returned": both solves returned (V2: converged or at_rounding_floor).
+        # "cg_converged": both reached their rtol; False on an at_rounding_floor level,
+        # so no field reads "converged" where only tol_eff was reached.
+        "cg_returned": returned_tight and returned_loose,
+        "cg_converged": info_tight["status"] == "converged" and info_loose["status"] == "converged",
         "cg_status": info_tight["status"],
         "cg_status_loose": info_loose["status"],
         "cg_iterations": info_tight["iterations"],
@@ -913,7 +916,7 @@ def _i1_level_holds(level: Dict[str, Any], stopping: str) -> bool:
 
     The PASS branch hangs on comparisons that must be TRUE, so a NaN fails.
     """
-    if not level["cg_converged"] or level["cg_status"] not in _I1_ACCEPTED_STATUS[stopping]:
+    if not level["cg_returned"] or level["cg_status"] not in _I1_ACCEPTED_STATUS[stopping]:
         return False
     bound = _MMS_CG_RTOL if stopping == "v1" else level["cg_tol_eff"]
     return bool(level["cg_relative_residual"] <= bound

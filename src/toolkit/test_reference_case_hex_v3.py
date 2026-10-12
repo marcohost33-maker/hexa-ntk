@@ -421,6 +421,9 @@ class TestHexMmsTriStudyGate(unittest.TestCase):
         self.assertEqual([level["cg_status"] for level in levels],
                          ["converged", "converged", "converged", "at_rounding_floor"])
         self.assertEqual(self.study["thresholds"]["cg_floor_factor"], 8)
+        # "converged" only where rtol was reached by both solves (no converged label at the floor).
+        self.assertEqual([level["cg_converged"] for level in levels], [True, True, True, False])
+        self.assertEqual([level["cg_returned"] for level in levels], [True] * 4)
         for level in levels:
             with self.subTest(n=level["n"]):
                 self.assertEqual(level["cg_status_loose"], "converged")
@@ -439,12 +442,12 @@ class TestHexMmsTriStudyGate(unittest.TestCase):
                     self.assertLessEqual(level["cg_backward_error"], cu)
 
     def test_i1_level_rule_fails_closed(self) -> None:
-        ok = {"cg_converged": True, "cg_status": "at_rounding_floor", "cg_relative_residual": 2e-13,
+        ok = {"cg_returned": True, "cg_status": "at_rounding_floor", "cg_relative_residual": 2e-13,
               "cg_tol_eff": 4e-12, "iterative_to_discretisation_ratio": 1e-6}
         self.assertTrue(rc._i1_level_holds(ok, "v2"))
         self.assertFalse(rc._i1_level_holds(ok, "v1"))  # V1 accepts only "converged" at rtol
         for change in ({"cg_relative_residual": 5e-12}, {"cg_relative_residual": math.nan},
-                       {"cg_tol_eff": math.nan}, {"cg_status": "not_converged"}, {"cg_converged": False},
+                       {"cg_tol_eff": math.nan}, {"cg_status": "not_converged"}, {"cg_returned": False},
                        {"iterative_to_discretisation_ratio": math.nan},
                        {"iterative_to_discretisation_ratio": 2e-3}):
             with self.subTest(change=change):
@@ -591,7 +594,8 @@ class TestMmsGateDiscrimination(unittest.TestCase):
                 study = self._study()
             except fv.ConvergenceError as exc:
                 self.fail(f"a non-converged level crashed the study instead of failing I1: {exc}")
-        self.assertEqual([level["cg_converged"] for level in study["levels"]], [True, True, True, False])
+        self.assertEqual([level["cg_returned"] for level in study["levels"]], [True, True, True, False])
+        self.assertEqual(study["levels"][-1]["cg_status"], "not_converged")
         self.assertEqual([k for k, ok in study["criteria"].items() if not ok], ["I1_iterative_error_negligible"])
         _, solver = hex_mms_tri_reference_specs(study, evidence_ref="x")
         self.assertIs(solver.iterative_verification.status, EvidenceStatus.FAIL)

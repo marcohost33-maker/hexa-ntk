@@ -582,3 +582,5 @@
 | 34B1815ACAD6ECB2 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: REFERENCE_CASES_HEX_PHASE0B_v1.md |
 | 9B689DCC93F9B9F2 | 2026-10-12 00:00 | scripts | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: mutation_probe.py |
 | 725151FC09B80F9C | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 V2 non-finite floor test fails by assertion for any exception type: test_hex_fv_solver_hex_v3.py |
+| F70F0D7AB9D8444E | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: reference_case_hex_v3.py |
+| 71769EC73D62DE94 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: test_reference_case_hex_v3.py |
