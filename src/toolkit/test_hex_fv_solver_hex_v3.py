@@ -544,6 +544,42 @@ class TestConjugateGradient(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "x0 is not representable"):
             conjugate_gradient(lambda w: w, np.full(4, 1e-300), rtol=1e-12, maxiter=10, x0=np.full(4, 1e300))
 
+    def test_true_residual_norm_does_not_underflow(self) -> None:
+        # Codex P2 on #61 @266900e: A = diag(1, 2), b = [1, 1e-200], rtol = 1e-250.
+        # After one step the residual is ~5e-201 (scaled system), r . r underflows
+        # to 0 and the old rule returned "converged" with relative_residual 0.
+        a = np.diag([1.0, 2.0])
+        b = np.array([1.0, 1e-200])
+        try:
+            x, info = conjugate_gradient(lambda v: a @ v, b, rtol=1e-250, maxiter=10)
+        except ConvergenceError as exc:
+            self.assertIn("below the binary64 range", str(exc))
+            true_relative = float(np.linalg.norm(b - a @ exc.best) / np.linalg.norm(b))
+            self.assertGreater(exc.best_relative_residual, 1e-250)
+            self.assertGreaterEqual(true_relative, 0.0)
+        else:
+            true = b - a @ x
+            scale = float(np.max(np.abs(true)))
+            true_relative = 0.0 if scale == 0.0 else scale * float(np.linalg.norm(true / scale)) / float(
+                np.linalg.norm(b))
+            self.fail(f"reported convergence (relative_residual={info['relative_residual']!r}) although the "
+                      f"true relative residual is {true_relative!r} > rtol 1e-250")
+
+    def test_scaled_norm_agrees_bitwise_with_the_unscaled_one_in_range(self) -> None:
+        # The pre-check and the true-residual decision keep their old arithmetic
+        # wherever r . r is safely in range, so converged solves are unchanged.
+        v = np.random.default_rng(3).standard_normal(500)
+        for scale in (1.0, 2.0**-300, 2.0**-440):
+            with self.subTest(scale=scale):
+                w = scale * v
+                squared = float(w @ w)
+                self.assertGreaterEqual(squared, fv._CG_SAFE_SQUARED_NORM)
+                self.assertEqual(fv._norm2(w, squared), math.sqrt(squared))
+        tiny = 2.0**-600 * v  # r . r underflows: the scaled norm takes over
+        self.assertEqual(float(tiny @ tiny), 0.0)
+        self.assertEqual(fv._norm2(tiny, 0.0), math.ldexp(float(np.linalg.norm(v)), -600))
+        self.assertEqual(fv._norm2(np.zeros(3), 0.0), 0.0)
+
     def test_maxiter_error_carries_the_true_residual_of_the_start(self) -> None:
         a = self._spd(60, 2)
         b = np.ones(60)

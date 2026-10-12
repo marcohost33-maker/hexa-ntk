@@ -449,6 +449,36 @@ def _rescaled_solution(y: np.ndarray, exponent: int) -> np.ndarray:
     return x
 
 
+# Below this, r . r may have lost the squares of residual components to
+# underflow (|r_i| < 2^-511 squares below the normal range); sqrt(r . r) is then
+# replaced by the power-of-two-scaled norm. Above it the two agree bit for bit:
+# scaling by 2^k commutes exactly with every binary64 operation, and the
+# underflowed squares are below 2^-1022 each, negligible against 2^-900.
+_CG_SAFE_SQUARED_NORM = 2.0**-900
+
+
+def _norm2(v: np.ndarray, squared: float) -> float:
+    """||v||_2 without underflow (PR #61 Codex P2): sqrt(v . v) where that is exact, else scaled.
+
+    ``squared`` is v . v as already computed by the caller (finite).
+    """
+    if squared >= _CG_SAFE_SQUARED_NORM:
+        return math.sqrt(squared)
+    peak = float(np.max(np.abs(v)))
+    if peak == 0.0:
+        return 0.0
+    exponent = math.frexp(peak)[1]
+    return math.ldexp(float(np.linalg.norm(np.ldexp(v, -exponent))), exponent)
+
+
+def _cg_underflow(best: np.ndarray, exponent: int, best_relative: float, iteration: int) -> ConvergenceError:
+    return ConvergenceError(
+        "conjugate_gradient: the residual is below the binary64 range of the CG recurrence "
+        "(r . r underflows to 0 while ||r|| > rtol ||b||); the requested rtol is not reachable",
+        best=np.ldexp(best, exponent), best_relative_residual=best_relative, iterations=iteration,
+    )
+
+
 def conjugate_gradient(
     apply_a: Callable[[np.ndarray], np.ndarray],
     b: Any,
@@ -505,9 +535,11 @@ def conjugate_gradient(
     rr = float(r @ r)
     if not math.isfinite(rr):
         raise ConvergenceError("conjugate_gradient: non-finite residual")
-    best, best_relative = x, math.sqrt(rr) / b_norm
+    best, best_relative = x, _norm2(r, rr) / b_norm
     if best_relative <= rtol:
         return _rescaled_solution(x, exponent), {"iterations": 0, "relative_residual": best_relative}
+    if rr == 0.0:
+        raise _cg_underflow(best, exponent, best_relative, 0)
     p = r.copy()
     stale = 0
     for iteration in range(1, maxiter + 1):
@@ -522,7 +554,9 @@ def conjugate_gradient(
         if not math.isfinite(rr_new):
             raise ConvergenceError("conjugate_gradient: non-finite residual", best=np.ldexp(best, exponent),
                                    best_relative_residual=best_relative, iterations=iteration)
-        if math.sqrt(rr_new) > rtol * b_norm:
+        if _norm2(r, rr_new) > rtol * b_norm:
+            if rr_new == 0.0:
+                raise _cg_underflow(best, exponent, best_relative, iteration)
             p = r + (rr_new / rr) * p
             rr = rr_new
             continue
@@ -532,7 +566,7 @@ def conjugate_gradient(
         if not math.isfinite(rr):
             raise ConvergenceError("conjugate_gradient: non-finite residual", best=np.ldexp(best, exponent),
                                    best_relative_residual=best_relative, iterations=iteration)
-        relative = math.sqrt(rr) / b_norm
+        relative = _norm2(r, rr) / b_norm
         if relative <= rtol:
             return _rescaled_solution(x, exponent), {"iterations": iteration, "relative_residual": relative}
         if relative < best_relative:
@@ -545,6 +579,8 @@ def conjugate_gradient(
                     f"(no new minimum in {stale} checks, {iteration} iterations)",
                     best=np.ldexp(best, exponent), best_relative_residual=best_relative, iterations=iteration,
                 )
+        if rr == 0.0:
+            raise _cg_underflow(best, exponent, best_relative, iteration)
         p = r.copy()  # residual replacement: restart from the true residual
     raise ConvergenceError(
         f"conjugate_gradient: no convergence to rtol={rtol!r} in {maxiter} iterations",

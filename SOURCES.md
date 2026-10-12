@@ -550,3 +550,5 @@
 | 1C0CD9DC2F08626F | 2026-10-12 00:00 | scripts/oracles | in-repo derived, 2026-10-12 PR #61 Codex P2 evidence writers fail closed on an unbound source revision: hex_phase0_reference_oracle.py |
 | 7338EDC5172914B4 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 evidence writers fail closed on an unbound source revision: test_reference_oracle_source_binding.py |
 
+| D5D9EF2923B2C07C | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 underflow-safe true CG residual norm: hex_fv_solver_hex_v3.py |
+| 823A6B4BC89BD24C | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 underflow-safe true CG residual norm: test_hex_fv_solver_hex_v3.py |
