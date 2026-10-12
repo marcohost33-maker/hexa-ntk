@@ -561,3 +561,4 @@
 | AF7D1DFFFEA29988 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 oscillatory study serialised as negative evidence: reference_case_hex_v3.py |
 | 3925442C24A56C39 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 oscillatory study serialised as negative evidence: test_reference_case_hex_v3.py |
 | BA52937C53F030BE | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 oscillatory study serialised as negative evidence: REFERENCE_CASE_HEX_HEAT_TRI_v1.md |
+| 008ECFEDAA323F20 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 CG underflow rule; measured residual replacement keeping p rejected: HEX_FV_SOLVER_v1.md |

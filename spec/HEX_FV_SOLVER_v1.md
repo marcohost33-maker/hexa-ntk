@@ -126,7 +126,15 @@ forward-Euler step maps non-negative states to non-negative states.
     2026-10-12: the recursive residual drifts from the true one in binary64;
     measured on the Phase 0b MMS levels, it passed `1e-13` while the true
     residual was `1.24e-13` (N=48) to `3.20e-12` (N=192).)
-- It fails closed in four cases:
+    (Measured 2026-10-12 and rejected: keeping the search direction at this
+    point, `p = r_true + (r_true . r_true / r_old . r_old) p` as in residual
+    replacement after van der Vorst & Ye, made the MMS solves at `rtol = 1e-13`
+    worse: N=96 no longer converged (44750 iterations = maxiter, best
+    `4.26e-13`; with the restart 302 iterations, `9.29e-14`) and N=192 ran to
+    maxiter at `3.20e-12` instead of stagnating at `2.34e-13`. The
+    replacement happens only once the pre-check passes, i.e. at the
+    attainable-accuracy floor, which is not where that scheme replaces.)
+- It fails closed in these cases:
   - a non-positive curvature `p . A p <= 0` raises `ValueError` (the operator
     is not SPD);
   - exceeding `maxiter` raises `ConvergenceError`;
@@ -141,6 +149,11 @@ forward-Euler step maps non-negative states to non-negative states.
     at the scale of `b` (overflow or subnormal) raises `ConvergenceError`; an
     `x0` that overflows at that scale raises `ValueError`. Only `b == 0`
     returns the zero vector without iterating.
+  - (Added 2026-10-12.) Every stopping decision uses `||r||_2` without
+    underflow: `sqrt(r . r)` while `r . r >= 2^-900` (bit-identical there),
+    otherwise the norm of `r` scaled by a power of two. If `r . r` underflows
+    to `0` while `||r|| > rtol * ||b||`, the recurrence cannot continue and
+    `ConvergenceError` is raised; it is never reported as converged.
   - Every `ConvergenceError` from the iteration carries the iterate with the
     smallest true residual seen, that residual and the iteration count as
     diagnostics. They are never a converged result.
