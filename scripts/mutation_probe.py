@@ -201,8 +201,12 @@ MUTANTS = (
            "test_heat_operator_task_hex_v3.TestPriorAndTruth"),
     Mutant(T1, "    digest.update(np.ascontiguousarray(u_t, dtype=\"<f8\").tobytes())\n", "",
            "test_heat_operator_task_hex_v3.TestManifest"),
-    Mutant(T1, "    values = [-lattice.cell_area * float(row @ apply_hex_laplacian(row, lattice)) for row in v]\n",
-           "    values = [lattice.cell_area * float(row @ row) for row in v]\n",
+    Mutant(T1, "        [-lattice.cell_area * float(row @ apply_hex_laplacian(row, lattice)) for row in v],\n",
+           "        [lattice.cell_area * float(row @ row) for row in v],\n",
+           "test_heat_operator_task_hex_v3.TestMetrics"),
+    # 2026-10-12 Codex P2: the negative-energy band is per sample, not batch-wide.
+    Mutant(T1, "    tolerance = 64.0 * np.finfo(np.float64).eps * np.maximum(1.0, np.abs(values))\n",
+           "    tolerance = 64.0 * np.finfo(np.float64).eps * max(1.0, float(np.max(np.abs(values))))\n",
            "test_heat_operator_task_hex_v3.TestMetrics"),
 )
 
