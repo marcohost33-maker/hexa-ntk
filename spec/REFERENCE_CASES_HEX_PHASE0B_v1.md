@@ -9,7 +9,8 @@
 
 **Builds on:**
 - `spec/REFERENCE_CASE_HEX_HEAT_TRI_v1.md` (Phase 0a: same lattice, study structure and Celik method);
-- `spec/HEX_FV_SOLVER_v1.md` (the code under test);
+- `spec/HEX_FV_SOLVER_v1.md` (the code under test) and its CG stopping rule V2,
+  `spec/HEX_FV_SOLVER_v2.md` (used by I1 since 2026-10-12);
 - `spec/REFERENCE_SPEC_v1.md` (claim ceilings).
 
 **Implementation:**
@@ -106,7 +107,8 @@ The mapping is that of Phase 0a section 6, except:
 
 **Discretisation (`spec/HEX_FV_SOLVER_v1.md`)**
 - `-L_c u_h = f` at the nodes, with `c = kappa` at the edge midpoints.
-- The system is solved with CG to `rtol = 1e-13`.
+- The system is solved with CG at `rtol = 1e-13`, stopping rule V2 since
+  2026-10-12 (I1 below).
 
 **Levels**
 - `N = 24, 48, 96, 192`.
@@ -139,10 +141,27 @@ The mapping is that of Phase 0a section 6, except:
 - For C9, the exact value is `u*(centroid)`.
 
 **Iterative verification**
-- **I1.** On every level CG converges at `rtol = 1e-13`.
-- In addition, the iterative-error estimate must be at most `1e-3` times the
-  discretisation error:
-  `||u_h(rtol=1e-10) - u_h(rtol=1e-13)||_inf <= 1e-3 * ||u_h(rtol=1e-13) - u*||_inf`.
+
+- **I1 V1 (historical, BLOCKED since 2026-10-12; text unchanged).**
+  - On every level CG converges at `rtol = 1e-13`.
+  - In addition, the iterative-error estimate must be at most `1e-3` times the
+    discretisation error:
+    `||u_h(rtol=1e-10) - u_h(rtol=1e-13)||_inf <= 1e-3 * ||u_h(rtol=1e-13) - u*||_inf`.
+  - Status: with the stopping rule decided on the true residual, N=192
+    stagnates at `2.344e-13 > 1e-13` and V1 fails there. V1 stays as negative
+    evidence; the study evaluates it on request (`HexMmsTriConfig(cg_stopping="v1")`).
+
+- **I1 V2 (contractual, E1012-07 = A, 2026-10-12).** Every solve uses CG
+  stopping rule V2 (`spec/HEX_FV_SOLVER_v2.md`) with `rtol = 1e-13` (tight) and
+  `rtol = 1e-10` (loose). I1 holds iff on every level:
+  - both solves return (status `converged` or `at_rounding_floor`; a
+    `ConvergenceError` fails I1);
+  - the tight solve's true relative residual is `<= tol_eff` of its iterate;
+  - `||u_h(loose) - u_h(tight)||_inf <= 1e-3 * ||u_h(tight) - u*||_inf`.
+
+  Each level reports its status, the true relative residual, `tol_eff` and the
+  backward error `eta`. A level with status `at_rounding_floor` has NOT reached
+  `1e-13`; no output or document may say so.
 
 **ReferenceSpec mapping** (two specs):
 
@@ -154,7 +173,7 @@ The mapping is that of Phase 0a section 6, except:
 | `code_verification` | — | `pass` iff O1-O3 and M1-M3 |
 | `spatial_verification` + study | — | `pass` iff C5-C9; levels finest to coarsest, `quantity_value = u_h(centroid)` |
 | `temporal_verification` | — | `not_applicable`: steady problem |
-| `iterative_verification` | — | `pass` iff I1 |
+| `iterative_verification` | — | `pass` iff I1 (V2; V1 on request, historical) |
 | `numerical_uncertainty` | — | `relative_fraction`, `GCI_fine` |
 | derived ceiling when all pass | `mathematical_oracle` | `verified_numerical_reference` |
 

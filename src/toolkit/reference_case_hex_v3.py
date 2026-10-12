@@ -55,6 +55,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 
 from hex_fv_solver_hex_v3 import (
+    CG_STOPPING_RULES,
+    HEX_RESIDUAL_FLOOR_FACTOR,
     ConvergenceError,
     HexLattice,
     apply_hex_laplacian,
@@ -740,15 +742,21 @@ class HexMmsTriConfig:
 
     kappa(x, y) = 1 + kappa_amplitude * sin(2 pi x + 0.3) * cos(3 pi y),
     |kappa_amplitude| < 1 keeps kappa > 0.
+
+    ``cg_stopping`` selects the I1 contract (spec Phase 0b section 3): "v2"
+    (contractual since E1012-07) or "v1" (historical, BLOCKED on N=192).
     """
 
     levels: Tuple[int, ...] = (24, 48, 96, 192)
     modes: Tuple[Tuple[LameMode, float], ...] = field(default_factory=_default_mms_modes)
     kappa_amplitude: float = 0.4
+    cg_stopping: str = "v2"
 
     def __post_init__(self) -> None:
         _validate_levels(self.levels, minimum=3, multiple_of=3)
         _validate_modes(self.modes, LameMode)
+        if not isinstance(self.cg_stopping, str) or self.cg_stopping not in CG_STOPPING_RULES:
+            raise ValueError(f"cg_stopping must be one of {CG_STOPPING_RULES}, got {self.cg_stopping!r}")
         amplitude = self.kappa_amplitude
         if isinstance(amplitude, bool) or not isinstance(amplitude, numbers.Real):
             raise TypeError("kappa_amplitude must be a real number")
@@ -828,18 +836,23 @@ def _centroid_index(lattice: HexLattice) -> int:
 
 
 def _mms_solve(lattice: HexLattice, conductance: np.ndarray, source: np.ndarray,
-               rtol: float) -> Tuple[np.ndarray, Dict[str, Any], bool]:
+               rtol: float, stopping: str) -> Tuple[np.ndarray, Dict[str, Any], bool]:
     """CG solve for I1: a non-converged solve is evidence (I1 fails), not a crash.
 
     On ConvergenceError the best iterate and its TRUE relative residual are
-    reported with converged=False, so the remaining criteria stay measurable.
+    reported with converged=False and status "not_converged", so the remaining
+    criteria stay measurable. A returned V1 solve has status "converged"
+    (V1 returns only at rtol); V2 reports its own status, tol_eff and eta.
     """
     try:
-        u, info = solve_steady_diffusion(lattice, conductance, source, rtol=rtol)
+        u, info = solve_steady_diffusion(lattice, conductance, source, rtol=rtol, stopping=stopping)
     except ConvergenceError as exc:
         if exc.best is None or exc.best_relative_residual is None:
             raise
-        return exc.best, {"iterations": exc.iterations, "relative_residual": exc.best_relative_residual}, False
+        return exc.best, {"iterations": exc.iterations, "relative_residual": exc.best_relative_residual,
+                          "status": "not_converged"}, False
+    if stopping == "v1":
+        info = {**info, "status": "converged", "tol_eff": rtol}
     return u, info, True
 
 
@@ -857,8 +870,9 @@ def _mms_level_evidence(n: int, config: HexMmsTriConfig) -> Dict[str, Any]:
     except ValueError:
         dt_bound = None
     source = config.source(lattice.coords)
-    u_tight, info_tight, converged_tight = _mms_solve(lattice, conductance, source, _MMS_CG_RTOL)
-    u_loose, info_loose, converged_loose = _mms_solve(lattice, conductance, source, _MMS_CG_RTOL_LOOSE)
+    stopping = config.cg_stopping
+    u_tight, info_tight, converged_tight = _mms_solve(lattice, conductance, source, _MMS_CG_RTOL, stopping)
+    u_loose, info_loose, converged_loose = _mms_solve(lattice, conductance, source, _MMS_CG_RTOL_LOOSE, stopping)
     exact = config.solution(lattice.coords)
     error = u_tight - exact
     discretisation_error = float(np.max(np.abs(error)))
@@ -871,9 +885,16 @@ def _mms_level_evidence(n: int, config: HexMmsTriConfig) -> Dict[str, Any]:
         "kappa_min": float(conductance.min()),
         "conductance_symmetric": bool(symmetric),
         "positivity_dt_bound": dt_bound,
+        # "cg_converged": both solves returned (V2: converged or at_rounding_floor).
         "cg_converged": converged_tight and converged_loose,
+        "cg_status": info_tight["status"],
+        "cg_status_loose": info_loose["status"],
         "cg_iterations": info_tight["iterations"],
         "cg_relative_residual": info_tight["relative_residual"],
+        # None where a solve raised (no accepted iterate, so no tol_eff).
+        "cg_tol_eff": info_tight.get("tol_eff"),
+        "cg_rounding_floor": info_tight.get("rounding_floor"),
+        "cg_backward_error": info_tight.get("backward_error"),
         "cg_iterations_loose": info_loose["iterations"],
         "rel_l2_error": float(np.linalg.norm(error) / np.linalg.norm(exact)),
         "max_error": discretisation_error,
@@ -881,6 +902,22 @@ def _mms_level_evidence(n: int, config: HexMmsTriConfig) -> Dict[str, Any]:
         "iterative_to_discretisation_ratio": iterative_error / discretisation_error,
         "u_centroid": float(u_tight[centroid]),
     }
+
+
+#: Tight-solve statuses that I1 accepts, per CG stopping rule (Phase 0b spec section 3).
+_I1_ACCEPTED_STATUS = {"v1": ("converged",), "v2": ("converged", "at_rounding_floor")}
+
+
+def _i1_level_holds(level: Dict[str, Any], stopping: str) -> bool:
+    """I1 on one level: V1 needs the true residual <= rtol, V2 <= tol_eff of the iterate.
+
+    The PASS branch hangs on comparisons that must be TRUE, so a NaN fails.
+    """
+    if not level["cg_converged"] or level["cg_status"] not in _I1_ACCEPTED_STATUS[stopping]:
+        return False
+    bound = _MMS_CG_RTOL if stopping == "v1" else level["cg_tol_eff"]
+    return bool(level["cg_relative_residual"] <= bound
+                and level["iterative_to_discretisation_ratio"] <= _MMS_ITERATIVE_RATIO)
 
 
 def run_hex_mms_tri_study(config: HexMmsTriConfig | None = None) -> Dict[str, Any]:
@@ -913,12 +950,7 @@ def run_hex_mms_tri_study(config: HexMmsTriConfig | None = None) -> Dict[str, An
         "M2_conductance_symmetric": all(level["conductance_symmetric"] for level in levels),
         "M3_positivity_gate": all(level["positivity_dt_bound"] is not None for level in levels),
         **solution,
-        "I1_iterative_error_negligible": all(
-            level["cg_converged"]
-            and level["cg_relative_residual"] <= _MMS_CG_RTOL
-            and level["iterative_to_discretisation_ratio"] <= _MMS_ITERATIVE_RATIO
-            for level in levels
-        ),
+        "I1_iterative_error_negligible": all(_i1_level_holds(level, config.cg_stopping) for level in levels),
     }
     oracle_ok = all(criteria[k] for k in _MMS_ORACLE_KEYS)
     code_ok = all(criteria[k] for k in _MMS_CODE_KEYS)
@@ -949,7 +981,11 @@ def run_hex_mms_tri_study(config: HexMmsTriConfig | None = None) -> Dict[str, An
             "cg_rtol": _MMS_CG_RTOL,
             "cg_rtol_loose": _MMS_CG_RTOL_LOOSE,
             "iterative_ratio": _MMS_ITERATIVE_RATIO,
+            "cg_stopping": config.cg_stopping,
+            "cg_floor_factor": HEX_RESIDUAL_FLOOR_FACTOR if config.cg_stopping == "v2" else None,
         },
+        "i1_contract": ("I1 V2 (spec/HEX_FV_SOLVER_v2.md, E1012-07)" if config.cg_stopping == "v2"
+                        else "I1 V1 (historical, rtol only; BLOCKED on the default levels since 2026-10-12)"),
         "oracle": {"boundary_ratio": boundary_ratio, "source_rel_error_vs_fd": source_error},
         "levels": levels,
         "rel_l2_error_orders": l2_orders,

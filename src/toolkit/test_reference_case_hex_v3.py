@@ -512,8 +512,9 @@ class TestMmsGateDiscrimination(unittest.TestCase):
         # ConvergenceError is evidence (I1 false), not a passed level.
         real = rc.solve_steady_diffusion
 
-        def stalls_on_the_finest(lattice, kappa, source, *, rtol):
-            u, info = real(lattice, kappa, source, rtol=rtol)
+        def stalls_on_the_finest(lattice, kappa, source, *, rtol, stopping):
+            self.assertEqual(stopping, "v2")  # the study solves with the I1 V2 rule
+            u, info = real(lattice, kappa, source, rtol=rtol, stopping=stopping)
             if lattice.n == self.LEVELS[-1] and rtol == rc._MMS_CG_RTOL:
                 raise fv.ConvergenceError("stalled", best=u, best_relative_residual=info["relative_residual"],
                                           iterations=info["iterations"])

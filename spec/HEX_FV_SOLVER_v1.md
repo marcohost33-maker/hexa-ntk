@@ -158,6 +158,11 @@ forward-Euler step maps non-negative states to non-negative states.
     smallest true residual seen, that residual and the iteration count as
     diagnostics. They are never a converged result.
 - It returns the iteration count and the achieved TRUE relative residual.
+- (Added 2026-10-12, E1012-07.) This rule is stopping rule **V1**; it stays the
+  default (`stopping="v1"`) and is not reinterpreted. Stopping rule **V2**,
+  which also accepts a residual at the rounding floor of its own evaluation
+  and then reports `status="at_rounding_floor"`, is specified in
+  `spec/HEX_FV_SOLVER_v2.md`.
 - An optional initial guess `x0` (warm start) does not change the stopping
   rule. If `x0` already satisfies the rule, CG returns after 0 iterations.
 

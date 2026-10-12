@@ -37,6 +37,8 @@ __all__ = [
     "crank_nicolson_heat",
     "conjugate_gradient",
     "solve_steady_diffusion",
+    "CG_STOPPING_RULES",
+    "HEX_RESIDUAL_FLOOR_FACTOR",
 ]
 
 import functools
@@ -68,6 +70,20 @@ Coefficient = Union[float, np.ndarray]
 #: Consecutive true-residual checks without a new minimum after which CG stops
 #: as stagnated (the binary64 floor of ||b - A x|| lies above rtol * ||b||).
 _CG_STAGNATION_CHECKS = 50
+
+#: Stopping rules of ``conjugate_gradient``: "v1" (spec/HEX_FV_SOLVER_v1.md
+#: section 5, rtol only) and "v2" (spec/HEX_FV_SOLVER_v2.md, rtol or the
+#: rounding floor of the residual evaluation, E1012-07).
+CG_STOPPING_RULES: Tuple[str, ...] = ("v1", "v2")
+
+#: Unit roundoff of binary64 (round to nearest), u = 2^-53.
+_UNIT_ROUNDOFF = 2.0**-53
+
+#: c of the V2 rounding floor for the hex operator (spec/HEX_FV_SOLVER_v2.md
+#: section 3): a row of A x = -(diag x + sum_s off x_n(s)) is an inner product
+#: of at most 7 terms, and b - A x adds one subtraction, so the computed
+#: residual is off by at most gamma_8 (|b| + |A| |x|) componentwise.
+HEX_RESIDUAL_FLOOR_FACTOR = 8
 
 
 class ConvergenceError(RuntimeError):
@@ -479,6 +495,44 @@ def _cg_underflow(best: np.ndarray, exponent: int, best_relative: float, iterati
     )
 
 
+def _floor_terms(
+    apply_abs_a: Callable[[np.ndarray], np.ndarray],
+    x: np.ndarray,
+    relative: float,
+    b_norm: float,
+    rtol: float,
+    floor_factor: float,
+) -> Dict[str, float]:
+    """V2 rounding floor at the iterate x (spec/HEX_FV_SOLVER_v2.md section 2).
+
+    rounding_floor = c u (|| |A| |x| ||_2 + ||b||_2) / ||b||_2,
+    tol_eff = max(rtol, rounding_floor),
+    backward_error = ||b - A x||_2 / (|| |A| |x| ||_2 + ||b||_2)   (Rigal-Gaches).
+
+    Works on the power-of-two-scaled system of conjugate_gradient; every term
+    is a ratio and therefore unchanged by that scaling. A floor that cannot be
+    evaluated (non-finite |A| |x|) raises ConvergenceError: no floor, no
+    acceptance.
+    """
+    raw = np.asarray(apply_abs_a(np.abs(x)), dtype=np.float64)
+    if raw.shape != x.shape:
+        raise ValueError(f"apply_abs_a must return shape {x.shape}, got {raw.shape}")
+    if not np.all(np.isfinite(raw)):
+        raise ConvergenceError("conjugate_gradient: |A| |x| is not finite, the V2 rounding floor is not computable")
+    if not np.all(raw >= 0.0):
+        raise ValueError("apply_abs_a must return |A| v >= 0 for v >= 0")
+    abs_norm = float(np.linalg.norm(raw))
+    scale = abs_norm + b_norm
+    if not math.isfinite(scale):
+        raise ConvergenceError("conjugate_gradient: || |A| |x| || overflows, the V2 rounding floor is not computable")
+    floor = floor_factor * _UNIT_ROUNDOFF * scale / b_norm
+    return {
+        "rounding_floor": floor,
+        "tol_eff": max(rtol, floor),
+        "backward_error": relative * b_norm / scale,
+    }
+
+
 def conjugate_gradient(
     apply_a: Callable[[np.ndarray], np.ndarray],
     b: Any,
@@ -486,6 +540,9 @@ def conjugate_gradient(
     rtol: float,
     maxiter: int,
     x0: Any = None,
+    stopping: str = "v1",
+    apply_abs_a: Callable[[np.ndarray], np.ndarray] | None = None,
+    floor_factor: float | None = None,
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """Solve A x = b for symmetric positive definite A, ||b - A x|| <= rtol ||b||.
 
@@ -500,9 +557,31 @@ def conjugate_gradient(
     not SPD); no convergence within maxiter, a stagnating true residual
     (no new minimum in ``_CG_STAGNATION_CHECKS`` consecutive checks) or a
     non-finite iterate -> ConvergenceError.
+
+    ``stopping="v1"`` (default) is the rule above, unchanged. ``stopping="v2"``
+    (spec/HEX_FV_SOLVER_v2.md) needs ``apply_abs_a`` (v -> |A| v for v >= 0)
+    and ``floor_factor`` c >= 1. It iterates exactly like V1; reaching rtol
+    returns ``status="converged"``. Where V1 gives up (stagnation, maxiter,
+    r . r underflow), V2 accepts the best iterate with
+    ``status="at_rounding_floor"`` iff its true relative residual is
+    <= tol_eff = max(rtol, c u (|| |A| |x| || + ||b||) / ||b||) with
+    u = 2^-53 and that floor is < 1; otherwise V1's ConvergenceError stands.
+    V2 info adds ``status``, ``tol_eff``, ``rounding_floor`` and the normwise
+    backward error ``backward_error``.
     """
     if not callable(apply_a):
         raise TypeError("apply_a must be callable")
+    if not isinstance(stopping, str) or stopping not in CG_STOPPING_RULES:
+        raise ValueError(f"stopping must be one of {CG_STOPPING_RULES}, got {stopping!r}")
+    if stopping == "v1":
+        if apply_abs_a is not None or floor_factor is not None:
+            raise ValueError("apply_abs_a and floor_factor belong to stopping='v2'")
+    else:
+        if not callable(apply_abs_a):
+            raise TypeError("stopping='v2' needs a callable apply_abs_a (v -> |A| v)")
+        floor_factor = _positive_finite(floor_factor, name="floor_factor")
+        if not floor_factor >= 1.0:
+            raise ValueError("floor_factor must be >= 1 (the residual evaluation errs by at least u)")
     rhs = np.asarray(b, dtype=np.float64)
     if rhs.ndim != 1 or rhs.size == 0 or not np.all(np.isfinite(rhs)):
         raise ValueError("b must be a non-empty finite 1-D array")
@@ -510,9 +589,14 @@ def conjugate_gradient(
     if rtol >= 1.0:
         raise ValueError("rtol must be < 1")
     maxiter = _int_at_least(maxiter, name="maxiter", minimum=1)
+    v2 = stopping == "v2"
     peak = float(np.max(np.abs(rhs)))
     if peak == 0.0:
-        return np.zeros_like(rhs), {"iterations": 0, "relative_residual": 0.0}
+        info: Dict[str, Any] = {"iterations": 0, "relative_residual": 0.0}
+        if v2:
+            # x = 0 solves A x = 0 exactly: r = 0, no perturbation is needed.
+            info.update(status="converged", rounding_floor=0.0, tol_eff=rtol, backward_error=0.0)
+        return np.zeros_like(rhs), info
     # Finite entries do not imply a representable ||b||_2 (1e200 overflows,
     # 1e-200 underflows to 0). CG runs on the linear system scaled by a power
     # of two, A (x / 2^e) = b / 2^e with max|b / 2^e| in [0.5, 1): the scaling
@@ -531,15 +615,34 @@ def conjugate_gradient(
         if not np.all(np.isfinite(x)):
             raise ValueError("x0 is not representable at the scale of b")
         r = rhs - np.asarray(apply_a(x), dtype=np.float64)
+    def converged(x_s: np.ndarray, relative: float, iterations: int) -> Tuple[np.ndarray, Dict[str, Any]]:
+        out: Dict[str, Any] = {"iterations": iterations, "relative_residual": relative}
+        if v2:
+            out["status"] = "converged"
+            out.update(_floor_terms(apply_abs_a, x_s, relative, b_norm, rtol, floor_factor))
+        return _rescaled_solution(x_s, exponent), out
+
+    def give_up(error: ConvergenceError, reason: str) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """V1: raise ``error``. V2: first accept the best iterate at the rounding floor."""
+        if v2:
+            terms = _floor_terms(apply_abs_a, best, best_relative, b_norm, rtol, floor_factor)
+            # Acceptance hangs on comparisons that must be TRUE (NaN fails closed).
+            if terms["rounding_floor"] < 1.0 and best_relative <= terms["tol_eff"]:
+                out: Dict[str, Any] = {"iterations": error.iterations, "relative_residual": best_relative,
+                                       "status": "at_rounding_floor", "stop_reason": reason}
+                out.update(terms)
+                return _rescaled_solution(best, exponent), out
+        raise error
+
     # Here r is the true residual of x.
     rr = float(r @ r)
     if not math.isfinite(rr):
         raise ConvergenceError("conjugate_gradient: non-finite residual")
     best, best_relative = x, _norm2(r, rr) / b_norm
     if best_relative <= rtol:
-        return _rescaled_solution(x, exponent), {"iterations": 0, "relative_residual": best_relative}
+        return converged(x, best_relative, 0)
     if rr == 0.0:
-        raise _cg_underflow(best, exponent, best_relative, 0)
+        return give_up(_cg_underflow(best, exponent, best_relative, 0), "underflow")
     p = r.copy()
     stale = 0
     for iteration in range(1, maxiter + 1):
@@ -556,7 +659,7 @@ def conjugate_gradient(
                                    best_relative_residual=best_relative, iterations=iteration)
         if _norm2(r, rr_new) > rtol * b_norm:
             if rr_new == 0.0:
-                raise _cg_underflow(best, exponent, best_relative, iteration)
+                return give_up(_cg_underflow(best, exponent, best_relative, iteration), "underflow")
             p = r + (rr_new / rr) * p
             rr = rr_new
             continue
@@ -568,24 +671,24 @@ def conjugate_gradient(
                                    best_relative_residual=best_relative, iterations=iteration)
         relative = _norm2(r, rr) / b_norm
         if relative <= rtol:
-            return _rescaled_solution(x, exponent), {"iterations": iteration, "relative_residual": relative}
+            return converged(x, relative, iteration)
         if relative < best_relative:
             best, best_relative, stale = x, relative, 0
         else:
             stale += 1
             if stale >= _CG_STAGNATION_CHECKS:
-                raise ConvergenceError(
+                return give_up(ConvergenceError(
                     f"conjugate_gradient: true residual stagnated at {best_relative:.3e} > rtol={rtol!r} "
                     f"(no new minimum in {stale} checks, {iteration} iterations)",
                     best=np.ldexp(best, exponent), best_relative_residual=best_relative, iterations=iteration,
-                )
+                ), "stagnation")
         if rr == 0.0:
-            raise _cg_underflow(best, exponent, best_relative, iteration)
+            return give_up(_cg_underflow(best, exponent, best_relative, iteration), "underflow")
         p = r.copy()  # residual replacement: restart from the true residual
-    raise ConvergenceError(
+    return give_up(ConvergenceError(
         f"conjugate_gradient: no convergence to rtol={rtol!r} in {maxiter} iterations",
         best=np.ldexp(best, exponent), best_relative_residual=best_relative, iterations=maxiter,
-    )
+    ), "maxiter")
 
 
 def crank_nicolson_heat(
@@ -637,10 +740,13 @@ def solve_steady_diffusion(
     *,
     rtol: float = 1e-13,
     maxiter: int | None = None,
+    stopping: str = "v1",
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """Solve -L_c u = f on the Dirichlet triangle with CG (spec section 5).
 
     The torus is refused: there -L_c has the constants as null space.
+    ``stopping="v2"`` uses the V2 stopping rule (spec/HEX_FV_SOLVER_v2.md)
+    with |A| from the assembled operator and c = HEX_RESIDUAL_FLOOR_FACTOR.
     """
     lattice = _check_lattice(lattice)
     if lattice.domain != "triangle_dirichlet":
@@ -649,4 +755,17 @@ def solve_steady_diffusion(
     diag, off = assemble_hex_operator(lattice, kappa)
     nb = lattice.neighbors
     limit = 10 * lattice.num_nodes + 100 if maxiter is None else maxiter
-    return conjugate_gradient(lambda v: -_apply_assembled(diag, off, nb, v), f, rtol=rtol, maxiter=limit)
+
+    def apply_a(v: np.ndarray) -> np.ndarray:
+        return -_apply_assembled(diag, off, nb, v)
+
+    if stopping != "v2":
+        # "v1" and every invalid value: conjugate_gradient validates ``stopping``.
+        return conjugate_gradient(apply_a, f, rtol=rtol, maxiter=limit, stopping=stopping)
+    abs_diag, abs_off = np.abs(diag), np.abs(off)
+
+    def apply_abs_a(v: np.ndarray) -> np.ndarray:
+        return _apply_assembled(abs_diag, abs_off, nb, v)
+
+    return conjugate_gradient(apply_a, f, rtol=rtol, maxiter=limit, stopping="v2", apply_abs_a=apply_abs_a,
+                              floor_factor=HEX_RESIDUAL_FLOOR_FACTOR)
