@@ -558,3 +558,6 @@
 | 4063390225430176 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 manifest task_id checked, sample ids and seed exact: heat_operator_task_hex_v3.py |
 | 833FF2BEECC507B3 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 manifest task_id checked, sample ids and seed exact: test_heat_operator_task_hex_v3.py |
 | 495893B4DE75E0D6 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 manifest task_id checked, sample ids and seed exact: HEAT_OPERATOR_TASK_v1.md |
+| AF7D1DFFFEA29988 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 oscillatory study serialised as negative evidence: reference_case_hex_v3.py |
+| 3925442C24A56C39 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 oscillatory study serialised as negative evidence: test_reference_case_hex_v3.py |
+| BA52937C53F030BE | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 oscillatory study serialised as negative evidence: REFERENCE_CASE_HEX_HEAT_TRI_v1.md |

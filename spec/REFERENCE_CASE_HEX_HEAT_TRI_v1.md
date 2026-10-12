@@ -144,6 +144,12 @@ non-zero otherwise.
 A passing study therefore derives the ceiling `verified_numerical_reference`
 for exactly this context of use. Anything else derives `comparison_only`.
 
+(Added 2026-10-12.) When criterion 6 fails, the finest triplet is oscillatory
+and `p` is not a valid observed order, although the Celik formula still
+yields a finite number. `observed_order` is then omitted; the levels and the
+failed criterion are kept, so the study still serialises as negative evidence
+with `comparison_only`. The same mapping is used by the Phase 0b cases.
+
 ## 7. Positivity gate on the assembled operator (issue #60, item 1)
 
 The explicit step `u + dt * kappa * L_h u` maps every non-negative state to a

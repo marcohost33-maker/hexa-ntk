@@ -373,6 +373,11 @@ def _check_from(criteria: Dict[str, bool], keys: Tuple[str, ...], evidence_ref: 
 def _spatial_study(study: Dict[str, Any], qoi_name: str, qoi_key: str, evidence_ref: str) -> ConvergenceStudy:
     celik = study["celik_fine"]
     order, gci = celik["observed_order"], celik["gci_fine"]
+    # An oscillatory finest triplet (C6 fails) is negative evidence: celik_three_grid
+    # still returns a finite p, which ConvergenceStudy would reject as non-monotone.
+    # Omit the order, keep the raw levels and the failed criterion (PR #61 Codex P2).
+    if celik["oscillatory"]:
+        order = math.nan
     levels = tuple(
         RefinementLevel(f"N={level['n']}", level["h"], level[qoi_key]) for level in reversed(study["levels"])
     )

@@ -223,6 +223,31 @@ class TestGateDiscrimination(unittest.TestCase):
         self._assert_capped(study, "C9_gci_covers_exact_error")
         self.assertTrue(study["code_verification_pass"])
 
+    def test_oscillatory_finest_triplet_is_serialised_as_negative_evidence(self) -> None:
+        # Codex P2 on #61 @266900e: celik_three_grid returns a finite p with
+        # C6_monotone=False, and passing it on made ConvergenceStudy raise instead
+        # of yielding the required comparison_only spec.
+        study = json.loads(json.dumps(run_hex_heat_tri_study()))
+        levels = study["levels"]
+        f2, f3 = levels[-2]["lambda_rq"], levels[-3]["lambda_rq"]
+        f1 = f2 - 0.1 * (f2 - f3)  # finest value on the other side of f2: sign change
+        levels[-1]["lambda_rq"] = f1
+        study["celik_fine"] = celik_three_grid(f1, f2, f3, 2.0)
+        self.assertTrue(study["celik_fine"]["oscillatory"])
+        self.assertTrue(math.isfinite(study["celik_fine"]["observed_order"]))
+        study["criteria"]["C6_monotone"] = False
+        try:
+            spec = hex_heat_tri_reference_spec(study, evidence_ref="results/x.json")
+        except ValueError as exc:
+            self.fail(f"an oscillatory study must serialise as negative evidence, not raise: {exc}")
+        self.assertEqual(spec.claim_ceiling(), ClaimCeiling.COMPARISON_ONLY)
+        self.assertIsNone(spec.spatial_study.observed_order)
+        self.assertEqual(spec.spatial_study.level_count, 4)
+        self.assertEqual(spec.spatial_study.levels[0].quantity_value, f1)
+        self.assertIs(spec.spatial_verification.status, EvidenceStatus.FAIL)
+        self.assertIn("C6_monotone", spec.spatial_verification.rationale)
+        self.assertEqual(spec.to_dict()["claim_ceiling"], "comparison_only")
+
     def test_each_failed_criterion_caps_the_ceiling(self) -> None:
         passing = run_hex_heat_tri_study()
         code_keys = {"C1_eigen_residual", "C2_rayleigh_matches_closed_form", "C3_isotropic_coefficient",
