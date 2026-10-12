@@ -552,7 +552,8 @@ class TestConjugateGradient(unittest.TestCase):
         b = np.array([1.0, 1e-200])
         try:
             x, info = conjugate_gradient(lambda v: a @ v, b, rtol=1e-250, maxiter=10)
-        except ConvergenceError as exc:
+        except Exception as exc:  # any other exception type is a failed contract, not a crash
+            self.assertIsInstance(exc, ConvergenceError, f"{type(exc).__name__}: {exc}")
             self.assertIn("below the binary64 range", str(exc))
             true_relative = float(np.linalg.norm(b - a @ exc.best) / np.linalg.norm(b))
             self.assertGreater(exc.best_relative_residual, 1e-250)
