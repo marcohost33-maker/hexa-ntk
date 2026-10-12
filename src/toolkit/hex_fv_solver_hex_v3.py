@@ -521,7 +521,10 @@ def _floor_terms(
         raise ConvergenceError("conjugate_gradient: |A| |x| is not finite, the V2 rounding floor is not computable")
     if not np.all(raw >= 0.0):
         raise ValueError("apply_abs_a must return |A| v >= 0 for v >= 0")
-    abs_norm = float(np.linalg.norm(raw))
+    # An overflowing norm is a decided outcome below (no floor), not a
+    # floating-point exception of a caller's np.errstate(over="raise").
+    with np.errstate(over="ignore", under="ignore"):
+        abs_norm = float(np.linalg.norm(raw))
     scale = abs_norm + b_norm
     if not math.isfinite(scale):
         raise ConvergenceError("conjugate_gradient: || |A| |x| || overflows, the V2 rounding floor is not computable")

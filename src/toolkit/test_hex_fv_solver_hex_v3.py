@@ -690,5 +690,222 @@ class TestSteadySolve(unittest.TestCase):
             apply_hex_laplacian(np.zeros(1), fake)
 
 
+_U = 2.0**-53
+
+
+def _hex_system(n: int, *, seed: int = 3):
+    """-L u = f on the n-triangle (kappa = 1): (apply_a, apply_abs_a, f)."""
+    lat = triangle_hex_lattice(n)
+    diag, off = assemble_hex_operator(lat, 1.0)
+    nb = lat.neighbors
+
+    def apply_a(v: np.ndarray) -> np.ndarray:
+        return -fv._apply_assembled(diag, off, nb, v)
+
+    def apply_abs_a(v: np.ndarray) -> np.ndarray:
+        return fv._apply_assembled(np.abs(diag), np.abs(off), nb, v)
+
+    return apply_a, apply_abs_a, np.random.default_rng(seed).standard_normal(lat.num_nodes)
+
+
+class TestConjugateGradientV2(unittest.TestCase):
+    """CG stopping rule V2 (spec/HEX_FV_SOLVER_v2.md, E1012-07)."""
+
+    def _v2(self, apply_a, apply_abs_a, b, *, rtol, maxiter=2000, c=fv.HEX_RESIDUAL_FLOOR_FACTOR, **kwargs):
+        return conjugate_gradient(apply_a, b, rtol=rtol, maxiter=maxiter, stopping="v2", apply_abs_a=apply_abs_a,
+                                  floor_factor=c, **kwargs)
+
+    def _expected_terms(self, apply_abs_a, x, b, relative, c):
+        """Independent recomputation of the V2 terms in the original scale."""
+        s = float(np.linalg.norm(apply_abs_a(np.abs(x))))
+        bn = float(np.linalg.norm(b))
+        return c * _U * (s + bn) / bn, relative * bn / (s + bn)
+
+    def test_converged_is_bit_identical_to_v1_and_reports_eta(self) -> None:
+        apply_a, apply_abs_a, f = _hex_system(9)
+        x1, i1 = conjugate_gradient(apply_a, f, rtol=1e-12, maxiter=500)
+        x2, i2 = self._v2(apply_a, apply_abs_a, f, rtol=1e-12, maxiter=500)
+        self.assertTrue(np.array_equal(x1, x2))
+        self.assertEqual((i2["iterations"], i2["relative_residual"]), (i1["iterations"], i1["relative_residual"]))
+        self.assertEqual(i2["status"], "converged")
+        self.assertNotIn("status", i1)  # V1 output is unchanged
+        floor, eta = self._expected_terms(apply_abs_a, x2, f, i2["relative_residual"], 8)
+        np.testing.assert_allclose([i2["rounding_floor"], i2["backward_error"]], [floor, eta], rtol=1e-12)
+        self.assertEqual(i2["tol_eff"], max(1e-12, i2["rounding_floor"]))
+        np.testing.assert_allclose(np.linalg.norm(f - apply_a(x2)) / np.linalg.norm(f), i2["relative_residual"],
+                                   rtol=1e-12)
+
+    def test_at_rounding_floor_where_v1_stagnates(self) -> None:
+        apply_a, apply_abs_a, f = _hex_system(12)
+        with self.assertRaisesRegex(ConvergenceError, "stagnated") as ctx:
+            conjugate_gradient(apply_a, f, rtol=1e-16, maxiter=2000)
+        x, info = self._v2(apply_a, apply_abs_a, f, rtol=1e-16)
+        self.assertEqual((info["status"], info["stop_reason"]), ("at_rounding_floor", "stagnation"))
+        # The returned iterate is V1's best iterate, and rtol was NOT reached.
+        self.assertTrue(np.array_equal(x, ctx.exception.best))
+        self.assertEqual(info["relative_residual"], ctx.exception.best_relative_residual)
+        self.assertGreater(info["relative_residual"], 1e-16)
+        self.assertLessEqual(info["relative_residual"], info["tol_eff"])
+        self.assertLessEqual(info["backward_error"], 8 * _U)  # at_rounding_floor implies eta <= c u
+        floor, eta = self._expected_terms(apply_abs_a, x, f, info["relative_residual"], 8)
+        np.testing.assert_allclose([info["rounding_floor"], info["backward_error"]], [floor, eta], rtol=1e-12)
+
+    def test_maxiter_and_underflow_give_ups_also_consult_the_floor(self) -> None:
+        apply_a, apply_abs_a, f = _hex_system(9)
+        with self.assertRaisesRegex(ConvergenceError, "no convergence"):
+            conjugate_gradient(apply_a, f, rtol=1e-18, maxiter=380)
+        _, info = self._v2(apply_a, apply_abs_a, f, rtol=1e-18, maxiter=380)
+        self.assertEqual((info["status"], info["stop_reason"]), ("at_rounding_floor", "maxiter"))
+        # maxiter before any true-residual check: the best iterate is x0 = 0, far above the floor.
+        with self.assertRaisesRegex(ConvergenceError, "no convergence"):
+            self._v2(apply_a, apply_abs_a, f, rtol=1e-12, maxiter=2)
+        # r . r underflow: V2 accepts only through the floor test as well.
+        b = np.array([1.0, 2.0**-600])
+        _, info = self._v2(lambda v: v, lambda v: v, b, rtol=1e-300, x0=np.array([1.0, 0.0]))
+        self.assertEqual((info["status"], info["stop_reason"]), ("at_rounding_floor", "underflow"))
+
+    def test_a_real_residual_above_the_floor_is_rejected(self) -> None:
+        # Defect: the operator is applied in float32. The true residual then
+        # stagnates near 1e-8, far above the binary64 rounding floor: V2 must
+        # keep V1's ConvergenceError.
+        apply_a, apply_abs_a, f = _hex_system(9)
+
+        def apply_a32(v: np.ndarray) -> np.ndarray:
+            return apply_a(v).astype(np.float32).astype(np.float64)
+
+        with self.assertRaisesRegex(ConvergenceError, "stagnated"):
+            self._v2(apply_a32, apply_abs_a, f, rtol=1e-10)
+
+    def test_the_acceptance_boundary_is_pinned(self) -> None:
+        # Choose c so that tol_eff sits 1e-6 (relative) below / above the best
+        # residual: below must reject, above must accept (obere Grenze genagelt).
+        apply_a, apply_abs_a, f = _hex_system(9)
+
+        def apply_a32(v: np.ndarray) -> np.ndarray:
+            return apply_a(v).astype(np.float32).astype(np.float64)
+
+        with self.assertRaises(ConvergenceError) as ctx:
+            conjugate_gradient(apply_a32, f, rtol=1e-10, maxiter=2000)
+        best, relative = ctx.exception.best, ctx.exception.best_relative_residual
+        s, bn = float(np.linalg.norm(apply_abs_a(np.abs(best)))), float(np.linalg.norm(f))
+        c_crit = relative * bn / (_U * (s + bn))
+        self.assertGreater(c_crit, 1.0)
+        with self.assertRaisesRegex(ConvergenceError, "stagnated"):
+            self._v2(apply_a32, apply_abs_a, f, rtol=1e-10, c=c_crit * (1 - 1e-6))
+        _, info = self._v2(apply_a32, apply_abs_a, f, rtol=1e-10, c=c_crit * (1 + 1e-6))
+        self.assertEqual(info["status"], "at_rounding_floor")
+
+    def test_status_is_invariant_under_power_of_two_scaling(self) -> None:
+        for n, rtol in ((9, 1e-12), (12, 1e-16)):
+            apply_a, apply_abs_a, f = _hex_system(n)
+            x_ref, ref = self._v2(apply_a, apply_abs_a, f, rtol=rtol)
+            for k, j in ((0, 600), (0, -600), (-300, 200), (250, -250), (40, 3)):
+                with self.subTest(n=n, k=k, j=j):
+                    def scaled_a(v, k=k, base=apply_a):
+                        return np.ldexp(base(v), k)
+
+                    def scaled_abs(v, k=k, base=apply_abs_a):
+                        return np.ldexp(base(v), k)
+
+                    x, info = self._v2(scaled_a, scaled_abs, np.ldexp(f, j), rtol=rtol)
+                    for key in ("status", "iterations", "relative_residual", "tol_eff", "rounding_floor",
+                                "backward_error"):
+                        self.assertEqual(info[key], ref[key], key)
+                    self.assertTrue(np.array_equal(x, np.ldexp(x_ref, j - k)))
+
+    def test_non_finite_inputs_fail_closed(self) -> None:
+        apply_a, apply_abs_a, f = _hex_system(9)
+        for bad in (np.nan, np.inf, -np.inf):
+            for pos in (0, -1):
+                with self.subTest(bad=bad, pos=pos):
+                    b = f.copy()
+                    b[pos] = bad
+                    with self.assertRaises(ValueError):
+                        self._v2(apply_a, apply_abs_a, b, rtol=1e-12)
+                    x0 = np.zeros_like(f)
+                    x0[pos] = bad
+                    with self.assertRaises(ValueError):
+                        self._v2(apply_a, apply_abs_a, f, rtol=1e-12, x0=x0)
+
+    def test_a_non_finite_floor_never_accepts(self) -> None:
+        apply_a, apply_abs_a, f = _hex_system(12)
+        for bad in (np.nan, np.inf):
+            with self.subTest(bad=bad):
+                def poisoned(v, bad=bad):
+                    out = apply_abs_a(v)
+                    out[-1] = bad
+                    return out
+
+                # on the floor path (rtol unreachable) and on the converged path
+                with self.assertRaisesRegex(ConvergenceError, "not computable"):
+                    self._v2(apply_a, poisoned, f, rtol=1e-16)
+                with self.assertRaisesRegex(ConvergenceError, "not computable"):
+                    self._v2(apply_a, poisoned, f, rtol=1e-10)
+        # || |A||x| || overflowing despite finite entries
+        with self.assertRaisesRegex(ConvergenceError, "not computable"):
+            self._v2(apply_a, lambda v: np.full_like(v, 1e308), f, rtol=1e-16)
+
+    def test_acceptance_hangs_on_true_comparisons(self) -> None:
+        # NaN orientation: if the floor terms were NaN, the floor branch must not accept.
+        apply_a, apply_abs_a, f = _hex_system(12)
+        nan_terms = {"rounding_floor": math.nan, "tol_eff": math.nan, "backward_error": math.nan}
+        with mock.patch.object(fv, "_floor_terms", return_value=nan_terms):
+            with self.assertRaisesRegex(ConvergenceError, "stagnated"):
+                self._v2(apply_a, apply_abs_a, f, rtol=1e-16)
+        # A floor >= 1 carries no information and never accepts.
+        with mock.patch.object(fv, "_floor_terms", return_value={"rounding_floor": 1.0, "tol_eff": 1.0,
+                                                                   "backward_error": 0.0}):
+            with self.assertRaisesRegex(ConvergenceError, "stagnated"):
+                self._v2(apply_a, apply_abs_a, f, rtol=1e-16)
+
+    def test_abs_operator_contract(self) -> None:
+        apply_a, apply_abs_a, f = _hex_system(9)
+        with self.assertRaisesRegex(ValueError, "shape"):
+            self._v2(apply_a, lambda v: apply_abs_a(v)[:-1], f, rtol=1e-12)
+        with self.assertRaisesRegex(ValueError, ">= 0"):
+            self._v2(apply_a, lambda v: -apply_abs_a(v), f, rtol=1e-12)
+
+    def test_zero_rhs_is_exact(self) -> None:
+        apply_a, apply_abs_a, f = _hex_system(9)
+        x, info = self._v2(apply_a, apply_abs_a, np.zeros_like(f), rtol=1e-12)
+        self.assertTrue(np.array_equal(x, np.zeros_like(f)))
+        self.assertEqual(info, {"iterations": 0, "relative_residual": 0.0, "status": "converged",
+                                "rounding_floor": 0.0, "tol_eff": 1e-12, "backward_error": 0.0})
+
+    def test_argument_contract(self) -> None:
+        apply_a, apply_abs_a, f = _hex_system(9)
+        for stopping in ("v3", "V2", "", None, 2):
+            with self.subTest(stopping=stopping), self.assertRaises(ValueError):
+                conjugate_gradient(apply_a, f, rtol=1e-12, maxiter=50, stopping=stopping)
+        with self.assertRaises(TypeError):
+            conjugate_gradient(apply_a, f, rtol=1e-12, maxiter=50, stopping="v2", floor_factor=8)
+        for c in (None, 0, -1.0, 0.5, math.nan, math.inf, True, "8"):
+            with self.subTest(c=c), self.assertRaises((TypeError, ValueError)):
+                self._v2(apply_a, apply_abs_a, f, rtol=1e-12, c=c)
+        for extra in ({"apply_abs_a": apply_abs_a}, {"floor_factor": 8}):
+            with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, "v2"):
+                conjugate_gradient(apply_a, f, rtol=1e-12, maxiter=50, **extra)
+
+    def test_steady_solve_v2_on_the_hex_operator(self) -> None:
+        lat = triangle_hex_lattice(12)
+        c = edge_conductances(lat, _smooth_kappa)
+        f = np.random.default_rng(5).standard_normal(lat.num_nodes)
+        with self.assertRaises(ConvergenceError):
+            solve_steady_diffusion(lat, c, f, rtol=1e-16)
+        u, info = solve_steady_diffusion(lat, c, f, rtol=1e-16, stopping="v2")
+        self.assertEqual(info["status"], "at_rounding_floor")
+        self.assertGreater(info["relative_residual"], 1e-16)
+        diag, off = assemble_hex_operator(lat, c)
+        abs_au = (np.abs(diag) * np.abs(u) + (np.abs(off) * np.abs(u)[np.clip(lat.neighbors, 0, None)]).sum(axis=1))
+        expected = 8 * _U * (np.linalg.norm(abs_au) + np.linalg.norm(f)) / np.linalg.norm(f)
+        np.testing.assert_allclose(info["rounding_floor"], expected, rtol=1e-12)
+        u1, i1 = solve_steady_diffusion(lat, c, f, rtol=1e-10)
+        u2, i2 = solve_steady_diffusion(lat, c, f, rtol=1e-10, stopping="v2")
+        self.assertTrue(np.array_equal(u1, u2))
+        self.assertEqual(i2["status"], "converged")
+        with self.assertRaises(ValueError):
+            solve_steady_diffusion(lat, c, f, stopping="v3")
+
+
 if __name__ == "__main__":
     unittest.main()

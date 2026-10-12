@@ -404,11 +404,54 @@ class TestHexMmsTriStudyGate(unittest.TestCase):
         cls.study = run_hex_mms_tri_study()
 
     def test_default_study_passes_every_criterion(self) -> None:
+        # I1 is judged by V2 (E1012-07); the V1 verdict is pinned separately as
+        # negative evidence (TestMmsI1V1Historical).
+        self.assertEqual(self.study["thresholds"]["cg_stopping"], "v2")
+        self.assertTrue(self.study["i1_contract"].startswith("I1 V2"))
         self.assertEqual(len(self.study["criteria"]), 12)
         self.assertEqual([k for k, ok in self.study["criteria"].items() if not ok], [])
         for key in ("oracle_verification_pass", "code_verification_pass", "solution_verification_pass",
                     "iterative_verification_pass", "passed"):
             self.assertTrue(self.study[key], key)
+
+    def test_i1_v2_reports_each_level_honestly(self) -> None:
+        levels = self.study["levels"]
+        self.assertEqual([level["n"] for level in levels], [24, 48, 96, 192])
+        # Measured 2026-10-12: N=192 stagnates above 1e-13 and is accepted only at the rounding floor.
+        self.assertEqual([level["cg_status"] for level in levels],
+                         ["converged", "converged", "converged", "at_rounding_floor"])
+        self.assertEqual(self.study["thresholds"]["cg_floor_factor"], 8)
+        for level in levels:
+            with self.subTest(n=level["n"]):
+                self.assertEqual(level["cg_status_loose"], "converged")
+                self.assertLessEqual(level["cg_relative_residual"], level["cg_tol_eff"])
+                self.assertEqual(level["cg_tol_eff"], max(1e-13, level["cg_rounding_floor"]))
+                # spec v2 section 2: eta <= max(rtol ||b|| / (|| |A||x| || + ||b||), c u),
+                # where rtol ||b|| / (...) = rtol * c u / rounding_floor.
+                cu = 8 * 2.0**-53
+                bound = max(1e-13 * cu / level["cg_rounding_floor"], cu)
+                self.assertLessEqual(level["cg_backward_error"], bound * (1 + 1e-12))
+                if level["cg_status"] == "converged":
+                    self.assertLessEqual(level["cg_relative_residual"], 1e-13)
+                else:  # rtol was NOT reached: no "1e-13" claim for this level
+                    self.assertGreater(level["cg_relative_residual"], 1e-13)
+                    self.assertGreater(level["cg_tol_eff"], 1e-13)
+                    self.assertLessEqual(level["cg_backward_error"], cu)
+
+    def test_i1_level_rule_fails_closed(self) -> None:
+        ok = {"cg_converged": True, "cg_status": "at_rounding_floor", "cg_relative_residual": 2e-13,
+              "cg_tol_eff": 4e-12, "iterative_to_discretisation_ratio": 1e-6}
+        self.assertTrue(rc._i1_level_holds(ok, "v2"))
+        self.assertFalse(rc._i1_level_holds(ok, "v1"))  # V1 accepts only "converged" at rtol
+        for change in ({"cg_relative_residual": 5e-12}, {"cg_relative_residual": math.nan},
+                       {"cg_tol_eff": math.nan}, {"cg_status": "not_converged"}, {"cg_converged": False},
+                       {"iterative_to_discretisation_ratio": math.nan},
+                       {"iterative_to_discretisation_ratio": 2e-3}):
+            with self.subTest(change=change):
+                self.assertFalse(rc._i1_level_holds({**ok, **change}, "v2"))
+        v1_ok = {**ok, "cg_status": "converged", "cg_relative_residual": 9e-14, "cg_tol_eff": 1e-13}
+        self.assertTrue(rc._i1_level_holds(v1_ok, "v1"))
+        self.assertFalse(rc._i1_level_holds({**v1_ok, "cg_relative_residual": 1.1e-13}, "v1"))
 
     def test_manufactured_solution_and_source(self) -> None:
         cfg = HexMmsTriConfig()
@@ -454,11 +497,34 @@ class TestHexMmsTriStudyGate(unittest.TestCase):
     def test_config_contract(self) -> None:
         for kwargs in ({"levels": (16, 32, 64, 128)}, {"levels": (24, 48, 96)}, {"kappa_amplitude": 1.0},
                        {"kappa_amplitude": float("nan")}, {"kappa_amplitude": True}, {"modes": ()},
-                       {"modes": ((TorusMode(1, 1), 1.0),)}):
+                       {"modes": ((TorusMode(1, 1), 1.0),)}, {"cg_stopping": "v3"}, {"cg_stopping": None},
+                       {"cg_stopping": "V2"}):
             with self.subTest(kwargs=kwargs), self.assertRaises((ValueError, TypeError)):
                 HexMmsTriConfig(**kwargs)
         with self.assertRaises(TypeError):
             run_hex_mms_tri_study(HexHeatTriConfig())
+
+
+class TestMmsI1V1Historical(unittest.TestCase):
+    """Negative evidence (E1012-07): the V1 contract of I1 stays red; it is not reinterpreted."""
+
+    def test_v1_contract_stays_blocked_on_n192(self) -> None:
+        study = run_hex_mms_tri_study(HexMmsTriConfig(cg_stopping="v1"))
+        self.assertTrue(study["i1_contract"].startswith("I1 V1"))
+        self.assertIsNone(study["thresholds"]["cg_floor_factor"])
+        self.assertEqual([k for k, ok in study["criteria"].items() if not ok], ["I1_iterative_error_negligible"])
+        self.assertFalse(study["iterative_verification_pass"])
+        self.assertFalse(study["passed"])
+        levels = study["levels"]
+        self.assertEqual([level["cg_status"] for level in levels],
+                         ["converged", "converged", "converged", "not_converged"])
+        finest = levels[-1]
+        self.assertGreater(finest["cg_relative_residual"], 1e-13)  # measured 2026-10-12: 2.344e-13
+        self.assertIsNone(finest["cg_tol_eff"])
+        _, solver = hex_mms_tri_reference_specs(study, evidence_ref="x")
+        self.assertIs(solver.iterative_verification.status, EvidenceStatus.FAIL)
+        self.assertEqual(solver.claim_ceiling(), ClaimCeiling.COMPARISON_ONLY)
+        json.dumps(study, allow_nan=False)
 
 
 class TestMmsGateDiscrimination(unittest.TestCase):
