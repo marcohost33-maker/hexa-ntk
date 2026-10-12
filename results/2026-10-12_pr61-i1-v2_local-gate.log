@@ -1,0 +1,56 @@
+# HexaNTK gate log, PR #61, E1012-07 = A: CG stopping rule V2, Phase 0b I1 judged by V2 - local branch vero/hn-pr61
+# Tested commit: 9db9cbcda0dcd834de81b97236a1630771a55ee5 (dirty=0); baseline b2e135c35e644506c3e537ae9b99633cc22f72f3
+# Environment: Windows 11 Home 10.0.26200, Python 3.12.10 (venv), torch 2.6.0+cpu, numpy 2.5.3, ruff 0.16.9, coverage 7.16.2
+# Claim: local Windows run, CI open. Phase 0b I1: V1 BLOCKED (historical, pinned by TestMmsI1V1Historical); V2 PASS.
+
+## ci.yml chain (ruff check src scripts; compileall -q src; verify_sources.py; engine_gate.py;
+##   coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"; coverage report)
+
+# baseline @b2e135c: code identical to 62cab58 (b2e135c only adds results/2026-10-12_pr61-review2_local-gate.log);
+#   full chain see that log (unittest rc=1: Ran 685, failures=3 = the three I1 tests). Re-measured here only
+#   the two MMS classes: Ran 12 tests, FAILED (failures=3).
+
+# intermediate @2d5d0bd (code complete, README counts not yet updated)
+unittest rc=1: Ran 701 tests, FAILED (failures=4, skipped=6) - only TestDocsContract (README counts 685 -> 701, 9 -> 10 spec entries)
+
+# final @9db9cbc
+ruff rc=0: All checks passed!
+compileall rc=0
+verify_sources rc=0: [VERIFY-SOURCES] 35 Toolkit-Eintraege + 10 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (55 Dateien) | PASS
+engine_gate rc=0: [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+unittest rc=0: Ran 701 tests, OK (skipped=6)
+coverage report rc=0: hex_fv_solver 98%, reference_case 97%, TOTAL 93%
+
+## Rounding floor, measured before the change (@b2e135c code, V1, rtol 1e-13), per level
+#   N    V1 result                               u*(|| |A||x| || + ||b||)/||b||
+#   24    71 it / 7.1933e-14 converged           8.7203e-15
+#   48   148 it / 5.1857e-14 converged           3.4719e-14
+#   96   302 it / 9.2880e-14 converged           1.3870e-13
+#   192  745 it / 2.3443e-13 NOT converged       5.5460e-13   (stagnation; eps*|| |A||x| ||/||b|| = 1.1090e-12)
+# First true-residual check (pre-check passed), V1: N=48 1.244e-13, N=96 5.727e-13, N=192 3.202e-12
+#   -> accepting at the first check below tol_eff would label N=48 and N=96 at_rounding_floor although
+#      the restarts reach 5.19e-14 / 9.29e-14: V2 consults the floor only where V1 gives up.
+
+## hex-mms-tri I1 V2 (c = 8, u = 2^-53), @d4acb27, results/2026-10-12_phase0_reference_i1-v2.json
+#   N    status             true rel. residual   tol_eff      eta          iterations  iter/discr ratio
+#   24   converged          7.1933e-14           1.0000e-13   9.1581e-16    71         1.156e-09
+#   48   converged          5.1857e-14           2.7775e-13   1.6583e-16   148         4.232e-09
+#   96   converged          9.2880e-14           1.1096e-12   7.4346e-17   302         1.271e-08
+#   192  at_rounding_floor  2.3443e-13           4.4368e-12   4.6928e-17   745         4.082e-08   (1e-13 NOT reached)
+# V2 iterates are bit-identical to V1 (converged levels) resp. to V1's best iterate (N=192).
+# Evidence writer @d4acb27 (bound, dirty=0): exit 0, [PHASE0] PASS; ceilings hex-heat-tri/v1, hex-heat-torus/v1,
+#   hex-mms-tri/v1 verified_numerical_reference, hex-mms-tri/oracle mathematical_oracle.
+# Heat-study digests unchanged against b2e135c (tri 9689d091b83dcac0..., torus 659fa841b89d07e7...).
+
+## Discrimination (Tools/diskriminierung.py, pytest node per case, ledger Data/diskriminierung_runs.jsonl)
+# DK-20261012T180338-bbf0fe3ec600 @0e887ac VOLL: 12/12 DISKRIMINIERT (V2 acceptance orientation, floor >= 1,
+#   floor at the first check, non-finite |A||x|, status label, negative |A|v, V1 swallowing V2 args,
+#   I1 status gate, I1 orientation, study ignoring cg_stopping (both directions), floor without ||b||)
+# DK-20261012T180943-a7b4daae176b @d4acb27 VOLL: 3/3 DISKRIMINIERT (I1 status gate after the rename,
+#   cg_converged label on the floor level, I1 ignoring cg_returned)
+
+## Mutation probe (scripts/mutation_probe.py), full run @9db9cbc, 20:22:26 -> 20:29:44 (+02:00)
+[MUTATION-PROBE] baseline green | 50/51 killed | FAIL   (rc=1)
+#   M02 SURVIVED (TestDurabilityErrorAfterReplace is POSIX-only, all skipped under Windows; not measurable here)
+#   M41 (O2 source check) and M42 (I1 without the iterative-error ratio, retargeted to _i1_level_holds) KILLED
+# Work tree clean after the probe (git status --porcelain empty).
