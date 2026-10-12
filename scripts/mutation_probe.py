@@ -176,7 +176,10 @@ MUTANTS = (
     Mutant(RC, '        "O2_source_matches_flux_divergence": source_error <= _MMS_SOURCE_TOL,\n',
            '        "O2_source_matches_flux_divergence": True,\n',
            "test_reference_case_hex_v3.TestMmsGateDiscrimination"),
-    Mutant(RC, '            and level["iterative_to_discretisation_ratio"] <= _MMS_ITERATIVE_RATIO\n', "",
+    # 2026-10-12 (E1012-07): the I1 rule moved into _i1_level_holds (V1/V2); same defect.
+    Mutant(RC, '    return bool(level["cg_relative_residual"] <= bound\n'
+               '                and level["iterative_to_discretisation_ratio"] <= _MMS_ITERATIVE_RATIO)\n',
+           '    return bool(level["cg_relative_residual"] <= bound)\n',
            "test_reference_case_hex_v3.TestMmsGateDiscrimination"),
     Mutant(RC, "        criteria[\"C10_conservation\"] = all(level[\"conservation_residual\"] <= _CONSERVATION_TOL for "
                "level in levels)\n",

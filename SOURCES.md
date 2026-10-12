@@ -563,3 +563,21 @@
 | BA52937C53F030BE | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 oscillatory study serialised as negative evidence: REFERENCE_CASE_HEX_HEAT_TRI_v1.md |
 | 008ECFEDAA323F20 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 CG underflow rule; measured residual replacement keeping p rejected: HEX_FV_SOLVER_v1.md |
 | FB8C074236D46EB4 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 underflow test fails by assertion for any exception type: test_hex_fv_solver_hex_v3.py |
+
+> **2026-10-12, E1012-07 = A (CG stopping rule V2).** New spec
+> `spec/HEX_FV_SOLVER_v2.md`: accept `||b - A x|| <= tol_eff ||b||`,
+> `tol_eff = max(rtol, c u (|| |A||x| || + ||b||) / ||b||)`, `c = 8` for the hex
+> operator, status `converged` / `at_rounding_floor`, backward error reported.
+> Phase 0b I1 is judged by V2; the V1 rule stays the solver default and the V1
+> verdict of I1 (red on N=192) stays as pinned negative evidence. The I1
+> mutant of `mutation_probe.py` follows the rule into `_i1_level_holds`. Prior
+> rows remain lineage.
+
+| 95F135F92D66644F | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: hex_fv_solver_hex_v3.py |
+| 8162854050D99784 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: test_hex_fv_solver_hex_v3.py |
+| BF172F48069DCE33 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: reference_case_hex_v3.py |
+| 2728169C296B2886 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: test_reference_case_hex_v3.py |
+| E70C1C24727BE491 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: HEX_FV_SOLVER_v1.md |
+| 025012A9B9F8E024 | 2026-10-12 00:00 | spec | in-repo new, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: HEX_FV_SOLVER_v2.md |
+| 34B1815ACAD6ECB2 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: REFERENCE_CASES_HEX_PHASE0B_v1.md |
+| 9B689DCC93F9B9F2 | 2026-10-12 00:00 | scripts | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: mutation_probe.py |
