@@ -46,18 +46,32 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
   Diskretisierung sind die Phase-0-Referenzfaelle (unten): Code- und Loesungsverifikation gegen
   exakte bzw. hergestellte Loesungen, eng begrenzte Contexts of Use, keine Physik-Aussage.
 
-## Reifegrad / Evidenz (Lauf 2026-10-07, lokal, Exit-Codes gesehen)
+## Reifegrad / Evidenz (Lauf 2026-10-12, lokal Windows, Exit-Codes gesehen)
+
+> **BLOCKED (2026-10-12): Phase 0b I1.** Der CG-Loeser entscheidet seine Stoppregel jetzt, wie
+> `spec/HEX_FV_SOLVER_v1.md` Abschnitt 5 es verlangt, am **wahren** Residuum `||b - A x||`
+> (vorher am rekursiv nachgefuehrten, das in binary64 davon abdriftet). Damit verfehlt
+> `hex-mms-tri` das Kriterium I1 auf N=192: das wahre Residuum stagniert bei 2.34e-13 > 1e-13
+> (die eps-Untergrenze `eps * || |A| |x| || / ||b||` liegt dort bei 1.11e-12). Die Schwelle ist
+> **nicht** angepasst; eine V2 mit anderer Schwelle oder anderer Residuumsberechnung ist ein
+> Owner-Entscheid. Bis dahin sind 3 Tests absichtlich rot und die Loeser-Decke von
+> `hex-mms-tri` steht auf `comparison_only`.
 
 | Gate | Kommando | Ergebnis |
 |---|---|---|
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
-| Provenance | `python scripts/verify_sources.py` | 34 Toolkit- + 9 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 663 Tests, OK, exit 0 (Skips je Plattform: Gate-Log) |
+| Provenance | `python scripts/verify_sources.py` | 35 Toolkit- + 9 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 678 Tests, FAILED (failures=3, skipped=6), exit 1 — die 3 roten sind I1 BLOCKED (oben); Skips je Plattform: Gate-Log |
 | Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
-| Mutation | `python scripts/mutation_probe.py` | 49/49 Mutanten getoetet (Baseline gruen), exit 0 — Lauf 2026-10-07 unter Linux. Unter Windows ist M02 nicht messbar (Testklasse POSIX-only, alle skipped; Lauf 2026-09-28 dort: 21/22, exit 1) |
+| Mutation | `python scripts/mutation_probe.py` | 4/51 Mutanten getoetet, nur einzeln ueber `run_mutant` gefahren (M45, M46, M50, M51, die am 2026-10-12 neuen oder verschobenen); die uebrigen 47 sind an diesem Stand nicht neu gemessen. Die volle Probe endet mit Baseline rot, exit 3 (die zwei MMS-Testklassen, I1 BLOCKED) — kein gueltiges Gesamtergebnis. Letzter voller Lauf: 49/49, exit 0, 2026-10-07 unter Linux (alte Zaehlung). Unter Windows ist M02 nicht messbar (Testklasse POSIX-only, alle skipped; Lauf 2026-09-28 dort: 21/22, exit 1) |
 
-Lokale Umgebung dieses Laufs: Linux (Cloud-Container), Python 3.12.3, `torch` 2.6.0+cu124
+Lokale Umgebung des Laufs 2026-10-12: Windows 11, Python 3.12.10, `torch` 2.6.0+cpu, `numpy`
+2.5.3, coverage 7.16.2, ruff 0.16.9; Log `results/2026-10-12_pr61-hardening_local-gate.log`
+(gepruefter Commit-SHA, Kommandos, Exit-Codes, Zahlen; der Commit mit Log und README aendert
+keinen Code). Vorlauf 2026-10-07 (659 Tests am Commit f4137f8; danach kamen vier Tests ohne
+eigenen Gate-Lauf hinzu, Codex P2 auf #61) in folgender Umgebung:
+Linux (Cloud-Container), Python 3.12.3, `torch` 2.6.0+cu124
 (PyPI-Wheel, CPU-Ausfuehrung ohne CUDA-Geraet; der CPU-Index download.pytorch.org war aus dem
 Container gesperrt), `numpy` 2.5.3; Stand: Zweig `claude/hexa-ntk-project-overview-mzkd4p` auf
 `main` bb4f986 (Issue #59, ReferenceSpec #33, Reality Anchor Phase 0, Phase-1-Instrumente). Die CI
@@ -107,7 +121,7 @@ in `spec/`, offene Lint-/Test-Schuld in `docs/ROADMAP.md`.
 
 - **Engine:** `src/hexantk_v3.py` (1772 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
   Train-Step, Operator-Vertraege, 26 Selftests inline)
-- **Toolkit:** `src/toolkit/` — 15 Module + 19 Testmodule (Benchmark, Checkpoint-Integration,
+- **Toolkit:** `src/toolkit/` — 15 Module + 20 Testmodule (Benchmark, Checkpoint-Integration,
   Dataloader-Utils, Dataset-Split, EMA, Failure-Signature, Hex-FV-Loeser, Operator-Adapter,
   Phase-0-Referenzfaelle, Phase-1-Aufgabe T1, ReferenceSpec, Resume-Utils, Runner, Stress,
   Warmstart-Utils; dazu die Tests des Provenance-Gates, des DCP-Bundle-Protokolls und des
@@ -127,7 +141,7 @@ exakten Fehler deckend, vier Level mit konstantem r > 1.3.
 |---|---|---|---|---|---|
 | `hex-heat-tri` | `REFERENCE_CASE_HEX_HEAT_TRI_v1` | Lame-Moden = exakte diskrete Eigenvektoren, Dirichlet | 1.998 / 1.993 | 2.5e-4 / 2.0e-4 | `verified_numerical_reference` |
 | `hex-heat-torus` | `REFERENCE_CASES_HEX_PHASE0B_v1` | ebene Wellen, periodische Assemblierung, Erhaltung, Isotropie in 0 / 10.9 / 30 Grad | 1.997 / 1.986 | 4.4e-4 / 3.5e-4 | `verified_numerical_reference` |
-| `hex-mms-tri` | `REFERENCE_CASES_HEX_PHASE0B_v1` | variables kappa (Mittelpunkt-Leitfaehigkeiten), Quelle, CG; Quelle gegen unabhaengige FD | 2.001 / 2.006 | 1.1e-4 / 9.1e-5 | Orakel `mathematical_oracle`, Loeser `verified_numerical_reference` |
+| `hex-mms-tri` | `REFERENCE_CASES_HEX_PHASE0B_v1` | variables kappa (Mittelpunkt-Leitfaehigkeiten), Quelle, CG; Quelle gegen unabhaengige FD | 2.001 / 2.006 | 1.1e-4 / 9.1e-5 | Orakel `mathematical_oracle`, Loeser `comparison_only` (I1 BLOCKED seit 2026-10-12; vorher `verified_numerical_reference` mit rekursivem Residuum) |
 
 Jede Decke gilt **nur** fuer ihren Context of Use. Diskriminierung (Tests + Mutationsprobe):
 falsches Gewicht, Gewichtsfehler erster Ordnung, Neumann-artige Slots, kappa am Knoten statt
@@ -136,7 +150,10 @@ nicht-konservativer Operator und falscher Torus-Umbruch fallen durch; das arithm
 der Knoten-kappa (ebenfalls zweiter Ordnung) besteht. Positivitaets-Gate auf dem
 assemblierten Operator (#60 Punkt 1): Vorzeichenstruktur + `dt <= min 1/|diag|`, sonst
 `ValueError`. Evidenz: `python scripts/oracles/hex_phase0_reference_oracle.py` ->
-`results/2026-10-07_phase0_reference.json`. Kein Lern-Backend vor gruener Phase 0 (#60).
+`results/2026-10-07_phase0_reference.json` (Stand vor der Wahr-Residuum-Stoppregel). Am
+2026-10-12 meldet derselbe Schreiber `[PHASE0] FAIL` (exit 1): `hex-mms-tri` verfehlt I1 auf
+N=192; er gibt ausserdem nur noch exit 0, wenn der Quellstand gebunden ist (sauberer
+Arbeitsbaum, verifizierter HEAD). Kein Lern-Backend vor gruener Phase 0 (#60).
 
 ## Phase 1: Instrumente und Vorregistrierung (Entwurf)
 
@@ -168,8 +185,8 @@ python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/wh
 python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 663 Unit-Tests (2026-10-07) + Coverage-Gate
-python scripts/mutation_probe.py                               # optional: 49 Mutanten der Review-Fixes
+python -m coverage report                                      # 678 Unit-Tests (2026-10-12; 3 rot = I1 BLOCKED) + Coverage-Gate
+python scripts/mutation_probe.py                               # optional: 51 Mutanten der Review-Fixes
 python scripts/oracles/hex_phase0_reference_oracle.py         # Phase-0-Referenzfaelle (exit 0 = alle Gates gruen)
 ```
 
@@ -178,7 +195,7 @@ den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (663, Stand 2026-10-07) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (678, Stand 2026-10-12; 3 rot = I1 BLOCKED) unter Branch-Coverage.
 
 ## Struktur
 
