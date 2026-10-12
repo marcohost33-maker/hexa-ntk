@@ -531,4 +531,5 @@
 | A534D04BAAA1075B | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): test_reference_case_hex_v3.py |
 | 2CC63B7B63B566D3 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): HEX_FV_SOLVER_v1.md |
 | E7E3849689E6F44B | 2026-10-12 00:00 | scripts | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): mutation_probe.py |
+| A0E8AFC37C6782D1 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 P1 test hardening (crash is an assertion failure): test_reference_case_hex_v3.py |
 

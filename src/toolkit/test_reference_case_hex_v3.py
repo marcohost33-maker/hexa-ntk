@@ -495,7 +495,10 @@ class TestMmsGateDiscrimination(unittest.TestCase):
             return u, info
 
         with mock.patch.object(rc, "solve_steady_diffusion", side_effect=stalls_on_the_finest):
-            study = self._study()
+            try:
+                study = self._study()
+            except fv.ConvergenceError as exc:
+                self.fail(f"a non-converged level crashed the study instead of failing I1: {exc}")
         self.assertEqual([level["cg_converged"] for level in study["levels"]], [True, True, True, False])
         self.assertEqual([k for k, ok in study["criteria"].items() if not ok], ["I1_iterative_error_negligible"])
         _, solver = hex_mms_tri_reference_specs(study, evidence_ref="x")
