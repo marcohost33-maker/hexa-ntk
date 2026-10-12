@@ -5,7 +5,11 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Blockiert
 
-- [ ] **BLOCKED (2026-10-12): Phase 0b I1, `hex-mms-tri`.** Seit der CG-Loeser seine Stoppregel
+- [ ] **BLOCKED (2026-10-12), historisch (V1): Phase 0b I1, `hex-mms-tri`.** Bleibt als
+  Negativ-Befund stehen; gilt fuer den V1-Vertrag weiter (Test `TestMmsI1V1Historical`).
+  Abgeloest fuer den geltenden Vertrag durch I1 V2 (unter Erledigt). Text vom
+  2026-10-12 vor E1012-07, unveraendert:
+  Seit der CG-Loeser seine Stoppregel
   am wahren Residuum `||b - A x||` entscheidet (PR #61, `spec/HEX_FV_SOLVER_v1.md` Abschnitt 5),
   verfehlt `hex-mms-tri` I1 auf N=192: das wahre Residuum stagniert bei 2.34e-13 > 1e-13. Die
   Loeser-Decke von `hex-mms-tri` steht damit auf `comparison_only`, nicht mehr auf
@@ -17,6 +21,19 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   _Evidenz:_ `results/2026-10-12_pr61-hardening_local-gate.log`.
 
 ## Erledigt (verifiziert)
+
+- [x] **Phase 0b I1 V2 (E1012-07 = A, 2026-10-12).** Marco hat entschieden: I1 bekommt eine
+  versionierte V2 mit erreichbarer Schwelle; V1 bleibt als historischer, ehrlich roter Vertrag
+  stehen (Blockiert, oben). `spec/HEX_FV_SOLVER_v2.md`: Annahme bei
+  `||b - A x|| <= tol_eff ||b||`, `tol_eff = max(rtol, 8 u (|| |A| |x| || + ||b||) / ||b||)`,
+  `u = 2^-53` (c = 8: Zeilen mit 7 Termen plus die Subtraktion von b, gamma_8-Schranke der
+  Residuumsauswertung), konsultiert erst, wo V1 aufgibt; Status `converged` /
+  `at_rounding_floor`, Rueckwaertsfehler `eta` berichtet. Ergebnis @d4acb27: N=24/48/96
+  `converged`, N=192 `at_rounding_floor` (2.344e-13 > 1e-13, <= tol_eff 4.437e-12,
+  eta 4.69e-17; 1e-13 dort NICHT erreicht); Loeser-Decke `verified_numerical_reference` unter
+  I1 V2. Lokal Windows, CI offen.
+  _Evidenz:_ `results/2026-10-12_phase0_reference_i1-v2.json`,
+  `results/2026-10-12_pr61-i1-v2_local-gate.log`.
 
 - [x] **Phase-1-Instrumente (#60, 2026-10-07).** Ohne Modell und ohne Training:
   Crank-Nicolson mit warm gestartetem CG im Loeser (exakter Verstaerkungsfaktor auf
@@ -46,6 +63,9 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   `verified_numerical_reference` fuer `hex-mms-tri` gelten nicht mehr. Die Evidenz von 2026-10-07
   beruhte auf dem rekursiven CG-Residuum; mit dem wahren Residuum ist I1 rot und die Decke
   `comparison_only` (siehe Blockiert oben). Der Eintrag bleibt als Lineage stehen.
+  **Nachtrag 2026-10-12 (E1012-07):** unter I1 V2 ist die Decke wieder
+  `verified_numerical_reference` (Eintrag "Phase 0b I1 V2" oben); unter I1 V1 bleibt sie
+  `comparison_only`.
 
 - [x] **Reality Anchor Phase 0a: Referenzfall `hex-heat-tri` + ReferenceSpec v1 (#60, #33,
   W1-K08, 2026-10-07).** ReferenceSpec v1 aus Draft #33 per Merge-Commit uebernommen (Commits
