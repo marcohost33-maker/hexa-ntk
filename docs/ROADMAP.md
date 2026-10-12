@@ -3,6 +3,19 @@
 Ehrliche Liste der naechsten Schritte und offenen Schuld. Reihenfolge = Prioritaet.
 Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst zurueckgestellt.
 
+## Blockiert
+
+- [ ] **BLOCKED (2026-10-12): Phase 0b I1, `hex-mms-tri`.** Seit der CG-Loeser seine Stoppregel
+  am wahren Residuum `||b - A x||` entscheidet (PR #61, `spec/HEX_FV_SOLVER_v1.md` Abschnitt 5),
+  verfehlt `hex-mms-tri` I1 auf N=192: das wahre Residuum stagniert bei 2.34e-13 > 1e-13. Die
+  Loeser-Decke von `hex-mms-tri` steht damit auf `comparison_only`, nicht mehr auf
+  `verified_numerical_reference`; drei Tests sind absichtlich rot. **Phase 0 ist nicht gruen**:
+  kein Lern-Backend und kein Phase-1-Lauf, bevor I1 entschieden ist. Die Schwelle 1e-13 ist
+  unveraendert; eine V2 mit anderer Schwelle oder Residuumsberechnung ist ein Owner-Entscheid
+  (E1012-07). Gemessen und verworfen: Residual Replacement mit beibehaltener Suchrichtung statt
+  Neustart (N=96 und N=192 laufen dann bis maxiter, Spec Abschnitt 5).
+  _Evidenz:_ `results/2026-10-12_pr61-hardening_local-gate.log`.
+
 ## Erledigt (verifiziert)
 
 - [x] **Phase-1-Instrumente (#60, 2026-10-07).** Ohne Modell und ohne Training:
@@ -29,6 +42,10 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   Knoten (nur Ordnung 1), Quelle ohne Gradiententerm, vorzeitiger CG-Abbruch, nicht-konservativer
   Operator; das arithmetische Mittel der Knoten-kappa (zweiter Ordnung) besteht.
   _Evidenz:_ `results/2026-10-07_phase0b_local-gate.log`, `results/2026-10-07_phase0_reference.json`.
+  **Ueberholt 2026-10-12 (PR #61):** "Phase 0 komplett" und die Loeser-Decke
+  `verified_numerical_reference` fuer `hex-mms-tri` gelten nicht mehr. Die Evidenz von 2026-10-07
+  beruhte auf dem rekursiven CG-Residuum; mit dem wahren Residuum ist I1 rot und die Decke
+  `comparison_only` (siehe Blockiert oben). Der Eintrag bleibt als Lineage stehen.
 
 - [x] **Reality Anchor Phase 0a: Referenzfall `hex-heat-tri` + ReferenceSpec v1 (#60, #33,
   W1-K08, 2026-10-07).** ReferenceSpec v1 aus Draft #33 per Merge-Commit uebernommen (Commits
