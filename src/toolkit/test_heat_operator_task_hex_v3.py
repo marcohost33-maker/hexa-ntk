@@ -250,6 +250,48 @@ class TestMetrics(unittest.TestCase):
                 with self.subTest(metric=fn.__name__), self.assertRaises(ValueError):
                     fn(pred, truth, lat)
 
+    def test_inputs_with_extra_dimensions_are_rejected(self) -> None:
+        # Codex P2 on #61 @266900e: [S, M, C] passed the shape[1] check and the
+        # metrics returned C values per sample instead of one.
+        lat = triangle_hex_lattice(8)
+        good = np.stack([LameMode(1, 1).evaluate(lat.coords), LameMode(1, 2, "cos").evaluate(lat.coords)])
+        extra = np.repeat(good[:, :, None], 3, axis=2)
+        for fn in (relative_l2, relative_h1_seminorm, relative_max):
+            with self.subTest(metric=fn.__name__):
+                with self.assertRaisesRegex(ValueError, "same shape"):
+                    fn(1.1 * extra, extra, lat)
+                with self.assertRaisesRegex(ValueError, "same shape"):
+                    fn(1.1 * good[None], good[None], lat)
+                self.assertEqual(fn(1.1 * good[0], good[0], lat).shape, (1,))  # one 1-D field = one sample
+        with self.assertRaisesRegex(ValueError, "same shape"):
+            evaluate_predictions(1.1 * extra, extra, lat)
+
+    def test_l2_and_max_are_exact_at_extreme_finite_scales(self) -> None:
+        # Codex P2 on #61 @266900e: norm(axis=1) underflowed a nonzero truth to 0
+        # (1e-300: "zero truth") or overflowed numerator and denominator to inf
+        # (1e308: inf / inf = NaN); p - t itself overflows for p = -t = 1e308.
+        lat = triangle_hex_lattice(8)
+        truth = np.stack([LameMode(1, 1).evaluate(lat.coords), LameMode(1, 2, "cos").evaluate(lat.coords)])
+        reference = {fn: fn(1.1 * truth, truth, lat) for fn in (relative_l2, relative_max)}
+        for scale in (2.0**-990, 1e-300, 1e300, 2.0**1000, 1e308 / float(np.max(np.abs(truth)))):
+            for fn, expected in reference.items():
+                with self.subTest(scale=scale, metric=fn.__name__):
+                    t = scale * truth
+                    self.assertTrue(np.all(np.isfinite(t)) and np.all(np.isfinite(1.1 * t)))
+                    got = fn(1.1 * t, t, lat)
+                    self.assertTrue(np.all(np.isfinite(got)), got)
+                    np.testing.assert_allclose(got, expected, rtol=1e-12)
+        big = 1e308 * np.sign(truth + 0.5)
+        for fn in (relative_l2, relative_max):
+            with self.subTest(case="p = -t near the overflow threshold", metric=fn.__name__):
+                got = fn(-big, big, lat)
+                np.testing.assert_allclose(got, 2.0, rtol=1e-12)
+        # A ratio that binary64 cannot hold fails closed instead of reporting inf.
+        for fn in (relative_l2, relative_max):
+            with self.subTest(case="unrepresentable ratio", metric=fn.__name__):
+                with self.assertRaisesRegex(ValueError, "not representable"):
+                    fn(1e300 * truth, 1e-300 * truth, lat)
+
     def test_h1_rejects_materially_negative_discrete_energy(self) -> None:
         lat = triangle_hex_lattice(8)
         v = LameMode(1, 1).evaluate(lat.coords)

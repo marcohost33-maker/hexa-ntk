@@ -552,3 +552,6 @@
 
 | D5D9EF2923B2C07C | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 underflow-safe true CG residual norm: hex_fv_solver_hex_v3.py |
 | 823A6B4BC89BD24C | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 underflow-safe true CG residual norm: test_hex_fv_solver_hex_v3.py |
+| D8CBCF33A208AF2B | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 metric inputs exactly [S, M], scaled L2/max norms: heat_operator_task_hex_v3.py |
+| 3F1667E3CE9AA1C9 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 metric inputs exactly [S, M], scaled L2/max norms: test_heat_operator_task_hex_v3.py |
+| 723931AABC8DD449 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 metric inputs exactly [S, M], scaled L2/max norms: HEAT_OPERATOR_TASK_v1.md |

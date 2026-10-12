@@ -416,7 +416,9 @@ class HeatOperatorDataset(Dataset):
 def _pair(pred: Any, truth: Any, lattice: HexLattice) -> Tuple[np.ndarray, np.ndarray]:
     p = np.atleast_2d(np.asarray(pred, dtype=np.float64))
     t = np.atleast_2d(np.asarray(truth, dtype=np.float64))
-    if p.shape != t.shape or p.shape[1] != lattice.num_nodes:
+    # Exactly [S, M] (a 1-D field is one sample): [S, M, C] with M nodes would
+    # pass a shape[1] check and yield C values per sample (PR #61 Codex P2).
+    if p.ndim != 2 or p.shape != t.shape or p.shape[1] != lattice.num_nodes:
         raise ValueError(f"pred and truth must have the same shape [S, {lattice.num_nodes}]")
     if not (np.all(np.isfinite(p)) and np.all(np.isfinite(t))):
         raise ValueError("pred and truth must be finite")
@@ -429,10 +431,43 @@ def _nonzero(norms: np.ndarray, name: str) -> np.ndarray:
     return norms
 
 
+def _scaled_pair(p: np.ndarray, t: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """(p - t, t), both divided per sample by one power of two 2^k with max(|p|, |t|) / 2^k in [0.5, 1).
+
+    Both metrics below are ratios of homogeneous norms, so the common factor
+    cancels exactly; dividing by a power of two is exact in binary64 (unless an
+    entry falls below the normal range, i.e. 2^-1022 times the row peak), and the
+    difference of two scaled rows cannot overflow (PR #61 Codex P2: p - t, and
+    norm(axis=1) of 1e308 / 1e-300 inputs, over- and underflowed). In the normal
+    range the results are bit-identical to the unscaled formulas.
+    """
+    peak = np.maximum(np.max(np.abs(p), axis=1), np.max(np.abs(t), axis=1))
+    exponent = np.frexp(peak)[1][:, None]
+    scaled_t = np.ldexp(t, -exponent)
+    return np.ldexp(p, -exponent) - scaled_t, scaled_t
+
+
+def _row_norm(v: np.ndarray) -> np.ndarray:
+    """Per-row 2-norm with its own power-of-two scaling: no squares below the normal range."""
+    exponent = np.frexp(np.max(np.abs(v), axis=1))[1][:, None]
+    return np.ldexp(np.linalg.norm(np.ldexp(v, -exponent), axis=1), exponent[:, 0])
+
+
+def _ratio(numerator: np.ndarray, denominator: np.ndarray, truth: np.ndarray, name: str) -> np.ndarray:
+    if np.any(np.all(truth == 0.0, axis=1)):
+        raise ValueError(f"{name} of the truth is zero for at least one sample")
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        values = numerator / denominator
+    if not np.all(np.isfinite(values)):
+        raise ValueError(f"relative {name} is not representable in binary64 for at least one sample")
+    return values
+
+
 def relative_l2(pred: Any, truth: Any, lattice: HexLattice) -> np.ndarray:
     """||e||_A / ||u||_A per sample (equal cell areas: an RMS ratio)."""
     p, t = _pair(pred, truth, lattice)
-    return np.linalg.norm(p - t, axis=1) / _nonzero(np.linalg.norm(t, axis=1), "L2 norm")
+    error, scaled_t = _scaled_pair(p, t)
+    return _ratio(_row_norm(error), _row_norm(scaled_t), t, "L2 norm")
 
 
 def _energy_seminorm(v: np.ndarray, lattice: HexLattice) -> np.ndarray:
@@ -459,7 +494,8 @@ def relative_h1_seminorm(pred: Any, truth: Any, lattice: HexLattice) -> np.ndarr
 def relative_max(pred: Any, truth: Any, lattice: HexLattice) -> np.ndarray:
     """max|e| / max|u| per sample."""
     p, t = _pair(pred, truth, lattice)
-    return np.max(np.abs(p - t), axis=1) / _nonzero(np.max(np.abs(t), axis=1), "max norm")
+    error, scaled_t = _scaled_pair(p, t)
+    return _ratio(np.max(np.abs(error), axis=1), np.max(np.abs(scaled_t), axis=1), t, "max norm")
 
 
 def evaluate_predictions(pred: Any, truth: Any, lattice: HexLattice) -> Dict[str, List[float]]:

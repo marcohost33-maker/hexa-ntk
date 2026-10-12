@@ -73,9 +73,15 @@ operator, `|v|_{1,h}^2 = -A * v . (L_h v)`.
 - This is not the H1 proxy in `benchmark_hex_v3`, which drops `-1` slots.
 
 **Fail-closed rules:**
-- shapes must match;
+- shapes must match and be exactly `[S, M]`; a 1-D field counts as one
+  sample, any further axis raises `ValueError` (added 2026-10-12);
 - values must be finite;
 - a zero truth norm raises `ValueError`;
+- `rel_l2` and `rel_max` divide both fields per sample by one power of two
+  before differencing and taking norms, which is exact and leaves the ratio
+  unchanged, so finite inputs near the binary64 limits neither over- nor
+  underflow; a ratio that binary64 cannot represent raises `ValueError`
+  instead of returning `inf` or `NaN` (added 2026-10-12);
 - materially negative discrete energy raises `ValueError`; only a
   floating-point roundoff band of `64 * eps * max(1, |energy|)` may be
   clamped to zero.
