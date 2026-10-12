@@ -242,7 +242,8 @@ def dataset_manifest(config: HeatOperatorTaskConfig, data: Dict[str, Any], *, da
     config_sha = config.digest()
     lattice_sha = _lattice_digest(lattice)
     dataset_seed = _non_negative_int(dataset_seed, name="dataset_seed")
-    sample_ids = [int(s) for s in data["sample_ids"]]
+    # The generation contract, not int(): 0.2 must not be recorded as 0.
+    sample_ids = _sample_ids(data["sample_ids"])
     basis = mode_basis(config)
     return {
         "schema": _SCHEMA,
@@ -273,9 +274,16 @@ def verify_dataset(manifest: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, 
     """Verify content integrity and cross-platform reproducibility fail-closed."""
     if not isinstance(manifest, dict) or manifest.get("schema") != _SCHEMA:
         raise ValueError(f"manifest must be a {_SCHEMA} manifest")
+    # task_id is in no digest: a manifest for another task must not verify (PR #61 Codex P2).
+    if manifest.get("task_id") != TASK_ID:
+        raise ValueError(f"manifest task_id must be {TASK_ID!r}, got {manifest.get('task_id')!r}")
     config = HeatOperatorTaskConfig(**manifest["config"])
     if config.digest() != manifest["config_sha256"]:
         raise ValueError("config digest mismatch")
+    # Identity metadata is checked exactly, never coerced (PR #61 Codex P2):
+    # int(0.2) == 0 and 0.0 == 0 would let changed ids verify.
+    manifest_seed = _non_negative_int(manifest["dataset_seed"], name="manifest dataset_seed")
+    manifest_ids = _sample_ids(manifest["sample_ids"])
 
     lattice = data.get("lattice")
     if not isinstance(lattice, HexLattice):
@@ -298,7 +306,15 @@ def verify_dataset(manifest: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, 
             "bitwise_identical": False,
         }
 
-    sample_ids = [int(s) for s in data["sample_ids"]]
+    try:
+        sample_ids = _sample_ids(data["sample_ids"])
+    except (TypeError, ValueError):
+        return {
+            "integrity": False,
+            "reproducible": False,
+            "max_relative_deviation": math.inf,
+            "bitwise_identical": False,
+        }
     coefficients = np.asarray(data["coefficients"], dtype=np.float64)
     u0 = np.asarray(data["u0"], dtype=np.float64)
     u_t = np.asarray(data["uT"], dtype=np.float64)
@@ -326,7 +342,7 @@ def verify_dataset(manifest: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, 
     ]
     dataset_sha = _sha256_json({
         "config_sha256": manifest["config_sha256"],
-        "dataset_seed": int(manifest["dataset_seed"]),
+        "dataset_seed": manifest_seed,
         "sample_ids": sample_ids,
         "lattice_sha256": lattice_sha,
         "samples": digests,
@@ -337,7 +353,7 @@ def verify_dataset(manifest: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, 
         and manifest.get("n") == lattice.n
         and manifest.get("num_nodes") == lattice.num_nodes
         and manifest.get("lattice_sha256") == lattice_sha
-        and sample_ids == manifest["sample_ids"]
+        and sample_ids == manifest_ids
         and manifest.get("basis") == expected_basis
         and digests == manifest["sample_sha256"]
         and dataset_sha == manifest["dataset_sha256"]
@@ -346,8 +362,8 @@ def verify_dataset(manifest: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, 
     regenerated = generate_dataset(
         config,
         n=manifest["n"],
-        sample_ids=manifest["sample_ids"],
-        dataset_seed=manifest["dataset_seed"],
+        sample_ids=manifest_ids,
+        dataset_seed=manifest_seed,
     )
     fresh_lattice = regenerated["lattice"]
     if not np.array_equal(lattice.neighbors, fresh_lattice.neighbors):
@@ -394,7 +410,7 @@ class HeatOperatorDataset(Dataset):
     """
 
     def __init__(self, data: Dict[str, Any]) -> None:
-        self.sample_ids = [int(s) for s in data["sample_ids"]]
+        self.sample_ids = _sample_ids(data["sample_ids"])  # exact ids: they are the split groups
         self.u0 = np.asarray(data["u0"], dtype=np.float64)
         self.u_t = np.asarray(data["uT"], dtype=np.float64)
         if self.u0.shape != self.u_t.shape or self.u0.shape[0] != len(self.sample_ids):

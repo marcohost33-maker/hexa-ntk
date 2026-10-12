@@ -555,3 +555,6 @@
 | D8CBCF33A208AF2B | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 metric inputs exactly [S, M], scaled L2/max norms: heat_operator_task_hex_v3.py |
 | 3F1667E3CE9AA1C9 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 metric inputs exactly [S, M], scaled L2/max norms: test_heat_operator_task_hex_v3.py |
 | 723931AABC8DD449 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 metric inputs exactly [S, M], scaled L2/max norms: HEAT_OPERATOR_TASK_v1.md |
+| 4063390225430176 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 manifest task_id checked, sample ids and seed exact: heat_operator_task_hex_v3.py |
+| 833FF2BEECC507B3 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 manifest task_id checked, sample ids and seed exact: test_heat_operator_task_hex_v3.py |
+| 495893B4DE75E0D6 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 manifest task_id checked, sample ids and seed exact: HEAT_OPERATOR_TASK_v1.md |

@@ -107,6 +107,12 @@ operator, `|v|_{1,h}^2 = -A * v . (L_h v)`.
 **Integrity vs. reproducibility.**
 - **Integrity:** `verify_dataset` recomputes the digests of the lattice,
   coefficients and solution arrays. Any content change fails.
+- **Identity (added 2026-10-12):** `task_id` is in no digest, so
+  `verify_dataset` raises `ValueError` unless it is `hex-heat-operator/v1`.
+  Sample ids and the seed follow the generation contract exactly
+  (non-negative integers, no `bool`, no float, ids unique and non-empty),
+  never coerced with `int()`: a manifest that violates it raises, data ids
+  that violate it fail integrity and reproducibility.
 - **Reproducibility:** `verify_dataset` regenerates the lattice and samples;
   neighbour topology must match exactly and floating arrays must agree within
   `1e-12` relative max-norm.

@@ -173,6 +173,41 @@ class TestManifest(unittest.TestCase):
         self.assertFalse(report["integrity"])
         self.assertFalse(report["reproducible"])
 
+    def test_sample_ids_are_verified_exactly(self) -> None:
+        # Codex P2 on #61 @266900e: int() turned a changed id 0.2 back into 0, and
+        # integrity, digest and regeneration all agreed again.
+        manifest = self.data["manifest"]
+        self.assertTrue(verify_dataset(manifest, self.data)["integrity"])
+        for label, ids in (
+            ("non-integral id", np.concatenate([[0.2], np.arange(1, 12)])),
+            ("integral float ids", np.arange(12, dtype=np.float64)),
+            ("bool id", [True] + list(range(1, 12))),
+        ):
+            with self.subTest(data_ids=label):
+                report = verify_dataset(manifest, dict(self.data, sample_ids=ids))
+                self.assertFalse(report["integrity"], report)
+                self.assertFalse(report["reproducible"], report)
+        for field, value in (("sample_ids", [0.2] + list(range(1, 12))),
+                             ("sample_ids", [0.0] + list(range(1, 12))),
+                             ("dataset_seed", 5.0), ("dataset_seed", 5.2)):
+            with self.subTest(manifest_field=field, value=value), self.assertRaises(TypeError):
+                verify_dataset(dict(manifest, **{field: value}), self.data)
+        with self.assertRaises(TypeError):
+            dataset_manifest(TRI, dict(self.data, sample_ids=np.concatenate([[0.2], np.arange(1, 12)])),
+                             dataset_seed=5)
+        with self.assertRaises(TypeError):
+            HeatOperatorDataset(dict(self.data, sample_ids=np.concatenate([[0.2], np.arange(1, 12)])))
+
+    def test_manifest_for_another_task_is_rejected(self) -> None:
+        # Codex P2 on #61 @266900e: task_id is in no digest, so a manifest relabelled
+        # for another task verified with full integrity and reproducibility.
+        for task_id in ("hex-heat-operator/v2", "other-task/v1", None):
+            with self.subTest(task_id=task_id), self.assertRaisesRegex(ValueError, "task_id"):
+                verify_dataset(dict(self.data["manifest"], task_id=task_id), self.data)
+        missing = {k: v for k, v in self.data["manifest"].items() if k != "task_id"}
+        with self.assertRaisesRegex(ValueError, "task_id"):
+            verify_dataset(missing, self.data)
+
     def test_digests_are_order_and_resolution_sensitive(self) -> None:
         reordered = generate_dataset(TRI, n=24, sample_ids=list(range(12))[::-1], dataset_seed=5)
         self.assertNotEqual(reordered["manifest"]["dataset_sha256"], self.data["manifest"]["dataset_sha256"])
