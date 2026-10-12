@@ -837,10 +837,12 @@ class TestConjugateGradientV2(unittest.TestCase):
                     return out
 
                 # on the floor path (rtol unreachable) and on the converged path
-                with self.assertRaisesRegex(ConvergenceError, "not computable"):
-                    self._v2(apply_a, poisoned, f, rtol=1e-16)
-                with self.assertRaisesRegex(ConvergenceError, "not computable"):
-                    self._v2(apply_a, poisoned, f, rtol=1e-10)
+                for rtol in (1e-16, 1e-10):
+                    # Any exception type is caught, so a wrong class fails by assertion, not by crash.
+                    with self.assertRaises(Exception) as ctx:
+                        self._v2(apply_a, poisoned, f, rtol=rtol)
+                    self.assertIsInstance(ctx.exception, ConvergenceError)
+                    self.assertIn("not computable", str(ctx.exception))
         # || |A||x| || overflowing despite finite entries
         with self.assertRaisesRegex(ConvergenceError, "not computable"):
             self._v2(apply_a, lambda v: np.full_like(v, 1e308), f, rtol=1e-16)
