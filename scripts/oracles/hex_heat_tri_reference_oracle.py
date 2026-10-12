@@ -30,19 +30,37 @@ from reference_case_hex_v3 import hex_heat_tri_reference_spec, run_hex_heat_tri_
 
 
 def _source_revision() -> dict:
-    """Git HEAD and whether the work tree is clean (GITHUB_SHA preferred in CI)."""
-    sha = os.environ.get("GITHUB_SHA")
+    """Git HEAD, whether the work tree is clean, and whether both are verified.
+
+    ``bound`` is True only if git answered, the work tree is clean and, when
+    GITHUB_SHA is set, it equals the checked-out HEAD. Only then do the
+    executed bytes match the advertised revision; an evidence writer must not
+    report success otherwise (Codex P2 on #61). ``git_sha`` is the verified
+    HEAD, or the unverified GITHUB_SHA if git failed.
+    """
+    github_sha = os.environ.get("GITHUB_SHA") or None
+    head = None
     dirty = None
     try:
-        if not sha:
-            sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=_REPO, capture_output=True,
-                                 text=True, check=True, stdin=subprocess.DEVNULL).stdout.strip()
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=_REPO, capture_output=True,
+                              text=True, check=True, stdin=subprocess.DEVNULL).stdout.strip() or None
         status = subprocess.run(["git", "status", "--porcelain"], cwd=_REPO, capture_output=True,
                                 text=True, check=True, stdin=subprocess.DEVNULL).stdout
         dirty = bool(status.strip())
     except (OSError, subprocess.CalledProcessError):
-        sha = sha or None
-    return {"git_sha": sha, "worktree_dirty": dirty}
+        pass
+    bound = head is not None and dirty is False and (github_sha is None or github_sha == head)
+    return {"git_sha": head or github_sha, "github_sha": github_sha, "worktree_dirty": dirty, "bound": bound}
+
+
+def _report_source_binding(source: dict, tag: str) -> bool:
+    """Print the binding verdict to stderr; True iff the source is bound."""
+    if source.get("bound") is True:
+        return True
+    print(f"[{tag}] source revision NOT bound (git_sha={source.get('git_sha')!r}, "
+          f"github_sha={source.get('github_sha')!r}, worktree_dirty={source.get('worktree_dirty')!r}) | FAIL",
+          file=sys.stderr)
+    return False
 
 
 def build_report(evidence_ref: str) -> dict:
@@ -79,7 +97,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{'PASS' if study['passed'] else 'FAIL ' + ','.join(failed)}",
         file=sys.stderr,
     )
-    return 0 if study["passed"] else 1
+    bound = _report_source_binding(report["source"], "HEX-HEAT-TRI")
+    return 0 if study["passed"] and bound else 1
 
 
 if __name__ == "__main__":

@@ -546,4 +546,7 @@
 | 8FA2B49EDEAA92A6 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 per-sample H1 negative-energy band: test_heat_operator_task_hex_v3.py |
 | 796B7DF840C87D64 | 2026-10-12 00:00 | scripts | in-repo derived, 2026-10-12 PR #61 Codex P2 M49 retargeted, per-sample band mutant: mutation_probe.py |
 | DD05384B671624BE | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 test hardening (failed rescaled solve is an assertion failure): test_hex_fv_solver_hex_v3.py |
+| 7711B0D09ADF1C45 | 2026-10-12 00:00 | scripts/oracles | in-repo derived, 2026-10-12 PR #61 Codex P2 evidence writers fail closed on an unbound source revision: hex_heat_tri_reference_oracle.py |
+| 1C0CD9DC2F08626F | 2026-10-12 00:00 | scripts/oracles | in-repo derived, 2026-10-12 PR #61 Codex P2 evidence writers fail closed on an unbound source revision: hex_phase0_reference_oracle.py |
+| 7338EDC5172914B4 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 evidence writers fail closed on an unbound source revision: test_reference_oracle_source_binding.py |
 

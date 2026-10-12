@@ -8,7 +8,9 @@ Runs the three reference studies:
 It derives their ReferenceSpec v1 claim ceilings (four specs: the MMS case
 yields an oracle spec and a solver spec) and prints or writes strict JSON
 bound to the source revision. The exit code is 0 only if every study passes
-its gate and every spec reaches the expected ceiling; otherwise it is 1.
+its gate, every spec reaches the expected ceiling and the source revision is
+bound (clean work tree, verified HEAD, GITHUB_SHA == HEAD when set);
+otherwise it is 1.
 
 The same studies run in ``tests (cpu)`` via
 ``src/toolkit/test_reference_case_hex_v3.py``. This script produces the
@@ -30,7 +32,7 @@ sys.path.insert(0, str(_REPO / "src" / "toolkit"))
 
 import numpy  # noqa: E402
 
-from hex_heat_tri_reference_oracle import _source_revision  # noqa: E402  (same directory)
+from hex_heat_tri_reference_oracle import _report_source_binding, _source_revision  # noqa: E402  (same directory)
 from reference_case_hex_v3 import (  # noqa: E402
     hex_heat_torus_reference_spec,
     hex_heat_tri_reference_spec,
@@ -99,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[PHASE0] {spec['reference_id']:19s} ceiling={spec['claim_ceiling']}"
               f"{'' if hit else ' (expected ' + expected + ')'}", file=sys.stderr)
         ok = ok and hit
+    ok = _report_source_binding(report["source"], "PHASE0") and ok
     print(f"[PHASE0] {'PASS' if ok else 'FAIL'}", file=sys.stderr)
     return 0 if ok else 1
 
