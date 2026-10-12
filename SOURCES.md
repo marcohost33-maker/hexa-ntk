@@ -545,4 +545,5 @@
 | 675C90BC29E4AC30 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 per-sample H1 negative-energy band: heat_operator_task_hex_v3.py |
 | 8FA2B49EDEAA92A6 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 per-sample H1 negative-energy band: test_heat_operator_task_hex_v3.py |
 | 796B7DF840C87D64 | 2026-10-12 00:00 | scripts | in-repo derived, 2026-10-12 PR #61 Codex P2 M49 retargeted, per-sample band mutant: mutation_probe.py |
+| DD05384B671624BE | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 test hardening (failed rescaled solve is an assertion failure): test_hex_fv_solver_hex_v3.py |
 

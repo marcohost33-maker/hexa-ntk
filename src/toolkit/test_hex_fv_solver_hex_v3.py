@@ -522,7 +522,10 @@ class TestConjugateGradient(unittest.TestCase):
             with self.subTest(scale=scale):
                 b = scale * v
                 self.assertTrue(np.all(np.isfinite(b)) and np.all(b != 0.0))
-                x, info = conjugate_gradient(lambda w: a @ w, b, rtol=1e-12, maxiter=300)
+                try:
+                    x, info = conjugate_gradient(lambda w: a @ w, b, rtol=1e-12, maxiter=300)
+                except Exception as exc:  # the solve itself is the contract under test
+                    self.fail(f"finite b of scale {scale!r} is not solved: {type(exc).__name__}: {exc}")
                 self.assertGreater(info["iterations"], 0)
                 self.assertTrue(math.isfinite(info["relative_residual"]))
                 self.assertLessEqual(info["relative_residual"], 1e-12)
