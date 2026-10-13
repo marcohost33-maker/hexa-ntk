@@ -592,3 +592,5 @@
 | 28D86FE9CC41299B | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 B3 linear POD-ridge baseline with leakage guard, checked by the spectral audit: linear_baseline_hex_v3.py |
 | 35F70875438E85C4 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 B3 linear POD-ridge baseline with leakage guard, checked by the spectral audit: test_linear_baseline_hex_v3.py |
 | 76D0289C9F3E1531 | 2026-10-13 00:00 | src/toolkit | in-repo derived, 2026-10-13 DK-LB04 was red by IndexError only: all-zero training test fails by assertion: test_linear_baseline_hex_v3.py |
+| 02C803DBBE6DEC98 | 2026-10-13 00:00 | src/toolkit | in-repo derived, 2026-10-13 B4 citation narrowed to Higham 2002 section 3.1: spectral_audit_hex_v3.py |
+| 996CB2636D266724 | 2026-10-13 00:00 | spec | in-repo new, 2026-10-13 B4 spectral audit and linear POD-ridge baseline contract (secondary instrument, not preregistered): SPECTRAL_AUDIT_v1.md |

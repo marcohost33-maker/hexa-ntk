@@ -65,7 +65,7 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 |---|---|---|
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
-| Provenance | `python scripts/verify_sources.py` | 40 Toolkit- + 10 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
+| Provenance | `python scripts/verify_sources.py` | 40 Toolkit- + 11 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
 | Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 761 Tests, Ergebnis und Exit-Code fuer diesen Stand (Spektral-Audit, 2026-10-13) im Gate-Log des Spec-Blocks; letzter geloggter Stand 701 Tests im Gate-Log `results/2026-10-12_pr61-i1-v2_local-gate.log` (I1 nach V2; das V1-Rot ist ein erwarteter Befund im Test `TestMmsI1V1Historical`, kein roter Test); Skips je Plattform: Gate-Log |
 | Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
 | Mutation | `python scripts/mutation_probe.py` | 50/51 Mutanten getoetet, volle Probe @9db9cbc unter Windows, Baseline gruen, exit 1: einzig M02 ueberlebt, und das ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped; so schon 2026-09-28). Der I1-Mutant (Iterationsfehler-Verhaeltnis entfernt) zielt seit 2026-10-12 auf `_i1_level_holds`. Letzter voller Lauf unter Linux: 49/49, exit 0, 2026-10-07 (alte Zaehlung) |
@@ -182,6 +182,15 @@ Vor jedem Training festgelegt, ohne Modell und ohne Lern-Claim:
   GINO (`neuraloperator==2.0.0`, MIT, auf PyPI verifiziert) gegen diese Baseline nach
   McGreivy & Hakim (gleiche Laufzeit / gleiche Genauigkeit, Kosten-Genauigkeits-Kurve,
   Break-even inkl. Training und Datengenerierung), >= 5 Seeds, IQM + stratifiziertes Bootstrap.
+- **Spektral-Audit** (`spec/SPECTRAL_AUDIT_v1.md`, `src/toolkit/spectral_audit_hex_v3.py`;
+  Sekundaerinstrument, NICHT Teil der Vorregistrierung): Eingabe-Jacobi `J` eines beliebigen
+  Operators (numpy, torch, `nn.Module`), projiziert auf die W-orthonormierte T1-Basis,
+  `S = Q^T W J Q`. Liefert Frequenzgang je Mode, Modenkopplung und Antwort ausserhalb der Basis
+  gegen geschlossene Orakel (semidiskret `exp(-kappa lambda_h T)`, Crank-Nicolson, T1-Wahrheit
+  `exp(-kappa lambda T)`). Fail-closed bei NaN/Inf, Budget, nicht orthonormaler Basis. Ist
+  NICHT die Parameter-NTK (die bleibt offen in #60). Dazu eine lineare POD-Ridge-Baseline
+  (`src/toolkit/linear_baseline_hex_v3.py`) mit vorab fixierten Rang-/Regularisierungsregeln
+  und Leckage-Waechter, nur auf synthetischen Daten getestet.
 
 ## Reproduzieren
 

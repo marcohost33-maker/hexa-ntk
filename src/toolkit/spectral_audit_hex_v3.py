@@ -132,7 +132,7 @@ def default_orthonormality_tol(num_nodes: int) -> float:
 
     Each entry is a W-weighted dot product of two W-unit vectors; its rounding
     error is at most gamma_M * sum_i w_i |q_ik q_il| <= gamma_M * 1 (Higham
-    2002, eq. 3.5, and Cauchy-Schwarz), gamma_M ~ M eps. The reference size is
+    2002, section 3.1, and Cauchy-Schwarz), gamma_M ~ M eps. The reference size is
     therefore 1, the exact value of the diagonal. Factor 4 covers the rounding
     of the normalisation that produced Q.
     """
