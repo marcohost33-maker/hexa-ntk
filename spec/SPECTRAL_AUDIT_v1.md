@@ -197,7 +197,7 @@ T1 value, coefficients from a private RNG):
 - **No T1 fit.** Nothing here is fitted to or evaluated on T1 data. The
   preregistration forbids that before approval.
 
-## 8. Proposed use as a secondary measurement (not adopted)
+## 8. Use as a secondary measurement (adopted 2026-10-13 in PREREGISTRATION_PHASE1_v1 section 5)
 
 If the owner adopts it in a preregistration version:
 - audit every GINO seed at base point `0`, and at a fixed set of test-sample

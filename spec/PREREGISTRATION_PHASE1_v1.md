@@ -176,6 +176,15 @@ plus data cost is amortised.
 **Negative results** (no advantage, OOD failure) are reported with the same
 prominence as positive ones (AGENTS.md: first-class).
 
+**Secondary measurement: spectral audit** (owner decision 2026-10-13, `spec/SPECTRAL_AUDIT_v1.md`).
+- Every trained GINO seed is audited at base point `0` and at the first 8 sample ids
+  of each test set, against oracle (iii) (`exp(-kappa lambda T)`, T1 truth).
+- Reported per mode: `diag_rel_error`, `coupling_fraction`, `out_of_span`; the
+  mechanistic baseline is audited at the same `(N, steps)` next to it.
+- The POD-ridge baseline (`spec/SPECTRAL_AUDIT_v1.md` section 6) is fit on the training
+  split only and reported as an additional baseline, not a decision baseline.
+- No decision rule in section 6 depends on these numbers.
+
 ## 6. Decision rules (per test set)
 
 **Equal runtime.**
@@ -231,6 +240,11 @@ reported.
 | D6 | Torus shift naming | treat it as composite domain/topology/BC OOD in v1; reserve "BC-family" for same-domain Neumann/Robin in v2 |
 | D7 | Add `neuraloperator==2.0.0` as an optional dependency | accept (MIT) |
 | D8 | Optional licence request to the GAOT/GINOT authors (#60) | external action, Marco's call |
+
+Owner `[M]`, 2026-10-13: D1-D8 accepted as recommended; T1 is a calibration study (a negative
+result is an accepted outcome); the spectral audit is adopted as a secondary measurement
+(section 5); the licence request (D8) is drafted for the owner to send. Still open before the
+status line can change: the concrete D4 grid (at most 8 configurations) and the named D5 machine.
 
 ## 9. Claim boundary
 

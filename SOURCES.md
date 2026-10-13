@@ -594,3 +594,5 @@
 | 76D0289C9F3E1531 | 2026-10-13 00:00 | src/toolkit | in-repo derived, 2026-10-13 DK-LB04 was red by IndexError only: all-zero training test fails by assertion: test_linear_baseline_hex_v3.py |
 | 02C803DBBE6DEC98 | 2026-10-13 00:00 | src/toolkit | in-repo derived, 2026-10-13 B4 citation narrowed to Higham 2002 section 3.1: spectral_audit_hex_v3.py |
 | 996CB2636D266724 | 2026-10-13 00:00 | spec | in-repo new, 2026-10-13 B4 spectral audit and linear POD-ridge baseline contract (secondary instrument, not preregistered): SPECTRAL_AUDIT_v1.md |
+| 3EC5B4A4B6B3C5DA | 2026-10-13 16:00 | spec | in-repo derived, owner decision 2026-10-13 (spectral audit adopted as secondary measurement): PREREGISTRATION_PHASE1_v1.md |
+| 29C3C1737A70F951 | 2026-10-13 16:00 | spec | in-repo derived, owner decision 2026-10-13 (spectral audit adopted as secondary measurement): SPECTRAL_AUDIT_v1.md |
