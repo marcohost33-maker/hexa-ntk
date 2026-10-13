@@ -235,6 +235,19 @@ class TestFailClosed(unittest.TestCase):
                     with self.assertRaises(sa.NonFiniteOutputError):
                         sa.input_jacobian_spectrum(op, self.q, self.w)
 
+    def test_nonfinite_only_at_the_base_point(self):
+        # The base-point output enters no difference quotient: S would be finite
+        # and the audit would pass silently over a model that is broken at u0.
+        calls = []
+
+        def op(u):
+            calls.append(1)
+            return u * float("nan") if len(calls) == 1 else u
+
+        with self.assertRaises(sa.NonFiniteOutputError):
+            sa.input_jacobian_spectrum(op, self.q, self.w)
+        self.assertEqual(len(calls), 1)
+
     def test_nonfinite_only_off_the_base_point(self):
         calls = []
 

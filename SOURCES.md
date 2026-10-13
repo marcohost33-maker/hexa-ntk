@@ -587,3 +587,5 @@
 | E6BE1CB1FEF2FFD7 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 spectral audit B1 (input Jacobian projected on the T1 modes, fail-closed): spectral_audit_hex_v3.py |
 | 0D37A6EDD1C091C9 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 spectral audit B1 (input Jacobian projected on the T1 modes, fail-closed): test_spectral_audit_hex_v3.py |
 | 763B5F2160112190 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 spectral audit B2 (oracles: semidiscrete semigroup, Crank-Nicolson, negative controls, metamorphic): test_spectral_audit_oracles_hex_v3.py |
+| 880A7A1923CBBC0D | 2026-10-13 00:00 | src/toolkit | in-repo derived, 2026-10-13 spectral audit DK-SA03/DK-SA09 were BLIND: base-point NaN test, coupling-only verdict: test_spectral_audit_hex_v3.py |
+| EA13FFBFE0DEE643 | 2026-10-13 00:00 | src/toolkit | in-repo derived, 2026-10-13 spectral audit DK-SA03/DK-SA09 were BLIND: base-point NaN test, coupling-only verdict: test_spectral_audit_oracles_hex_v3.py |

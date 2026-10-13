@@ -142,6 +142,10 @@ class TestNegativeControls(unittest.TestCase):
         self.assertEqual(sa.audit_verdict(result, diag_rtol=ORACLE_RTOL, coupling_tol=ORACLE_RTOL), "FAIL")
         # A pure coupling defect is visible only in the coupling: the other modes' diagonal is exact.
         self.assertLessEqual(np.max(result.diag_rel_error[2:]), ORACLE_RTOL)
+        # With the diagonal check opened wide (all diag errors here are <= 1), the coupling alone fails it.
+        self.assertLessEqual(np.max(result.diag_rel_error), 1.0 + 1e-12)
+        self.assertEqual(sa.audit_verdict(result, diag_rtol=10.0, coupling_tol=0.1), "FAIL")
+        self.assertEqual(sa.audit_verdict(result, diag_rtol=10.0, coupling_tol=0.99), "PASS")
 
     def test_wrong_frequency_response_detected(self):
         result = self._audit(_semigroup_matrix(self.lattice, 1.0, TRI.t_final, rate_factor=2.0))
