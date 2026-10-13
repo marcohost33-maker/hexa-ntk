@@ -264,6 +264,13 @@ def _model_device_dtype(model: Any) -> tuple[torch.device | None, torch.dtype]:
     dtype = floating[0] if floating else torch.float32
     if dtype not in (torch.float32, torch.float64) or any(d != dtype for d in floating):
         raise ValueError("GINO model parameters/buffers have inconsistent floating dtypes")
+    expected_complex = torch.complex64 if dtype == torch.float32 else torch.complex128
+    if any(t.is_complex() and t.dtype != expected_complex for t in tensors):
+        raise ValueError("GINO complex spectral weights do not match the real parameter dtype")
+    if dtype == torch.float64 and type(model).__module__.startswith("neuralop."):
+        # neuraloperator 2.0.0 allocates in float32/complex64 regardless of the model:
+        # layers/segment_csr.py:76 (torch.zeros without dtype), spectral_convolution.py:444.
+        raise ValueError("float64 GINO is not supported by the neuraloperator 2.0.0 backend; use float32")
     return device, dtype
 
 

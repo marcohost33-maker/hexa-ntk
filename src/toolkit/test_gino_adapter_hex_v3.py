@@ -323,6 +323,39 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         self.assertEqual(tuple(out.shape), (2, lattice.num_nodes))
         self.assertTrue(torch.isfinite(out).all())
 
+    def test_complex_weight_dtype_must_match_real_dtype(self) -> None:
+        # model.double() leaves complex64 spectral weights next to float64 tensors.
+        lattice = triangle_hex_lattice(8)
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
+
+        class Mixed(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1, bias=False, dtype=torch.float64)
+                self.spectral = torch.nn.Parameter(torch.ones(2, dtype=torch.complex64))
+
+            def forward(self, **batch):
+                return self.linear(batch["x"])
+
+        with self.assertRaisesRegex(ValueError, "complex spectral weights"):
+            predict_gino(Mixed(), lattice, torch.ones((1, lattice.num_nodes), dtype=torch.float64), cfg)
+
+    @unittest.skipUnless(importlib.util.find_spec("neuralop"), "optional neuraloperator backend not installed")
+    def test_actual_backend_float64_is_refused_by_the_adapter(self) -> None:
+        # neuraloperator 2.0.0 allocates segment_csr and spectral buffers in float32/complex64:
+        # a float64 GINO fails deep in the backend, so the adapter must refuse it first.
+        lattice = triangle_hex_lattice(32)
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3, hidden_channels=8, n_layers=1)
+        model = build_gino(cfg, lattice).double()
+        for p in model.parameters():
+            if p.is_complex():
+                p.data = p.data.to(torch.complex128)
+        with self.assertRaises(Exception) as caught:
+            predict_gino(model, lattice, torch.ones((1, lattice.num_nodes), dtype=torch.float64), cfg)
+        got = type(caught.exception).__name__
+        self.assertIsInstance(caught.exception, ValueError, f"expected ValueError, got {got}")
+        self.assertIn("float64", str(caught.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

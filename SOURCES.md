@@ -564,3 +564,6 @@
 | 9F91DCBDC101FD94 | 2026-10-11 05:00 | src/toolkit | in-repo derived, Wave20 combined spectral-memory guard: gino_adapter_hex_v3.py |
 | 09ED11DAEB4341A7 | 2026-10-11 05:00 | src/toolkit | in-repo derived, Wave20 regression tests: test_gino_adapter_hex_v3.py |
 | BFC8D4BD243E2982 | 2026-10-11 05:00 | spec | in-repo derived, Wave20 explicit operational v2 contract: GINO_ADAPTER_PHASE1_v2.md |
+| D3F24028185AEF60 | 2026-10-13 10:40 | src/toolkit | in-repo derived, float64/complex-dtype guard after real neuraloperator 2.0.0 run: gino_adapter_hex_v3.py |
+| 67119E4E5E380C72 | 2026-10-13 10:40 | src/toolkit | in-repo derived, real-backend float64 refusal + complex-dtype tests: test_gino_adapter_hex_v3.py |
+| 3ED18F2893BD0265 | 2026-10-13 10:40 | spec | in-repo derived, dtype contract + radius-tie error class (measured): GINO_ADAPTER_PHASE1_v2.md |
