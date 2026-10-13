@@ -212,6 +212,19 @@ class TestFailClosed(unittest.TestCase):
         with self.assertRaises(TypeError):
             PODRidgeBaseline(np.ones(3), config={"alpha_rel": 0.0})
 
+    def test_all_zero_training_fails_by_assertion(self):
+        # Fails by assertion for ANY other outcome (no exception, or a crash such as IndexError).
+        m = TRI.lattice.num_nodes
+        u0, ut = TRI.data(4)
+        for x, y in ((np.zeros((4, m)), ut), (u0, np.zeros((4, m)))):
+            outcome = None
+            try:
+                PODRidgeBaseline(TRI.w).fit(x, y, range(4))
+            except Exception as exc:  # noqa: BLE001 - the type is what is checked
+                outcome = exc
+            self.assertIsInstance(outcome, ValueError, repr(outcome))
+            self.assertIn("all zero", str(outcome))
+
     def test_data_validation(self):
         model = PODRidgeBaseline(TRI.w)
         u0, ut = TRI.data(4)

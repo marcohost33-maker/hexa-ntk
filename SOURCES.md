@@ -591,3 +591,4 @@
 | EA13FFBFE0DEE643 | 2026-10-13 00:00 | src/toolkit | in-repo derived, 2026-10-13 spectral audit DK-SA03/DK-SA09 were BLIND: base-point NaN test, coupling-only verdict: test_spectral_audit_oracles_hex_v3.py |
 | 28D86FE9CC41299B | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 B3 linear POD-ridge baseline with leakage guard, checked by the spectral audit: linear_baseline_hex_v3.py |
 | 35F70875438E85C4 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 B3 linear POD-ridge baseline with leakage guard, checked by the spectral audit: test_linear_baseline_hex_v3.py |
+| 76D0289C9F3E1531 | 2026-10-13 00:00 | src/toolkit | in-repo derived, 2026-10-13 DK-LB04 was red by IndexError only: all-zero training test fails by assertion: test_linear_baseline_hex_v3.py |
