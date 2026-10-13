@@ -584,3 +584,5 @@
 | 725151FC09B80F9C | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 V2 non-finite floor test fails by assertion for any exception type: test_hex_fv_solver_hex_v3.py |
 | F70F0D7AB9D8444E | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: reference_case_hex_v3.py |
 | 71769EC73D62DE94 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: test_reference_case_hex_v3.py |
+| E6BE1CB1FEF2FFD7 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 spectral audit B1 (input Jacobian projected on the T1 modes, fail-closed): spectral_audit_hex_v3.py |
+| 0D37A6EDD1C091C9 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 spectral audit B1 (input Jacobian projected on the T1 modes, fail-closed): test_spectral_audit_hex_v3.py |
