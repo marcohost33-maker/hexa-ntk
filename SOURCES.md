@@ -586,3 +586,4 @@
 | 71769EC73D62DE94 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: test_reference_case_hex_v3.py |
 | E6BE1CB1FEF2FFD7 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 spectral audit B1 (input Jacobian projected on the T1 modes, fail-closed): spectral_audit_hex_v3.py |
 | 0D37A6EDD1C091C9 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 spectral audit B1 (input Jacobian projected on the T1 modes, fail-closed): test_spectral_audit_hex_v3.py |
+| 763B5F2160112190 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 spectral audit B2 (oracles: semidiscrete semigroup, Crank-Nicolson, negative controls, metamorphic): test_spectral_audit_oracles_hex_v3.py |
