@@ -140,7 +140,7 @@ SOURCES.md  Provenance: Quelle + SHA-256 + mtime je Datei
 
 ## Referenzen (fremde Verfahren — nicht Ergebnisse dieses Repos)
 
-Der vollstaendige Referenz-Block mit Kontext steht in `src/hexantk_v3.py:43-67`.
+Der vollstaendige Referenz-Block mit Kontext steht in `src/hexantk_v3.py:44-68`.
 
 - **[Li23]** Z. Li, N. Kovachki, C. Choy et al., *Geometry-Informed Neural Operator for
   Large-Scale 3D PDEs*, NeurIPS 2023, arXiv:2309.00583. — Ursprung von **GINO**.
@@ -151,7 +151,7 @@ Der vollstaendige Referenz-Block mit Kontext steht in `src/hexantk_v3.py:43-67`.
   fuer 3D gibt es dort **keinen** validierten Default (siehe `src/hexantk_v3.py:847-855`).
 - **[Sarkar25]** S. Sarkar et al., *Physics- and geometry-aware spatio-spectral graph
   neural operator* (piG-Sp2GNO / mGNO), arXiv Aug. 2025.
-- Hex-FV-Stencil: Lee & Tien 2014 / Lee 2017 (`src/hexantk_v3.py:658`).
+- Hex-FV-Stencil: Lee & Tien 2014 / Lee 2017 (`src/hexantk_v3.py:659`).
 
 Die Herkunft jeder Datei (inkl. der in-repo gehaerteten Ableitungen) ist in `SOURCES.md`
 mit SHA-256 gepinnt und mit `scripts/verify_sources.py` nachpruefbar.
