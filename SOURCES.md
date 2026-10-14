@@ -419,3 +419,9 @@
 > Pins for the integrated bytes of this block. Prior rows remain lineage.
 
 | 99FA3780E73F53DA | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R3-test-assertion: test_runner_hex_v3.py |
+
+## PR #75 engine-ownership wording (append-only, 2026-10-14, fix/public-metadata-claims)
+
+> Docstring only: the engine's maintenance location is open (Issue #74). Prior rows remain lineage.
+
+| 54464888B78D897F | 2026-10-14 00:00 | scripts | in-repo derived, PR #75 engine-ownership wording: engine_gate.py |

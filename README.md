@@ -123,8 +123,8 @@ python scripts/mutation_probe.py                               # optional: 22 Mu
 CI (`.github/workflows/ci.yml`), beide Jobs scheitern mit exit != 0 (ob `tests (cpu)` auch
 den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom 2026-09-21 ist
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
-- **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
-  vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
+- **gate** — Lint (`ruff check src scripts`; die Engine `src/hexantk_v3.py` ist vom
+  Lint-Gate ausgenommen; wo sie kanonisch gepflegt wird, ist offen, Issue #74), `compileall`, Provenance.
 - **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (528, Stand 2026-10-05) unter Branch-Coverage.
 
 ## Struktur
@@ -158,7 +158,8 @@ mit SHA-256 gepinnt und mit `scripts/verify_sources.py` nachpruefbar.
 
 ## Verwandte Repos
 
-`coworker-dde` ist die stromaufwaerts liegende Quelle der kanonischen v3-Engine;
+`coworker-dde` haelt eine weitere Kopie der v3-Engine (die Kopien sind auseinandergelaufen;
+welche kanonisch ist, entscheidet Issue #74);
 `HQST`, `hex-hqst`, `u2-dualspec`, `u6-bifurcation` gehoeren zur selben Serie.
 **Diese Repos sind privat und von aussen nicht erreichbar.** Oeffentlich zugaenglich ist
 aus der Serie nur [`phi-hex`](https://github.com/marcohost33-maker/phi-hex).

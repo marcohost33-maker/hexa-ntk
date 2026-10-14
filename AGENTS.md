@@ -26,8 +26,9 @@ KI-Coding-Agent-Anweisungen. Reihenfolge: §1 Working agreements > §2 Conventio
   PR #5, LF-Normalisierung PR #6, CI-blocking seit 2026-07-03 laut `docs/ROADMAP.md`) prueft
   die aktuellen Bytes — der Text folgt jetzt der gelebten Praxis.)
   Eine weitere v3-Engine-Kopie lebt in `coworker-dde/src`. Ziel war ein Byte-Mirror (Gleichheit
-  per git-Blob belegt); **Stand 2026-10-14 sind die Kopien auseinandergelaufen** (hexa a28fbf1 vs
-  coworker-dde 3a64658, Code-Unterschiede). Welche kanonisch ist und wie synchronisiert wird,
+  per git-Blob belegt); **Stand 2026-10-14 sind die Kopien auseinandergelaufen** (hexa-Blob
+  7b2c475 auf diesem Stand, vor #73 a28fbf1, zuletzt gleich bis zum Commit vor #47; coworker-dde
+  3a64658, Code-Unterschiede). Welche kanonisch ist und wie synchronisiert wird,
   entscheidet Issue #74 -- bis dahin keine Gleichheit annehmen und keine Aussage "verifiziert".
 
 ## Working agreements
