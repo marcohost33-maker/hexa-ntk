@@ -100,7 +100,7 @@ in `spec/`, offene Lint-/Test-Schuld in `docs/ROADMAP.md`.
 
 ## Kern
 
-- **Engine:** `src/hexantk_v3.py` (1772 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
+- **Engine:** `src/hexantk_v3.py` (1773 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
   Train-Step, Operator-Vertraege, 26 Selftests inline)
 - **Toolkit:** `src/toolkit/` — 11 Module + 15 Testmodule (Benchmark, Checkpoint-Integration,
   Dataloader-Utils, Dataset-Split, EMA, Failure-Signature, Operator-Adapter, Resume-Utils,
