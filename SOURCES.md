@@ -584,3 +584,12 @@
 | 725151FC09B80F9C | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 V2 non-finite floor test fails by assertion for any exception type: test_hex_fv_solver_hex_v3.py |
 | F70F0D7AB9D8444E | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: reference_case_hex_v3.py |
 | 71769EC73D62DE94 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: test_reference_case_hex_v3.py |
+
+## CG V2 tests: BLAS-kernel-independent premise (append-only, 2026-10-14)
+
+> PR #61 head 6d219d9 was red in `tests (cpu)`: two V2 tests assumed rtol=1e-16
+> is unreachable for the n=12 system, which holds on the SkylakeX/Sandybridge
+> OpenBLAS kernels but not on Haswell/Zen/Prescott (the CI run failed the same way).
+> Prior rows remain lineage.
+
+| D58885C8EA67AE42 | 2026-10-14 00:00 | src/toolkit | in-repo derived, 2026-10-14 CG V2 tests use _RTOL_BELOW_ROUNDING=1e-17 (kernel-independent stagnation premise), scaling test pins status: test_hex_fv_solver_hex_v3.py |

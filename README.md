@@ -187,7 +187,7 @@ Vor jedem Training festgelegt, ohne Modell und ohne Lern-Claim:
 ```bash
 python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt                  # zentrale Tool-Pins: ruff/coverage
-python -m pip install numpy
+python -m pip install "numpy==2.5.3"                         # wie CI und Evidence-Lanes
 python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
 python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
@@ -202,7 +202,10 @@ den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
   vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (701, Stand 2026-10-12; I1 nach V2) unter Branch-Coverage.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (701, Stand 2026-10-12; I1 nach V2) unter Branch-Coverage;
+  danach die torch-freien FV-/Reference-Suites unter jedem portablen OpenBLAS-Kernel
+  (`OPENBLAS_CORETYPE` Prescott/Sandybridge/Haswell/Zen, SkylakeX bei AVX-512), weil die
+  CG-Stoppregel-Tests an der Rundung von BLAS-`ddot` haengen (2026-10-14).
 
 ## Struktur
 

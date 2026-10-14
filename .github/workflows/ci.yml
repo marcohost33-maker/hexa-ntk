@@ -51,7 +51,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt   # zentrale Pins: ruff/coverage
-          pip install numpy
+          # gepinnt wie die Evidence-Lanes (distributed-checkpoint, stateful-loader):
+          # ein ungepinntes numpy aenderte die CI ohne Commit (ROADMAP).
+          pip install "numpy==2.5.3"
           # CPU-Wheel ueber den dedizierten Index (kleiner, kein CUDA-Ballast);
           # torch 2.6.0 = vom Engine-Header geforderte SoTA-Baseline.
           pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
@@ -66,3 +68,23 @@ jobs:
         run: |
           python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" -v
           python -m coverage report   # blocking: fail_under in pyproject.toml
+      - name: FV solver + reference case across OpenBLAS kernels
+        # The CG stopping-rule tests depend on the rounding of BLAS ddot, whose
+        # summation order is chosen per OpenBLAS kernel: PR #61 head 6d219d9
+        # was green on SkylakeX and red on the CI runner, as with the
+        # Haswell/Zen/Prescott kernels. Re-run the torch-free FV/reference
+        # suites under every portable kernel (and
+        # SkylakeX where AVX-512 exists) so a kernel-dependent premise fails
+        # here instead of on the next runner generation.
+        working-directory: src/toolkit
+        run: |
+          kernels="Prescott Sandybridge Haswell Zen"
+          # SkylakeX kernels need AVX-512 F/BW/DQ/VL; add it only where all exist.
+          if grep -qw avx512f /proc/cpuinfo && grep -qw avx512bw /proc/cpuinfo \
+             && grep -qw avx512dq /proc/cpuinfo && grep -qw avx512vl /proc/cpuinfo; then
+            kernels="$kernels SkylakeX"
+          fi
+          for kernel in $kernels; do
+            echo "== OPENBLAS_CORETYPE=$kernel"
+            OPENBLAS_CORETYPE="$kernel" python -m unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
+          done
