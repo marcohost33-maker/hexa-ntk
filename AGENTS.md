@@ -25,9 +25,10 @@ KI-Coding-Agent-Anweisungen. Reihenfolge: §1 Working agreements > §2 Conventio
   einen reinen Original-Locator [u6 Option A / k-theory #13], das Gate (Skript seit
   PR #5, LF-Normalisierung PR #6, CI-blocking seit 2026-07-03 laut `docs/ROADMAP.md`) prueft
   die aktuellen Bytes — der Text folgt jetzt der gelebten Praxis.)
-  Kanonische v3-Engines leben zusaetzlich in `coworker-dde/src` — Aenderungen dort und
-  hier synchron halten (Byte-Mirror, per git-Blob verifiziert). **Stand 2026-10-14: die beiden
-  Kopien sind auseinandergelaufen (Issue #74) -- bis zum Entscheid keine Gleichheit annehmen.**
+  Eine weitere v3-Engine-Kopie lebt in `coworker-dde/src`. Ziel war ein Byte-Mirror (Gleichheit
+  per git-Blob belegt); **Stand 2026-10-14 sind die Kopien auseinandergelaufen** (hexa a28fbf1 vs
+  coworker-dde 3a64658, Code-Unterschiede). Welche kanonisch ist und wie synchronisiert wird,
+  entscheidet Issue #74 -- bis dahin keine Gleichheit annehmen und keine Aussage "verifiziert".
 
 ## Working agreements
 1. **Reality-Anchor.** "Tests N/N PASS (verified <date>)" statt "sollte gehen". Gate-Logs in `results/` sind die Evidenz.
