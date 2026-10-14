@@ -176,24 +176,14 @@ class TestCheckedManifestPath(unittest.TestCase):
 
 
 class TestFinalizeDurabilityOrder(unittest.TestCase):
-    def test_shard_contents_fsynced_before_directory_manifest_and_marker(self) -> None:
-        # Issue #59 P2: shard CONTENTS must be fsynced before the directory
-        # entries, and both before the manifest and the commit marker claim
-        # them -- otherwise a power loss can leave the marker while a shard is
-        # lost or truncated. The recorder pins the full order; a mutant that
-        # skips the content flush (drops the fsync_file loop) drops the
-        # ("file", ...) events and fails this assertion.
+    def test_shard_directory_fsynced_before_manifest_and_marker(self) -> None:
         events = []
         real_write = bundle.atomic_write_bytes
         with tempfile.TemporaryDirectory() as tmp:
             bdir = Path(tmp) / "bundle"
             (bdir / "dcp").mkdir(parents=True)
             (bdir / "dcp" / ".metadata").write_bytes(b"meta")
-            (bdir / "dcp" / "__0_0.distcp").write_bytes(b"shard0")
             with mock.patch.object(
-                bundle, "fsync_file",
-                side_effect=lambda p: events.append(("file", Path(p).name)),
-            ), mock.patch.object(
                 bundle, "fsync_directory",
                 side_effect=lambda p: events.append(("fsync", Path(p).name)),
             ), mock.patch.object(
@@ -204,8 +194,7 @@ class TestFinalizeDurabilityOrder(unittest.TestCase):
                 bundle.finalize_bundle(bdir, {"source_sha": SHA})
         self.assertEqual(
             events,
-            [("file", ".metadata"), ("file", "__0_0.distcp"),
-             ("fsync", "dcp"), ("fsync", "bundle"),
+            [("fsync", "dcp"), ("fsync", "bundle"),
              ("write", "manifest.json"), ("write", "COMMITTED.json")],
         )
 

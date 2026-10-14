@@ -49,7 +49,6 @@ import math
 import numbers
 import random
 import re
-import struct
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -135,23 +134,11 @@ class SampleSubsetDataset(Dataset):
 # Internal helpers
 # ------------------------------------------------------------------
 
-# The quantisation contract for "same step size reported in two precisions"
-# (issues #42, #59) is float32 resolution: two dt keys of one trajectory are
-# the same step size iff they round to the same IEEE-754 binary32 value
-# (e.g. 0.1 as a Python float and a float32 tensor's 0.10000000149...). The
-# earlier relative tolerance (2**-20) compared with abs_tol=0.0, so 0.0 and
-# 1e-46 were treated as different although both are float32 0.0 (#59 P3).
-def _as_float32(value: float) -> float:
-    """Return ``value`` rounded to IEEE-754 binary32, as a Python float.
-
-    Values beyond the binary32 range round to +/-inf (round-to-nearest),
-    matching how a float32 tensor would store them; sub-binary32 magnitudes
-    (e.g. 1e-46) underflow to 0.0 exactly as float32 does.
-    """
-    try:
-        return struct.unpack("f", struct.pack("f", value))[0]
-    except OverflowError:
-        return math.inf if value > 0 else -math.inf
+# Two dt keys of one trajectory closer than this (relative) are the same step
+# size in different precisions. float32 rounds with relative error <= 2**-24;
+# 2**-20 leaves room for a few float32 ulps of arithmetic noise and is still
+# far below any deliberate step-size ratio (issue #42).
+_DT_SAME_STEP_RTOL = 2.0**-20
 
 # Canonical decimal integer: no sign "+", no leading zeros, no "-0", no
 # whitespace, ASCII digits only (int() also accepts "٣" and "1_2").
@@ -333,10 +320,10 @@ def _reject_precision_split_dt_keys(keys: Any) -> None:
     for trajectory_id, dts in dts_by_trajectory.items():
         dts.sort()
         for lower, upper in zip(dts, dts[1:]):
-            if _as_float32(lower) == _as_float32(upper):
+            if math.isclose(lower, upper, rel_tol=_DT_SAME_STEP_RTOL, abs_tol=0.0):
                 raise ValueError(
                     f"trajectory_id {trajectory_id} has dt keys {lower!r} and "
-                    f"{upper!r} that round to the same float32 value, i.e. "
+                    f"{upper!r} that differ only below float32 resolution, i.e. "
                     "one step size in two precisions, which would be grouped "
                     "and reported as two step sizes. Set "
                     "dt_round_ndigits (e.g. 6) to normalise dt before grouping."

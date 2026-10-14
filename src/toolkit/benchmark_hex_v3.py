@@ -35,7 +35,6 @@ __all__ = [
     "aggregate_forecast_metric",
     "MetricSpecV4",
     "metric_spec_digest",
-    "metric_semantics_label",
     "evaluate_rollout",
     "evaluate_rollout_v4",
     "preserve_legacy_report_without_relabeling",
