@@ -1,0 +1,309 @@
+# HexaNTK gate log, PR #61 hardening (P1 CG true-residual stopping rule, Codex P2 x6, GPT6 W9-F01) - local branch vero/hn-pr61
+# Tested commit: abf0dcdaacb484f7ddb59d1e6b39ec405f2c90f6 (code identical to 9f655de7dbc9e6fee10bf3de2e557cd05071db8c; abf0dcd changes README.md only)
+# Environment: Windows 11 Home 10.0.26200, Python 3.12.10 (uv venv), torch 2.6.0+cpu, numpy 2.5.3, coverage 7.16.2, ruff 0.16.9
+# Order: ci.yml chain (gate + tests (cpu)) at abf0dcd; Phase 0 evidence writer and mutation probe at 9f655de (same code).
+# Claim: local Windows run, CI open. BLOCKED: Phase 0b I1 fails on N=192 with the true CG residual (threshold unchanged, owner decision).
+# Note: the unittest step took 3294 s here vs 64 s for the same suite at 9f655de (another agent's pytest ran concurrently on the
+#       machine; cause not determined). Test results are identical apart from the README docs-contract tests fixed in abf0dcd.
+# Paths: <repo> = the worktree, <scratch> = the agent scratch directory (machine-specific prefixes removed).
+
+## ci.yml chain (ruff check src scripts; compileall -q src; verify_sources.py; engine_gate.py;
+##   coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"; coverage report)
+# chain 2026-10-12T10:16:08Z HEAD abf0dcdaacb484f7ddb59d1e6b39ec405f2c90f6 dirty=0
+# env: 3.12.10 torch 2.6.0+cpu numpy 2.5.3 coverage 7.16.2 ruff ruff 0.16.9
+===== STEP ruff: <scratch>/venv/Scripts/python.exe -m ruff check src scripts
+All checks passed!
+===== EXIT ruff = 0 (1s)
+===== STEP compileall: <scratch>/venv/Scripts/python.exe -m compileall -q src
+===== EXIT compileall = 0 (0s)
+===== STEP verify_sources: <scratch>/venv/Scripts/python.exe scripts/verify_sources.py
+[ OK ] src/toolkit/benchmark_hex_v3.py: 412AA56028E8CDBF
+[ OK ] src/toolkit/checkpoint_integration_hex_v3.py: A77713B3C2F450AB
+[ OK ] src/toolkit/dataloader_utils_hex_v3.py: A8ACCD446EC287D6
+[ OK ] src/toolkit/dataset_split_hex_v3.py: 3C9695B66E17255F
+[ OK ] src/toolkit/ema_hex_v3.py: 4790DFE7CBA298A2
+[ OK ] src/toolkit/failure_signature_hex_v3.py: B4B2D20101A4A8CA
+[ OK ] src/toolkit/heat_operator_task_hex_v3.py: 675C90BC29E4AC30
+[ OK ] src/toolkit/hex_fv_solver_hex_v3.py: 03C9A61A6B74D006
+[ OK ] src/toolkit/operator_adapter_hex_v3.py: D0192688CE5222F1
+[ OK ] src/toolkit/reference_case_hex_v3.py: 0F496A82B8D39E49
+[ OK ] src/toolkit/reference_spec_hex_v3.py: 84DAB72D604BCA2B
+[ OK ] src/toolkit/resume_utils_hex_v3.py: 854EBC8CB813E22E
+[ OK ] src/toolkit/runner_hex_v3.py: FCD004306D3AEB06
+[ OK ] src/toolkit/stress_hex_v3.py: 0B0A80BFDC117DC1
+[ OK ] src/toolkit/test_benchmark_hex_v3.py: 137812E571113CFC
+[ OK ] src/toolkit/test_checkpoint_integration_hex_v3.py: 39C298784E6824E9
+[ OK ] src/toolkit/test_dataloader_utils_hex_v3.py: 54FE8C5313B45824
+[ OK ] src/toolkit/test_dataset_split_hex_v3.py: 64C9F1BDB1FD7B49
+[ OK ] src/toolkit/test_distributed_checkpoint_bundle_v1.py: B050C6EBDAD7E045
+[ OK ] src/toolkit/test_ema_hex_v3.py: 9A325FE96FA64572
+[ OK ] src/toolkit/test_heat_operator_task_hex_v3.py: 8FA2B49EDEAA92A6
+[ OK ] src/toolkit/test_hex_fv_solver_hex_v3.py: DD05384B671624BE
+[ OK ] src/toolkit/test_hex_timestep_contract.py: ED29A89E81B871F6
+[ OK ] src/toolkit/test_operator_adapter_hex_v3.py: C0EAD8D722BCE4D4
+[ OK ] src/toolkit/test_reference_case_hex_v3.py: A0E8AFC37C6782D1
+[ OK ] src/toolkit/test_reference_oracle_source_binding.py: 7338EDC5172914B4
+[ OK ] src/toolkit/test_reference_spec_hex_v3.py: 012B910B89916082
+[ OK ] src/toolkit/test_resume_utils_cov_hex_v3.py: 1A5842152C2CD33E
+[ OK ] src/toolkit/test_resume_utils_hex_v3.py: FF8594FFD085E64D
+[ OK ] src/toolkit/test_runner_hex_v3.py: 99FA3780E73F53DA
+[ OK ] src/toolkit/test_stress_hex_v3.py: EE8D734CA0F9567A
+[ OK ] src/toolkit/test_verify_sources_gate.py: EEFE5FBCEEB67ADE
+[ OK ] src/toolkit/test_warmstart_utils_cov_hex_v3.py: 665DC949ADA471EA
+[ OK ] src/toolkit/test_warmstart_utils_hex_v3.py: 53663241136220FA
+[ OK ] src/toolkit/warmstart_utils_hex_v3.py: 45DE93FC82AEA5ED
+[ OK ] spec/HEAT_OPERATOR_TASK_v1.md: C441BBE421F690A7
+[ OK ] spec/HEX_FV_SOLVER_v1.md: 11815B955B7ADDA5
+[ OK ] spec/HexaNTK_Review_Gehaertet.md: B54757BA32C68E50
+[ OK ] spec/METRIC_SPEC_v4.md: 51013971AA5CB76F
+[ OK ] spec/PREREGISTRATION_PHASE1_v1.md: 9EBBA2DBC6724B91
+[ OK ] spec/REFERENCE_CASES_HEX_PHASE0B_v1.md: 591AF4505C676D73
+[ OK ] spec/REFERENCE_CASE_HEX_HEAT_TRI_v1.md: 4D90EEA7AECB7913
+[ OK ] spec/REFERENCE_SPEC_v1.md: E8BA656865FF9032
+[ OK ] spec/STRESS_SHIFT_CONTRACT_v1.md: 95100B4D8B668153
+[ OK ] scripts/engine_gate.py: 40161F27978DC8D3
+[ OK ] scripts/mutation_probe.py: 796B7DF840C87D64
+[ OK ] scripts/verify_sources.py: 36D3CBADC59CE6C3
+[ OK ] scripts/oracles/dcp_2rank_gloo_oracle.py: 1FDD515C48BE308B
+[ OK ] scripts/oracles/dcp_bundle_2rank_oracle.py: 02F3C8E1BE282F1C
+[ OK ] scripts/oracles/dcp_worldsize_change_oracle.py: 7C7806D9817628E9
+[ OK ] scripts/oracles/distributed_checkpoint_bundle_v1.py: F765A1425BFA7CFE
+[ OK ] scripts/oracles/hex_heat_tri_reference_oracle.py: 7711B0D09ADF1C45
+[ OK ] scripts/oracles/hex_phase0_reference_oracle.py: 1C0CD9DC2F08626F
+[ OK ] scripts/oracles/stateful_loader_resume_oracle.py: 120C32D0DC287451
+
+[VERIFY-SOURCES] 35 Toolkit-Eintraege + 9 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (54 Dateien) | PASS
+===== EXIT verify_sources = 0 (1s)
+===== STEP engine_gate: <scratch>/venv/Scripts/python.exe scripts/engine_gate.py
+======================================================================
+HexaNTK v3.0.1 (L014) -- Manuscript Test Suite
+  Module hash: 2a30d3057e6f646a...
+  Tests: 26 (covers P0.1-P0.5, P1.1, P1.2)
+======================================================================
+
+[TEST] module hash stable
+  hash: 2a30d3057e6f646a...
+  -> PASS (0.000s)
+
+[TEST] FailureSignature basic
+  failure registered, fields intact
+  -> PASS (0.005s)
+
+[TEST] AtomicWriter basic
+  atomic write survives; no tempfile leak
+  -> PASS (0.015s)
+
+[TEST] AtomicWriter crash safety
+  crash leaves no target file and no tempfile leak
+  -> PASS (0.008s)
+
+[TEST] build_resume_payload fields
+  resume payload fields correct
+  -> PASS (0.001s)
+
+[TEST] BestPolicy min-mode
+  min-mode policy correct
+  -> PASS (0.000s)
+
+[TEST] BestPolicy max-mode
+  max-mode policy correct
+  -> PASS (0.000s)
+
+[TEST] BestPolicy invalid args
+  invalid policy args rejected
+  -> PASS (0.000s)
+
+[TEST] CkptMgr: best roundtrip
+  save/load best roundtrip with policy gates
+  -> PASS (0.026s)
+
+[TEST] CkptMgr: resume roundtrip
+  resume roundtrip + semantics validation
+  -> PASS (0.013s)
+
+[TEST] CkptMgr: bad semantics rejected
+  wrong-semantics resume rejected
+  -> PASS (0.001s)
+
+[TEST] CkptMgr: DDP guard
+  DDP non-main guard works
+  -> PASS (0.002s)
+
+[TEST] Warmstart drops optimizer
+  dropped: ['optimizer_state_dict', 'scheduler_state_dict', 'grad_scaler_state_dict', 'rng_states']
+  -> PASS (0.000s)
+
+[TEST] Warmstart prefix transforms
+  prefix transforms: ['backbone.layer.w', 'decoder.layer.w']
+  -> PASS (0.000s)
+
+[TEST] Hex Laplacian + CFL correct
+  hex stencil=2/3; L2 default dt=0.2833; positivity dt=0.2500; centre(default)=-0.1333
+  -> PASS (0.000s)
+
+[TEST] safe_train_step: success
+  ok path
+  -> PASS (0.001s)
+
+[TEST] safe_train_step: NaN
+  NaN path records failure
+  -> PASS (0.014s)
+
+[TEST] safe_train_step: OOM pre-assignment
+  OOM-before-assignment handled without NameError
+  -> PASS (0.013s)
+
+[TEST] OperatorContext: valid GINO
+  valid GINO ctx passes
+  -> PASS (0.000s)
+
+[TEST] OperatorContext: non-shared GINO
+  non-shared GINO rejected
+  -> PASS (0.000s)
+
+[TEST] OperatorContext: missing edge GNO
+  GNO without edge_index rejected
+  -> PASS (0.000s)
+
+[TEST] OperatorContext: shape validations
+  3 shape mismatches rejected
+  -> PASS (0.000s)
+
+[TEST] GAOT config defaults match paper
+  GAOTConfig defaults confirmed vs arXiv:2505.18781 Table 4
+  -> PASS (0.000s)
+
+[TEST] GAOT config validation
+  5/5 invalid configurations rejected
+  -> PASS (0.000s)
+
+[TEST] GAOT context requires config
+  GAOT rejected without gaot_config
+  -> PASS (0.000s)
+
+[TEST] GAOT context dim mismatch caught
+  2D-vs-3D mismatch caught, 2D paper-default passes
+  -> PASS (0.041s)
+
+======================================================================
+Results: 26/26 PASS
+ALL TESTS PASSED -- HexaNTK v3.0.1 manuscript-ready.
+======================================================================
+
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+===== EXIT engine_gate = 0 (1s)
+===== STEP unittest_coverage: <scratch>/venv/Scripts/python.exe -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p test_*.py
+......................................................................................................sss...........Resume: best metric not restored (metric_name_mismatch); the next improvement check starts from None.
+..Resume: best metric not restored (run_id_mismatch); the next improvement check starts from None.
+.Resume: best metric not restored (best_checkpoint_missing); the next improvement check starts from None.
+....Resume: best metric not restored (policy_mode_mismatch); the next improvement check starts from None.
+.Resume: best metric not restored (best_checkpoint_missing); the next improvement check starts from None.
+.Resume: best metric not restored (best_checkpoint_mismatch); the next improvement check starts from None.
+.Resume: best metric not restored (run_id_mismatch); the next improvement check starts from None.
+...Resume: best metric not restored (metric_name_mismatch); the next improvement check starts from None.
+........................................................................................................s..........................................<repo>\src\toolkit\hex_fv_solver_hex_v3.py:443: RuntimeWarning: overflow encountered in ldexp
+  x = np.ldexp(y, exponent)
+<repo>\src\toolkit\hex_fv_solver_hex_v3.py:500: RuntimeWarning: overflow encountered in ldexp
+  x = np.ldexp(x, -exponent)
+...................................................................................................................................F..F........F...............................................<scratch>\venv\Lib\site-packages\torch\optim\lr_scheduler.py:227: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn(
+..........................<scratch>\venv\Lib\site-packages\torch\optim\lr_scheduler.py:243: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+.................Empty_Validation: val_nrmse=nan at epoch 0; best checkpoint not updated
+.Anomaly at step 0: NaN_or_Inf_Loss
+Anomaly at step 1: NaN_or_Inf_Loss
+Anomaly at step 2: NaN_or_Inf_Loss
+Anomaly at step 3: NaN_or_Inf_Loss
+............Resume: best metric not restored (metric_name_mismatch); the next improvement check starts from None.
+Resume: best metric not restored (metric_name_mismatch); the next improvement check starts from None.
+........NaN_or_Inf_Metric: val_nrmse=nan at epoch 0; best checkpoint not updated
+.NaN_or_Inf_Metric: val_nrmse=nan at epoch 0; best checkpoint not updated
+NaN_or_Inf_Metric: val_nrmse=inf at epoch 0; best checkpoint not updated
+NaN_or_Inf_Metric: val_nrmse=-inf at epoch 0; best checkpoint not updated
+.......Resume checkpoint <scratch>\pt\tmp6yszsbhq\elsewhere\resume.pt carries no EMA state; the EMA average restarts from the resumed weights.
+..Resume checkpoint <scratch>\pt\tmp89wn08ze\elsewhere\resume.pt carries no EMA state; the EMA average restarts from the resumed weights.
+.............Anomaly at step 0: Loss_Spike (val=3.910325, median=0.001000)
+.Anomaly at step 0: NaN_or_Inf_Loss
+..CUDA OOM at step 0! Attempting rescue...
+..............NaN_or_Inf_Metric: val_nrmse=nan at epoch 0; best checkpoint not updated
+.....................................ss................................Warmstart: weights_only=True failed for <scratch>\pt\tmp00m9jas0\corrupt.pt. Attempting safe_globals whitelisting for numpy types...
+safe_globals whitelisting also failed. Checkpoint may contain unsupported Python objects.
+......................Warmstart: weights_only=True failed for <scratch>\pt\tmp2hwsj1y3\ckpt.pt. Attempting safe_globals whitelisting for numpy types...
+safe_globals whitelisting also failed. Checkpoint may contain unsupported Python objects.
+....Warmstart: weights_only=True failed for <scratch>\pt\tmp7ln9g3q_\ckpt.pt. Attempting safe_globals whitelisting for numpy types...
+..........
+======================================================================
+FAIL: test_default_study_passes_every_criterion (test_reference_case_hex_v3.TestHexMmsTriStudyGate.test_default_study_passes_every_criterion)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<repo>\src\toolkit\test_reference_case_hex_v3.py", line 383, in test_default_study_passes_every_criterion
+    self.assertEqual([k for k, ok in self.study["criteria"].items() if not ok], [])
+AssertionError: Lists differ: ['I1_iterative_error_negligible'] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+'I1_iterative_error_negligible'
+
+- ['I1_iterative_error_negligible']
++ []
+
+======================================================================
+FAIL: test_reference_specs_derive_oracle_and_verified_ceilings (test_reference_case_hex_v3.TestHexMmsTriStudyGate.test_reference_specs_derive_oracle_and_verified_ceilings)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<repo>\src\toolkit\test_reference_case_hex_v3.py", line 411, in test_reference_specs_derive_oracle_and_verified_ceilings
+    self.assertEqual(solver.claim_ceiling(), ClaimCeiling.VERIFIED_NUMERICAL_REFERENCE)
+AssertionError: <ClaimCeiling.COMPARISON_ONLY: 'comparison_only'> != <ClaimCeiling.VERIFIED_NUMERICAL_REFERENCE: 'verified_numerical_reference'>
+
+======================================================================
+FAIL: test_arithmetic_mean_conductance_is_a_valid_second_order_alternative (test_reference_case_hex_v3.TestMmsGateDiscrimination.test_arithmetic_mean_conductance_is_a_valid_second_order_alternative)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<repo>\src\toolkit\test_reference_case_hex_v3.py", line 531, in test_arithmetic_mean_conductance_is_a_valid_second_order_alternative
+    self.assertTrue(study["passed"], [k for k, ok in study["criteria"].items() if not ok])
+AssertionError: False is not true : ['I1_iterative_error_negligible']
+
+----------------------------------------------------------------------
+Ran 678 tests in 3293.662s
+
+FAILED (failures=3, skipped=6)
+===== EXIT unittest_coverage = 1 (3308s)
+===== STEP coverage_report: <scratch>/venv/Scripts/python.exe -m coverage report
+Name                                           Stmts   Miss Branch BrPart  Cover
+--------------------------------------------------------------------------------
+src\toolkit\benchmark_hex_v3.py                  354     29    120     28    88%
+src\toolkit\checkpoint_integration_hex_v3.py     224     28     70      6    87%
+src\toolkit\dataloader_utils_hex_v3.py            22      0      2      0   100%
+src\toolkit\dataset_split_hex_v3.py              205      7     92      6    96%
+src\toolkit\ema_hex_v3.py                         40      0     10      0   100%
+src\toolkit\failure_signature_hex_v3.py           41      3      0      0    93%
+src\toolkit\heat_operator_task_hex_v3.py         242      6     78      6    96%
+src\toolkit\hex_fv_solver_hex_v3.py              323      6    120      4    98%
+src\toolkit\operator_adapter_hex_v3.py           128     11     94     11    90%
+src\toolkit\reference_case_hex_v3.py             448     11     92      7    97%
+src\toolkit\reference_spec_hex_v3.py             232     27    106     22    84%
+src\toolkit\resume_utils_hex_v3.py               149      3     80      2    98%
+src\toolkit\runner_hex_v3.py                     337     19    114     11    92%
+src\toolkit\stress_hex_v3.py                     207     25     92     23    84%
+src\toolkit\warmstart_utils_hex_v3.py            129      7     50      2    95%
+--------------------------------------------------------------------------------
+TOTAL                                           3081    182   1120    128    92%
+===== EXIT coverage_report = 0 (3s)
+# END HEAD abf0dcdaacb484f7ddb59d1e6b39ec405f2c90f6 dirty=0
+
+## Phase 0 evidence writer at 9f655de: python scripts/oracles/hex_phase0_reference_oracle.py --output <scratch>/logs/phase0_9f655de.json  -> exit 1
+[PHASE0] hex-heat-tri    p=1.9983 GCI_fine=2.514e-04 | PASS
+[PHASE0] hex-heat-torus  p=1.9965 GCI_fine=4.405e-04 | PASS
+[PHASE0] hex-mms-tri     p=2.0014 GCI_fine=1.138e-04 | FAIL I1_iterative_error_negligible
+[PHASE0] hex-heat-tri/v1     ceiling=verified_numerical_reference
+[PHASE0] hex-heat-torus/v1   ceiling=verified_numerical_reference
+[PHASE0] hex-mms-tri/oracle  ceiling=mathematical_oracle
+[PHASE0] hex-mms-tri/v1      ceiling=comparison_only (expected verified_numerical_reference)
+[PHASE0] FAIL
+
+## mutation probe at 9f655de: python scripts/mutation_probe.py -> exit 3 (baseline red)
+[BASELINE RED] test_reference_case_hex_v3.TestHexMmsTriStudyGate
+[BASELINE RED] test_reference_case_hex_v3.TestMmsGateDiscrimination
+[MUTATION-PROBE] baseline red - no mutant result is valid | FAIL
+
+## single mutants via mutation_probe.run_mutant at b203df2: M45, M46, M50, M51 -> KILLED

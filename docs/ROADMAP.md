@@ -3,7 +3,102 @@
 Ehrliche Liste der naechsten Schritte und offenen Schuld. Reihenfolge = Prioritaet.
 Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst zurueckgestellt.
 
+## Blockiert
+
+- [ ] **BLOCKED (2026-10-12), historisch (V1): Phase 0b I1, `hex-mms-tri`.** Bleibt als
+  Negativ-Befund stehen; gilt fuer den V1-Vertrag weiter (Test `TestMmsI1V1Historical`).
+  Abgeloest fuer den geltenden Vertrag durch I1 V2 (unter Erledigt). Text vom
+  2026-10-12 vor E1012-07, unveraendert:
+  Seit der CG-Loeser seine Stoppregel
+  am wahren Residuum `||b - A x||` entscheidet (PR #61, `spec/HEX_FV_SOLVER_v1.md` Abschnitt 5),
+  verfehlt `hex-mms-tri` I1 auf N=192: das wahre Residuum stagniert bei 2.34e-13 > 1e-13. Die
+  Loeser-Decke von `hex-mms-tri` steht damit auf `comparison_only`, nicht mehr auf
+  `verified_numerical_reference`; drei Tests sind absichtlich rot. **Phase 0 ist nicht gruen**:
+  kein Lern-Backend und kein Phase-1-Lauf, bevor I1 entschieden ist. Die Schwelle 1e-13 ist
+  unveraendert; eine V2 mit anderer Schwelle oder Residuumsberechnung ist ein Owner-Entscheid
+  (E1012-07). Gemessen und verworfen: Residual Replacement mit beibehaltener Suchrichtung statt
+  Neustart (N=96 und N=192 laufen dann bis maxiter, Spec Abschnitt 5).
+  _Evidenz:_ `results/2026-10-12_pr61-hardening_local-gate.log`.
+
 ## Erledigt (verifiziert)
+
+- [x] **Phase 0b I1 V2 (E1012-07 = A, 2026-10-12).** Marco hat entschieden: I1 bekommt eine
+  versionierte V2 mit erreichbarer Schwelle; V1 bleibt als historischer, ehrlich roter Vertrag
+  stehen (Blockiert, oben). `spec/HEX_FV_SOLVER_v2.md`: Annahme bei
+  `||b - A x|| <= tol_eff ||b||`, `tol_eff = max(rtol, 8 u (|| |A| |x| || + ||b||) / ||b||)`,
+  `u = 2^-53` (c = 8: Zeilen mit 7 Termen plus die Subtraktion von b, gamma_8-Schranke der
+  Residuumsauswertung), konsultiert erst, wo V1 aufgibt; Status `converged` /
+  `at_rounding_floor`, Rueckwaertsfehler `eta` berichtet. Ergebnis @d4acb27: N=24/48/96
+  `converged`, N=192 `at_rounding_floor` (2.344e-13 > 1e-13, <= tol_eff 4.437e-12,
+  eta 4.69e-17; 1e-13 dort NICHT erreicht); Loeser-Decke `verified_numerical_reference` unter
+  I1 V2. Lokal Windows, CI offen.
+  _Evidenz:_ `results/2026-10-12_phase0_reference_i1-v2.json`,
+  `results/2026-10-12_pr61-i1-v2_local-gate.log`.
+
+- [x] **Phase-1-Instrumente (#60, 2026-10-07).** Ohne Modell und ohne Training:
+  Crank-Nicolson mit warm gestartetem CG im Loeser (exakter Verstaerkungsfaktor auf
+  Eigenvektoren, Ordnung 2 in der Zeit, unbedingt L2-stabil, massenerhaltend auf dem Torus);
+  Aufgabe T1 `hex-heat-operator` (`spec/HEAT_OPERATOR_TASK_v1.md`): exakte Wahrheit aus der
+  Eigenfunktionsbasis ((m,n)/(n,m) als ein Eigenraum per Gram-Rang geprueft), Seeds je
+  `sample_id`, Manifest mit SHA-256, Integritaet vs. Reproduzierbarkeit getrennt, Split ueber
+  `dataset_split_hex_v3` (Integrationsbefund: der Splitter verlangt das `samples`-Attribut),
+  Metriken rel. L2/H1(Energieform)/Max, Baseline zweiter Ordnung. Vorregistrierung als DRAFT.
+  _Evidenz:_ `results/2026-10-07_phase1-instruments_local-gate.log`.
+
+- [x] **Reality Anchor Phase 0b: `hex-heat-torus` + `hex-mms-tri`, Loeserschicht (#60, W1-K08,
+  2026-10-07).** Damit ist Phase 0 komplett (0a + 0b). Neue mechanistische Schicht
+  `hex_fv_solver_hex_v3.py` (`spec/HEX_FV_SOLVER_v1.md`): Dreieck-Dirichlet- und periodisches
+  Torus-Gitter, Two-Point-Flux mit exakt symmetrischen Mittelpunkt-Leitfaehigkeiten,
+  Positivitaets-Gate (jetzt auch variables kappa), explizites Euler, CG (SPD, fail-closed); die
+  0a-Logik ist bitgleich umgezogen (0a-`study_sha256` unveraendert 6a366cdb...).
+  `spec/REFERENCE_CASES_HEX_PHASE0B_v1.md`: Torus mit ebenen Wellen (exakt, Erhaltung C10,
+  Isotropie in drei nicht aequivalenten Richtungen), MMS mit variablem kappa + Quelle
+  (Orakel O1-O3 inkl. unabhaengiger FD-Pruefung der Quelle, Loeser M1-M3, Celik C5-C9 auf
+  dem Zentroid-Wert, Iterationsfehler I1); zwei ReferenceSpecs fuer MMS (Orakel
+  `mathematical_oracle`, Loeser `verified_numerical_reference`). Diskriminierung u.a.: kappa am
+  Knoten (nur Ordnung 1), Quelle ohne Gradiententerm, vorzeitiger CG-Abbruch, nicht-konservativer
+  Operator; das arithmetische Mittel der Knoten-kappa (zweiter Ordnung) besteht.
+  _Evidenz:_ `results/2026-10-07_phase0b_local-gate.log`, `results/2026-10-07_phase0_reference.json`.
+  **Ueberholt 2026-10-12 (PR #61):** "Phase 0 komplett" und die Loeser-Decke
+  `verified_numerical_reference` fuer `hex-mms-tri` gelten nicht mehr. Die Evidenz von 2026-10-07
+  beruhte auf dem rekursiven CG-Residuum; mit dem wahren Residuum ist I1 rot und die Decke
+  `comparison_only` (siehe Blockiert oben). Der Eintrag bleibt als Lineage stehen.
+  **Nachtrag 2026-10-12 (E1012-07):** unter I1 V2 ist die Decke wieder
+  `verified_numerical_reference` (Eintrag "Phase 0b I1 V2" oben); unter I1 V1 bleibt sie
+  `comparison_only`.
+
+- [x] **Reality Anchor Phase 0a: Referenzfall `hex-heat-tri` + ReferenceSpec v1 (#60, #33,
+  W1-K08, 2026-10-07).** ReferenceSpec v1 aus Draft #33 per Merge-Commit uebernommen (Commits
+  erhalten; dessen CI-Rot: fehlender SOURCES-Eintrag fuer `spec/REFERENCE_SPEC_v1.md` und Pins
+  vor den letzten Haertungs-Commits -> append-only nachgezogen). Neuer Vertrag
+  `spec/REFERENCE_CASE_HEX_HEAT_TRI_v1.md`, Modul `reference_case_hex_v3.py`: Lame-Moden (m, n,
+  sin/cos) sind exakte diskrete Eigenvektoren des 7-Punkt-Hex-Laplace (Engine-Gewicht) auf dem
+  Dirichlet-Dreieck; Studie N = 16..128 reproduziert die Zahlen aus #60 (lambda_h 51.9649 ...
+  52.6273, Celik p 1.998 / 1.993), Waermeloesung Ordnung 2.00, GCI_fine 2.51e-4 >= exakter
+  Fehler 2.01e-4, alle Kriterien C1-C9 gruen, abgeleitete Decke `verified_numerical_reference`
+  nur fuer diesen Context of Use. Positivitaets-Gate auf dem assemblierten Operator (#60 Punkt
+  1): Vorzeichenstruktur + `dt <= h^2/(4 kappa)`, gegen `hex_positivity_max_dt` geprueft.
+  Diskriminierung: 1-%-Gewichtsfehler, Gewichtsfehler erster Ordnung, Neumann-artige Slots und
+  ein zu kleiner GCI-Sicherheitsfaktor fallen durch; Mutationsprobe 34/34.
+  _Evidenz:_ `results/2026-10-07_phase0-hex-heat-tri_local-gate.log`,
+  `results/2026-10-07_hex-heat-tri_reference.json` (study_sha256 6a366cdb..., Quelle d23dec8).
+
+- [x] **Issue #59: Folgepunkte aus PR #58 (2026-10-07).**
+  _DCP-Bundle (P2):_ `finalize_bundle` fsynct den Inhalt jeder im Manifest gelisteten Datei
+  (`fsync_file`, `rb+`-Handle, Windows-tauglich), dann die Shard-Verzeichnisse, dann Manifest
+  und Marker. Vorher waren nur die Verzeichniseintraege dauerhaft. DCPs `FileSystemWriter`
+  synct per Default (`sync_files=True`); das Bundle-Protokoll haengt davon nicht mehr ab.
+  _MetricSpec v4 (P2):_ `metric_semantics_label` steht in `__all__`; `spec/METRIC_SPEC_v4.md`
+  Abschnitt 0 listet die oeffentlichen Namen, ein Test liest genau diese Liste.
+  _dt-Vergleich (P3):_ zwei dt-Schluessel einer Trajektorie sind dieselbe Schrittweite, wenn
+  sie auf dasselbe endliche float32 runden oder relativ innerhalb `2**-20` liegen (vorher nur
+  relativ: 0.0 vs 1e-46 nie erkannt). Testpraemisse des Property-Tests korrigiert (0.0/5e-324
+  sind float32-Zwillinge; Pool nutzt jetzt `2**-149`).
+  _Evidenz:_ rot gegen die alten Bytes failures=5, errors=2 -> 536/536 OK; Mutationsprobe
+  27/27 (M23-M27 neu); DCP-Oracles lokal exit 0; `results/2026-10-07_issue59_local-gate.log`.
+  Weiter offen aus #59: Reality Anchor (#33/#60), dt-Gruppierung als deklarierter
+  Quantisierungsvertrag (`dt_round_ndigits=-1` wird akzeptiert), Positivitaets-Hinweis
+  (`safety=0.85` ist nicht positivitaetserhaltend; dokumentiert, kein Default verspricht es).
 
 - [x] **Codex-Review #46 nach Merge von `main` (2026-09-28).**
   _EMA-Decay (PRRT_kwDOSwvSC86m2eei):_ die oeffentlichen Resume-Helfer nahmen `ema_state_dict`
@@ -124,6 +219,21 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Offen
 
+- [ ] **Reality Anchor Phase 1 (#60): Owner-Freigabe der Vorregistrierung.**
+  `spec/PREREGISTRATION_PHASE1_v1.md` ist ein DRAFT mit den Entscheidungen D1-D8 (Aufgaben-Konfig,
+  Seeds, Stichprobengroessen, GINO-Raster/Budget, Hardware, BC-Achse nur periodisch in v1,
+  optionale Abhaengigkeit `neuraloperator==2.0.0`, Lizenzanfrage GAOT/GINOT). Erst nach Freigabe:
+  Datensaetze mit Manifest erzeugen, GINO-Raster auf Validierung, 5 Seeds, Testsets einmal,
+  Kosten-Genauigkeits-Kurve der Baseline, Bericht mit IQM + Bootstrap-KI. Neumann-Achse braeuchte
+  ein Neumann-Gitter im Loeser (v2).
+- [ ] **ReferenceSpec v1 (#33), Review-Befund.** `ConvergenceStudy.observed_order` wird nur auf
+  endlich/positiv geprueft, nicht gegen die Werte der Levels nachgerechnet; ein Aufrufer kann eine
+  Ordnung behaupten, die die Daten nicht tragen. Vorschlag: bei konstantem r und >= 3 Levels
+  Konsistenz gegen die Celik-Ordnung verlangen (Vertragsaenderung -> Owner-Entscheid).
+  `reference_spec_hex_v3.py` hat 82 % Branch-Coverage (Gesamt-Gate 87 % gilt global).
+- [ ] **dt-Gruppierung als deklarierter Quantisierungsvertrag (#59).** `dt_round_ndigits=-1` wird
+  akzeptiert; Vertrag fuer zulaessige Werte und Semantik fehlt.
+
 - [x] ~~**Coverage-Ratchet Richtung 80–90%.**~~ Erledigt 2026-09-27: 89,6 % Branch-Coverage,
   `fail_under = 87` (siehe oben). Schwaechste Module jetzt `runner_hex_v3.py` / `stress_hex_v3.py`
   (je 84 %). Draft-PR #20 (aelterer Ratchet-Versuch 79->91 + resume_from-Fix) ist damit inhaltlich
@@ -137,7 +247,9 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   Skript im Repo (Beispiel: `scripts/mutation_probe.py`).
 - [ ] **`tests (cpu)` als Required Check.** Laut externem Bericht (2026-09-21) ist nur `gate`
   Required Check; ein roter Testjob blockiert den Merge also nicht. Nur der Repo-Owner kann das
-  im Branch-Schutz aendern.
+  im Branch-Schutz aendern. Nachtrag 2026-10-07: ein Session-Handoff vom 2026-10-05 (Drive)
+  meldet "Required gate + tests (cpu)" als gesetzt; aus dem Repo/der Agent-Sitzung nicht
+  pruefbar (keine Branch-Protection-API) -> Owner bestaetigt, dann diesen Punkt schliessen.
 - [ ] **Mid-Epoch-Resume.** `dataloader_state_dict` wird gespeichert/geladen, der Runner nutzt es
   aber nicht (Resume nur an Epochengrenzen). Fuer lange Epochen auf Preemptible-Clustern relevant
   (Muster: `torchdata.StatefulDataLoader`).
