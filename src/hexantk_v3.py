@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 HexaNTK v3.0 -- L014 Manuscript-Quality Implementation
 =======================================================
@@ -66,7 +67,7 @@ SoTA REFERENCES (verified Feb 2026)
              guidance for FSDP compatibility.
 [Daido]      Lee & Tien 2014, Lee 2017 (hex-Laplacian FV schemes).
 
-License: Apache-2.0 (SPDX-License-Identifier: Apache-2.0), see LICENSE.
+License: Apache-2.0, see LICENSE.
 Note: This module works without PyTorch installed; torch is imported
       lazily inside functions that need it, with stub fallbacks for
       pure-logic tests.

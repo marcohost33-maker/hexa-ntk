@@ -26,7 +26,8 @@ KI-Coding-Agent-Anweisungen. Reihenfolge: §1 Working agreements > §2 Conventio
   PR #5, LF-Normalisierung PR #6, CI-blocking seit 2026-07-03 laut `docs/ROADMAP.md`) prueft
   die aktuellen Bytes — der Text folgt jetzt der gelebten Praxis.)
   Kanonische v3-Engines leben zusaetzlich in `coworker-dde/src` — Aenderungen dort und
-  hier synchron halten (Byte-Mirror, per git-Blob verifiziert).
+  hier synchron halten (Byte-Mirror, per git-Blob verifiziert). **Stand 2026-10-14: die beiden
+  Kopien sind auseinandergelaufen (Issue #74) -- bis zum Entscheid keine Gleichheit annehmen.**
 
 ## Working agreements
 1. **Reality-Anchor.** "Tests N/N PASS (verified <date>)" statt "sollte gehen". Gate-Logs in `results/` sind die Evidenz.
