@@ -66,7 +66,7 @@ SoTA REFERENCES (verified Feb 2026)
              guidance for FSDP compatibility.
 [Daido]      Lee & Tien 2014, Lee 2017 (hex-Laplacian FV schemes).
 
-License: Coworker Research internal.
+License: Apache-2.0 (SPDX-License-Identifier: Apache-2.0), see LICENSE.
 Note: This module works without PyTorch installed; torch is imported
       lazily inside functions that need it, with stub fallbacks for
       pure-logic tests.
@@ -844,7 +844,7 @@ class OperatorType(Enum):
 #   vit_hidden_dim      : 256
 #
 # IMPORTANT NOTE ON 3D USE:
-# The paper has a SEPARATE optimized 3D repository (camlab-ethz/GAOT3D)
+# The paper has a SEPARATE optimized 3D repository (Shizheng-Wen/GAOT-3D)
 # for ultra-large 3D datasets (DrivAerNet++, DrivaerML, NASA-CRM). In the
 # 3D regime the authors TUNE hyperparameters per-dataset; there is no
 # single paper-validated "3D default". When instantiating a 3D
@@ -1666,7 +1666,7 @@ def test_gaot_context_dim_mismatch() -> bool:
     This catches the common mistake of copying a 2D config to a 3D
     dataset without updating latent_grid_shape. The 3D shape used here
     is ILLUSTRATIVE ONLY -- for production 3D use the authors'
-    camlab-ethz/GAOT3D repository and its dataset-specific configs.
+    Shizheng-Wen/GAOT-3D repository and its dataset-specific configs.
     """
     cfg_3d = GAOTConfig(
         latent_grid_shape=(16, 16, 16), patch_size=4,
