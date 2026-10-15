@@ -653,3 +653,5 @@
 > Prior rows remain lineage.
 
 | D58885C8EA67AE42 | 2026-10-14 00:00 | src/toolkit | in-repo derived, 2026-10-14 CG V2 tests use _RTOL_BELOW_ROUNDING=1e-17 (kernel-independent stagnation premise), scaling test pins status: test_hex_fv_solver_hex_v3.py |
+
+| F80BB66072969523 | 2026-10-15 00:00 | spec | in-repo derived, 2026-10-15 E1015M-01 D5 = CPU entered from the approved source, D4 grid and D5 machine still open, status stays DRAFT: PREREGISTRATION_PHASE1_v1.md |

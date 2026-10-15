@@ -246,6 +246,18 @@ result is an accepted outcome); the spectral audit is adopted as a secondary mea
 (section 5); the licence request (D8) is drafted for the owner to send. Still open before the
 status line can change: the concrete D4 grid (at most 8 configurations) and the named D5 machine.
 
+2026-10-15 (owner decision E1015M-01: enter D4/D5 now, only with content from the approved
+source). The approval of 2026-10-13 (E1013M-01) rests on the research synthesis of 2026-10-13,
+question 1 (Vero research archive, not in this repo:
+`Recherche/2026-10-13_neuronale-operatoren-und-hexa-ntk/01_SYNTHESE.md`, line 33, recommendation
+1(d) "D5 = CPU"; rationale in `04_T2_hexa-ntk.md`, line 118: the default GINO spectral weights
+need about 11 MB, `N = 32` has 465 nodes).
+- **D5, filled:** compute = CPU, no GPU.
+- **D5, still open:** the named machine. The source names no machine.
+- **D4, still open:** the source contains no grid and no epoch budget.
+
+The status line therefore stays DRAFT; nothing here allows a fit on T1 data.
+
 ## 9. Claim boundary
 
 - This draft fixes the protocol only. It produces no result.
