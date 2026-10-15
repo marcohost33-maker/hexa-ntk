@@ -228,7 +228,7 @@ nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (805, Stand 2026-10-16; + Parameter-NTK) unter Branch-Coverage;
   danach die torch-freien FV-/Reference-Suites unter jedem portablen OpenBLAS-Kernel
   (`OPENBLAS_CORETYPE` Prescott/Sandybridge/Haswell/Zen, SkylakeX bei AVX-512), weil die
-  CG-Stoppregel-Tests an der Rundung von BLAS-`ddot` haengen (2026-10-14); seit 2026-10-16 laeuft auch das Spektral-Orakel (CN-Toleranz aus dem CG-Abbruch hergeleitet) in dieser Schleife.
+  CG-Stoppregel-Tests an der Rundung von BLAS-`ddot` haengen (2026-10-14). Das Spektral-Orakel (torch) bleibt ausserhalb: unter erzwungenem OPENBLAS_CORETYPE stuerzt es auf dem Runner ab (Exit 139, Haswell, 2026-10-16); seine CN-Toleranz ist stattdessen aus dem CG-Abbruch hergeleitet und lokal unter vier Kerneln gruen.
 
 **Adapter-Ressourcenbudget (Wave19):** Vor kanonischer Gitterallokation werden
 Arrayform, n und Dtype geprüft. Die GINO-Linie akzeptiert maximal n=512,
