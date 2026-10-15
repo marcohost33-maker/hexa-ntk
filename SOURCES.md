@@ -419,3 +419,232 @@
 > Pins for the integrated bytes of this block. Prior rows remain lineage.
 
 | 99FA3780E73F53DA | 2026-10-05 00:00 | src/toolkit | in-repo derived, integration R3-test-assertion: test_runner_hex_v3.py |
+
+## Issue #59 follow-ups (append-only, 2026-10-07, claude/hexa-ntk-project-overview-mzkd4p)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| E7A3BD3FC8159373 | 2026-10-07 00:00 | scripts | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: mutation_probe.py |
+| F765A1425BFA7CFE | 2026-10-07 00:00 | scripts/oracles | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: distributed_checkpoint_bundle_v1.py |
+| 51013971AA5CB76F | 2026-10-07 00:00 | spec | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: METRIC_SPEC_v4.md |
+| 412AA56028E8CDBF | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: benchmark_hex_v3.py |
+| C0076272235EDB25 | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: dataset_split_hex_v3.py |
+| 137812E571113CFC | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: test_benchmark_hex_v3.py |
+| 76572D45CAC3C78B | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: test_dataset_split_hex_v3.py |
+| B050C6EBDAD7E045 | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 DCP content fsync, v4 export, float32 dt: test_distributed_checkpoint_bundle_v1.py |
+
+
+## src/toolkit/ — ReferenceSpec v1 2026-09-23 (append-only)
+
+> New in-repo ReferenceSpec implementation and contract tests. SHA prefixes are
+> filled from the fail-closed provenance gate before review readiness.
+
+| 892D90A81D2DE830 | 2026-09-23 00:00 | src/toolkit | in-repo created, ReferenceSpec v1: reference_spec_hex_v3.py |
+| 74158FD15466A368 | 2026-09-23 00:00 | src/toolkit | in-repo created, ReferenceSpec v1 tests: test_reference_spec_hex_v3.py |
+
+## ReferenceSpec v1 integration (PR #33) (append-only, 2026-10-07, claude/hexa-ntk-project-overview-mzkd4p)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| 1BE50B493049465C | 2026-10-07 00:00 | spec | in-repo derived, PR #33 ReferenceSpec v1 contract, merged into the issue #59 / Phase 0 branch: REFERENCE_SPEC_v1.md |
+| 84A83BFDA8185621 | 2026-10-07 00:00 | src/toolkit | in-repo derived, PR #33 ReferenceSpec v1 contract at head 932e9f9 (the 2026-09-23 pins predate its last hardening commits): reference_spec_hex_v3.py |
+| 8E5CFC60C7267FAC | 2026-10-07 00:00 | src/toolkit | in-repo derived, PR #33 ReferenceSpec v1 contract at head 932e9f9 (the 2026-09-23 pins predate its last hardening commits): test_reference_spec_hex_v3.py |
+
+## Reality Anchor Phase 0a hex-heat-tri (#60) (append-only, 2026-10-07, claude/hexa-ntk-project-overview-mzkd4p)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| B907BF72F3A9D6D3 | 2026-10-07 00:00 | spec | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: REFERENCE_CASE_HEX_HEAT_TRI_v1.md |
+| A2C90CF65D11EE6F | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: reference_case_hex_v3.py |
+| 7D5D372881BB4A20 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: test_reference_case_hex_v3.py |
+| 5BE5EBA7E235317E | 2026-10-07 00:00 | scripts/oracles | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: hex_heat_tri_reference_oracle.py |
+| 4C43E5DAA853E381 | 2026-10-07 00:00 | scripts | in-repo derived, Phase 0a reference case hex-heat-tri, W1-K08: mutation_probe.py |
+
+## Phase 0a self-review: Celik refinement ratio (append-only, 2026-10-07, claude/hexa-ntk-project-overview-mzkd4p)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| E97EDC20216DC873 | 2026-10-07 00:00 | spec | in-repo derived, Phase 0a self-review, refinement ratio r > 1.3 (Celik 2008): REFERENCE_CASE_HEX_HEAT_TRI_v1.md |
+| A84C3F4971B1B6AD | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0a self-review, refinement ratio r > 1.3 (Celik 2008): reference_case_hex_v3.py |
+| 1B1D7386C8E3952A | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0a self-review, refinement ratio r > 1.3 (Celik 2008): test_reference_case_hex_v3.py |
+
+## Reality Anchor Phase 0b: torus, MMS, solver layer (#60) (append-only, 2026-10-07, claude/hexa-ntk-project-overview-mzkd4p)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| 2A4C4D0DFDA9B63A | 2026-10-07 00:00 | scripts | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: mutation_probe.py |
+| 0CC4857820C31E00 | 2026-10-07 00:00 | scripts/oracles | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: hex_phase0_reference_oracle.py |
+| 7B01D64FB125C95C | 2026-10-07 00:00 | spec | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: HEX_FV_SOLVER_v1.md |
+| 591AF4505C676D73 | 2026-10-07 00:00 | spec | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: REFERENCE_CASES_HEX_PHASE0B_v1.md |
+| 4D90EEA7AECB7913 | 2026-10-07 00:00 | spec | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: REFERENCE_CASE_HEX_HEAT_TRI_v1.md |
+| E73B0159AD87B43A | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: hex_fv_solver_hex_v3.py |
+| CA7F77E711CF94FC | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: test_hex_fv_solver_hex_v3.py |
+| 6E97268A81CF9B9D | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: reference_case_hex_v3.py |
+| 932549A2E8F158FC | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 0b hex-heat-torus + hex-mms-tri + hex FV solver layer, W1-K08: test_reference_case_hex_v3.py |
+
+## Phase 1 instruments: Crank-Nicolson, T1 task, preregistration draft (#60) (append-only, 2026-10-07, claude/hexa-ntk-project-overview-mzkd4p)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| F9D54B4D541B71ED | 2026-10-07 00:00 | scripts | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: mutation_probe.py |
+| 7AF057326D34E5D9 | 2026-10-07 00:00 | spec | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: HEX_FV_SOLVER_v1.md |
+| CFED3030667A3155 | 2026-10-07 00:00 | spec | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: HEAT_OPERATOR_TASK_v1.md |
+| 599E9065E77427F7 | 2026-10-07 00:00 | spec | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: PREREGISTRATION_PHASE1_v1.md |
+| C79474FB3B42A241 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: hex_fv_solver_hex_v3.py |
+| 1FC5DA42498FCF93 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: test_hex_fv_solver_hex_v3.py |
+| C11A3434A3C95697 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: heat_operator_task_hex_v3.py |
+| 57B53E08ECBFAE83 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase 1 instruments (CN baseline, T1 hex-heat-operator) and preregistration DRAFT, W1-K08: test_heat_operator_task_hex_v3.py |
+
+## Independent PR #61 hardening — GPT-5.6 Sol (append-only, 2026-10-07)
+
+> Independent review of exact head 1acca25: recompute ReferenceSpec observed
+> order, bind T1 lattice/coefficients into dataset integrity, fail closed on
+> negative H1 energy, and remove the confounded pure-BC label from the torus
+> OOD axis. Prior rows remain lineage.
+
+| F386BDF9F14F6022 | 2026-10-07 00:00 | spec | in-repo derived, independent PR #61 credibility hardening: REFERENCE_SPEC_v1.md |
+| 84DAB72D604BCA2B | 2026-10-07 00:00 | src/toolkit | in-repo derived, independent PR #61 credibility hardening: reference_spec_hex_v3.py |
+| 012B910B89916082 | 2026-10-07 00:00 | src/toolkit | in-repo derived, independent PR #61 credibility hardening: test_reference_spec_hex_v3.py |
+| C441BBE421F690A7 | 2026-10-07 00:00 | spec | in-repo derived, independent PR #61 T1 evidence hardening: HEAT_OPERATOR_TASK_v1.md |
+| 9EBBA2DBC6724B91 | 2026-10-07 00:00 | spec | in-repo derived, independent PR #61 preregistration hardening: PREREGISTRATION_PHASE1_v1.md |
+| 8142EE80BA07B24E | 2026-10-07 00:00 | src/toolkit | in-repo derived, independent PR #61 T1 evidence hardening: heat_operator_task_hex_v3.py |
+| 9905598D73DAB0B1 | 2026-10-07 00:00 | src/toolkit | in-repo derived, independent PR #61 T1 evidence hardening: test_heat_operator_task_hex_v3.py |
+| E8BA656865FF9032 | 2026-10-07 00:00 | spec | in-repo derived, independent PR #61 formula-text correction after CI review: REFERENCE_SPEC_v1.md |
+
+## dt grouping quantisation contract (#59) — GPT-5.6 Sol (append-only, 2026-10-07)
+
+> Close the ambiguous negative-ndigits path: decimal quantisation is None or a
+> non-negative number of decimal places. Prior rows remain lineage.
+
+| 3C9695B66E17255F | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 dt quantisation contract: dataset_split_hex_v3.py |
+| 64C9F1BDB1FD7B49 | 2026-10-07 00:00 | src/toolkit | in-repo derived, issue #59 dt quantisation contract: test_dataset_split_hex_v3.py |
+
+> **2026-10-12, PR #61 P1 (CG stopping rule).** `conjugate_gradient` now decides
+> `||b - A x||_2 <= rtol ||b||_2` on the true residual (spec/HEX_FV_SOLVER_v1.md
+> section 5). Consequence: Phase 0b I1 fails on N=192 (true residual stagnates
+> at 2.34e-13 > 1e-13); the threshold is unchanged (owner decision). Prior rows
+> remain lineage.
+
+| CAB44CD8B761E223 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): hex_fv_solver_hex_v3.py |
+| 8A70864BFFFCE627 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): test_hex_fv_solver_hex_v3.py |
+| 0F496A82B8D39E49 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): reference_case_hex_v3.py |
+| A534D04BAAA1075B | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): test_reference_case_hex_v3.py |
+| 2CC63B7B63B566D3 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): HEX_FV_SOLVER_v1.md |
+| E7E3849689E6F44B | 2026-10-12 00:00 | scripts | in-repo derived, 2026-10-12 PR #61 P1 CG true-residual stopping rule (spec section 5): mutation_probe.py |
+| A0E8AFC37C6782D1 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 P1 test hardening (crash is an assertion failure): test_reference_case_hex_v3.py |
+| BD4C5559B4B4B6CD | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 reject non-positive conductance arrays: hex_fv_solver_hex_v3.py |
+| BB64FA00F04987A9 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 reject non-positive conductance arrays: test_hex_fv_solver_hex_v3.py |
+| 6D37E04541C52F33 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 reject non-positive conductance arrays: HEX_FV_SOLVER_v1.md |
+| 2B1529B0FB815450 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 overflow-safe CG rhs norm (exact power-of-two scaling): hex_fv_solver_hex_v3.py |
+| CEEE96C6CA0BD802 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 overflow-safe CG rhs norm (exact power-of-two scaling): test_hex_fv_solver_hex_v3.py |
+| AFA0C6BFE9827222 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 overflow-safe CG rhs norm (exact power-of-two scaling): HEX_FV_SOLVER_v1.md |
+| 3ACF36EB34286B1A | 2026-10-12 00:00 | scripts | in-repo derived, 2026-10-12 PR #61 Codex P2 overflow-safe CG rhs norm (exact power-of-two scaling): mutation_probe.py |
+| 03C9A61A6B74D006 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 GPT6 W9-F01 canonical lattice contract: hex_fv_solver_hex_v3.py |
+| 22885F2D2B0CEB3A | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 GPT6 W9-F01 canonical lattice contract: test_hex_fv_solver_hex_v3.py |
+| 11815B955B7ADDA5 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 GPT6 W9-F01 canonical lattice contract: HEX_FV_SOLVER_v1.md |
+| 675C90BC29E4AC30 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 per-sample H1 negative-energy band: heat_operator_task_hex_v3.py |
+| 8FA2B49EDEAA92A6 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 per-sample H1 negative-energy band: test_heat_operator_task_hex_v3.py |
+| 796B7DF840C87D64 | 2026-10-12 00:00 | scripts | in-repo derived, 2026-10-12 PR #61 Codex P2 M49 retargeted, per-sample band mutant: mutation_probe.py |
+| DD05384B671624BE | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 test hardening (failed rescaled solve is an assertion failure): test_hex_fv_solver_hex_v3.py |
+| 7711B0D09ADF1C45 | 2026-10-12 00:00 | scripts/oracles | in-repo derived, 2026-10-12 PR #61 Codex P2 evidence writers fail closed on an unbound source revision: hex_heat_tri_reference_oracle.py |
+| 1C0CD9DC2F08626F | 2026-10-12 00:00 | scripts/oracles | in-repo derived, 2026-10-12 PR #61 Codex P2 evidence writers fail closed on an unbound source revision: hex_phase0_reference_oracle.py |
+| 7338EDC5172914B4 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 evidence writers fail closed on an unbound source revision: test_reference_oracle_source_binding.py |
+
+| D5D9EF2923B2C07C | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 underflow-safe true CG residual norm: hex_fv_solver_hex_v3.py |
+| 823A6B4BC89BD24C | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 underflow-safe true CG residual norm: test_hex_fv_solver_hex_v3.py |
+| D8CBCF33A208AF2B | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 metric inputs exactly [S, M], scaled L2/max norms: heat_operator_task_hex_v3.py |
+| 3F1667E3CE9AA1C9 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 metric inputs exactly [S, M], scaled L2/max norms: test_heat_operator_task_hex_v3.py |
+| 723931AABC8DD449 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 metric inputs exactly [S, M], scaled L2/max norms: HEAT_OPERATOR_TASK_v1.md |
+| 4063390225430176 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 manifest task_id checked, sample ids and seed exact: heat_operator_task_hex_v3.py |
+| 833FF2BEECC507B3 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 manifest task_id checked, sample ids and seed exact: test_heat_operator_task_hex_v3.py |
+| 495893B4DE75E0D6 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 manifest task_id checked, sample ids and seed exact: HEAT_OPERATOR_TASK_v1.md |
+| AF7D1DFFFEA29988 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 oscillatory study serialised as negative evidence: reference_case_hex_v3.py |
+| 3925442C24A56C39 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 oscillatory study serialised as negative evidence: test_reference_case_hex_v3.py |
+| BA52937C53F030BE | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 oscillatory study serialised as negative evidence: REFERENCE_CASE_HEX_HEAT_TRI_v1.md |
+| 008ECFEDAA323F20 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 PR #61 Codex P2 CG underflow rule; measured residual replacement keeping p rejected: HEX_FV_SOLVER_v1.md |
+| FB8C074236D46EB4 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 PR #61 Codex P2 underflow test fails by assertion for any exception type: test_hex_fv_solver_hex_v3.py |
+
+> **2026-10-12, E1012-07 = A (CG stopping rule V2).** New spec
+> `spec/HEX_FV_SOLVER_v2.md`: accept `||b - A x|| <= tol_eff ||b||`,
+> `tol_eff = max(rtol, c u (|| |A||x| || + ||b||) / ||b||)`, `c = 8` for the hex
+> operator, status `converged` / `at_rounding_floor`, backward error reported.
+> Phase 0b I1 is judged by V2; the V1 rule stays the solver default and the V1
+> verdict of I1 (red on N=192) stays as pinned negative evidence. The I1
+> mutant of `mutation_probe.py` follows the rule into `_i1_level_holds`. Prior
+> rows remain lineage.
+
+| 95F135F92D66644F | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: hex_fv_solver_hex_v3.py |
+| 8162854050D99784 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: test_hex_fv_solver_hex_v3.py |
+| BF172F48069DCE33 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: reference_case_hex_v3.py |
+| 2728169C296B2886 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: test_reference_case_hex_v3.py |
+| E70C1C24727BE491 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: HEX_FV_SOLVER_v1.md |
+| 025012A9B9F8E024 | 2026-10-12 00:00 | spec | in-repo new, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: HEX_FV_SOLVER_v2.md |
+| 34B1815ACAD6ECB2 | 2026-10-12 00:00 | spec | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: REFERENCE_CASES_HEX_PHASE0B_v1.md |
+| 9B689DCC93F9B9F2 | 2026-10-12 00:00 | scripts | in-repo derived, 2026-10-12 E1012-07 CG stopping rule V2 (rounding floor), Phase 0b I1 judged by V2, V1 kept as negative evidence: mutation_probe.py |
+| 725151FC09B80F9C | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 V2 non-finite floor test fails by assertion for any exception type: test_hex_fv_solver_hex_v3.py |
+| F70F0D7AB9D8444E | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: reference_case_hex_v3.py |
+| 71769EC73D62DE94 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: test_reference_case_hex_v3.py |
+## Phase-1 external GINO adapter v1 — GPT-5.6 Sol (append-only, 2026-10-07)
+
+> Optional neuraloperator==2.0.0 adapter, synthetic forward smoke and explicit
+> geometry/claim contract. No training or held-out test access.
+
+| BF4314F84A2CC2A0 | 2026-10-07 00:00 | spec | in-repo derived, Phase-1 external GINO adapter contract: GINO_ADAPTER_PHASE1_v1.md |
+| 1C275A6198354313 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase-1 external GINO adapter: gino_adapter_hex_v3.py |
+| FBF08A0858F074F0 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase-1 GINO adapter contract/smoke tests: test_gino_adapter_hex_v3.py |
+
+## Phase-1 GINO adapter — repo-gate SHA correction (append-only, 2026-10-07)
+
+> Authoritative prefixes below are the values computed by
+> scripts/verify_sources.py from the GitHub checkout. They supersede the
+> earlier connector-side pre-write hashes without deleting lineage.
+
+| EED780CF4C2653DE | 2026-10-07 00:00 | spec | repo-gate verified current bytes: GINO_ADAPTER_PHASE1_v1.md |
+| 953D456F86FC9276 | 2026-10-07 00:00 | src/toolkit | repo-gate verified current bytes: gino_adapter_hex_v3.py |
+| 386F8AD29D21BE33 | 2026-10-07 00:00 | src/toolkit | repo-gate verified current bytes: test_gino_adapter_hex_v3.py |
+
+
+## Independent GINO adapter review hardening (2026-10-11; stacked on PR #62)
+
+> Append-only pin for the canonical lattice guard, actual backend-version validation,
+> N=32 fixed radius, geometric and config digests in tests.
+
+| 198BC9DEA76DE6B2 | 2026-10-11 00:00 | src/toolkit | in-repo derived, independent GINO review hardening: gino_adapter_hex_v3.py |
+| 238B26A645BD6656 | 2026-10-11 00:00 | src/toolkit | in-repo derived, independent GINO review hardening: test_gino_adapter_hex_v3.py |
+| 4A193E9774BB32DA | 2026-10-11 00:01 | src/toolkit | in-repo derived, Wave17 CI Ruff E501 regression correction: test_gino_adapter_hex_v3.py |
+
+
+## Independent Wave18 GINO device/dtype and synthetic gradient hardening (2026-10-11)
+
+> Appended on reviewed PR63 head, no V1 MMS/preregistrated training changes.
+
+| 650AED2652C23789 | 2026-10-11 03:45 | src/toolkit | in-repo derived, Wave18 device/dtype/autograd and synthetic optimizer regression: gino_adapter_hex_v3.py |
+| 74196F46C89AF814 | 2026-10-11 03:45 | src/toolkit | in-repo derived, Wave18 device/dtype/autograd and synthetic optimizer regression: test_gino_adapter_hex_v3.py |
+| 20451528C1C82C41 | 2026-10-11 04:45 | src/toolkit | in-repo derived, Wave19 bounded early GINO lattice preflight: gino_adapter_hex_v3.py |
+| 7C7EF604A3E2BD7D | 2026-10-11 04:45 | src/toolkit | in-repo derived, Wave19 bounded early GINO lattice preflight: test_gino_adapter_hex_v3.py |
+
+## Wave19 resource-budget hardening final bytes
+| 512A666E4213BE26 | 2026-10-11 04:50 | src/toolkit | in-repo derived, Wave19 final budgeted GINO preflight: gino_adapter_hex_v3.py |
+| 8F37B365FE332FCA | 2026-10-11 04:50 | src/toolkit | in-repo derived, Wave19 final budgeted GINO preflight: test_gino_adapter_hex_v3.py |
+| 9F91DCBDC101FD94 | 2026-10-11 05:00 | src/toolkit | in-repo derived, Wave20 combined spectral-memory guard: gino_adapter_hex_v3.py |
+| 09ED11DAEB4341A7 | 2026-10-11 05:00 | src/toolkit | in-repo derived, Wave20 regression tests: test_gino_adapter_hex_v3.py |
+| BFC8D4BD243E2982 | 2026-10-11 05:00 | spec | in-repo derived, Wave20 explicit operational v2 contract: GINO_ADAPTER_PHASE1_v2.md |
+| D3F24028185AEF60 | 2026-10-13 10:40 | src/toolkit | in-repo derived, float64/complex-dtype guard after real neuraloperator 2.0.0 run: gino_adapter_hex_v3.py |
+| 67119E4E5E380C72 | 2026-10-13 10:40 | src/toolkit | in-repo derived, real-backend float64 refusal + complex-dtype tests: test_gino_adapter_hex_v3.py |
+| 3ED18F2893BD0265 | 2026-10-13 10:40 | spec | in-repo derived, dtype contract + radius-tie error class (measured): GINO_ADAPTER_PHASE1_v2.md |
+
+## CG V2 tests: BLAS-kernel-independent premise (append-only, 2026-10-14)
+
+> PR #61 head 6d219d9 was red in `tests (cpu)`: two V2 tests assumed rtol=1e-16
+> is unreachable for the n=12 system, which holds on the SkylakeX/Sandybridge
+> OpenBLAS kernels but not on Haswell/Zen/Prescott (the CI run failed the same way).
+> Prior rows remain lineage.
+
+| D58885C8EA67AE42 | 2026-10-14 00:00 | src/toolkit | in-repo derived, 2026-10-14 CG V2 tests use _RTOL_BELOW_ROUNDING=1e-17 (kernel-independent stagnation premise), scaling test pins status: test_hex_fv_solver_hex_v3.py |
+
+| 2EF9B114873DAFF8 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): hex_fv_solver_hex_v3.py |
+| 6D8721D56E9B9942 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): test_hex_fv_solver_hex_v3.py |
+| 5F14BC566BD97CE8 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): heat_operator_task_hex_v3.py |
+| C2E9300E82426EA8 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): test_heat_operator_task_hex_v3.py |
+| A18A6C82BB0DC292 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): gino_adapter_hex_v3.py |
+| 55DCBCF24EFAB6D4 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): test_gino_adapter_hex_v3.py |

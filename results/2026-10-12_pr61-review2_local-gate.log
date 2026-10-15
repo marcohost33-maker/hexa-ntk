@@ -1,0 +1,36 @@
+# HexaNTK gate log, PR #61 review round 2 (seven Codex P2 findings @266900e) - local branch vero/hn-pr61
+# Tested commit: 62cab583bda1875948c3321d1071241f301c7654 (dirty=0); baseline 266900efc37e05e1e5553842fd3a887793507392
+# Environment: Windows 11 Home 10.0.26200, Python 3.12.10 (venv), torch 2.6.0+cpu, numpy 2.5.3, ruff 0.16.9
+# Claim: local Windows run, CI open. BLOCKED unchanged: Phase 0b I1 fails on N=192 (threshold 1e-13 unchanged, owner decision E1012-07).
+
+## ci.yml chain (ruff check src scripts; compileall -q src; verify_sources.py; engine_gate.py;
+##   coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"; coverage report)
+
+# baseline @266900e (before any change)
+ruff rc=0 | compileall rc=0 | verify_sources rc=0 | engine_gate rc=0
+unittest rc=1: Ran 678 tests, FAILED (failures=3, skipped=6) - the three I1 tests
+coverage report rc=0: TOTAL 92%
+
+# final @62cab58
+ruff rc=0: All checks passed!
+compileall rc=0
+verify_sources rc=0: [VERIFY-SOURCES] 35 Toolkit-Eintraege + 9 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (54 Dateien) | PASS
+engine_gate rc=0: [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+unittest rc=1: Ran 685 tests, FAILED (failures=3, skipped=6)
+  FAIL: test_default_study_passes_every_criterion (TestHexMmsTriStudyGate)                  - I1 BLOCKED, as at baseline
+  FAIL: test_reference_specs_derive_oracle_and_verified_ceilings (TestHexMmsTriStudyGate)   - I1 BLOCKED, as at baseline
+  FAIL: test_arithmetic_mean_conductance_is_a_valid_second_order_alternative (TestMmsGateDiscrimination) - I1 BLOCKED, as at baseline
+coverage report rc=0: heat_operator_task 97%, hex_fv_solver 97%, reference_case 97%, TOTAL 92%
+
+## hex-mms-tri CG solves (rtol 1e-13 tight / 1e-10 loose), per level: iterations, TRUE relative residual
+# @266900e (restart after a failed true-residual check):
+#   N=24  71 / 7.193e-14   N=48 148 / 5.186e-14   N=96 302 / 9.288e-14   N=192 745 / 2.3442637737644514e-13 NOT converged (stagnation)
+# @73ac24d (underflow-safe stopping norm): identical to 266900e at every level
+# experiment, not committed (73ac24d + keep the search direction, p = r_true + (rr_true / rr_old) p):
+#   N=24  71 / 7.193e-14   N=48 148 / 9.206e-14   N=96 44750 = maxiter / 4.259e-13 NOT converged
+#   N=192 181550 = maxiter / 3.2015962345492612e-12 NOT converged (620 s)
+#   -> rejected; the restart stays (spec/HEX_FV_SOLVER_v1.md section 5)
+
+## Discrimination (Tools/diskriminierung.py, pytest node per case, ledger Data/diskriminierung_runs.jsonl)
+# DK-20261012T142452-64d957c3dda0 @62cab58 VOLL: 11/13 DISKRIMINIERT; 61-435c anchor ambiguous (not run), 61-301a baseline red once
+# DK-20261012T142950-fc33fbd45fb3 @62cab58 VOLL: 2/2 DISKRIMINIERT (61-435c with a unique anchor, 61-301a rerun; the test passed 3/3 in isolation afterwards)

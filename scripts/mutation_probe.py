@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """mutation_probe.py - reproducible mutation probe for the 2026-09-27 review fixes.
 
-Each mutant reverts one fix (issues #40, #42 and the review findings) in place
-in a toolkit module, runs the named test class, and restores the file. A
+Each mutant reverts one fix (issues #40, #42, #59, the #60 reference cases,
+solver layer and Phase 1 instruments, and the review findings) in place in a
+toolkit module (or, for a path with a "/", a repo-relative file such as an
+oracle under scripts/), runs the named test class, and restores the file. A
 mutant must turn its test class red ("KILLED"); a surviving mutant means the
 tests do not pin that fix.
 
@@ -30,7 +32,8 @@ import subprocess
 import sys
 from typing import NamedTuple
 
-TOOLKIT = pathlib.Path(__file__).resolve().parent.parent / "src" / "toolkit"
+REPO = pathlib.Path(__file__).resolve().parent.parent
+TOOLKIT = REPO / "src" / "toolkit"
 
 
 class Mutant(NamedTuple):
@@ -43,6 +46,10 @@ class Mutant(NamedTuple):
 CK = "checkpoint_integration_hex_v3.py"
 DS = "dataset_split_hex_v3.py"
 RU = "runner_hex_v3.py"
+DCP = "scripts/oracles/distributed_checkpoint_bundle_v1.py"
+RC = "reference_case_hex_v3.py"
+FV = "hex_fv_solver_hex_v3.py"
+T1 = "heat_operator_task_hex_v3.py"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -120,6 +127,90 @@ MUTANTS = (
            "test_warmstart_utils_hex_v3.TestPrefixTransforms"),
     # EMA: decay outside [0, 1] accepted.
     Mutant("ema_hex_v3.py", "    decay = _validate_decay(decay)\n", "", "test_ema_hex_v3.TestDecayContract"),
+    # #59 P2: shard contents are no longer flushed before the marker.
+    Mutant(DCP, '    for item in manifest["files"]:\n        fsync_file(bundle_path / item["path"])\n', "",
+           "test_distributed_checkpoint_bundle_v1.TestShardContentDurabilityIssue59"),
+    Mutant(DCP, '    with path.open("rb+") as stream:\n        os.fsync(stream.fileno())\n',
+           '    with path.open("rb+") as stream:\n        pass\n',
+           "test_distributed_checkpoint_bundle_v1.TestShardContentDurabilityIssue59"),
+    # #59 P2: metric_semantics_label missing from __all__ again.
+    Mutant("benchmark_hex_v3.py", '    "metric_semantics_label",\n', "",
+           "test_benchmark_hex_v3.TestPublicApiMatchesMetricSpecV4"),
+    # #59 P3: dt keys compared purely relatively again (0.0 vs 1e-46 accepted).
+    Mutant(DS, "    if bits_lower is not None and bits_upper is not None:\n", "    if False:\n",
+           "test_dataset_split_hex_v3.TestDtPrecisionSplitIssue42"),
+    # #59 P3: raw bit patterns compared, so -0.0 and 0.0 count as different.
+    Mutant(DS, 'struct.unpack("<f", bits_lower)[0] == struct.unpack("<f", bits_upper)[0]',
+           "bits_lower == bits_upper", "test_dataset_split_hex_v3.TestDtPrecisionSplitIssue42"),
+    # Reality Anchor Phase 0a (hex-heat-tri, #60): operator, analysis, gate.
+    Mutant(FV, "        return weight * float(kappa) * (gathered.sum(axis=1) - 6.0 * arr)\n",
+           "        return weight * float(kappa) * (gathered.sum(axis=1) - (nb >= 0).sum(axis=1) * arr)\n",
+           "test_reference_case_hex_v3.TestLameModesAreExactDiscreteEigenvectors"),
+    Mutant(RC, "    p = abs(math.log(abs(quotient))) / math.log(r)\n", "    p = abs(math.log(abs(quotient)))\n",
+           "test_reference_case_hex_v3.TestConvergenceAnalysis"),
+    Mutant(RC, '        "C5_observed_order": _within(celik_fine["observed_order"], ORDER_BAND),\n',
+           '        "C5_observed_order": True,\n', "test_reference_case_hex_v3.TestGateDiscrimination"),
+    Mutant(RC, '        "C9_gci_covers_exact_error": celik_fine["gci_fine"] >= exact_rel_error_fine,\n',
+           '        "C9_gci_covers_exact_error": True,\n', "test_reference_case_hex_v3.TestGateDiscrimination"),
+    Mutant(RC, "    if all(criteria[k] for k in keys):\n", "    if True:\n",
+           "test_reference_case_hex_v3.TestGateDiscrimination"),
+    Mutant(FV, "    if np.any(off_arr < 0.0):\n", "    if False:\n",
+           "test_hex_fv_solver_hex_v3.TestPositivityGateIssue60"),
+    Mutant(FV, "    if dt > bound:\n", "    if False:\n", "test_hex_fv_solver_hex_v3.TestPositivityGateIssue60"),
+    # Reality Anchor Phase 0b (hex-heat-torus, hex-mms-tri, solver layer).
+    Mutant(FV, "        ni = np.where(nj == n, ni + n // 2, ni)\n", "        ni = np.where(nj == n, ni, ni)\n",
+           "test_hex_fv_solver_hex_v3.TestTorusLattice"),
+    Mutant(FV, "        midpoints = lattice.coords + 0.5 * lattice.h * SLOT_DIRECTIONS[slot]\n",
+           "        midpoints = lattice.coords + 0.0 * lattice.h * SLOT_DIRECTIONS[slot]\n",
+           "test_hex_fv_solver_hex_v3.TestEdgeConductances"),
+    Mutant(FV, "        if not np.array_equal(c[rows, slot], c[lattice.neighbors[rows, slot], slot + 3]):\n",
+           "        if False:\n", "test_hex_fv_solver_hex_v3.TestEdgeConductances"),
+    Mutant(FV, "        if not curvature > 0.0:\n", "        if False:\n",
+           "test_hex_fv_solver_hex_v3.TestConjugateGradient"),
+    Mutant(FV, '        raise ValueError("solve_steady_diffusion supports the Dirichlet triangle only (singular on the '
+               'torus)")\n',
+           "        pass\n", "test_hex_fv_solver_hex_v3.TestSteadySolve"),
+    Mutant(RC, "        return self.kappa(xy) * neg_laplacian - (self.kappa_gradient(xy) * self.solution_gradient(xy))"
+               ".sum(axis=1)\n",
+           "        return self.kappa(xy) * neg_laplacian\n", "test_reference_case_hex_v3.TestHexMmsTriStudyGate"),
+    Mutant(RC, '        "O2_source_matches_flux_divergence": source_error <= _MMS_SOURCE_TOL,\n',
+           '        "O2_source_matches_flux_divergence": True,\n',
+           "test_reference_case_hex_v3.TestMmsGateDiscrimination"),
+    # 2026-10-12 (E1012-07): the I1 rule moved into _i1_level_holds (V1/V2); same defect.
+    Mutant(RC, '    return bool(level["cg_relative_residual"] <= bound\n'
+               '                and level["iterative_to_discretisation_ratio"] <= _MMS_ITERATIVE_RATIO)\n',
+           '    return bool(level["cg_relative_residual"] <= bound)\n',
+           "test_reference_case_hex_v3.TestMmsGateDiscrimination"),
+    Mutant(RC, "        criteria[\"C10_conservation\"] = all(level[\"conservation_residual\"] <= _CONSERVATION_TOL for "
+               "level in levels)\n",
+           "        criteria[\"C10_conservation\"] = True\n", "test_reference_case_hex_v3.TestHexHeatTorusStudyGate"),
+    # Phase 1 instruments (T1 hex-heat-operator, Crank-Nicolson baseline).
+    Mutant(FV, "    half = 0.5 * dt\n", "    half = dt\n", "test_hex_fv_solver_hex_v3.TestCrankNicolson"),
+    Mutant(FV, "            raise ValueError(\"x0 is not representable at the scale of b\")\n"
+               "        r = rhs - np.asarray(apply_a(x), dtype=np.float64)\n",
+           "            raise ValueError(\"x0 is not representable at the scale of b\")\n"
+           "        r = rhs.copy()\n",
+           "test_hex_fv_solver_hex_v3.TestConjugateGradient"),
+    # 2026-10-12 P1: the stopping rule is decided on the TRUE residual b - A x.
+    Mutant(FV, "        # Pre-check passed: the true residual decides.\n"
+               "        r = rhs - np.asarray(apply_a(x), dtype=np.float64)\n"
+               "        rr = float(r @ r)\n",
+           "        rr = rr_new\n",
+           "test_hex_fv_solver_hex_v3.TestConjugateGradient"),
+    Mutant(T1, "            for n in range(m, bound + 1):\n", "            for n in range(1, bound + 1):\n",
+           "test_heat_operator_task_hex_v3.TestBasis"),
+    Mutant(T1, "    sigma = (eigenvalues.min() / eigenvalues) ** float(config.spectral_decay)\n",
+           "    sigma = (eigenvalues.min() / eigenvalues) ** 0.0\n",
+           "test_heat_operator_task_hex_v3.TestPriorAndTruth"),
+    Mutant(T1, "    digest.update(np.ascontiguousarray(u_t, dtype=\"<f8\").tobytes())\n", "",
+           "test_heat_operator_task_hex_v3.TestManifest"),
+    Mutant(T1, "        [-lattice.cell_area * float(row @ apply_hex_laplacian(row, lattice)) for row in v],\n",
+           "        [lattice.cell_area * float(row @ row) for row in v],\n",
+           "test_heat_operator_task_hex_v3.TestMetrics"),
+    # 2026-10-12 Codex P2: the negative-energy band is per sample, not batch-wide.
+    Mutant(T1, "    tolerance = 64.0 * np.finfo(np.float64).eps * np.maximum(1.0, np.abs(values))\n",
+           "    tolerance = 64.0 * np.finfo(np.float64).eps * max(1.0, float(np.max(np.abs(values))))\n",
+           "test_heat_operator_task_hex_v3.TestMetrics"),
 )
 
 
@@ -146,7 +237,7 @@ def run_mutant(mutant: Mutant) -> str:
     Returns "KILLED", "SURVIVED" or "INVALID" (the run failed without
     executing tests, e.g. a crash before discovery).
     """
-    path = TOOLKIT / mutant.module
+    path = (REPO if "/" in mutant.module else TOOLKIT) / mutant.module
     original = path.read_text(encoding="utf-8")
     if original.count(mutant.original) != 1:
         raise LookupError(f"{mutant.module}: mutation site not found exactly once: {mutant.original!r}")

@@ -79,6 +79,17 @@ def fsync_directory(path: Path) -> None:
         os.close(directory_fd)
 
 
+def fsync_file(path: Path) -> None:
+    """Flush one file's contents to stable storage (issue #59).
+
+    Opened read-write: on Windows ``os.fsync`` needs a handle with write
+    access (a read-only handle fails with EBADF), the same pattern as the
+    toolkit's ``AtomicCheckpointWriter``. Nothing is written.
+    """
+    with path.open("rb+") as stream:
+        os.fsync(stream.fileno())
+
+
 def json_bytes(value: Mapping[str, Any]) -> bytes:
     return (
         json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
@@ -119,6 +130,13 @@ def finalize_bundle(
     """Write COMMITTED.json last, after DCP completion and the caller's barrier."""
     bundle_path = Path(bundle_dir)
     manifest = build_manifest(bundle_path, metadata)
+    # Issue #59: directory fsyncs persist the entries, not the bytes. Flush
+    # every listed file's contents first, so the marker can never survive a
+    # lost or truncated shard after a power loss: contents -> directories ->
+    # manifest -> marker. DCP's FileSystemWriter syncs its files by default
+    # (sync_files=True); the bundle protocol does not rely on that setting.
+    for item in manifest["files"]:
+        fsync_file(bundle_path / item["path"])
     # The DCP shard directory entries must be durable before the manifest and
     # the marker claim them (O4): fsync every directory that holds a shard,
     # then the bundle directory itself.
