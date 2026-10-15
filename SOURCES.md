@@ -584,3 +584,22 @@
 | 725151FC09B80F9C | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 V2 non-finite floor test fails by assertion for any exception type: test_hex_fv_solver_hex_v3.py |
 | F70F0D7AB9D8444E | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: reference_case_hex_v3.py |
 | 71769EC73D62DE94 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: test_reference_case_hex_v3.py |
+## Phase-1 external GINO adapter v1 — GPT-5.6 Sol (append-only, 2026-10-07)
+
+> Optional neuraloperator==2.0.0 adapter, synthetic forward smoke and explicit
+> geometry/claim contract. No training or held-out test access.
+
+| BF4314F84A2CC2A0 | 2026-10-07 00:00 | spec | in-repo derived, Phase-1 external GINO adapter contract: GINO_ADAPTER_PHASE1_v1.md |
+| 1C275A6198354313 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase-1 external GINO adapter: gino_adapter_hex_v3.py |
+| FBF08A0858F074F0 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase-1 GINO adapter contract/smoke tests: test_gino_adapter_hex_v3.py |
+
+## Phase-1 GINO adapter — repo-gate SHA correction (append-only, 2026-10-07)
+
+> Authoritative prefixes below are the values computed by
+> scripts/verify_sources.py from the GitHub checkout. They supersede the
+> earlier connector-side pre-write hashes without deleting lineage.
+
+| EED780CF4C2653DE | 2026-10-07 00:00 | spec | repo-gate verified current bytes: GINO_ADAPTER_PHASE1_v1.md |
+| 953D456F86FC9276 | 2026-10-07 00:00 | src/toolkit | repo-gate verified current bytes: gino_adapter_hex_v3.py |
+| 386F8AD29D21BE33 | 2026-10-07 00:00 | src/toolkit | repo-gate verified current bytes: test_gino_adapter_hex_v3.py |
+
