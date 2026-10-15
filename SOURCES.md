@@ -626,3 +626,6 @@
 ## Wave19 resource-budget hardening final bytes
 | 512A666E4213BE26 | 2026-10-11 04:50 | src/toolkit | in-repo derived, Wave19 final budgeted GINO preflight: gino_adapter_hex_v3.py |
 | 8F37B365FE332FCA | 2026-10-11 04:50 | src/toolkit | in-repo derived, Wave19 final budgeted GINO preflight: test_gino_adapter_hex_v3.py |
+| 9F91DCBDC101FD94 | 2026-10-11 05:00 | src/toolkit | in-repo derived, Wave20 combined spectral-memory guard: gino_adapter_hex_v3.py |
+| 09ED11DAEB4341A7 | 2026-10-11 05:00 | src/toolkit | in-repo derived, Wave20 regression tests: test_gino_adapter_hex_v3.py |
+| BFC8D4BD243E2982 | 2026-10-11 05:00 | spec | in-repo derived, Wave20 explicit operational v2 contract: GINO_ADAPTER_PHASE1_v2.md |

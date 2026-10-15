@@ -34,6 +34,11 @@ _MAX_LATENT_RESOLUTION = 128
 _MAX_HIDDEN_CHANNELS = 512
 _MAX_LAYERS = 16
 _MAX_RADIUS_FACTOR = 16.0
+# Conservative spectral-weight budget for a dense complex64 FNO stack.
+# This excludes GNO/MLP/optimizer/activation allocations, and is NOT a
+# complete peak-memory estimate. All arithmetic uses Python integers.
+_MAX_SPECTRAL_WEIGHT_BYTES = 256 * 1024 * 1024
+_RESOURCE_POLICY = "GINO_ADAPTER_PHASE1_v2"
 _DOMAIN_HEIGHT = math.sqrt(3.0) / 2.0
 
 
@@ -63,6 +68,19 @@ class GinoPhase1Config:
             raise ValueError("GINO configuration exceeds adapter resource limit")
         if modes >= resolution / 2:
             raise ValueError("n_modes must be strictly below latent_resolution / 2 (Nyquist)")
+        # neuraloperator 2.0.0 uses dense complex spectral weights for the
+        # default (non-factorized) FNO, with the final RFFT axis halved.
+        # Even-round odd mode counts UP, so the estimate is conservative.
+        effective_modes = modes + (modes % 2)
+        spectral_bytes = (
+            layers * channels * channels * effective_modes
+            * (effective_modes // 2 + 1) * 8
+        )
+        if spectral_bytes > _MAX_SPECTRAL_WEIGHT_BYTES:
+            raise ValueError(
+                "GINO combined spectral weight resource limit exceeded: "
+                f"estimated {spectral_bytes} bytes > {_MAX_SPECTRAL_WEIGHT_BYTES} bytes"
+            )
         if isinstance(self.radius_factor, (bool, str)) or not isinstance(self.radius_factor, numbers.Real):
             raise TypeError("radius_factor must be a real numeric scalar")
         try:
@@ -77,6 +95,7 @@ class GinoPhase1Config:
     def canonical(self) -> Dict[str, Any]:
         return {
             "backend": GINO_BACKEND_PIN,
+            "resource_policy": _RESOURCE_POLICY,
             "geometry_semantics": "shared-euclidean-v1",
             "latent_resolution": int(self.latent_resolution),
             "n_modes": int(self.n_modes),
