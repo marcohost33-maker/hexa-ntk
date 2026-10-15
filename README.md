@@ -68,7 +68,7 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
 | Provenance | `python scripts/verify_sources.py` | 37 Toolkit- + 11 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 712 Tests, Ergebnis und Exit-Code im Gate-Log `results/2026-10-12_pr61-i1-v2_local-gate.log` (I1 nach V2; das V1-Rot ist ein erwarteter Befund im Test `TestMmsI1V1Historical`, kein roter Test); Skips je Plattform: Gate-Log |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 715 Tests, Ergebnis und Exit-Code im Gate-Log `results/2026-10-12_pr61-i1-v2_local-gate.log` (I1 nach V2; das V1-Rot ist ein erwarteter Befund im Test `TestMmsI1V1Historical`, kein roter Test); Skips je Plattform: Gate-Log |
 | Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
 | Mutation | `python scripts/mutation_probe.py` | 50/51 Mutanten getoetet, volle Probe @9db9cbc unter Windows, Baseline gruen, exit 1: einzig M02 ueberlebt, und das ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped; so schon 2026-09-28). Der I1-Mutant (Iterationsfehler-Verhaeltnis entfernt) zielt seit 2026-10-12 auf `_i1_level_holds`. Letzter voller Lauf unter Linux: 49/49, exit 0, 2026-10-07 (alte Zaehlung) |
 
@@ -193,8 +193,11 @@ python -m pip install numpy
 python -m pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
 python scripts/engine_gate.py                                  # 49 Doctests + 26 Selftests
 python scripts/verify_sources.py                               # Provenance-Gate (SOURCES.md)
+# GINO-Gate nur mit optionalen Paketen, wie im verpflichtenden ci/gate:
+# python -m pip install -r requirements-operator.txt
+# python -m unittest discover -s src/toolkit -t src/toolkit -p "test_gino_adapter_hex_v3.py" -v
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 712 Unit-Tests (2026-10-12; I1 nach V2) + Coverage-Gate
+python -m coverage report                                      # 715 Unit-Tests (2026-10-12; I1 nach V2) + Coverage-Gate
 python scripts/mutation_probe.py                               # optional: 51 Mutanten der Review-Fixes
 python scripts/oracles/hex_phase0_reference_oracle.py         # Phase-0-Referenzfaelle (exit 0 = alle Gates gruen)
 ```
@@ -203,8 +206,21 @@ CI (`.github/workflows/ci.yml`), beide Jobs scheitern mit exit != 0 (ob `tests (
 den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom 2026-09-21 ist
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
 - **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
-  vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (712, Stand 2026-10-12; I1 nach V2) unter Branch-Coverage.
+  vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance,
+  **zusaetzlich** bei vorhandenem GINO-Adapter: Installation von `torch==2.6.0` und
+  `requirements-operator.txt` in einer isolierten CI-Jobumgebung, `neuraloperator==2.0.0`
+  Versions-Check, dann `python -m unittest discover -s src/toolkit -t src/toolkit
+  -p "test_gino_adapter_hex_v3.py" -v` inklusive echtem Forward, Backward und
+  synthetischem Optimizerschritt (kein T1-Training). Fehlendes Backend => FAIL.
+  Achtung: Abweichung von der noch nicht genehmigten D7-Preregistrierung, die
+  `CI stays torch-only` vorsieht: siehe `docs/ADR/ADR-002-Phase1-GINO-required-gate-proposal.md`.
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (715, Stand 2026-10-12; I1 nach V2) unter Branch-Coverage.
+
+**Adapter-Ressourcenbudget (Wave19):** Vor kanonischer Gitterallokation werden
+Arrayform, n und Dtype geprüft. Die GINO-Linie akzeptiert maximal n=512,
+latent_resolution=128, hidden_channels=512, n_layers=16 und radius_factor=16.
+Dies ist ein operatives Fail-Closed-Limit, **keine wissenschaftliche Modellgrenze**;
+Erhöhungen benötigen Speicherbenchmark und versionierten Review.
 
 ## Struktur
 

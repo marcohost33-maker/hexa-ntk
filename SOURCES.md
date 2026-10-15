@@ -620,3 +620,9 @@
 
 | 650AED2652C23789 | 2026-10-11 03:45 | src/toolkit | in-repo derived, Wave18 device/dtype/autograd and synthetic optimizer regression: gino_adapter_hex_v3.py |
 | 74196F46C89AF814 | 2026-10-11 03:45 | src/toolkit | in-repo derived, Wave18 device/dtype/autograd and synthetic optimizer regression: test_gino_adapter_hex_v3.py |
+| 20451528C1C82C41 | 2026-10-11 04:45 | src/toolkit | in-repo derived, Wave19 bounded early GINO lattice preflight: gino_adapter_hex_v3.py |
+| 7C7EF604A3E2BD7D | 2026-10-11 04:45 | src/toolkit | in-repo derived, Wave19 bounded early GINO lattice preflight: test_gino_adapter_hex_v3.py |
+
+## Wave19 resource-budget hardening final bytes
+| 512A666E4213BE26 | 2026-10-11 04:50 | src/toolkit | in-repo derived, Wave19 final budgeted GINO preflight: gino_adapter_hex_v3.py |
+| 8F37B365FE332FCA | 2026-10-11 04:50 | src/toolkit | in-repo derived, Wave19 final budgeted GINO preflight: test_gino_adapter_hex_v3.py |
