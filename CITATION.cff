@@ -1,7 +1,19 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 authors:
-  - name: "Coworker Research / Coworkerz"
+  - family-names: "Hostettler"
+    given-names: "Marco"
+    affiliation: "Coworker Research (Coworkerz)"
 title: "hexa-ntk"
+abstract: >-
+  Research workbench for neural operators on hexagonal finite-volume grids,
+  verified against exact reference solutions, with a preregistered evaluation.
+  Developed with the DI (digital intelligence) Coworker system.
 license: Apache-2.0
 repository-code: "https://github.com/marcohost33-maker/hexa-ntk"
+keywords:
+  - neural operator
+  - hexagonal grid
+  - finite volume
+  - verification and validation
+  - preregistration
