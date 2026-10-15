@@ -50,6 +50,7 @@ from torch.utils.data import Dataset
 
 from hex_fv_solver_hex_v3 import (
     HexLattice,
+    _check_lattice,
     apply_hex_laplacian,
     crank_nicolson_heat,
     torus_hex_lattice,
@@ -166,6 +167,10 @@ def evaluate_sample(config: HeatOperatorTaskConfig, coefficients: Any, lattice: 
     """Exact (u0, u(T)) at the lattice nodes for one coefficient vector."""
     if not isinstance(lattice, HexLattice) or lattice.domain != config.domain:
         raise ValueError(f"lattice must be a {config.domain} HexLattice")
+    # HexLattice is freely constructible: a forged lattice (e.g. all-zero coordinates)
+    # would turn into fabricated "exact" truth. Only a factory-identical lattice is
+    # accepted, and the canonical copy is what the truth is computed on (Codex P2, #61).
+    lattice = _check_lattice(lattice)
     basis = mode_basis(config)
     a = np.asarray(coefficients, dtype=np.float64)
     if a.shape != (len(basis),) or not np.all(np.isfinite(a)):
@@ -415,6 +420,12 @@ class HeatOperatorDataset(Dataset):
         self.u_t = np.asarray(data["uT"], dtype=np.float64)
         if self.u0.shape != self.u_t.shape or self.u0.shape[0] != len(self.sample_ids):
             raise ValueError("u0, uT and sample_ids must agree in length and shape")
+        # The task contract is one lattice field per sample, [S, M]: [S] would yield
+        # scalars and [S, M, C] multi-channel fields downstream (Codex P2, #61).
+        if self.u0.ndim != 2:
+            raise ValueError(f"u0 and uT must be shaped [S, M], got {self.u0.shape}")
+        if not (np.all(np.isfinite(self.u0)) and np.all(np.isfinite(self.u_t))):
+            raise ValueError("u0 and uT must be finite")
         self.samples = [{"trajectory_id": sid} for sid in self.sample_ids]
 
     def __len__(self) -> int:

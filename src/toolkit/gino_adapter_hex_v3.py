@@ -232,7 +232,7 @@ def build_gino(config: GinoPhase1Config, training_lattice: HexLattice) -> Any:
         ) from exc
 
     radius = float(config.radius_factor) * float(training_lattice.h)
-    return GINO(
+    model = GINO(
         in_channels=1,
         out_channels=1,
         gno_coord_dim=2,
@@ -244,6 +244,24 @@ def build_gino(config: GinoPhase1Config, training_lattice: HexLattice) -> Any:
         gno_use_open3d=False,
         gno_use_torch_scatter=False,
     )
+    # n_modes, hidden_channels, n_layers and radius_factor are baked into the model;
+    # predict_gino must not attribute a run to another config's digest (Codex P2, #61).
+    setattr(model, CONFIG_DIGEST_ATTR, config.digest())
+    return model
+
+
+CONFIG_DIGEST_ATTR = "_hexantk_gino_config_digest"
+
+
+def _check_config_binding(model: Any, config: GinoPhase1Config) -> None:
+    """A model built by build_gino carries its config digest; any other config is refused.
+    Models not built here (test doubles, foreign wrappers) carry no binding and pass."""
+    bound = getattr(model, CONFIG_DIGEST_ATTR, None)
+    if bound is not None and bound != config.digest():
+        raise ValueError(
+            f"model was built with config digest {bound[:16]}..., "
+            f"predict_gino got {config.digest()[:16]}...; use the construction config"
+        )
 
 
 def _model_device_dtype(model: Any) -> tuple[torch.device | None, torch.dtype]:
@@ -281,6 +299,7 @@ def predict_gino(
     config: GinoPhase1Config,
 ) -> torch.Tensor:
     """Run GINO and return shape (batch, num_nodes), failing closed on drift."""
+    _check_config_binding(model, config)
     device, dtype = _model_device_dtype(model)
     batch = prepare_gino_batch(lattice, u0, config, dtype=dtype, device=device)
     out = model(**batch)

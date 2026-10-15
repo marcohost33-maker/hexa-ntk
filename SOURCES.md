@@ -641,3 +641,10 @@
 > Prior rows remain lineage.
 
 | D58885C8EA67AE42 | 2026-10-14 00:00 | src/toolkit | in-repo derived, 2026-10-14 CG V2 tests use _RTOL_BELOW_ROUNDING=1e-17 (kernel-independent stagnation premise), scaling test pins status: test_hex_fv_solver_hex_v3.py |
+
+| 2EF9B114873DAFF8 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): hex_fv_solver_hex_v3.py |
+| 6D8721D56E9B9942 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): test_hex_fv_solver_hex_v3.py |
+| 5F14BC566BD97CE8 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): heat_operator_task_hex_v3.py |
+| C2E9300E82426EA8 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): test_heat_operator_task_hex_v3.py |
+| A18A6C82BB0DC292 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): gino_adapter_hex_v3.py |
+| 55DCBCF24EFAB6D4 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): test_gino_adapter_hex_v3.py |

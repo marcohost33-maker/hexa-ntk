@@ -158,6 +158,11 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         self.assertAlmostEqual(model.kwargs["in_gno_radius"], 2.5 * lattice.h)
         out = predict_gino(model, lattice, np.ones((2, lattice.num_nodes)), cfg)
         self.assertEqual(tuple(out.shape), (2, lattice.num_nodes))
+        # Codex P2 on #61: a model built with config A must not run under config B
+        # (B's latent grid would be used while A's modes/channels/radius stay baked in).
+        other = GinoPhase1Config(latent_resolution=16, n_modes=3, hidden_channels=8, n_layers=1)
+        with self.assertRaisesRegex(ValueError, "construction config"):
+            predict_gino(model, lattice, np.ones((2, lattice.num_nodes)), other)
 
     def test_reject_wrong_training_resolution_and_backend_version(self) -> None:
         cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
