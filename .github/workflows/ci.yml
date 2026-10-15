@@ -31,7 +31,7 @@ jobs:
         # fail-closed: jedes Toolkit-Modul braucht einen SOURCES.md-Eintrag,
         # jeder Eintrag muss zur aktuellen Datei passen (SHA-256, LF-normalisiert).
         run: python scripts/verify_sources.py
-      - name: required real GINO forward gate when adapter is present
+      - name: required GINO forward+backward+optimizer smoke when adapter is present
         # Runs on stacked PRs too; never count an optional-backend skip as success.
         # The phase1-adapter-checks workflow alone is not the protected ci/gate.
         run: |

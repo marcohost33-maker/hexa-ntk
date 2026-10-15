@@ -65,7 +65,7 @@ jobs:
           python -m coverage report
 
   gino-smoke:
-    name: real GINO forward smoke
+    name: real GINO forward and synthetic backward optimizer smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -82,5 +82,5 @@ jobs:
           pip install numpy
           pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements-operator.txt
-      - name: real GINO forward smoke
+      - name: real GINO forward and synthetic backward optimizer smoke
         run: python -m unittest discover -s src/toolkit -t src/toolkit -p "test_gino_adapter_hex_v3.py" -v

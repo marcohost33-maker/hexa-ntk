@@ -48,6 +48,11 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         ):
             modified = GinoPhase1Config(**{field: other})
             self.assertNotEqual(modified.digest(), digest, field)
+        for wrong_type in (True, "2.5", complex(2.5, 0.0)):
+            with self.subTest(radius=wrong_type), self.assertRaises(TypeError):
+                GinoPhase1Config(radius_factor=wrong_type)
+        with self.assertRaises(ValueError):
+            GinoPhase1Config(radius_factor=10 ** 500)
         for kwargs in (
             {"latent_resolution": 7},
             {"n_modes": 16},
@@ -140,6 +145,98 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         forged = HexLattice(lat.n, lat.h, lat.domain, lat.coords, neighbors)
         with self.assertRaisesRegex(ValueError, "canonical"):
             prepare_gino_batch(forged, np.ones(lat.num_nodes), GinoPhase1Config())
+
+    def test_model_dtype_contract_and_gradient_propagation(self) -> None:
+        lattice = triangle_hex_lattice(8)
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
+
+        class CheckedDouble(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1, bias=False, dtype=torch.float64)
+
+            def forward(self, **batch):
+                self.assert_dtype(batch["x"], batch["input_geom"], batch["latent_queries"])
+                return self.linear(batch["x"])
+
+            @staticmethod
+            def assert_dtype(*args):
+                if any(t.dtype != torch.float64 for t in args):
+                    raise AssertionError("adapter failed to match model dtype")
+
+        model = CheckedDouble()
+        u0 = torch.ones((1, lattice.num_nodes), dtype=torch.float64, requires_grad=True)
+        out = predict_gino(model, lattice, u0, cfg)
+        self.assertEqual(out.dtype, torch.float64)
+        out.sum().backward()
+        self.assertIsNotNone(model.linear.weight.grad)
+        self.assertTrue(bool(torch.isfinite(model.linear.weight.grad).all()))
+        self.assertIsNotNone(u0.grad)
+        self.assertGreater(float(torch.sum(torch.abs(u0.grad))), 0.0)
+
+    def test_conversion_underflow_bool_complex_and_caller_alias(self) -> None:
+        lattice = triangle_hex_lattice(8)
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
+        with self.assertRaisesRegex(ValueError, "underflows"):
+            prepare_gino_batch(lattice, np.full(lattice.num_nodes, 1e-60), cfg)
+        for bad in (
+            np.ones(lattice.num_nodes, dtype=bool),
+            np.ones(lattice.num_nodes, dtype=np.complex128),
+        ):
+            with self.subTest(dtype=str(bad.dtype)), self.assertRaises(TypeError):
+                prepare_gino_batch(lattice, bad, cfg)
+        for bad in (torch.float16, torch.int32, torch.complex64):
+            with self.subTest(dtype=str(bad)), self.assertRaises(TypeError):
+                prepare_gino_batch(lattice, np.ones(lattice.num_nodes), cfg, dtype=bad)
+        supplied = torch.ones((1, lattice.num_nodes))
+        batch = prepare_gino_batch(lattice, supplied, cfg)
+        supplied[0, 0] = 42
+        self.assertEqual(float(batch["x"][0, 0, 0]), 1.0)
+
+    def test_model_mixed_floating_types_fail_closed(self) -> None:
+        lattice = triangle_hex_lattice(8)
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
+
+        class MixedModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1, dtype=torch.float32)
+                self.register_buffer("other", torch.ones(1, dtype=torch.float64))
+
+            def forward(self, **batch):
+                raise AssertionError("mixed dtype should fail before model invocation")
+
+        with self.assertRaisesRegex(ValueError, "inconsistent floating dtypes"):
+            predict_gino(MixedModel(), lattice, np.ones(lattice.num_nodes), cfg)
+
+    @unittest.skipUnless(importlib.util.find_spec("neuralop"), "optional neuraloperator backend not installed")
+    def test_actual_backend_backward_optimizer_smoke(self) -> None:
+        """Synthetic optimizer step ONLY; not Phase-1 task data or preregistered training."""
+        lattice = triangle_hex_lattice(32)
+        cfg = GinoPhase1Config(
+            latent_resolution=8, n_modes=3,
+            hidden_channels=8, n_layers=1, radius_factor=5.0,
+        )
+        with torch.random.fork_rng():
+            torch.manual_seed(317)
+            model = build_gino(cfg, lattice)
+            model.train()
+            data = torch.sin(torch.linspace(0.1, 2.4, lattice.num_nodes)).unsqueeze(0)
+            optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+            optimizer.zero_grad(set_to_none=True)
+            before = [p.detach().clone() for p in model.parameters()]
+            output = predict_gino(model, lattice, data, cfg)
+            self.assertEqual(tuple(output.shape), (1, lattice.num_nodes))
+            loss = output.square().mean()
+            self.assertTrue(bool(torch.isfinite(loss)))
+            loss.backward()
+            gradients = [p.grad for p in model.parameters() if p.grad is not None]
+            self.assertTrue(gradients, "expected at least one trainable gradient")
+            self.assertTrue(all(bool(torch.isfinite(g).all()) for g in gradients))
+            self.assertTrue(any(bool(torch.any(g != 0)) for g in gradients))
+            optimizer.step()
+            self.assertTrue(all(bool(torch.isfinite(p).all()) for p in model.parameters()))
+            self.assertTrue(any(not torch.equal(old, p) for old, p in zip(before, model.parameters())))
 
     @unittest.skipUnless(importlib.util.find_spec("neuralop"), "optional neuraloperator backend not installed")
     def test_actual_backend_forward_smoke(self) -> None:
