@@ -682,3 +682,8 @@
 | 73DB4059487654BA | 2026-10-16 | src/toolkit | merge #61 1b9c2c4 + CN oracle tolerance derived from CG rtol (E5): gino_adapter_hex_v3.py |
 | 5822365C94CED266 | 2026-10-16 | src/toolkit | merge #61 1b9c2c4 + CN oracle tolerance derived from CG rtol (E5): test_gino_adapter_hex_v3.py |
 | 3176497F2398A499 | 2026-10-16 | src/toolkit | merge #61 1b9c2c4 + CN oracle tolerance derived from CG rtol (E5): test_spectral_audit_oracles_hex_v3.py |
+
+| BEAD5188822CAE4A | 2026-10-16 | src/toolkit | PARAM_NTK_v1 (E1015M-03): parameter NTK, float64 shim + float32 cross-check: param_ntk_hex_v3.py |
+| EB2540E4E6DF9FAC | 2026-10-16 | src/toolkit | PARAM_NTK_v1 (E1015M-03): parameter NTK, float64 shim + float32 cross-check: test_param_ntk_hex_v3.py |
+| 08BA7746C3BBE57A | 2026-10-16 | src/toolkit | PARAM_NTK_v1 (E1015M-03): parameter NTK, float64 shim + float32 cross-check: test_gino_adapter_hex_v3.py |
+| 0FFA4E5D26AEDAF1 | 2026-10-16 | spec | PARAM_NTK_v1 (E1015M-03): parameter NTK, float64 shim + float32 cross-check: PARAM_NTK_v1.md |

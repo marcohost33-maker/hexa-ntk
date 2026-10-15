@@ -329,6 +329,33 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         self.assertEqual(tuple(out.shape), (2, lattice.num_nodes))
         self.assertTrue(torch.isfinite(out).all())
 
+    @unittest.skipUnless(importlib.util.find_spec("neuralop"), "optional neuraloperator backend not installed")
+    def test_parameter_ntk_of_the_real_gino(self) -> None:
+        # PARAM_NTK_v1 on the actual neuraloperator 2.0.0 GINO (owner decision E1015M-03):
+        # float64 shim with float32 cross-check, complex spectral weights in real coordinates.
+        import param_ntk_hex_v3 as pn
+        lattice = triangle_hex_lattice(32)
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3, hidden_channels=8, n_layers=1,
+                               radius_factor=2.5)
+        torch.manual_seed(0)
+        model = build_gino(cfg, lattice)
+        model.eval()
+        m = lattice.num_nodes
+        rng = np.random.default_rng(3)
+        weights = np.full(m, 1.0 / m)
+        q, _ = np.linalg.qr(np.sqrt(weights)[:, None] * rng.standard_normal((m, 4)))
+        modes = q / np.sqrt(weights)[:, None]
+        u0 = torch.as_tensor(np.sin(np.pi * lattice.coords[:, 0])[None, :])
+        result = pn.param_ntk(model, lambda mm: predict_gino(mm, lattice, u0, cfg)[0], modes, weights,
+                              model_dtype="float32")
+        self.assertEqual(result.kernel.shape, (4, 4))
+        self.assertGreater(result.n_real_params, sum(p.numel() for p in model.parameters()))  # complex x2
+        self.assertGreaterEqual(result.eigenvalues[0], -1e-10 * result.eigenvalues[-1])
+        self.assertGreater(result.eigenvalues[-1], 0.0)
+        self.assertLessEqual(result.fd_relative_error, pn.FD_REL_TOL_FLOAT32)
+        self.assertLess(result.float32_relative_deviation, 1e-2)
+        self.assertEqual(next(model.parameters()).dtype, torch.float32)  # caller's model untouched
+
     def test_complex_weight_dtype_must_match_real_dtype(self) -> None:
         # model.double() leaves complex64 spectral weights next to float64 tensors.
         lattice = triangle_hex_lattice(8)
