@@ -1,0 +1,49 @@
+==================================================================
+HexaNTK Gate-Run -- PR #61 nach Einsammeln #62..#66, #70, #72 (E1015M-02)
+Datum:    2026-10-15
+Geprueft: f2adc7a (Arbeitsbaum vor dem Commit dieses Logs; der Log-Commit aendert keinen Code)
+Anlass:   Stapel in den #61-Zweig gemergt; Ursache tests(cpu)-Rot auf 6d219d9 = BLAS-Kernel (#72)
+Umgebung: Windows 11 | Python 3.12.10 | torch 2.6.0+cpu | numpy 2.5.3 | ruff 0.16.9 |
+          coverage 7.16.2; GINO-Gate in eigenem venv mit neuraloperator 2.0.0 (wie ci.yml gate).
+Exit-Codes je Kommando direkt gemessen (cmd > log 2>&1; rc=$?), keine Pipe.
+==================================================================
+
+$ ruff check src scripts
+  exit 0  -- All checks passed!
+$ python -m compileall src
+  exit 0  -- (leer, exit 0)
+$ python scripts/verify_sources.py
+  exit 0  -- [VERIFY-SOURCES] 37 Toolkit-Eintraege + 12 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (59 Dateien) | PASS
+$ [venv + neuraloperator==2.0.0] version/GINO import check
+  exit 0  -- (leer, exit 0)
+$ [venv + neuraloperator==2.0.0] unittest -p test_gino_adapter_hex_v3.py
+  exit 0  -- Ran 18 tests in 10.347s | OK
+$ python scripts/engine_gate.py
+  exit 0  -- ====================================================================== | [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+$ coverage run -m unittest discover -s src/toolkit -t src/toolkit -p test_*.py
+  exit 0  -- Ran 719 tests in 69.317s | OK (skipped=9)
+$ python -m coverage report
+  exit 0  -- TOTAL                                           3352    196   1244    140    92%
+$ OPENBLAS_CORETYPE=Prescott unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
+  exit 0  -- OK
+$ OPENBLAS_CORETYPE=Sandybridge unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
+  exit 0  -- OK
+$ OPENBLAS_CORETYPE=Haswell unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
+  exit 0  -- OK
+$ OPENBLAS_CORETYPE=Zen unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
+  exit 0  -- OK
+$ OPENBLAS_CORETYPE=SkylakeX unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
+  exit 0  -- OK
+
+### Skips (unittest, Windows):
+  test_best_value_matches_file_after_directory_fsync_failure (test_checkpoint_integration_hex_v3.TestDurabilityErrorAfterReplace.test_best_value_matches_file_after_directory_fsync_failure) ... skipped 'directory fsync is POSIX-only'
+  test_failure_before_replace_is_not_a_durability_error (test_checkpoint_integration_hex_v3.TestDurabilityErrorAfterReplace.test_failure_before_replace_is_not_a_durability_error) ... skipped 'directory fsync is POSIX-only'
+  test_writer_reports_replaced_file (test_checkpoint_integration_hex_v3.TestDurabilityErrorAfterReplace.test_writer_reports_replaced_file) ... skipped 'directory fsync is POSIX-only'
+  test_symlink_inside_dcp_escaping_is_rejected (test_distributed_checkpoint_bundle_v1.TestValidateBundle.test_symlink_inside_dcp_escaping_is_rejected) ... skipped "symlinks not available here: [WinError 1314] (Pfade gekuerzt)"
+  Synthetic optimizer step ONLY; not Phase-1 task data or preregistered training. ... skipped 'optional neuraloperator backend not installed'
+  test_actual_backend_float64_is_refused_by_the_adapter (test_gino_adapter_hex_v3.TestGinoPhase1Adapter.test_actual_backend_float64_is_refused_by_the_adapter) ... skipped 'optional neuraloperator backend not installed'
+  test_actual_backend_forward_smoke (test_gino_adapter_hex_v3.TestGinoPhase1Adapter.test_actual_backend_forward_smoke) ... skipped 'optional neuraloperator backend not installed'
+  test_filesystem_symlink_is_a_gap (test_verify_sources_gate.TestVerifySourcesFilesystem.test_filesystem_symlink_is_a_gap) ... skipped "symlink creation not permitted here: [WinError 1314] (Pfade gekuerzt)"
+  test_filesystem_target_root_symlink_is_a_gap (test_verify_sources_gate.TestVerifySourcesFilesystem.test_filesystem_target_root_symlink_is_a_gap) ... skipped "directory symlink creation not permitted: [WinError 1314] (Pfade gekuerzt)"
+
+Hinweis: SkylakeX-Kernel lokal ohne AVX-512-Pruefung angefordert (OpenBLAS faellt bei fehlender CPU-Unterstuetzung ggf. zurueck); die CI waehlt SkylakeX nur bei AVX-512.

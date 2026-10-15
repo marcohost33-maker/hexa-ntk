@@ -22,6 +22,27 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **CI rot auf #61 (`tests (cpu)`, Head 6d219d9): CG-V2-Tests hingen am BLAS-Kernel
+  (2026-10-14).** `test_at_rounding_floor_where_v1_stagnates` und
+  `test_acceptance_hangs_on_true_comparisons` setzten voraus, dass V1 `rtol=1e-16` auf
+  `_hex_system(12)` nie erreicht. Das erreichbare wahre Residuum liegt selbst bei ~1e-16 und haengt
+  von der Summationsreihenfolge des OpenBLAS-`ddot`-Kernels ab: mit `OPENBLAS_CORETYPE` =
+  Haswell/Zen/Prescott konvergiert V1 (9.9e-17 / 9.8e-17), mit SkylakeX/Sandybridge stagniert es
+  (lokal reproduziert; der CI-Lauf scheitert genauso; numpy 2.5.4 ist NICHT die Ursache). Auf Zen waren beide
+  Tests unabhaengig vom Code rot (null Trennschaerfe); zwei weitere Tests (Skalierungs-Invarianz
+  n=12, nicht-endlicher Floor) liefen dort still den Konvergenz- statt den Floor-Pfad.
+  Fix (nur Tests): `_RTOL_BELOW_ROUNDING = 1e-17` (~u/11) fuer jede "rtol unerreichbar"-Praemisse;
+  jeder Kernel stagniert (bestes Residuum 9.4e-17 .. 3.8e-16, <= 683/2000 Iterationen); der
+  Skalierungstest pinnt den Status je Fall. CI-Schritt "FV solver + reference case across OpenBLAS
+  kernels" faehrt die torch-freien FV/Reference-Suites unter Prescott/Sandybridge/Haswell/Zen (+SkylakeX
+  bei AVX-512) und faellt mit den alten Tests sofort. Mutanten der V2-Akzeptanz (NaN akzeptiert,
+  nie akzeptieren, Floor >= 1 akzeptiert) auf Zen und SkylakeX getoetet.
+  _Phase-0-Evidenz kernelunabhaengig im Urteil:_ `hex_phase0_reference_oracle.py` unter allen fuenf
+  Kerneln: 55/55 Urteilsfelder gleich (Kriterien inkl. I1, Ceilings); p und GCI_fine identisch auf
+  4 Stellen, physikalische Groessen (GCI, Fehler) <= 5e-11 relativ verschieden; nur
+  Rundungsdiagnosen (Eigen-Residuum ~1e-12, CG-Residuum ~1e-16, 7 Iterationsfelder) schwanken
+  kernelabhaengig. _Evidenz:_ `results/2026-10-14_cg-v2-blas-kernel_local-gate.log`.
+
 - [x] **Phase 0b I1 V2 (E1012-07 = A, 2026-10-12).** Marco hat entschieden: I1 bekommt eine
   versionierte V2 mit erreichbarer Schwelle; V1 bleibt als historischer, ehrlich roter Vertrag
   stehen (Blockiert, oben). `spec/HEX_FV_SOLVER_v2.md`: Annahme bei
@@ -255,8 +276,9 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   (Muster: `torchdata.StatefulDataLoader`).
 - [ ] **DDP-Integration des Runners.** Nur `is_main_process`-Guard; kein `DistributedSampler.
   set_epoch`, kein Barrier nach dem Checkpoint-Write, Metriken nicht ueber Ranks reduziert.
-- [ ] **CI-Reproduzierbarkeit:** `numpy` ist im Testjob ungepinnt (`pip install numpy`); ein
-  numpy-Major-Sprung aendert die CI ohne Commit. Pin in `requirements-dev.txt` erwaegen.
+- [x] ~~**CI-Reproduzierbarkeit:** `numpy` ist im Testjob ungepinnt.~~ Erledigt 2026-10-14
+  (siehe oben): `numpy==2.5.3` im Testjob, wie in den Evidence-Lanes; inline wie `torch==2.6.0`,
+  weil `requirements-dev.txt` laut Kopf nur Dev-Tools pinnt.
 
 ## Zurueckgestellt (bewusst, mit Begruendung)
 

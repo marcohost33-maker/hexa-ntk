@@ -596,3 +596,60 @@
 | 996CB2636D266724 | 2026-10-13 00:00 | spec | in-repo new, 2026-10-13 B4 spectral audit and linear POD-ridge baseline contract (secondary instrument, not preregistered): SPECTRAL_AUDIT_v1.md |
 | 3EC5B4A4B6B3C5DA | 2026-10-13 13:13 | spec | in-repo derived, owner decision 2026-10-13 (spectral audit adopted as secondary measurement): PREREGISTRATION_PHASE1_v1.md |
 | 29C3C1737A70F951 | 2026-10-13 13:13 | spec | in-repo derived, owner decision 2026-10-13 (spectral audit adopted as secondary measurement): SPECTRAL_AUDIT_v1.md |
+## Phase-1 external GINO adapter v1 — GPT-5.6 Sol (append-only, 2026-10-07)
+
+> Optional neuraloperator==2.0.0 adapter, synthetic forward smoke and explicit
+> geometry/claim contract. No training or held-out test access.
+
+| BF4314F84A2CC2A0 | 2026-10-07 00:00 | spec | in-repo derived, Phase-1 external GINO adapter contract: GINO_ADAPTER_PHASE1_v1.md |
+| 1C275A6198354313 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase-1 external GINO adapter: gino_adapter_hex_v3.py |
+| FBF08A0858F074F0 | 2026-10-07 00:00 | src/toolkit | in-repo derived, Phase-1 GINO adapter contract/smoke tests: test_gino_adapter_hex_v3.py |
+
+## Phase-1 GINO adapter — repo-gate SHA correction (append-only, 2026-10-07)
+
+> Authoritative prefixes below are the values computed by
+> scripts/verify_sources.py from the GitHub checkout. They supersede the
+> earlier connector-side pre-write hashes without deleting lineage.
+
+| EED780CF4C2653DE | 2026-10-07 00:00 | spec | repo-gate verified current bytes: GINO_ADAPTER_PHASE1_v1.md |
+| 953D456F86FC9276 | 2026-10-07 00:00 | src/toolkit | repo-gate verified current bytes: gino_adapter_hex_v3.py |
+| 386F8AD29D21BE33 | 2026-10-07 00:00 | src/toolkit | repo-gate verified current bytes: test_gino_adapter_hex_v3.py |
+
+
+## Independent GINO adapter review hardening (2026-10-11; stacked on PR #62)
+
+> Append-only pin for the canonical lattice guard, actual backend-version validation,
+> N=32 fixed radius, geometric and config digests in tests.
+
+| 198BC9DEA76DE6B2 | 2026-10-11 00:00 | src/toolkit | in-repo derived, independent GINO review hardening: gino_adapter_hex_v3.py |
+| 238B26A645BD6656 | 2026-10-11 00:00 | src/toolkit | in-repo derived, independent GINO review hardening: test_gino_adapter_hex_v3.py |
+| 4A193E9774BB32DA | 2026-10-11 00:01 | src/toolkit | in-repo derived, Wave17 CI Ruff E501 regression correction: test_gino_adapter_hex_v3.py |
+
+
+## Independent Wave18 GINO device/dtype and synthetic gradient hardening (2026-10-11)
+
+> Appended on reviewed PR63 head, no V1 MMS/preregistrated training changes.
+
+| 650AED2652C23789 | 2026-10-11 03:45 | src/toolkit | in-repo derived, Wave18 device/dtype/autograd and synthetic optimizer regression: gino_adapter_hex_v3.py |
+| 74196F46C89AF814 | 2026-10-11 03:45 | src/toolkit | in-repo derived, Wave18 device/dtype/autograd and synthetic optimizer regression: test_gino_adapter_hex_v3.py |
+| 20451528C1C82C41 | 2026-10-11 04:45 | src/toolkit | in-repo derived, Wave19 bounded early GINO lattice preflight: gino_adapter_hex_v3.py |
+| 7C7EF604A3E2BD7D | 2026-10-11 04:45 | src/toolkit | in-repo derived, Wave19 bounded early GINO lattice preflight: test_gino_adapter_hex_v3.py |
+
+## Wave19 resource-budget hardening final bytes
+| 512A666E4213BE26 | 2026-10-11 04:50 | src/toolkit | in-repo derived, Wave19 final budgeted GINO preflight: gino_adapter_hex_v3.py |
+| 8F37B365FE332FCA | 2026-10-11 04:50 | src/toolkit | in-repo derived, Wave19 final budgeted GINO preflight: test_gino_adapter_hex_v3.py |
+| 9F91DCBDC101FD94 | 2026-10-11 05:00 | src/toolkit | in-repo derived, Wave20 combined spectral-memory guard: gino_adapter_hex_v3.py |
+| 09ED11DAEB4341A7 | 2026-10-11 05:00 | src/toolkit | in-repo derived, Wave20 regression tests: test_gino_adapter_hex_v3.py |
+| BFC8D4BD243E2982 | 2026-10-11 05:00 | spec | in-repo derived, Wave20 explicit operational v2 contract: GINO_ADAPTER_PHASE1_v2.md |
+| D3F24028185AEF60 | 2026-10-13 10:40 | src/toolkit | in-repo derived, float64/complex-dtype guard after real neuraloperator 2.0.0 run: gino_adapter_hex_v3.py |
+| 67119E4E5E380C72 | 2026-10-13 10:40 | src/toolkit | in-repo derived, real-backend float64 refusal + complex-dtype tests: test_gino_adapter_hex_v3.py |
+| 3ED18F2893BD0265 | 2026-10-13 10:40 | spec | in-repo derived, dtype contract + radius-tie error class (measured): GINO_ADAPTER_PHASE1_v2.md |
+
+## CG V2 tests: BLAS-kernel-independent premise (append-only, 2026-10-14)
+
+> PR #61 head 6d219d9 was red in `tests (cpu)`: two V2 tests assumed rtol=1e-16
+> is unreachable for the n=12 system, which holds on the SkylakeX/Sandybridge
+> OpenBLAS kernels but not on Haswell/Zen/Prescott (the CI run failed the same way).
+> Prior rows remain lineage.
+
+| D58885C8EA67AE42 | 2026-10-14 00:00 | src/toolkit | in-repo derived, 2026-10-14 CG V2 tests use _RTOL_BELOW_ROUNDING=1e-17 (kernel-independent stagnation premise), scaling test pins status: test_hex_fv_solver_hex_v3.py |
