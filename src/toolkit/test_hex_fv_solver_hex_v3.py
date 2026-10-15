@@ -692,6 +692,18 @@ class TestSteadySolve(unittest.TestCase):
 
 _U = 2.0**-53
 
+#: An rtol that CG must NOT reach on the n = 12 systems below, so V1 gives up
+#: and V2 has to decide at the rounding floor. 1e-16 (~0.9 u) is not safe:
+#: the attainable true relative residual is itself ~1e-16 and depends on the
+#: summation order of the BLAS ddot kernel. Measured on PR #61 head 6d219d9
+#: with OPENBLAS_CORETYPE in {SkylakeX, Sandybridge, Haswell, Zen, Prescott}:
+#: with rtol=1e-16, V1 CONVERGES on Haswell/Zen/Prescott (9.9e-17 / 9.8e-17;
+#: the CI run of 6d219d9 failed exactly these tests) and stagnates only on
+#: SkylakeX/Sandybridge. With
+#: 1e-17 (~u/11) every kernel stagnates (best 9.4e-17 .. 3.8e-16, at most 683
+#: of 2000 iterations), i.e. the premise holds with a margin of ~10.
+_RTOL_BELOW_ROUNDING = 1e-17
+
 
 def _hex_system(n: int, *, seed: int = 3):
     """-L u = f on the n-triangle (kappa = 1): (apply_a, apply_abs_a, f)."""
@@ -738,13 +750,13 @@ class TestConjugateGradientV2(unittest.TestCase):
     def test_at_rounding_floor_where_v1_stagnates(self) -> None:
         apply_a, apply_abs_a, f = _hex_system(12)
         with self.assertRaisesRegex(ConvergenceError, "stagnated") as ctx:
-            conjugate_gradient(apply_a, f, rtol=1e-16, maxiter=2000)
-        x, info = self._v2(apply_a, apply_abs_a, f, rtol=1e-16)
+            conjugate_gradient(apply_a, f, rtol=_RTOL_BELOW_ROUNDING, maxiter=2000)
+        x, info = self._v2(apply_a, apply_abs_a, f, rtol=_RTOL_BELOW_ROUNDING)
         self.assertEqual((info["status"], info["stop_reason"]), ("at_rounding_floor", "stagnation"))
         # The returned iterate is V1's best iterate, and rtol was NOT reached.
         self.assertTrue(np.array_equal(x, ctx.exception.best))
         self.assertEqual(info["relative_residual"], ctx.exception.best_relative_residual)
-        self.assertGreater(info["relative_residual"], 1e-16)
+        self.assertGreater(info["relative_residual"], _RTOL_BELOW_ROUNDING)
         self.assertLessEqual(info["relative_residual"], info["tol_eff"])
         self.assertLessEqual(info["backward_error"], 8 * _U)  # at_rounding_floor implies eta <= c u
         floor, eta = self._expected_terms(apply_abs_a, x, f, info["relative_residual"], 8)
@@ -796,9 +808,12 @@ class TestConjugateGradientV2(unittest.TestCase):
         self.assertEqual(info["status"], "at_rounding_floor")
 
     def test_status_is_invariant_under_power_of_two_scaling(self) -> None:
-        for n, rtol in ((9, 1e-12), (12, 1e-16)):
+        # One case per V2 outcome; the status is pinned so that a platform on
+        # which rtol becomes reachable cannot silently test the wrong path.
+        for n, rtol, status in ((9, 1e-12, "converged"), (12, _RTOL_BELOW_ROUNDING, "at_rounding_floor")):
             apply_a, apply_abs_a, f = _hex_system(n)
             x_ref, ref = self._v2(apply_a, apply_abs_a, f, rtol=rtol)
+            self.assertEqual(ref["status"], status)
             for k, j in ((0, 600), (0, -600), (-300, 200), (250, -250), (40, 3)):
                 with self.subTest(n=n, k=k, j=j):
                     def scaled_a(v, k=k, base=apply_a):
@@ -837,7 +852,7 @@ class TestConjugateGradientV2(unittest.TestCase):
                     return out
 
                 # on the floor path (rtol unreachable) and on the converged path
-                for rtol in (1e-16, 1e-10):
+                for rtol in (_RTOL_BELOW_ROUNDING, 1e-10):
                     # Any exception type is caught, so a wrong class fails by assertion, not by crash.
                     with self.assertRaises(Exception) as ctx:
                         self._v2(apply_a, poisoned, f, rtol=rtol)
@@ -845,7 +860,7 @@ class TestConjugateGradientV2(unittest.TestCase):
                     self.assertIn("not computable", str(ctx.exception))
         # || |A||x| || overflowing despite finite entries
         with self.assertRaisesRegex(ConvergenceError, "not computable"):
-            self._v2(apply_a, lambda v: np.full_like(v, 1e308), f, rtol=1e-16)
+            self._v2(apply_a, lambda v: np.full_like(v, 1e308), f, rtol=_RTOL_BELOW_ROUNDING)
 
     def test_acceptance_hangs_on_true_comparisons(self) -> None:
         # NaN orientation: if the floor terms were NaN, the floor branch must not accept.
@@ -853,12 +868,12 @@ class TestConjugateGradientV2(unittest.TestCase):
         nan_terms = {"rounding_floor": math.nan, "tol_eff": math.nan, "backward_error": math.nan}
         with mock.patch.object(fv, "_floor_terms", return_value=nan_terms):
             with self.assertRaisesRegex(ConvergenceError, "stagnated"):
-                self._v2(apply_a, apply_abs_a, f, rtol=1e-16)
+                self._v2(apply_a, apply_abs_a, f, rtol=_RTOL_BELOW_ROUNDING)
         # A floor >= 1 carries no information and never accepts.
         with mock.patch.object(fv, "_floor_terms", return_value={"rounding_floor": 1.0, "tol_eff": 1.0,
                                                                    "backward_error": 0.0}):
             with self.assertRaisesRegex(ConvergenceError, "stagnated"):
-                self._v2(apply_a, apply_abs_a, f, rtol=1e-16)
+                self._v2(apply_a, apply_abs_a, f, rtol=_RTOL_BELOW_ROUNDING)
 
     def test_abs_operator_contract(self) -> None:
         apply_a, apply_abs_a, f = _hex_system(9)
@@ -893,10 +908,10 @@ class TestConjugateGradientV2(unittest.TestCase):
         c = edge_conductances(lat, _smooth_kappa)
         f = np.random.default_rng(5).standard_normal(lat.num_nodes)
         with self.assertRaises(ConvergenceError):
-            solve_steady_diffusion(lat, c, f, rtol=1e-16)
-        u, info = solve_steady_diffusion(lat, c, f, rtol=1e-16, stopping="v2")
+            solve_steady_diffusion(lat, c, f, rtol=_RTOL_BELOW_ROUNDING)
+        u, info = solve_steady_diffusion(lat, c, f, rtol=_RTOL_BELOW_ROUNDING, stopping="v2")
         self.assertEqual(info["status"], "at_rounding_floor")
-        self.assertGreater(info["relative_residual"], 1e-16)
+        self.assertGreater(info["relative_residual"], _RTOL_BELOW_ROUNDING)
         diag, off = assemble_hex_operator(lat, c)
         abs_au = (np.abs(diag) * np.abs(u) + (np.abs(off) * np.abs(u)[np.clip(lat.neighbors, 0, None)]).sum(axis=1))
         expected = 8 * _U * (np.linalg.norm(abs_au) + np.linalg.norm(f)) / np.linalg.norm(f)

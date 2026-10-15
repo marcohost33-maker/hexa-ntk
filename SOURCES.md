@@ -632,3 +632,12 @@
 | D3F24028185AEF60 | 2026-10-13 10:40 | src/toolkit | in-repo derived, float64/complex-dtype guard after real neuraloperator 2.0.0 run: gino_adapter_hex_v3.py |
 | 67119E4E5E380C72 | 2026-10-13 10:40 | src/toolkit | in-repo derived, real-backend float64 refusal + complex-dtype tests: test_gino_adapter_hex_v3.py |
 | 3ED18F2893BD0265 | 2026-10-13 10:40 | spec | in-repo derived, dtype contract + radius-tie error class (measured): GINO_ADAPTER_PHASE1_v2.md |
+
+## CG V2 tests: BLAS-kernel-independent premise (append-only, 2026-10-14)
+
+> PR #61 head 6d219d9 was red in `tests (cpu)`: two V2 tests assumed rtol=1e-16
+> is unreachable for the n=12 system, which holds on the SkylakeX/Sandybridge
+> OpenBLAS kernels but not on Haswell/Zen/Prescott (the CI run failed the same way).
+> Prior rows remain lineage.
+
+| D58885C8EA67AE42 | 2026-10-14 00:00 | src/toolkit | in-repo derived, 2026-10-14 CG V2 tests use _RTOL_BELOW_ROUNDING=1e-17 (kernel-independent stagnation premise), scaling test pins status: test_hex_fv_solver_hex_v3.py |
