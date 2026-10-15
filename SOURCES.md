@@ -672,3 +672,13 @@
 | 1314D4BF9583957B | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): test_spectral_audit_oracles_hex_v3.py |
 | 6DA42EA6DFEDF763 | 2026-10-15 00:00 | spec | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): GINO_ADAPTER_PHASE1_v2.md |
 | D1D3D3B2D2DB39A7 | 2026-10-15 00:00 | spec | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): SPECTRAL_AUDIT_v1.md |
+| 2EF9B114873DAFF8 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): hex_fv_solver_hex_v3.py |
+| 6D8721D56E9B9942 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): test_hex_fv_solver_hex_v3.py |
+| 5F14BC566BD97CE8 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): heat_operator_task_hex_v3.py |
+| C2E9300E82426EA8 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): test_heat_operator_task_hex_v3.py |
+| A18A6C82BB0DC292 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): gino_adapter_hex_v3.py |
+| 55DCBCF24EFAB6D4 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): test_gino_adapter_hex_v3.py |
+
+| 73DB4059487654BA | 2026-10-16 | src/toolkit | merge #61 1b9c2c4 + CN oracle tolerance derived from CG rtol (E5): gino_adapter_hex_v3.py |
+| 5822365C94CED266 | 2026-10-16 | src/toolkit | merge #61 1b9c2c4 + CN oracle tolerance derived from CG rtol (E5): test_gino_adapter_hex_v3.py |
+| 3176497F2398A499 | 2026-10-16 | src/toolkit | merge #61 1b9c2c4 + CN oracle tolerance derived from CG rtol (E5): test_spectral_audit_oracles_hex_v3.py |

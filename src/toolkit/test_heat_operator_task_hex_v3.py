@@ -112,6 +112,21 @@ class TestPriorAndTruth(unittest.TestCase):
         with self.assertRaises(ValueError):
             evaluate_sample(TRI, a, torus_hex_lattice(8))
 
+    def test_forged_lattice_is_not_exact_truth(self) -> None:
+        # Codex P2 on #61: a correctly sized triangle lattice with all-zero coordinates
+        # produced all-zero u0/u(T) presented as exact T1 truth.
+        import dataclasses
+        lat = triangle_hex_lattice(20)
+        a = sample_coefficients(TRI, 2, 11)
+        u0, _ = evaluate_sample(TRI, a, lat)  # positive control: the factory lattice
+        self.assertGreater(float(np.abs(u0).max()), 0.0)
+        forged = dataclasses.replace(lat, coords=np.zeros_like(lat.coords))
+        with self.assertRaises((ValueError, TypeError)):
+            evaluate_sample(TRI, a, forged)
+        rewired = dataclasses.replace(lat, neighbors=np.zeros_like(lat.neighbors))
+        with self.assertRaises((ValueError, TypeError)):
+            evaluate_sample(TRI, a, rewired)
+
     def test_resolution_axis_samples_the_same_function(self) -> None:
         coarse = generate_dataset(TRI, n=16, sample_ids=[0, 1], dataset_seed=3)
         fine = generate_dataset(TRI, n=32, sample_ids=[0, 1], dataset_seed=3)
@@ -230,6 +245,20 @@ class TestManifest(unittest.TestCase):
 
 
 class TestSplitAndLoader(unittest.TestCase):
+    def test_dataset_requires_one_finite_field_per_sample(self) -> None:
+        # Codex P2 on #61: [S] and [S, M, C] arrays used to pass the equal-shape check.
+        data = generate_dataset(TRI, n=8, sample_ids=range(3), dataset_seed=1)
+        self.assertEqual(len(HeatOperatorDataset(data)), 3)  # positive control: [S, M]
+        u0, u_t = np.asarray(data["u0"]), np.asarray(data["uT"])
+        for label, a, b in (("flat [S]", u0[:, 0], u_t[:, 0]),
+                            ("channels [S, M, C]", u0[:, :, None], u_t[:, :, None])):
+            with self.subTest(label), self.assertRaises(ValueError):
+                HeatOperatorDataset(dict(data, u0=a, uT=b))
+        bad = u0.copy()
+        bad[1, 2] = np.nan
+        with self.assertRaises(ValueError):
+            HeatOperatorDataset(dict(data, u0=bad))
+
     def test_leakage_safe_split_and_dataloader(self) -> None:
         data = generate_dataset(TRI, n=12, sample_ids=range(20), dataset_seed=1)
         ds = HeatOperatorDataset(data)

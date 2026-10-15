@@ -747,6 +747,19 @@ class TestConjugateGradientV2(unittest.TestCase):
         np.testing.assert_allclose(np.linalg.norm(f - apply_a(x2)) / np.linalg.norm(f), i2["relative_residual"],
                                    rtol=1e-12)
 
+    def test_v2_checks_the_last_iterate_before_maxiter_give_up(self) -> None:
+        # Codex P2 on #61 (dd24538): the recursive residual of the final iterate stayed
+        # above a tiny rtol, so its true residual was never computed and give_up judged
+        # the initial iterate (best_relative = 1) instead of the far better last one.
+        d = np.array([1.0, 1.0 + 2.0**-50])
+        apply_a = lambda v: d * v  # noqa: E731
+        apply_abs_a = lambda v: np.abs(d) * v  # noqa: E731
+        b = np.array([1.0, 1.0])
+        x, info = self._v2(apply_a, apply_abs_a, b, rtol=1e-20, maxiter=1)
+        self.assertEqual((info["status"], info["stop_reason"]), ("at_rounding_floor", "maxiter"))
+        self.assertLess(info["relative_residual"], 1e-12)
+        np.testing.assert_allclose(x, b / d, rtol=1e-12)
+
     def test_at_rounding_floor_where_v1_stagnates(self) -> None:
         apply_a, apply_abs_a, f = _hex_system(12)
         with self.assertRaisesRegex(ConvergenceError, "stagnated") as ctx:

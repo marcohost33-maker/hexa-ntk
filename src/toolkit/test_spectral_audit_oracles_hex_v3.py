@@ -29,6 +29,7 @@ from hex_fv_solver_hex_v3 import assemble_hex_operator, torus_hex_lattice, trian
 TRI = HeatOperatorTaskConfig()
 TORUS = HeatOperatorTaskConfig(domain="torus_periodic")
 ORACLE_RTOL = 1e-12
+CG_STEP_RTOL = 1e-12  # rtol of each CN step solve in mechanistic_baseline
 EPS = float(np.finfo(np.float64).eps)
 
 
@@ -102,11 +103,19 @@ class TestOracleCrankNicolson(unittest.TestCase):
                 result = sa.input_jacobian_spectrum(
                     lambda u: mechanistic_baseline(config, u, lattice, steps=steps)[0],
                     hm.modes, hm.weights, oracle=oracle)
-                self.assertLessEqual(np.max(result.diag_rel_error), ORACLE_RTOL)
-                self.assertLessEqual(result.coupling_fraction, ORACLE_RTOL)
+                # Each CN step is a CG solve to relative residual CG_STEP_RTOL; the solution
+                # error is bounded by cond(I + dt/2 kappa L) times that, accumulated over the
+                # steps. A fixed 1e-12 ignored this reference size and failed by a hair under
+                # one BLAS kernel (1.37e-12, triangle, steps=1) -- the bound is derived now.
+                lam_max = float(np.max(np.abs(hm.discrete_eigenvalues)))
+                cond = 1.0 + 0.5 * dt * config.kappa * lam_max
+                cn_tol = 4.0 * steps * CG_STEP_RTOL * cond
+                self.assertLessEqual(np.max(result.diag_rel_error), cn_tol)
+                self.assertLess(cn_tol, 1e-8)  # the bound stays far below any modelling error
+                self.assertLessEqual(result.coupling_fraction, cn_tol)
                 # CG stops at rtol = 1e-12 per step: the out-of-span residual sits at that level.
                 self.assertLessEqual(result.out_of_span_max, 1e-10)
-                self.assertEqual(sa.audit_verdict(result, diag_rtol=ORACLE_RTOL, coupling_tol=ORACLE_RTOL), "PASS")
+                self.assertEqual(sa.audit_verdict(result, diag_rtol=cn_tol, coupling_tol=cn_tol), "PASS")
                 if steps == 1:
                     # z > 2 for the high modes: CN flips their sign (no L-stability); the audit sees it.
                     self.assertTrue(np.any(result.diagonal < 0.0))

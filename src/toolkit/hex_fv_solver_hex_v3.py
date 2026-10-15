@@ -688,6 +688,18 @@ def conjugate_gradient(
         if rr == 0.0:
             return give_up(_cg_underflow(best, exponent, best_relative, iteration), "underflow")
         p = r.copy()  # residual replacement: restart from the true residual
+    # V2 only: the last iterate may never have had its true residual computed (its
+    # recursive residual stayed above rtol). Judge it before giving up, so the
+    # rounding-floor acceptance sees the best iterate actually reached, not an earlier
+    # one (Codex P2 on #61). V1 keeps its documented maxiter error unchanged.
+    r_end = rhs - np.asarray(apply_a(x), dtype=np.float64) if v2 else None
+    rr_end = float(r_end @ r_end) if v2 else math.nan
+    if v2 and math.isfinite(rr_end):
+        relative_end = _norm2(r_end, rr_end) / b_norm
+        if relative_end <= rtol:
+            return converged(x, relative_end, maxiter)
+        if relative_end < best_relative:
+            best, best_relative = x, relative_end
     return give_up(ConvergenceError(
         f"conjugate_gradient: no convergence to rtol={rtol!r} in {maxiter} iterations",
         best=np.ldexp(best, exponent), best_relative_residual=best_relative, iterations=maxiter,

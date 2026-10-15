@@ -97,5 +97,5 @@ jobs:
           fi
           for kernel in $kernels; do
             echo "== OPENBLAS_CORETYPE=$kernel"
-            OPENBLAS_CORETYPE="$kernel" python -m unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
+            OPENBLAS_CORETYPE="$kernel" python -m unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3 test_spectral_audit_oracles_hex_v3
           done
