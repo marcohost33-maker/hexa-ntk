@@ -603,3 +603,12 @@
 | 953D456F86FC9276 | 2026-10-07 00:00 | src/toolkit | repo-gate verified current bytes: gino_adapter_hex_v3.py |
 | 386F8AD29D21BE33 | 2026-10-07 00:00 | src/toolkit | repo-gate verified current bytes: test_gino_adapter_hex_v3.py |
 
+
+## Independent GINO adapter review hardening (2026-10-11; stacked on PR #62)
+
+> Append-only pin for the canonical lattice guard, actual backend-version validation,
+> N=32 fixed radius, geometric and config digests in tests.
+
+| 198BC9DEA76DE6B2 | 2026-10-11 00:00 | src/toolkit | in-repo derived, independent GINO review hardening: gino_adapter_hex_v3.py |
+| 238B26A645BD6656 | 2026-10-11 00:00 | src/toolkit | in-repo derived, independent GINO review hardening: test_gino_adapter_hex_v3.py |
+| 4A193E9774BB32DA | 2026-10-11 00:01 | src/toolkit | in-repo derived, Wave17 CI Ruff E501 regression correction: test_gino_adapter_hex_v3.py |

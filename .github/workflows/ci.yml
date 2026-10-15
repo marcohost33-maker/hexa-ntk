@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -32,6 +31,18 @@ jobs:
         # fail-closed: jedes Toolkit-Modul braucht einen SOURCES.md-Eintrag,
         # jeder Eintrag muss zur aktuellen Datei passen (SHA-256, LF-normalisiert).
         run: python scripts/verify_sources.py
+      - name: required real GINO forward gate when adapter is present
+        # Runs on stacked PRs too; never count an optional-backend skip as success.
+        # The phase1-adapter-checks workflow alone is not the protected ci/gate.
+        run: |
+          if [ -f src/toolkit/gino_adapter_hex_v3.py ]; then
+            pip install numpy
+            pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
+            pip install -r requirements-operator.txt
+            python -c "import importlib.metadata; assert importlib.metadata.version('neuraloperator') == '2.0.0'"
+            python -c "import neuralop.models; assert hasattr(neuralop.models, 'GINO')"
+            python -m unittest discover -s src/toolkit -t src/toolkit -p "test_gino_adapter_hex_v3.py" -v
+          fi
 
   tests:
     name: tests (cpu)

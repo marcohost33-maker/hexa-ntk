@@ -15,6 +15,7 @@ __all__ = [
 ]
 
 import hashlib
+import importlib.metadata
 import json
 import math
 from dataclasses import dataclass
@@ -23,7 +24,7 @@ from typing import Any, Dict
 import numpy as np
 import torch
 
-from hex_fv_solver_hex_v3 import HexLattice
+from hex_fv_solver_hex_v3 import HexLattice, torus_hex_lattice, triangle_hex_lattice
 
 GINO_BACKEND_PIN = "neuraloperator==2.0.0"
 _DOMAIN_HEIGHT = math.sqrt(3.0) / 2.0
@@ -73,12 +74,29 @@ class GinoPhase1Config:
 
 
 def _check_lattice(lattice: Any) -> HexLattice:
+    """Fail closed on fabricated/mutated geometry and adjacency at the public boundary."""
     if not isinstance(lattice, HexLattice):
         raise TypeError("lattice must be a HexLattice")
-    coords = np.asarray(lattice.coords)
-    if coords.shape != (lattice.num_nodes, 2) or not np.all(np.isfinite(coords)):
-        raise ValueError("lattice coordinates must be finite with shape (num_nodes, 2)")
-    return lattice
+    if type(lattice.n) is not int or lattice.n < 3:
+        raise ValueError("lattice n must be a canonical integer")
+    if lattice.domain == "triangle_dirichlet":
+        canonical = triangle_hex_lattice(lattice.n)
+    elif lattice.domain == "torus_periodic":
+        canonical = torus_hex_lattice(lattice.n)
+    else:
+        raise ValueError("lattice domain is not supported")
+    if (
+        lattice.h != canonical.h
+        or not isinstance(lattice.coords, np.ndarray)
+        or not isinstance(lattice.neighbors, np.ndarray)
+        or lattice.coords.dtype != canonical.coords.dtype
+        or lattice.neighbors.dtype != canonical.neighbors.dtype
+        or not np.array_equal(lattice.coords, canonical.coords)
+        or not np.array_equal(lattice.neighbors, canonical.neighbors)
+    ):
+        raise ValueError("lattice must have canonical geometry and neighbor topology")
+    # The adapter must never use mutable caller-owned lattice arrays after check.
+    return canonical
 
 
 def prepare_gino_batch(
@@ -124,10 +142,18 @@ def prepare_gino_batch(
 def build_gino(config: GinoPhase1Config, training_lattice: HexLattice) -> Any:
     """Instantiate the pinned external GINO with a radius fixed from train h."""
     training_lattice = _check_lattice(training_lattice)
-    if training_lattice.domain != "triangle_dirichlet":
-        raise ValueError("Phase-1 GINO must be configured from the triangle training lattice")
+    if training_lattice.domain != "triangle_dirichlet" or training_lattice.n != 32:
+        raise ValueError("Phase-1 GINO requires the fixed N=32 triangle training lattice")
     if not isinstance(config, GinoPhase1Config):
         raise TypeError("config must be a GinoPhase1Config")
+    try:
+        actual_version = importlib.metadata.version("neuraloperator")
+    except importlib.metadata.PackageNotFoundError as exc:
+        raise RuntimeError(f"optional backend missing; install {GINO_BACKEND_PIN}") from exc
+    if actual_version != "2.0.0":
+        raise RuntimeError(
+            f"backend version mismatch: required {GINO_BACKEND_PIN}, got {actual_version}"
+        )
     try:
         from neuralop.models import GINO
     except ImportError as exc:
