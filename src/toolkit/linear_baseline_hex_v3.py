@@ -22,6 +22,9 @@ No centring: the target operators here are linear, not affine.
 
 Leakage guard: ``fit`` records the training sample ids; ``predict`` takes
 the ids of the samples it scores and raises if any of them was trained on.
+Since 2026-10-15 ``fit`` also records a SHA-256 per training input row in
+canonical form (float64 little-endian, -0.0 -> 0.0), and ``predict`` raises
+if a scored row repeats a training input under another id.
 The operator view (``__call__``, ``matrix``) carries no ids: it is for
 instruments such as the spectral audit, not for scoring samples.
 
@@ -36,6 +39,7 @@ from __future__ import annotations
 
 __all__ = ["LinearBaselineConfig", "PODRidgeBaseline", "LeakageError"]
 
+import hashlib
 import math
 import numbers
 from dataclasses import dataclass
@@ -104,6 +108,16 @@ def _fields(value: Any, num_nodes: Optional[int], *, name: str) -> np.ndarray:
     if not np.all(np.isfinite(arr)):
         raise ValueError(f"{name} must be finite")
     return arr
+
+
+def _row_hashes(fields: np.ndarray) -> Tuple[bytes, ...]:
+    """SHA-256 of each row in canonical form: float64, little-endian, -0.0 -> 0.0.
+
+    Inputs are finite (checked by ``_fields``), so adding 0.0 maps exactly the
+    signed zero to +0.0 and leaves every other value unchanged.
+    """
+    canonical = np.ascontiguousarray(fields.astype("<f8") + 0.0)
+    return tuple(hashlib.sha256(row.tobytes()).digest() for row in canonical)
 
 
 def _pod(fields: np.ndarray, sqrt_w: np.ndarray, config: LinearBaselineConfig, *, name: str
@@ -185,7 +199,7 @@ class PODRidgeBaseline:
         for arr in (p_in, p_out, b, s_in, s_out):
             arr.flags.writeable = False
         self._fitted = {"p_in": p_in, "p_out": p_out, "b": b, "alpha": alpha, "s_in": s_in, "s_out": s_out,
-                        "train_ids": frozenset(ids)}
+                        "train_ids": frozenset(ids), "train_rows": frozenset(_row_hashes(x))}
         return self
 
     def _apply(self, x: np.ndarray) -> np.ndarray:
@@ -201,6 +215,12 @@ class PODRidgeBaseline:
         leaked = sorted(set(ids) & fit["train_ids"])
         if leaked:
             raise LeakageError(f"{len(leaked)} scored sample ids were trained on, e.g. {leaked[:5]}")
+        duplicates = [sid for sid, h in zip(ids, _row_hashes(x)) if h in fit["train_rows"]]
+        if duplicates:
+            raise LeakageError(
+                f"{len(duplicates)} scored samples repeat a training input under another id, "
+                f"e.g. {duplicates[:5]} (content match after -0.0 -> 0.0)"
+            )
         return self._apply(x)
 
     def __call__(self, u: Any) -> np.ndarray:

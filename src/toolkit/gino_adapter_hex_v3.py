@@ -40,6 +40,56 @@ _MAX_RADIUS_FACTOR = 16.0
 _MAX_SPECTRAL_WEIGHT_BYTES = 256 * 1024 * 1024
 _RESOURCE_POLICY = "GINO_ADAPTER_PHASE1_v2"
 _DOMAIN_HEIGHT = math.sqrt(3.0) / 2.0
+# The GNO radius is fixed from the N=32 training lattice (h = 1/32), see build_gino.
+_TRAINING_N = 32
+# A node-latent distance within this relative band of the GNO radius is a tie:
+# float32 and float64 then build different neighbour graphs (spec v2, B4).
+_RADIUS_TIE_RTOL = 1e-6
+_TIE_CHUNK_ELEMENTS = 1 << 21
+_TIE_CACHE: Dict[tuple, int] = {}
+
+
+def _latent_grid64(latent_resolution: int) -> np.ndarray:
+    """The latent query points of prepare_gino_batch, in float64, shape (R*R, 2)."""
+    axis_x = np.linspace(0.0, 1.0, latent_resolution)
+    axis_y = np.linspace(0.0, _DOMAIN_HEIGHT, latent_resolution)
+    grid_x, grid_y = np.meshgrid(axis_x, axis_y, indexing="ij")
+    return np.stack((grid_x.ravel(), grid_y.ravel()), axis=-1)
+
+
+def _radius_ties(lattice: HexLattice, config: "GinoPhase1Config") -> int:
+    """Count node-latent distances d with |d - r| <= 1e-6 r for the GNO radius r.
+
+    The lattice is canonical (checked by _check_lattice), so the count depends
+    only on (domain, n, latent_resolution, radius_factor) and is cached.
+    """
+    key = (lattice.domain, lattice.n, int(config.latent_resolution), float(config.radius_factor))
+    cached = _TIE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    radius = float(config.radius_factor) / _TRAINING_N
+    band = _RADIUS_TIE_RTOL * radius
+    queries = _latent_grid64(int(config.latent_resolution))
+    coords = np.asarray(lattice.coords, dtype=np.float64)
+    chunk = max(1, _TIE_CHUNK_ELEMENTS // queries.shape[0])
+    ties = 0
+    for start in range(0, coords.shape[0], chunk):
+        diff = coords[start:start + chunk, None, :] - queries[None, :, :]
+        dist = np.sqrt(np.sum(diff * diff, axis=-1))
+        ties += int(np.count_nonzero(np.abs(dist - radius) <= band))
+    _TIE_CACHE[key] = ties
+    return ties
+
+
+def _refuse_radius_ties(lattice: HexLattice, config: "GinoPhase1Config") -> None:
+    ties = _radius_ties(lattice, config)
+    if ties != 0:
+        raise ValueError(
+            f"{ties} node-latent distances lie within {_RADIUS_TIE_RTOL:g} r of the GNO radius "
+            f"(radius_factor={float(config.radius_factor)!r}, latent_resolution="
+            f"{int(config.latent_resolution)}, {lattice.domain} n={lattice.n}); a radius tie makes "
+            "the neighbour graph depend on rounding, choose another radius_factor"
+        )
 
 
 def _positive_int(value: Any, *, name: str, minimum: int = 1) -> int:
@@ -166,6 +216,7 @@ def prepare_gino_batch(
     lattice = _check_lattice(lattice)
     if not isinstance(config, GinoPhase1Config):
         raise TypeError("config must be a GinoPhase1Config")
+    _refuse_radius_ties(lattice, config)
 
     if dtype not in (torch.float32, torch.float64):
         raise TypeError("GINO inputs require float32 or float64")
@@ -216,6 +267,7 @@ def build_gino(config: GinoPhase1Config, training_lattice: HexLattice) -> Any:
         raise ValueError("Phase-1 GINO requires the fixed N=32 triangle training lattice")
     if not isinstance(config, GinoPhase1Config):
         raise TypeError("config must be a GinoPhase1Config")
+    _refuse_radius_ties(training_lattice, config)
     try:
         actual_version = importlib.metadata.version("neuraloperator")
     except importlib.metadata.PackageNotFoundError as exc:
@@ -267,9 +319,13 @@ def _model_device_dtype(model: Any) -> tuple[torch.device | None, torch.dtype]:
     expected_complex = torch.complex64 if dtype == torch.float32 else torch.complex128
     if any(t.is_complex() and t.dtype != expected_complex for t in tensors):
         raise ValueError("GINO complex spectral weights do not match the real parameter dtype")
-    if dtype == torch.float64 and type(model).__module__.startswith("neuralop."):
+    if dtype == torch.float64 and any(
+        type(sub).__module__.startswith("neuralop.") for sub in model.modules()
+    ):
         # neuraloperator 2.0.0 allocates in float32/complex64 regardless of the model:
         # layers/segment_csr.py:76 (torch.zeros without dtype), spectral_convolution.py:444.
+        # model.modules() includes the model itself, so a caller-side wrapper outside
+        # neuralop.* around a float64 neuraloperator submodule is refused too (2026-10-15).
         raise ValueError("float64 GINO is not supported by the neuraloperator 2.0.0 backend; use float32")
     return device, dtype
 

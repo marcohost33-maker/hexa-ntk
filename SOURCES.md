@@ -655,3 +655,20 @@
 | D58885C8EA67AE42 | 2026-10-14 00:00 | src/toolkit | in-repo derived, 2026-10-14 CG V2 tests use _RTOL_BELOW_ROUNDING=1e-17 (kernel-independent stagnation premise), scaling test pins status: test_hex_fv_solver_hex_v3.py |
 
 | F80BB66072969523 | 2026-10-15 00:00 | spec | in-repo derived, 2026-10-15 E1015M-01 D5 = CPU entered from the approved source, D4 grid and D5 machine still open, status stays DRAFT: PREREGISTRATION_PHASE1_v1.md |
+
+> **2026-10-15, hardening negative-first (B3a, B4, B9, B6).** GINO adapter: float64
+> refusal over every submodule; runtime radius-tie refusal in build_gino and
+> prepare_gino_batch. POD-ridge: content leakage via canonical row hashes
+> (-0.0 -> 0.0). Spectral audit: determinism preflight (two forwards bitwise
+> equal, global RNG unchanged), counted in the evaluation budget. Prior rows
+> remain lineage.
+
+| E209AE93528788AE | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): gino_adapter_hex_v3.py |
+| 8625301D301E8588 | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): test_gino_adapter_hex_v3.py |
+| E06B6E507C83A789 | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): linear_baseline_hex_v3.py |
+| 65676123D70A84DE | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): test_linear_baseline_hex_v3.py |
+| CCDEFBC9270C645A | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): spectral_audit_hex_v3.py |
+| 7EC0CFA6715BC616 | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): test_spectral_audit_hex_v3.py |
+| 1314D4BF9583957B | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): test_spectral_audit_oracles_hex_v3.py |
+| 6DA42EA6DFEDF763 | 2026-10-15 00:00 | spec | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): GINO_ADAPTER_PHASE1_v2.md |
+| D1D3D3B2D2DB39A7 | 2026-10-15 00:00 | spec | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): SPECTRAL_AUDIT_v1.md |

@@ -119,7 +119,8 @@ class TestTorchBackend(unittest.TestCase):
                 result = sa.input_jacobian_spectrum(self.linear, self.q, self.w, torch_mode=mode)
                 self.assertEqual((result.backend, result.torch_mode, result.dtype), ("torch", mode, "float64"))
                 self.assertLessEqual(np.max(np.abs(result.projection - self.reference)) / self.scale, 1e-13)
-                self.assertEqual(result.evaluations, self.q.shape[1] + (mode == "reverse"))
+                self.assertEqual(result.evaluations,
+                                 sa._REPEAT_EVALUATIONS + self.q.shape[1] + (mode == "reverse"))
         self.assertIsNone(sa.input_jacobian_spectrum(self.linear, self.q, self.w, torch_mode="reverse").out_of_span)
 
     def test_numpy_and_torch_agree(self):
@@ -209,7 +210,7 @@ class TestTorchBackend(unittest.TestCase):
                                                backend="torch", torch_mode=mode)
 
     def test_torch_budget(self):
-        k = self.q.shape[1]
+        k = self.q.shape[1] + sa._REPEAT_EVALUATIONS  # Jacobian columns + determinism preflight
         with self.assertRaises(sa.BudgetExceededError):
             sa.input_jacobian_spectrum(self.linear, self.q, self.w, max_evaluations=k - 1)
         with self.assertRaises(sa.BudgetExceededError):
@@ -275,11 +276,12 @@ class TestFailClosed(unittest.TestCase):
             calls.append(1)
             return u
 
+        need = 2 * self.k + 1 + sa._REPEAT_EVALUATIONS  # FD stencil + determinism preflight
         with self.assertRaises(sa.BudgetExceededError):
-            sa.input_jacobian_spectrum(op, self.q, self.w, max_evaluations=2 * self.k)
+            sa.input_jacobian_spectrum(op, self.q, self.w, max_evaluations=need - 1)
         self.assertEqual(calls, [])
-        result = sa.input_jacobian_spectrum(op, self.q, self.w, max_evaluations=2 * self.k + 1)
-        self.assertEqual((result.evaluations, len(calls)), (2 * self.k + 1, 2 * self.k + 1))
+        result = sa.input_jacobian_spectrum(op, self.q, self.w, max_evaluations=need)
+        self.assertEqual((result.evaluations, len(calls)), (need, need))
 
     def test_time_budget(self):
         with self.assertRaises(sa.BudgetExceededError):
@@ -351,6 +353,74 @@ class TestFailClosed(unittest.TestCase):
                     result.diag_abs_error, result.diag_rel_error):
             with self.assertRaises(ValueError):
                 arr[0] = 0.0
+
+
+class TestDeterminismPreflight(unittest.TestCase):
+    """B6 (2026-10-15): .training alone does not prove a deterministic operator.
+    Two forwards at the base point must agree bitwise and leave the global RNG
+    state (torch, numpy, random) unchanged."""
+
+    def setUp(self):
+        self.lattice, self.hm = _setup(TRI, 16)
+        self.q, self.w = self.hm.modes, self.hm.weights
+
+    def _refused(self, operator, needle, **kwargs):
+        with self.assertRaises(Exception) as caught:
+            sa.input_jacobian_spectrum(operator, self.q, self.w, **kwargs)
+        got = type(caught.exception).__name__
+        self.assertIsInstance(caught.exception, ValueError, f"expected ValueError, got {got}")
+        self.assertIn(needle, str(caught.exception))
+
+    def test_eval_module_with_noise_is_refused(self):
+        class Noisy(torch.nn.Module):
+            def forward(self, x):
+                return x + 1e-3 * torch.rand_like(x)
+
+        self._refused(Noisy().eval(), "RNG", backend="torch")
+
+    def test_rng_consumer_with_identical_output_is_refused(self):
+        # Output is deterministic, but the global torch RNG advances: only the RNG check sees it.
+        class Draws(torch.nn.Module):
+            def forward(self, x):
+                torch.rand(1)
+                return 2.0 * x
+
+        self._refused(Draws().eval(), "RNG", backend="torch")
+
+    def test_numpy_rng_consumer_is_refused(self):
+        def op(u):
+            np.random.random()
+            return 2.0 * u
+
+        self._refused(op, "RNG")
+
+    def test_stateful_operator_without_rng_is_refused(self):
+        # No RNG at all, but two forwards differ in the last bit: only the bitwise check sees it.
+        class Drifting(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+
+            def forward(self, x):
+                self.calls += 1
+                return x * (1.0 + self.calls * 2.0 ** -40)
+
+        # Non-zero base point: at the default base 0 the drift would vanish (0 * anything = 0).
+        self._refused(Drifting().eval(), "bitwise", backend="torch", torch_dtype=torch.float64,
+                      base_point=np.ones(self.q.shape[0]))
+
+    def test_deterministic_operators_pass_and_keep_the_rng(self):
+        # Positive control: deterministic module and numpy callable, RNG untouched.
+        linear = torch.nn.Linear(self.q.shape[0], self.q.shape[0]).double().eval()  # init draws RNG
+        torch_state = torch.get_rng_state()
+        numpy_state = np.random.get_state()
+        result = sa.input_jacobian_spectrum(linear, self.q, self.w)
+        self.assertTrue(np.all(np.isfinite(result.projection)))
+        numpy_result = sa.input_jacobian_spectrum(lambda u: 2.0 * u, self.q, self.w)
+        self.assertTrue(np.all(np.isfinite(numpy_result.projection)))
+        self.assertTrue(torch.equal(torch_state, torch.get_rng_state()))
+        after = np.random.get_state()
+        self.assertTrue(np.array_equal(numpy_state[1], after[1]) and numpy_state[2:] == after[2:])
 
 
 class TestAuditVerdict(unittest.TestCase):

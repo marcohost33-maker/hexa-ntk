@@ -35,6 +35,7 @@ from __future__ import annotations
 __all__ = [
     "BudgetExceededError",
     "NonFiniteOutputError",
+    "NondeterministicOperatorError",
     "HeatModeMatrix",
     "SpectralAuditResult",
     "heat_mode_matrix",
@@ -48,6 +49,7 @@ __all__ = [
 
 import math
 import numbers
+import random
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Tuple
@@ -70,6 +72,56 @@ class BudgetExceededError(RuntimeError):
 
 class NonFiniteOutputError(ValueError):
     """The operator, or a quantity derived from it, is not finite."""
+
+
+class NondeterministicOperatorError(ValueError):
+    """Two forwards at the base point differ bitwise, or the operator moved the global RNG."""
+
+
+# Forwards spent on the determinism preflight (counted in the evaluation budget).
+_REPEAT_EVALUATIONS = 2
+
+
+def _rng_snapshot() -> Tuple[Any, ...]:
+    cuda = torch.cuda.get_rng_state_all() if torch.cuda.is_available() and torch.cuda.is_initialized() else []
+    return torch.get_rng_state(), np.random.get_state(), random.getstate(), cuda
+
+
+def _rng_unchanged(before: Tuple[Any, ...], after: Tuple[Any, ...]) -> bool:
+    np_before, np_after = before[1], after[1]
+    return (
+        torch.equal(before[0], after[0])
+        and np_before[0] == np_after[0]
+        and np.array_equal(np_before[1], np_after[1])
+        and tuple(np_before[2:]) == tuple(np_after[2:])
+        and before[2] == after[2]
+        and len(before[3]) == len(after[3])
+        and all(torch.equal(a, b) for a, b in zip(before[3], after[3]))
+    )
+
+
+def _repeat_check(operator: Callable[[Any], Any], base: np.ndarray, m: int, use_torch: bool,
+                  dtype: Optional[torch.dtype], device: Optional[torch.device], budget: "_Budget") -> None:
+    """Two forwards at ``base`` must agree bitwise and leave the global RNG state unchanged."""
+    before = _rng_snapshot()
+    outputs = []
+    for _ in range(_REPEAT_EVALUATIONS):
+        if use_torch:
+            with torch.no_grad():
+                y = _torch_output(operator(torch.as_tensor(base, dtype=dtype, device=device)), m)
+            y = y.detach().to("cpu").contiguous()
+            outputs.append((str(y.dtype), y.view(torch.uint8).numpy().tobytes()))
+        else:
+            y = _numpy_output(operator(base.copy()), m)
+            outputs.append((y.dtype.str, np.ascontiguousarray(y).tobytes()))
+        budget.tick()
+    if not _rng_unchanged(before, _rng_snapshot()):
+        raise NondeterministicOperatorError(
+            "operator changed the global RNG state (torch/numpy/random) during two forwards at the base point; "
+            "dropout or sampling would make J random")
+    if not outputs[0] == outputs[1]:
+        raise NondeterministicOperatorError(
+            "two forwards at the base point differ bitwise; J would not be reproducible")
 
 
 # ------------------------------------------------------------------
@@ -434,6 +486,13 @@ def input_jacobian_spectrum(
     than ``max_seconds`` wall time raise BudgetExceededError. A module in
     training mode raises ValueError unless ``allow_train_mode`` (dropout and
     batch statistics would make J random and mutate buffers).
+
+    Determinism preflight (2026-10-15): before any Jacobian work the operator
+    is called twice at the base point (counted in ``evaluations`` and in the
+    budget); the two outputs must agree bitwise and the global RNG state
+    (torch, numpy, random, initialised CUDA) must be unchanged, otherwise
+    NondeterministicOperatorError (a ValueError) is raised. ``.training`` alone
+    does not prove determinism: an eval-mode module may still sample.
     """
     start = time.perf_counter()
     if backend not in _BACKENDS:
@@ -468,13 +527,18 @@ def input_jacobian_spectrum(
         if isinstance(operator, torch.nn.Module) and operator.training and not allow_train_mode:
             raise ValueError("module is in training mode; call .eval() or pass allow_train_mode=True")
         dtype = _torch_dtype(operator, torch_dtype)
-        jq, rows = _jq_torch(operator, q, w, base, dtype, _torch_device(operator), torch_mode, budget)
+        device = _torch_device(operator)
+        budget.require(_REPEAT_EVALUATIONS + (k if torch_mode == "forward" else k + 1))
+        _repeat_check(operator, base, m, True, dtype, device, budget)
+        jq, rows = _jq_torch(operator, q, w, base, dtype, device, torch_mode, budget)
         mode_used = torch_mode
         dtype_name = str(dtype).replace("torch.", "")
         step = None
     else:
         if torch_dtype is not None:
             raise ValueError("torch_dtype applies to the torch backend only")
+        budget.require(_REPEAT_EVALUATIONS + 2 * k + 1)
+        _repeat_check(operator, base, m, False, None, None, budget)
         jq, step, dtype_name = _jq_numpy(operator, q, w, base, step, budget)
         rows = None
 

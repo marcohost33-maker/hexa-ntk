@@ -166,11 +166,42 @@ class TestLeakageGuard(unittest.TestCase):
         with self.assertRaisesRegex(LeakageError, "1 scored sample ids"):
             self.model.predict(self.u0[:3], [7, 8, 100 + 5])
         self.assertTrue(issubclass(LeakageError, ValueError))
-        self.assertEqual(self.model.predict(self.u0[:2], [7, 8]).shape, (2, TRI.lattice.num_nodes))
+        # Fresh content under fresh ids (training rows under fresh ids are a content leak since 2026-10-15).
+        fresh, _ = TRI.data(2, seed=778)
+        self.assertEqual(self.model.predict(fresh, [7, 8]).shape, (2, TRI.lattice.num_nodes))
+
+    def test_content_duplicate_with_a_new_id_is_leakage(self):
+        # B9 (2026-10-15): the guard compared ids only; a training row scored
+        # under a fresh id, or with -0.0 where training had 0.0, slipped through.
+        with self.assertRaises(Exception) as caught:
+            self.model.predict(self.u0[3:4].copy(), [999])
+        got = type(caught.exception).__name__
+        self.assertIsInstance(caught.exception, LeakageError, f"expected LeakageError, got {got}")
+
+    def test_signed_zero_duplicate_is_leakage(self):
+        u0 = self.u0.copy()
+        u0[2, :7] = 0.0
+        model = PODRidgeBaseline(TRI.w).fit(u0, self.ut, list(range(len(u0))))
+        probe = u0[2:3].copy()
+        probe[0, :7] = -0.0
+        self.assertTrue(np.all(np.signbit(probe[0, :7])))
+        self.assertNotEqual(probe.tobytes(), u0[2:3].tobytes())  # differs bytewise, equal as numbers
+        with self.assertRaises(Exception) as caught:
+            model.predict(probe, [500])
+        got = type(caught.exception).__name__
+        self.assertIsInstance(caught.exception, LeakageError, f"expected LeakageError, got {got}")
+
+    def test_disjoint_content_with_new_ids_is_scored(self):
+        # Positive control: fresh samples (other seed) under fresh ids are scored.
+        fresh, _ = TRI.data(3, seed=777)
+        out = self.model.predict(fresh, [7, 8, 9])
+        self.assertEqual(out.shape, (3, TRI.lattice.num_nodes))
+        self.assertTrue(np.all(np.isfinite(out)))
 
     def test_refit_replaces_the_training_ids(self):
         self.model.fit(self.u0, self.ut, list(range(len(self.u0))))
-        self.assertEqual(self.model.predict(self.u0[:1], [100]).shape, (1, TRI.lattice.num_nodes))
+        fresh, _ = TRI.data(1, seed=779)
+        self.assertEqual(self.model.predict(fresh, [100]).shape, (1, TRI.lattice.num_nodes))
         with self.assertRaises(LeakageError):
             self.model.predict(self.u0[:1], [0])
 
@@ -180,7 +211,8 @@ class TestLeakageGuard(unittest.TestCase):
             with self.subTest(bad=bad):
                 rows = self.u0[:len(bad)] if not isinstance(bad, str) else self.u0[:1]
                 if exc is None:
-                    self.assertEqual(self.model.predict(rows, bad).shape[0], 1)
+                    fresh, _ = TRI.data(1, seed=780)  # training rows are a content leak since 2026-10-15
+                    self.assertEqual(self.model.predict(fresh, bad).shape[0], 1)
                     continue
                 if bad == [1, 2]:
                     rows = self.u0[:1]  # length mismatch

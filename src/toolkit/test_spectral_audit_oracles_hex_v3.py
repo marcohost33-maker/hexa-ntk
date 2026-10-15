@@ -76,7 +76,7 @@ class TestOracleSemidiscrete(unittest.TestCase):
                 self.assertEqual(sa.audit_verdict(result, diag_rtol=ORACLE_RTOL, coupling_tol=ORACLE_RTOL,
                                                   out_of_span_tol=ORACLE_RTOL), "PASS")
                 self.assertEqual(result.backend, "numpy")
-                self.assertEqual(result.evaluations, 2 * hm.modes.shape[1] + 1)
+                self.assertEqual(result.evaluations, 2 * hm.modes.shape[1] + 1 + sa._REPEAT_EVALUATIONS)
 
     def test_semidiscrete_is_not_the_continuous_t1_truth(self):
         # The T1 truth decays with lambda, the semidiscrete operator with lambda_h:

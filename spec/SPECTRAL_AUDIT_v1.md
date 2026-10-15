@@ -130,7 +130,13 @@ float32 but returns float64 hides its precision; pass `fd_step` then.
 - a non-finite operator output (including at `u0` alone), Jacobian product or
   `S` raises `NonFiniteOutputError`;
 - more than `max_evaluations` calls raise `BudgetExceededError` before the
-  first call; exceeding `max_seconds` raises it during the run.
+  first call; exceeding `max_seconds` raises it during the run;
+- determinism preflight (amendment 2026-10-15): before the Jacobian the
+  operator is called twice at `u0` (both backends; counted in `evaluations`
+  and in the budget). The two outputs must agree bitwise and the global RNG
+  state (torch, numpy, `random`, initialised CUDA) must be unchanged;
+  otherwise `NondeterministicOperatorError` (a `ValueError`). `.training`
+  alone does not prove determinism: an eval-mode module may still sample.
 
 **Verdict** (`audit_verdict`). The result is `PASS`, `FAIL` or `ABSTAIN`.
 - `PASS` needs all three:
@@ -167,6 +173,9 @@ because the target operators are linear.
 - `fit` records the training sample ids.
 - `predict(u0, sample_ids)` raises `LeakageError` (a `ValueError`) if any
   scored id was trained on.
+- Amendment 2026-10-15: `fit` also records a SHA-256 per training input row
+  in canonical form (float64 little-endian, `-0.0 -> 0.0`); `predict` raises
+  `LeakageError` if a scored row repeats a training input under another id.
 - The id-free operator view (`__call__`, `matrix`) is for instruments such as
   this audit. It must not be used to score samples.
 

@@ -283,7 +283,8 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         lattice = triangle_hex_lattice(32)
         cfg = GinoPhase1Config(
             latent_resolution=8, n_modes=3,
-            hidden_channels=8, n_layers=1, radius_factor=5.0,
+            # 2.5 = Phase-1 default; 5.0 has 8 radius ties here and is refused since 2026-10-15.
+            hidden_channels=8, n_layers=1, radius_factor=2.5,
         )
         with torch.random.fork_rng():
             torch.manual_seed(317)
@@ -314,7 +315,7 @@ class TestGinoPhase1Adapter(unittest.TestCase):
             n_modes=3,
             hidden_channels=8,
             n_layers=1,
-            radius_factor=5.0,
+            radius_factor=2.5,  # Phase-1 default; 5.0 has 8 radius ties (refused since 2026-10-15)
         )
         model = build_gino(cfg, lattice)
         model.eval()
@@ -355,6 +356,104 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         got = type(caught.exception).__name__
         self.assertIsInstance(caught.exception, ValueError, f"expected ValueError, got {got}")
         self.assertIn("float64", str(caught.exception))
+
+
+def _neuralop_like_core(dtype: torch.dtype) -> torch.nn.Module:
+    """Test double for a neuraloperator submodule: its class lives in ``neuralop.*``."""
+
+    class Core(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(1, 1, bias=False, dtype=dtype)
+
+        def forward(self, **batch):
+            return self.linear(batch["x"])
+
+    Core.__module__ = "neuralop.models.gino"
+    return Core()
+
+
+class _Wrapper(torch.nn.Module):
+    """A caller-side wrapper module outside ``neuralop.*`` around a backend module."""
+
+    def __init__(self, core: torch.nn.Module):
+        super().__init__()
+        self.core = core
+
+    def forward(self, **batch):
+        return self.core(**batch)
+
+
+class TestGinoHardening20261015(unittest.TestCase):
+    """Negative-first hardening of 2026-10-15 (B3a wrapper bypass, B4 radius ties)."""
+
+    def test_float64_wrapper_around_neuralop_submodule_is_refused(self) -> None:
+        # B3a: the float64 refusal looked at type(model) only; a wrapper outside
+        # neuralop.* around a float64 neuraloperator submodule slipped through.
+        lattice = triangle_hex_lattice(8)
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
+        wrapped = _Wrapper(_neuralop_like_core(torch.float64))
+        self.assertFalse(type(wrapped).__module__.startswith("neuralop."))
+        u0 = torch.ones((1, lattice.num_nodes), dtype=torch.float64)
+        with self.assertRaises(Exception) as caught:
+            predict_gino(wrapped, lattice, u0, cfg)
+        got = type(caught.exception).__name__
+        self.assertIsInstance(caught.exception, ValueError, f"expected ValueError, got {got}")
+        self.assertIn("float64", str(caught.exception))
+
+    def test_float32_wrapper_around_neuralop_submodule_runs(self) -> None:
+        # Positive control for the B3a test: same wrapper, float32, must run.
+        lattice = triangle_hex_lattice(8)
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
+        out = predict_gino(_Wrapper(_neuralop_like_core(torch.float32)), lattice,
+                           torch.ones((1, lattice.num_nodes)), cfg)
+        self.assertEqual(out.dtype, torch.float32)
+        self.assertEqual(tuple(out.shape), (1, lattice.num_nodes))
+
+    @unittest.skipUnless(importlib.util.find_spec("neuralop"), "optional neuraloperator backend not installed")
+    def test_actual_backend_float64_wrapper_is_refused(self) -> None:
+        lattice = triangle_hex_lattice(32)
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3, hidden_channels=8, n_layers=1)
+        model = _Wrapper(build_gino(cfg, lattice)).double()
+        for p in model.parameters():
+            if p.is_complex():
+                p.data = p.data.to(torch.complex128)
+        with self.assertRaises(Exception) as caught:
+            predict_gino(model, lattice, torch.ones((1, lattice.num_nodes), dtype=torch.float64), cfg)
+        got = type(caught.exception).__name__
+        self.assertIsInstance(caught.exception, ValueError, f"expected ValueError, got {got}")
+        self.assertIn("float64", str(caught.exception))
+
+    def test_radius_ties_are_refused_when_preparing_a_batch(self) -> None:
+        # B4: at radius_factor=5.0 (latent 8x8, N=32) eight node-latent distances
+        # lie on the GNO radius (spec/GINO_ADAPTER_PHASE1_v2.md); float32 and
+        # float64 then build different neighbour graphs. Measured 2026-10-15.
+        lattice = triangle_hex_lattice(32)
+        tied = GinoPhase1Config(latent_resolution=8, n_modes=3, radius_factor=5.0)
+        with self.assertRaises(Exception) as caught:
+            prepare_gino_batch(lattice, torch.ones(lattice.num_nodes), tied)
+        got = type(caught.exception).__name__
+        self.assertIsInstance(caught.exception, ValueError, f"expected ValueError, got {got}")
+        self.assertRegex(str(caught.exception), r"\b8\b.*radius")
+
+    def test_radius_ties_are_refused_when_building(self) -> None:
+        lattice = triangle_hex_lattice(32)
+        tied = GinoPhase1Config(latent_resolution=8, n_modes=3, radius_factor=5.0)
+        with self.assertRaises(Exception) as caught:
+            build_gino(tied, lattice)
+        got = type(caught.exception).__name__
+        self.assertIsInstance(caught.exception, ValueError, f"expected ValueError, got {got}")
+        self.assertIn("radius", str(caught.exception))
+
+    def test_default_radius_without_ties_runs(self) -> None:
+        # Positive control: Phase-1 default 2.5 h, same lattice and latent grid: 0 ties.
+        lattice = triangle_hex_lattice(32)
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
+        self.assertEqual(cfg.radius_factor, 2.5)
+        batch = prepare_gino_batch(lattice, torch.ones(lattice.num_nodes), cfg)
+        self.assertEqual(tuple(batch["x"].shape), (1, lattice.num_nodes, 1))
+        default = prepare_gino_batch(lattice, torch.ones(lattice.num_nodes), GinoPhase1Config())
+        self.assertEqual(tuple(default["latent_queries"].shape), (1, 32, 32, 2))
 
 
 if __name__ == "__main__":
