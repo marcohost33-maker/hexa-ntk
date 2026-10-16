@@ -117,6 +117,24 @@ class TestParamNTK(unittest.TestCase):
         with self.assertRaises(ValueError):
             _run(Linear(a), model_dtype="float16")
 
+    def test_fd_check_validates_the_kernel_rows_mode_by_mode(self) -> None:
+        """A defect in the rows that build Theta (here: two modes swapped) must be
+        refused; the earlier scalar check used its own autograd pass and could not
+        see it (PR #71, 007acc2 v6 finding "all K modes per direction")."""
+        model = Linear(RNG.standard_normal((M, 4)))
+        original = pn._gram_rows
+
+        def swapped(m, f, p):
+            rows, params = original(m, f, p)
+            return rows[[1, 0, *range(2, rows.shape[0])]], params
+
+        pn._gram_rows = swapped
+        try:
+            with self.assertRaisesRegex(pn.ParamNTKError, "disagree"):
+                _run(model, float32_crosscheck=False)
+        finally:
+            pn._gram_rows = original
+
     def test_training_mode_is_refused(self) -> None:
         # Codex P1 on #71: dropout/batch-norm in training mode would make the kernel random.
         model = Linear(RNG.standard_normal((M, 3)))

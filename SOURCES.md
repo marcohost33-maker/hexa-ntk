@@ -695,3 +695,10 @@
 | 12AD7404789A08D5 | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): spectral_audit_hex_v3.py |
 | E2F65F122FE10146 | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): test_spectral_audit_hex_v3.py |
 | 83BC52A73A92B66F | 2026-10-16 | spec | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): SPECTRAL_AUDIT_v1.md |
+
+## PR #71 FD check on the kernel rows (append-only, 2026-10-17)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| A07219EA8B48FAFC | 2026-10-17 00:00 | src/toolkit | FD check validates the kernel rows mode by mode (007acc2 v6 finding, 2026-10-17): param_ntk_hex_v3.py |
+| 2D71C953BB65872E | 2026-10-17 00:00 | src/toolkit | FD check validates the kernel rows mode by mode (007acc2 v6 finding, 2026-10-17): test_param_ntk_hex_v3.py |

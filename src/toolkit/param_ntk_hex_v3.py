@@ -130,34 +130,40 @@ def _gram_rows(model, forward, projector) -> tuple[torch.Tensor, list[torch.Tens
     return torch.stack(rows), params
 
 
-def _fd_check(model, forward, projector, seed: int, step: float) -> float:
-    """Central difference of one random projection along one random parameter direction."""
+def _fd_check(model, forward, projector, rows: torch.Tensor, seed: int, step: float) -> float:
+    """Central difference of ALL K projected modes along one random parameter direction,
+    compared with ``rows @ v`` -- the very Jacobian rows the kernel is built from.
+
+    Checking one random scalar projection with its own autograd pass (the earlier
+    form) neither validated the rows that enter Theta = G G^T nor resolved an error
+    confined to one mode. Error = ||fd - G v||_inf / max(||fd||_inf, ||G v||_inf),
+    i.e. the worst mode against the largest component.
+    """
     gen = torch.Generator().manual_seed(seed)  # CPU generator: reproducible on any device
     params = _trainable(model)
     device = params[0].device  # FD tensors live with the model (Codex P2 on #71)
-    coeff = torch.randn(projector.shape[0], generator=gen, dtype=torch.float64).to(device)
     proj = torch.as_tensor(projector, dtype=torch.float64, device=device)
 
-    def scalar() -> torch.Tensor:
-        return coeff @ (proj @ forward(model).to(torch.float64))
+    def projected() -> torch.Tensor:
+        return proj @ forward(model).to(torch.float64)
 
     directions = [torch.randn(p.shape, generator=gen, dtype=p.dtype).to(device) for p in params]
-    value = scalar()
-    grads = torch.autograd.grad(value, params, allow_unused=True)
-    jv = sum(float((_as_real(g) * _as_real(d)).sum()) for g, d in zip(grads, directions) if g is not None)
+    v = torch.cat([_as_real(d) for d in directions]).to(torch.float64)
+    jv = rows.detach().to(device=device, dtype=torch.float64) @ v
     scale = math.sqrt(sum(float(_as_real(p.detach()).pow(2).sum()) for p in params)) or 1.0
-    eps = step * scale / math.sqrt(sum(float(_as_real(d).pow(2).sum()) for d in directions))
+    eps = step * scale / float(v.norm())
     with torch.no_grad():
         for p, d in zip(params, directions):
             p.add_(eps * d)
-        plus = float(scalar())
+        plus = projected()
         for p, d in zip(params, directions):
             p.sub_(2 * eps * d)
-        minus = float(scalar())
+        minus = projected()
         for p, d in zip(params, directions):
             p.add_(eps * d)
     fd = (plus - minus) / (2 * eps)
-    return abs(fd - jv) / max(abs(fd), abs(jv), 1e-300)
+    denom = max(float(fd.abs().max()), float(jv.abs().max()), 1e-300)
+    return float((fd - jv).abs().max()) / denom
 
 
 def param_ntk(
@@ -197,7 +203,7 @@ def param_ntk(
         twin = _cast_copy(model, torch.float32, torch.complex64)
         step, tol = _FD_STEP[torch.float32], FD_REL_TOL_FLOAT32
     g, twin_params = _gram_rows(twin, forward, projector)
-    fd_error = _fd_check(twin, forward, projector, seed, step)
+    fd_error = _fd_check(twin, forward, projector, g, seed, step)
     if not fd_error <= tol:  # NaN fails closed
         raise ParamNTKError(
             f"autograd and finite differences disagree (relative {fd_error:.3e} > {tol}): "

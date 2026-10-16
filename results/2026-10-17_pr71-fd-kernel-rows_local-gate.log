@@ -1,0 +1,35 @@
+==================================================================
+HexaNTK Gate-Run -- PR #71: FD check on the kernel rows (all K modes)
+Datum:    2026-10-17
+Geprueft: Arbeitsbaum auf 21bdd48 + diese Aenderung (vor dem Commit dieses Logs)
+Umgebung: MINGW64_NT-10.0-26200 | Python 3.12.10 | torch 2.6.0+cpu | numpy 2.5.3
+          (dieselbe venv wie results/2026-10-16_pr71-codex-round_local-gate.log)
+Exit-Codes je Kommando direkt gemessen (cmd > tmp 2>&1; rc=$?), keine Pipe.
+==================================================================
+
+$ ruff check src scripts
+  exit 0 -- All checks passed!
+
+$ python scripts/verify_sources.py
+  exit 0 -- [VERIFY-SOURCES] 44 Toolkit-Eintraege + 14 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (68 Dateien) | PASS
+
+$ unittest discover (toolkit)
+  exit 0 -- Ran 809 tests in 14.370s OK (skipped=11)
+
+$ coverage run --branch + report (fail_under aus pyproject.toml)
+  exit 0 -- TOTAL 4027 statements, 1500 branches, 93%
+  Hinweis: der Log vom 2026-10-16 nennt TOTAL 12760 Statements; die Bezugsgroesse
+  ist eine andere, die Prozentwerte sind NICHT vergleichbar.
+
+$ GINO gate (neuraloperator 2.0.0 venv, unittest -p "test_gino*.py")
+  exit 0 -- Ran 25 tests in 6.337s OK
+
+Diskriminierung (neuer Test test_fd_check_validates_the_kernel_rows_mode_by_mode):
+  alte _fd_check (Skalar-Projektion, eigener autograd-Pass) -> FAILED (failures=1)
+  neue _fd_check (K-Vektor gegen G v, inf-Norm)             -> OK
+  Mutation: zwei Kernel-Zeilen vertauscht -- die alte Pruefung sah es nicht.
+
+Lokales Artefakt: src/toolkit/.coverage (git-ignoriert, vom Lauf 2026-10-16) liess
+test_readme_provenance_counts_current 45 statt 44 Dateien zaehlen; verschoben.
+
+GESAMT: alle Kommandos exit 0
