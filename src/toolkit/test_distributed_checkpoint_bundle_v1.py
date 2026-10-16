@@ -199,5 +199,61 @@ class TestFinalizeDurabilityOrder(unittest.TestCase):
         )
 
 
+class TestShardContentDurabilityIssue59(unittest.TestCase):
+    """Issue #59 (P2): directory fsyncs persist the entries, not the bytes.
+    Every listed file's contents must reach stable storage before the
+    directories, the manifest and the marker: contents -> directory -> marker.
+
+    The recorder sits on ``os.fsync`` itself and maps each flushed descriptor
+    to its file by (st_dev, st_ino), so a mutant that skips the content flush
+    or turns ``fsync_file`` into a no-op is caught, not only a reordering.
+    """
+
+    def _record_fsyncs(self, run):
+        real_fsync = os.fsync
+        flushed = []
+
+        def recorder(fd):
+            info = os.fstat(fd)
+            flushed.append((info.st_dev, info.st_ino))
+            return real_fsync(fd)
+
+        with mock.patch.object(bundle.os, "fsync", side_effect=recorder):
+            run()
+        return flushed
+
+    def test_contents_then_directories_then_manifest_then_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bdir = Path(tmp) / "bundle"
+            (bdir / "dcp").mkdir(parents=True)
+            (bdir / "dcp" / ".metadata").write_bytes(b"meta")
+            (bdir / "dcp" / "__0_0.distcp").write_bytes(b"shard0")
+            (bdir / "dcp" / "__1_0.distcp").write_bytes(b"shard1")
+            flushed = self._record_fsyncs(
+                lambda: bundle.finalize_bundle(bdir, {"source_sha": SHA}))
+            names = {}
+            for path in [bdir, bdir / "dcp", *sorted((bdir / "dcp").iterdir()),
+                         bdir / "manifest.json", bdir / "COMMITTED.json"]:
+                info = path.stat()
+                names[(info.st_dev, info.st_ino)] = path.name
+            order = [names.get(key, "?") for key in flushed]
+
+        posix = os.name == "posix"
+        expected = [".metadata", "__0_0.distcp", "__1_0.distcp"]
+        expected += ["dcp", "bundle"] if posix else []
+        expected += ["manifest.json"] + (["bundle"] if posix else [])
+        expected += ["COMMITTED.json"] + (["bundle"] if posix else [])
+        self.assertEqual(order, expected)
+
+    def test_fsync_file_flushes_exactly_the_named_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            shard = Path(tmp) / "__0_0.distcp"
+            shard.write_bytes(b"shard0")
+            flushed = self._record_fsyncs(lambda: bundle.fsync_file(shard))
+            info = shard.stat()
+            self.assertEqual(flushed, [(info.st_dev, info.st_ino)])
+            self.assertEqual(shard.read_bytes(), b"shard0")
+
+
 if __name__ == "__main__":
     unittest.main()

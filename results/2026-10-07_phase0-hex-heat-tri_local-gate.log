@@ -1,0 +1,98 @@
+# HexaNTK gate log, Reality Anchor Phase 0a (hex-heat-tri, #60) + ReferenceSpec v1 (#33) — claude/hexa-ntk-project-overview-mzkd4p
+# Tested commit: d23dec8ed64261cad73dea3f2d9fc2e9e0c86e9f   (base main bb4f986; #59 fix be0f193; #33 merged in be1daa7, gaps closed fcbc29d; Phase 0a 35b2e79 + d23dec8)
+# Environment: Linux 6.18.44-fc-v77 (cloud container), Python 3.12.3 torch 2.6.0+cu124 (PyPI wheel, CPU execution) numpy 2.5.3 coverage 7.16.2, ruff 0.16.9
+# Chain mirrors .github/workflows/ci.yml (gate + tests (cpu)). Claim: local green; CI open for this head.
+
+## Chain summary at the tested commit (exit codes as observed)
+LABEL=phase0a HEAD=d23dec8ed64261cad73dea3f2d9fc2e9e0c86e9f date=2026-10-07T13:01:27+00:00
+status-porcelain-lines=0
+All checks passed!
+RC ruff=0
+RC compileall=0
+RC verify_sources=0
+[VERIFY-SOURCES] 30 Toolkit-Eintraege + 5 Spec-Eintraege + 9 Script-Eintraege | Dateiliste: git (44 Dateien) | PASS
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC engine_gate=0
+RC unittest=0
+Ran 593 tests in 7.417s
+OK
+RC coverage_report=0
+TOTAL                                           2348    150    900    119    91%
+fail_under = 87
+
+
+## Reference case evidence: python scripts/oracles/hex_heat_tri_reference_oracle.py --output results/2026-10-07_hex-heat-tri_reference.json
+RC hex_heat_tri_reference_oracle=0
+[HEX-HEAT-TRI] p=1.9983 GCI_fine=2.514e-04 ceiling=verified_numerical_reference | PASS
+source={'git_sha': 'd23dec8ed64261cad73dea3f2d9fc2e9e0c86e9f', 'worktree_dirty': False} study_sha256=6a366cdb253ea00776e5e95f93ca4f8d23f46311e4b7b5f00ba6a3c1ed5db8ee
+N  nodes  lambda_RQ          lambda_h(closed)   eigen_res   coef(1,1)  heat_relL2
+16  105    51.964905805628 51.964905805628 8.08e-15  0.994874  9.726691e-03
+32  465    52.468994312245 52.468994312245 3.90e-14  0.998716  2.427889e-03
+64  1953   52.595625468484 52.595625468484 1.31e-13  0.999679  6.067270e-04
+128 8001   52.627321425215 52.627321425215 5.76e-13  0.999920  1.516663e-04
+lambda_exact = 52.637890139143245
+heat_error_orders = [2.002247, 2.000583, 2.000147]
+celik_fine: p=1.998262 oscillatory=False e_a21=6.022719e-04 GCI_fine=2.513502e-04 f_ext=52.637903735
+celik_coarse: p=1.993045
+qoi_exact_rel_error_fine=2.007815e-04
+criteria: {'C1_eigen_residual': True, 'C2_rayleigh_matches_closed_form': True, 'C3_isotropic_coefficient': True, 'C4_heat_error_order': True, 'C5_observed_order': True, 'C6_monotone': True, 'C7_asymptotic_range': True, 'C8_gci_reported': True, 'C9_gci_covers_exact_error': True}
+passed: True | claim_ceiling: verified_numerical_reference
+
+## mutation probe (python scripts/mutation_probe.py)
+M01 KILLED    checkpoint_integration_hex_v3.py -> TestNonMainRankStoresValidatedFloat
+M02 KILLED    checkpoint_integration_hex_v3.py -> TestDurabilityErrorAfterReplace
+M03 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M04 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M05 KILLED    resume_utils_hex_v3.py -> TestResumeEmaState
+M06 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M07 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M08 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M09 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M10 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M11 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M12 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M13 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M14 KILLED    runner_hex_v3.py -> TestDetectorContract
+M15 KILLED    runner_hex_v3.py -> TestFullResumeEquivalence
+M16 KILLED    runner_hex_v3.py -> TestCheckpointSchedule
+M17 KILLED    runner_hex_v3.py -> TestEmptyValidationAndTrainEpoch
+M18 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M19 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M20 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M21 KILLED    warmstart_utils_hex_v3.py -> TestPrefixTransforms
+M22 KILLED    ema_hex_v3.py -> TestDecayContract
+M23 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestShardContentDurabilityIssue59
+M24 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestShardContentDurabilityIssue59
+M25 KILLED    benchmark_hex_v3.py -> TestPublicApiMatchesMetricSpecV4
+M26 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M27 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M28 KILLED    reference_case_hex_v3.py -> TestLameModesAreExactDiscreteEigenvectors
+M29 KILLED    reference_case_hex_v3.py -> TestConvergenceAnalysis
+M30 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M31 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M32 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M33 KILLED    reference_case_hex_v3.py -> TestPositivityGateIssue60
+M34 KILLED    reference_case_hex_v3.py -> TestPositivityGateIssue60
+[MUTATION-PROBE] baseline green | 34/34 killed | PASS
+RC mutation_probe=0
+
+## DCP evidence lane: scripts/oracles/distributed_checkpoint_bundle_v1.py unchanged since be0f193 (sha256 f765a142...); local run there: all three oracles exit 0 (results/2026-10-07_issue59_local-gate.log)
+
+## coverage report
+Name                                           Stmts   Miss Branch BrPart  Cover
+--------------------------------------------------------------------------------
+src/toolkit/benchmark_hex_v3.py                  354     29    120     28    88%
+src/toolkit/checkpoint_integration_hex_v3.py     224     11     70      6    94%
+src/toolkit/dataloader_utils_hex_v3.py            22      0      2      0   100%
+src/toolkit/dataset_split_hex_v3.py              203      5     90      6    96%
+src/toolkit/ema_hex_v3.py                         40      0     10      0   100%
+src/toolkit/failure_signature_hex_v3.py           41      3      0      0    93%
+src/toolkit/operator_adapter_hex_v3.py           128     11     94     11    90%
+src/toolkit/reference_case_hex_v3.py             299     10     80      8    95%
+src/toolkit/reference_spec_hex_v3.py             215     27     98     22    82%
+src/toolkit/resume_utils_hex_v3.py               149      3     80      2    98%
+src/toolkit/runner_hex_v3.py                     337     19    114     11    92%
+src/toolkit/stress_hex_v3.py                     207     25     92     23    84%
+src/toolkit/warmstart_utils_hex_v3.py            129      7     50      2    95%
+--------------------------------------------------------------------------------
+TOTAL                                           2348    150    900    119    91%

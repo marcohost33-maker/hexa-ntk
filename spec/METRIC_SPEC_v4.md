@@ -7,6 +7,21 @@ die Semantik stand vorher nur im Code). Ergaenzt §3.4 von
 `HexaNTK_Review_Gehaertet.md`, ersetzt ihn nicht: die Legacy-Metriken
 (`nrmse_mean`, `divergence_step`, H1) bleiben unveraendert gueltig.
 
+## 0. Oeffentliche Namen
+
+Diese Namen aus `src/toolkit/benchmark_hex_v3.py` gehoeren zum v4-Vertrag und
+muessen in dessen `__all__` stehen (Issue #59: `metric_semantics_label` fehlte
+dort). `TestPublicApiMatchesMetricSpecV4` liest genau diese Liste:
+
+- `MetricSpecV4`
+- `metric_spec_digest`
+- `compute_mean_nrmse_per_step`
+- `aggregate_forecast_metric`
+- `compute_threshold_crossing_step`
+- `evaluate_rollout_v4`
+- `metric_semantics_label`
+- `preserve_legacy_report_without_relabeling`
+
 ## 1. Identitaet
 
 | Feld | Wert | Regel |

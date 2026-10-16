@@ -1,0 +1,132 @@
+# HexaNTK gate log, Reality Anchor Phase 0b (hex-heat-torus, hex-mms-tri, hex FV solver layer; #60) — claude/hexa-ntk-project-overview-mzkd4p
+# Tested commit: 292fa9a81cf4603ee279a1bdaa733cd5727c4b0d   (base main bb4f986; Phase 0a d23dec8; previous PR head 8ff34ad)
+# Environment: Linux 6.18.44-fc-v77 (cloud container), Python 3.12.3 torch 2.6.0+cu124 (PyPI wheel, CPU execution) numpy 2.5.3 coverage 7.16.2, ruff 0.16.9
+# Chain mirrors .github/workflows/ci.yml (gate + tests (cpu)). Claim: local green; CI open for this head.
+# Procedure note: a first chain run at this commit overlapped with the mutation probe (which mutates src/toolkit in place)
+# and is discarded; the chain below ran exclusively, after the probe had finished (no other process, clean tree).
+
+## Chain summary at the tested commit (exit codes as observed)
+LABEL=phase0b-exclusive HEAD=292fa9a81cf4603ee279a1bdaa733cd5727c4b0d date=2026-10-07T13:56:50+00:00
+status-porcelain-lines=0
+All checks passed!
+RC ruff=0
+RC compileall=0
+RC verify_sources=0
+[VERIFY-SOURCES] 32 Toolkit-Eintraege + 7 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (49 Dateien) | PASS
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC engine_gate=0
+RC unittest=0
+Ran 637 tests in 11.518s
+OK
+RC coverage_report=0
+TOTAL                                           2736    153   1002    118    92%
+fail_under = 87
+
+
+## Phase 0 evidence: python scripts/oracles/hex_phase0_reference_oracle.py --output results/2026-10-07_phase0_reference.json
+[PHASE0] hex-heat-tri    p=1.9983 GCI_fine=2.514e-04 | PASS
+[PHASE0] hex-heat-torus  p=1.9965 GCI_fine=4.405e-04 | PASS
+[PHASE0] hex-mms-tri     p=2.0014 GCI_fine=1.138e-04 | PASS
+[PHASE0] hex-heat-tri/v1     ceiling=verified_numerical_reference
+[PHASE0] hex-heat-torus/v1   ceiling=verified_numerical_reference
+[PHASE0] hex-mms-tri/oracle  ceiling=mathematical_oracle
+[PHASE0] hex-mms-tri/v1      ceiling=verified_numerical_reference
+[PHASE0] PASS
+RC hex_phase0_reference_oracle=0
+source = {'git_sha': '292fa9a81cf4603ee279a1bdaa733cd5727c4b0d', 'worktree_dirty': False}
+study_sha256 = {"hex-heat-torus": "b22895a0df5b51dbf4652acfab9e69c025448ab778b8d23b4d9fda0eca1d0772", "hex-heat-tri": "6a366cdb253ea00776e5e95f93ca4f8d23f46311e4b7b5f00ba6a3c1ed5db8ee", "hex-mms-tri": "12918048112de349e42e31e3b76b7303fc386b73a1eaec417c70d2c7ac27a3c9"}
+  hex-heat-tri digest equals the Phase 0a evidence (6a366cdb..., results/2026-10-07_hex-heat-tri_reference.json @ d23dec8): bit-identical refactor
+
+### hex-heat-torus
+N   nodes  lambda_RQ(1,1,cos)  eigen_res  coef(1,1,cos)/(2,-1,sin)/(1,0,sin)  heat_relL2   conservation
+16  256    90.066116192576 1.24e-14  0.989649/0.979663/0.995301  1.760042e-02  1.3e-16
+32  1024   91.599745286641 6.45e-14  0.997401/0.994874/0.998823  4.357572e-03  1.7e-17
+64  4096   91.986914824736 2.65e-13  0.999349/0.998716/0.999706  1.086745e-03  6.5e-18
+128 16384  92.083943722913 1.04e-12  0.999837/0.999679/0.999926  2.715209e-04  1.6e-18
+lambda_exact = 92.11630774350067 | heat orders = [2.014014, 2.003511, 2.000878]
+celik_fine p=1.996479 osc=False GCI_fine=4.404735e-04 | celik_coarse p=1.985912 | exact rel err fine=3.513387e-04
+criteria: {'C10_conservation': True, 'C1_eigen_residual': True, 'C2_rayleigh_matches_closed_form': True, 'C3_isotropic_coefficient': True, 'C4_heat_error_order': True, 'C5_observed_order': True, 'C6_monotone': True, 'C7_asymptotic_range': True, 'C8_gci_reported': True, 'C9_gci_covers_exact_error': True}
+
+### hex-mms-tri
+oracle: {'boundary_ratio': 1.3883175093885455e-15, 'source_rel_error_vs_fd': 2.425000255806544e-13}
+N   nodes  kappa_min  sym   dt_pos     CG_it  relL2        max          iter/disc  u(centroid)
+24  253    0.6016    True  3.119e-04  71     6.566624e-03 2.176806e-02 1.2e-09   2.613295284065
+48  1081   0.6000    True  7.767e-05  147    1.635358e-03 5.473960e-03 4.2e-09   2.601869069778
+96  4465   0.6002    True  1.938e-05  298    4.084490e-04 1.366925e-03 1.3e-08   2.599023685109
+192 18145  0.6000    True  4.844e-06  606    1.020879e-04 3.418902e-04 4.1e-08   2.598313033544
+u*(centroid) = 2.5980762113533142 | relL2 orders = [2.005545, 2.001379, 2.000344] | max orders = [1.991556, 2.001651, 1.999329]
+celik_fine p=2.001409 osc=False GCI_fine=1.138121e-04 | celik_coarse p=2.005652 | exact rel err fine=9.115290e-05
+criteria: {'C5_observed_order': True, 'C6_monotone': True, 'C7_asymptotic_range': True, 'C8_gci_reported': True, 'C9_gci_covers_exact_error': True, 'I1_iterative_error_negligible': True, 'M1_error_order': True, 'M2_conductance_symmetric': True, 'M3_positivity_gate': True, 'O1_boundary_zero': True, 'O2_source_matches_flux_divergence': True, 'O3_kappa_positive': True}
+
+### ReferenceSpecs
+hex-heat-tri/v1      kind=numerical     ceiling=verified_numerical_reference
+hex-heat-torus/v1    kind=numerical     ceiling=verified_numerical_reference
+hex-mms-tri/oracle   kind=manufactured  ceiling=mathematical_oracle
+hex-mms-tri/v1       kind=numerical     ceiling=verified_numerical_reference
+
+## mutation probe at the tested commit (python scripts/mutation_probe.py; ran before the exclusive chain)
+M01 KILLED    checkpoint_integration_hex_v3.py -> TestNonMainRankStoresValidatedFloat
+M02 KILLED    checkpoint_integration_hex_v3.py -> TestDurabilityErrorAfterReplace
+M03 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M04 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M05 KILLED    resume_utils_hex_v3.py -> TestResumeEmaState
+M06 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M07 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M08 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M09 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M10 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M11 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M12 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M13 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M14 KILLED    runner_hex_v3.py -> TestDetectorContract
+M15 KILLED    runner_hex_v3.py -> TestFullResumeEquivalence
+M16 KILLED    runner_hex_v3.py -> TestCheckpointSchedule
+M17 KILLED    runner_hex_v3.py -> TestEmptyValidationAndTrainEpoch
+M18 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M19 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M20 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M21 KILLED    warmstart_utils_hex_v3.py -> TestPrefixTransforms
+M22 KILLED    ema_hex_v3.py -> TestDecayContract
+M23 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestShardContentDurabilityIssue59
+M24 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestShardContentDurabilityIssue59
+M25 KILLED    benchmark_hex_v3.py -> TestPublicApiMatchesMetricSpecV4
+M26 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M27 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M28 KILLED    hex_fv_solver_hex_v3.py -> TestLameModesAreExactDiscreteEigenvectors
+M29 KILLED    reference_case_hex_v3.py -> TestConvergenceAnalysis
+M30 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M31 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M32 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M33 KILLED    hex_fv_solver_hex_v3.py -> TestPositivityGateIssue60
+M34 KILLED    hex_fv_solver_hex_v3.py -> TestPositivityGateIssue60
+M35 KILLED    hex_fv_solver_hex_v3.py -> TestTorusLattice
+M36 KILLED    hex_fv_solver_hex_v3.py -> TestEdgeConductances
+M37 KILLED    hex_fv_solver_hex_v3.py -> TestEdgeConductances
+M38 KILLED    hex_fv_solver_hex_v3.py -> TestConjugateGradient
+M39 KILLED    hex_fv_solver_hex_v3.py -> TestSteadySolve
+M40 KILLED    reference_case_hex_v3.py -> TestHexMmsTriStudyGate
+M41 KILLED    reference_case_hex_v3.py -> TestMmsGateDiscrimination
+M42 KILLED    reference_case_hex_v3.py -> TestMmsGateDiscrimination
+M43 KILLED    reference_case_hex_v3.py -> TestHexHeatTorusStudyGate
+[MUTATION-PROBE] baseline green | 43/43 killed | PASS
+RC mutation_probe=0
+
+## coverage report
+Name                                           Stmts   Miss Branch BrPart  Cover
+--------------------------------------------------------------------------------
+src/toolkit/benchmark_hex_v3.py                  354     29    120     28    88%
+src/toolkit/checkpoint_integration_hex_v3.py     224     11     70      6    94%
+src/toolkit/dataloader_utils_hex_v3.py            22      0      2      0   100%
+src/toolkit/dataset_split_hex_v3.py              203      5     90      6    96%
+src/toolkit/ema_hex_v3.py                         40      0     10      0   100%
+src/toolkit/failure_signature_hex_v3.py           41      3      0      0    93%
+src/toolkit/hex_fv_solver_hex_v3.py              247      4     92      2    98%
+src/toolkit/operator_adapter_hex_v3.py           128     11     94     11    90%
+src/toolkit/reference_case_hex_v3.py             440     10     90      6    97%
+src/toolkit/reference_spec_hex_v3.py             215     26     98     21    83%
+src/toolkit/resume_utils_hex_v3.py               149      3     80      2    98%
+src/toolkit/runner_hex_v3.py                     337     19    114     11    92%
+src/toolkit/stress_hex_v3.py                     207     25     92     23    84%
+src/toolkit/warmstart_utils_hex_v3.py            129      7     50      2    95%
+--------------------------------------------------------------------------------
+TOTAL                                           2736    153   1002    118    92%

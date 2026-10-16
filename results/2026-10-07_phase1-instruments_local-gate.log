@@ -1,0 +1,120 @@
+# HexaNTK gate log, Phase 1 instruments (CN baseline, T1 hex-heat-operator, preregistration DRAFT; #60) — claude/hexa-ntk-project-overview-mzkd4p
+# Tested commit: f4137f89a744adec04f34e353882be30b5ad7f6a   (base main bb4f986; Phase 0 complete at 292fa9a)
+# Environment: Linux 6.18.44-fc-v77 (cloud container), Python 3.12.3 torch 2.6.0+cu124 (PyPI wheel, CPU execution) numpy 2.5.3 coverage 7.16.2, ruff 0.16.9
+# Order: mutation probe first, then the ci.yml chain exclusively (no concurrent process; tree clean after the probe).
+# Claim: instruments verified locally; CI open for this head. No model was trained or tuned; no learning claim.
+
+## mutation probe (python scripts/mutation_probe.py)
+M01 KILLED    checkpoint_integration_hex_v3.py -> TestNonMainRankStoresValidatedFloat
+M02 KILLED    checkpoint_integration_hex_v3.py -> TestDurabilityErrorAfterReplace
+M03 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M04 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M05 KILLED    resume_utils_hex_v3.py -> TestResumeEmaState
+M06 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M07 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M08 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M09 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M10 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M11 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M12 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M13 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M14 KILLED    runner_hex_v3.py -> TestDetectorContract
+M15 KILLED    runner_hex_v3.py -> TestFullResumeEquivalence
+M16 KILLED    runner_hex_v3.py -> TestCheckpointSchedule
+M17 KILLED    runner_hex_v3.py -> TestEmptyValidationAndTrainEpoch
+M18 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M19 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M20 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M21 KILLED    warmstart_utils_hex_v3.py -> TestPrefixTransforms
+M22 KILLED    ema_hex_v3.py -> TestDecayContract
+M23 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestShardContentDurabilityIssue59
+M24 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestShardContentDurabilityIssue59
+M25 KILLED    benchmark_hex_v3.py -> TestPublicApiMatchesMetricSpecV4
+M26 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M27 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M28 KILLED    hex_fv_solver_hex_v3.py -> TestLameModesAreExactDiscreteEigenvectors
+M29 KILLED    reference_case_hex_v3.py -> TestConvergenceAnalysis
+M30 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M31 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M32 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M33 KILLED    hex_fv_solver_hex_v3.py -> TestPositivityGateIssue60
+M34 KILLED    hex_fv_solver_hex_v3.py -> TestPositivityGateIssue60
+M35 KILLED    hex_fv_solver_hex_v3.py -> TestTorusLattice
+M36 KILLED    hex_fv_solver_hex_v3.py -> TestEdgeConductances
+M37 KILLED    hex_fv_solver_hex_v3.py -> TestEdgeConductances
+M38 KILLED    hex_fv_solver_hex_v3.py -> TestConjugateGradient
+M39 KILLED    hex_fv_solver_hex_v3.py -> TestSteadySolve
+M40 KILLED    reference_case_hex_v3.py -> TestHexMmsTriStudyGate
+M41 KILLED    reference_case_hex_v3.py -> TestMmsGateDiscrimination
+M42 KILLED    reference_case_hex_v3.py -> TestMmsGateDiscrimination
+M43 KILLED    reference_case_hex_v3.py -> TestHexHeatTorusStudyGate
+M44 KILLED    hex_fv_solver_hex_v3.py -> TestCrankNicolson
+M45 KILLED    hex_fv_solver_hex_v3.py -> TestConjugateGradient
+M46 KILLED    heat_operator_task_hex_v3.py -> TestBasis
+M47 KILLED    heat_operator_task_hex_v3.py -> TestPriorAndTruth
+M48 KILLED    heat_operator_task_hex_v3.py -> TestManifest
+M49 KILLED    heat_operator_task_hex_v3.py -> TestMetrics
+[MUTATION-PROBE] baseline green | 49/49 killed | PASS
+RC mutation_probe=0
+
+## Chain summary at the tested commit (exit codes as observed)
+LABEL=phase1-instruments HEAD=f4137f89a744adec04f34e353882be30b5ad7f6a date=2026-10-07T14:08:51+00:00
+status-porcelain-lines=0
+All checks passed!
+RC ruff=0
+RC compileall=0
+RC verify_sources=0
+[VERIFY-SOURCES] 34 Toolkit-Eintraege + 9 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (53 Dateien) | PASS
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC engine_gate=0
+RC unittest=0
+Ran 659 tests in 12.866s
+OK
+RC coverage_report=0
+TOTAL                                           2963    154   1076    119    93%
+fail_under = 87
+
+
+## Phase 0 regression after the solver changes (CN added, CG warm start): python scripts/oracles/hex_phase0_reference_oracle.py
+source now: {'git_sha': 'f4137f89a744adec04f34e353882be30b5ad7f6a', 'worktree_dirty': False}
+hex-heat-torus  @292fa9a b22895a0df5b51db  @f4137f8 b22895a0df5b51db  IDENTICAL
+hex-heat-tri    @292fa9a 6a366cdb253ea007  @f4137f8 6a366cdb253ea007  IDENTICAL
+hex-mms-tri     @292fa9a 12918048112de349  @f4137f8 12918048112de349  IDENTICAL
+[PHASE0] hex-heat-tri    p=1.9983 GCI_fine=2.514e-04 | PASS
+[PHASE0] hex-heat-torus  p=1.9965 GCI_fine=4.405e-04 | PASS
+[PHASE0] hex-mms-tri     p=2.0014 GCI_fine=1.138e-04 | PASS
+[PHASE0] PASS
+RC=0
+
+## T1 instrument measurements at the tested commit (default HeatOperatorTaskConfig, dataset_seed 7)
+basis triangle_dirichlet: 15 modes, lambda 52.6379 .. 543.9249, config_sha256 0bf65989a9e711f4
+basis torus_periodic: 40 modes, lambda 39.4784 .. 565.8573, config_sha256 c99bb6ec09c03b94
+dataset N=32, 200 samples: dataset_sha256 66af2a4632a9419f | verify: {'integrity': True, 'reproducible': True, 'max_relative_deviation': 0.0, 'bitwise_identical': True}
+task difficulty mean ||uT-u0||/||u0|| = 0.6427
+mechanistic baseline (Crank-Nicolson, steps proportional to N), mean over 5 samples:
+  N=16  steps=4  rel_l2 2.2473e-02 rel_h1 2.6829e-02 rel_max 2.2756e-02
+  N=32  steps=8  rel_l2 5.3845e-03 rel_h1 6.4022e-03 rel_max 5.4715e-03 order 2.061
+  N=64  steps=16 rel_l2 1.3321e-03 rel_h1 1.5824e-03 rel_max 1.3630e-03 order 2.015
+  N=128 steps=32 rel_l2 3.3217e-04 rel_h1 3.9447e-04 rel_max 3.3980e-04 order 2.004
+(wall times are hardware-specific and deliberately not part of this log)
+
+## coverage report
+Name                                           Stmts   Miss Branch BrPart  Cover
+--------------------------------------------------------------------------------
+src/toolkit/benchmark_hex_v3.py                  354     29    120     28    88%
+src/toolkit/checkpoint_integration_hex_v3.py     224     11     70      6    94%
+src/toolkit/dataloader_utils_hex_v3.py            22      0      2      0   100%
+src/toolkit/dataset_split_hex_v3.py              203      5     90      6    96%
+src/toolkit/ema_hex_v3.py                         40      0     10      0   100%
+src/toolkit/failure_signature_hex_v3.py           41      3      0      0    93%
+src/toolkit/heat_operator_task_hex_v3.py         201      1     66      1    99%
+src/toolkit/hex_fv_solver_hex_v3.py              273      4    100      2    98%
+src/toolkit/operator_adapter_hex_v3.py           128     11     94     11    90%
+src/toolkit/reference_case_hex_v3.py             440     10     90      6    97%
+src/toolkit/reference_spec_hex_v3.py             215     26     98     21    83%
+src/toolkit/resume_utils_hex_v3.py               149      3     80      2    98%
+src/toolkit/runner_hex_v3.py                     337     19    114     11    92%
+src/toolkit/stress_hex_v3.py                     207     25     92     23    84%
+src/toolkit/warmstart_utils_hex_v3.py            129      7     50      2    95%
+--------------------------------------------------------------------------------
+TOTAL                                           2963    154   1076    119    93%

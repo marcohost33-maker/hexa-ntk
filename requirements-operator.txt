@@ -1,0 +1,2 @@
+# Optional Phase-1 backend. Core/CPU CI intentionally does not install this file.
+neuraloperator==2.0.0

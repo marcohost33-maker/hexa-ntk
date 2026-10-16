@@ -1,0 +1,98 @@
+# HexaNTK gate log, issue #59 follow-ups — claude/hexa-ntk-project-overview-mzkd4p
+# Tested commit: be0f1939f04d897a975469c55b946a4ec9b4e34c   (base main bb4f986edfd2fd388701a920322b8f9eb655d1b3; red-test commit db83c4a)
+# Environment: Linux 6.18.44-fc-v77 (cloud container), Python 3.12.3 torch 2.6.0+cu124 (PyPI wheel, CPU execution, torch.cuda.is_available()=False) numpy 2.5.3 coverage 7.16.2, ruff 0.16.9
+# Note: download.pytorch.org (CPU index used by ci.yml) is blocked by the container's egress policy, hence the PyPI wheel of the same torch version.
+# Chain mirrors .github/workflows/ci.yml (gate + tests (cpu)); CI runs Linux with the CPU wheel. Claim: local green; CI open for this head.
+
+## Baseline on main bb4f986 (before any change, same environment)
+RC ruff=0 | RC compileall=0 | verify_sources PASS (37 files) | engine 49/49 doctests, selftests ok | unittest Ran 528 tests OK | coverage TOTAL 92% (fail_under 87) | mutation_probe 22/22 killed, exit 0
+
+## Red run: new tests against the old module bytes (commit db83c4a = tests only)
+Command: (cd src/toolkit && python -m unittest test_distributed_checkpoint_bundle_v1.TestShardContentDurabilityIssue59 test_benchmark_hex_v3.TestPublicApiMatchesMetricSpecV4 test_dataset_split_hex_v3.TestDtPrecisionSplitIssue42)
+ERROR: test_fsync_file_flushes_exactly_the_named_file (test_distributed_checkpoint_bundle_v1.TestShardContentDurabilityIssue59.test_fsync_file_flushes_exactly_the_named_file)
+ERROR: test_star_import_provides_metric_semantics_label (test_benchmark_hex_v3.TestPublicApiMatchesMetricSpecV4.test_star_import_provides_metric_semantics_label)
+FAIL: test_contents_then_directories_then_manifest_then_marker (test_distributed_checkpoint_bundle_v1.TestShardContentDurabilityIssue59.test_contents_then_directories_then_manifest_then_marker)
+FAIL: test_spec_public_names_are_exported (test_benchmark_hex_v3.TestPublicApiMatchesMetricSpecV4.test_spec_public_names_are_exported) (name='metric_semantics_label')
+FAIL: test_values_equal_at_float32_resolution_fail_closed (test_dataset_split_hex_v3.TestDtPrecisionSplitIssue42.test_values_equal_at_float32_resolution_fail_closed) (lower=0.0, upper=1e-46)
+FAIL: test_values_equal_at_float32_resolution_fail_closed (test_dataset_split_hex_v3.TestDtPrecisionSplitIssue42.test_values_equal_at_float32_resolution_fail_closed) (lower=0.0, upper=-1e-46)
+FAIL: test_values_equal_at_float32_resolution_fail_closed (test_dataset_split_hex_v3.TestDtPrecisionSplitIssue42.test_values_equal_at_float32_resolution_fail_closed) (lower=1e-46, upper=5e-46)
+Ran 15 tests in 0.020s
+FAILED (failures=5, errors=2)
+exit 1
+Expected red: ordering (no content fsync), fsync_file missing (AttributeError), metric_semantics_label not in __all__ (assert + star import), 0.0/1e-46, 0.0/-1e-46, 1e-46/5e-46 accepted.
+Not red (by design): distinct pairs 0/1e-40, 1e-30/2e-30, 1e39/2e39, 0.1/0.2 already stayed separate (guard against over-merging).
+Added with the fix commit be0f193 (after this red run): fail-closed pair (0.0, 5e-324) and distinct pair (0.0, 2**-149);
+the property test TestTrajectoryInvariantE092703 replaced 5e-324 by 2**-149 in its pool of DISTINCT step sizes, because
+0.0 and 5e-324 round to the same float32 and are precision twins under the #59 contract (10 subtests errored with the fix
+before the premise was corrected; no other test changed).
+
+## Chain summary at the fix commit (exit codes as observed)
+LABEL=issue59-fix HEAD=be0f1939f04d897a975469c55b946a4ec9b4e34c date=2026-10-07T12:39:55+00:00
+status-porcelain-lines=0
+All checks passed!
+RC ruff=0
+RC compileall=0
+RC verify_sources=0
+[VERIFY-SOURCES] 26 Toolkit-Eintraege + 3 Spec-Eintraege + 8 Script-Eintraege | Dateiliste: git (37 Dateien) | PASS
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC engine_gate=0
+RC unittest=0
+Ran 536 tests in 6.646s
+OK
+RC coverage_report=0
+TOTAL                                           1834    113    722     89    92%
+fail_under = 87
+
+
+## mutation probe (python scripts/mutation_probe.py)
+M01 KILLED    checkpoint_integration_hex_v3.py -> TestNonMainRankStoresValidatedFloat
+M02 KILLED    checkpoint_integration_hex_v3.py -> TestDurabilityErrorAfterReplace
+M03 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M04 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M05 KILLED    resume_utils_hex_v3.py -> TestResumeEmaState
+M06 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M07 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M08 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M09 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M10 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M11 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M12 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M13 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M14 KILLED    runner_hex_v3.py -> TestDetectorContract
+M15 KILLED    runner_hex_v3.py -> TestFullResumeEquivalence
+M16 KILLED    runner_hex_v3.py -> TestCheckpointSchedule
+M17 KILLED    runner_hex_v3.py -> TestEmptyValidationAndTrainEpoch
+M18 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M19 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M20 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M21 KILLED    warmstart_utils_hex_v3.py -> TestPrefixTransforms
+M22 KILLED    ema_hex_v3.py -> TestDecayContract
+M23 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestShardContentDurabilityIssue59
+M24 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestShardContentDurabilityIssue59
+M25 KILLED    benchmark_hex_v3.py -> TestPublicApiMatchesMetricSpecV4
+M26 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M27 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+[MUTATION-PROBE] baseline green | 27/27 killed | PASS
+RC mutation_probe=0
+
+## DCP evidence lane, run locally (scripts/oracles/*, same bytes as the fix commit: distributed_checkpoint_bundle_v1.py sha256 f765a142...)
+RC dcp_2rank_gloo_oracle=0
+RC dcp_worldsize_change_oracle=0
+RC dcp_bundle_2rank_oracle=0
+
+## coverage report
+Name                                           Stmts   Miss Branch BrPart  Cover
+--------------------------------------------------------------------------------
+src/toolkit/benchmark_hex_v3.py                  354     29    120     28    88%
+src/toolkit/checkpoint_integration_hex_v3.py     224     11     70      6    94%
+src/toolkit/dataloader_utils_hex_v3.py            22      0      2      0   100%
+src/toolkit/dataset_split_hex_v3.py              203      5     90      6    96%
+src/toolkit/ema_hex_v3.py                         40      0     10      0   100%
+src/toolkit/failure_signature_hex_v3.py           41      3      0      0    93%
+src/toolkit/operator_adapter_hex_v3.py           128     11     94     11    90%
+src/toolkit/resume_utils_hex_v3.py               149      3     80      2    98%
+src/toolkit/runner_hex_v3.py                     337     19    114     11    92%
+src/toolkit/stress_hex_v3.py                     207     25     92     23    84%
+src/toolkit/warmstart_utils_hex_v3.py            129      7     50      2    95%
+--------------------------------------------------------------------------------
+TOTAL                                           1834    113    722     89    92%

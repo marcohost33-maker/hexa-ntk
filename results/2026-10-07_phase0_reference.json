@@ -1,0 +1,772 @@
+{
+  "environment": {
+    "numpy": "2.5.3",
+    "platform": "Linux-6.18.44-fc-v77-x86_64-with-glibc2.39",
+    "python": "3.12.3"
+  },
+  "reference_specs": [
+    {
+      "claim_ceiling": "verified_numerical_reference",
+      "code_verification": {
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "rationale": null,
+        "status": "pass"
+      },
+      "context_of_use": "u_t = kappa*Lap(u) on the unit equilateral triangle, homogeneous Dirichlet BC, regular 7-point hex FV Laplacian (engine weight 2/(3h^2)), h = 1/N for N = 16, 32, 64, 128, smooth Lame-mode data",
+      "iterative_verification": {
+        "evidence_ref": null,
+        "rationale": "explicit operator application and closed-form eigenvectors; no iterative solve",
+        "status": "not_applicable"
+      },
+      "kind": "numerical",
+      "measurement_uncertainty": null,
+      "numerical_uncertainty": {
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "kind": "relative_fraction",
+        "value": 0.00025135018543212046
+      },
+      "oracle_verification": {
+        "evidence_ref": null,
+        "rationale": null,
+        "status": "not_assessed"
+      },
+      "quantity_of_interest": "decay rate lambda_RQ of the fundamental Dirichlet Lame mode (1,1,sin)",
+      "reference_id": "hex-heat-tri/v1",
+      "spatial_study": {
+        "asymptotic_range_checked": true,
+        "axis": "spatial",
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "fine_grid_relative_error_estimate": 0.00025135018543212046,
+        "levels": [
+          {
+            "characteristic_size": 0.0078125,
+            "level_id": "N=128",
+            "quantity_value": 52.62732142521464
+          },
+          {
+            "characteristic_size": 0.015625,
+            "level_id": "N=64",
+            "quantity_value": 52.595625468484165
+          },
+          {
+            "characteristic_size": 0.03125,
+            "level_id": "N=32",
+            "quantity_value": 52.46899431224543
+          },
+          {
+            "characteristic_size": 0.0625,
+            "level_id": "N=16",
+            "quantity_value": 51.96490580562824
+          }
+        ],
+        "observed_order": 1.998261687123784,
+        "quantity_of_interest": "decay rate lambda_RQ of the fundamental Dirichlet Lame mode (1,1,sin)"
+      },
+      "spatial_verification": {
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "rationale": null,
+        "status": "pass"
+      },
+      "temporal_study": null,
+      "temporal_verification": {
+        "evidence_ref": null,
+        "rationale": "integrated exactly in time along verified discrete eigenvectors; no time-step error",
+        "status": "not_applicable"
+      }
+    },
+    {
+      "claim_ceiling": "verified_numerical_reference",
+      "code_verification": {
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "rationale": null,
+        "status": "pass"
+      },
+      "context_of_use": "u_t = kappa*Lap(u) on the periodic hex torus with periods (1, 0) and (0, sqrt(3)/2), regular 7-point hex FV Laplacian (engine weight 2/(3h^2)), h = 1/N for N = 16, 32, 64, 128, smooth plane-wave data",
+      "iterative_verification": {
+        "evidence_ref": null,
+        "rationale": "explicit operator application and closed-form eigenvectors; no iterative solve",
+        "status": "not_applicable"
+      },
+      "kind": "numerical",
+      "measurement_uncertainty": null,
+      "numerical_uncertainty": {
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "kind": "relative_fraction",
+        "value": 0.00044047345117026324
+      },
+      "oracle_verification": {
+        "evidence_ref": null,
+        "rationale": null,
+        "status": "not_assessed"
+      },
+      "quantity_of_interest": "decay rate lambda_RQ of the torus plane wave (1,1,cos)",
+      "reference_id": "hex-heat-torus/v1",
+      "spatial_study": {
+        "asymptotic_range_checked": true,
+        "axis": "spatial",
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "fine_grid_relative_error_estimate": 0.00044047345117026324,
+        "levels": [
+          {
+            "characteristic_size": 0.0078125,
+            "level_id": "N=128",
+            "quantity_value": 92.08394372291343
+          },
+          {
+            "characteristic_size": 0.015625,
+            "level_id": "N=64",
+            "quantity_value": 91.98691482473643
+          },
+          {
+            "characteristic_size": 0.03125,
+            "level_id": "N=32",
+            "quantity_value": 91.59974528664068
+          },
+          {
+            "characteristic_size": 0.0625,
+            "level_id": "N=16",
+            "quantity_value": 90.06611619257602
+          }
+        ],
+        "observed_order": 1.996479052878129,
+        "quantity_of_interest": "decay rate lambda_RQ of the torus plane wave (1,1,cos)"
+      },
+      "spatial_verification": {
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "rationale": null,
+        "status": "pass"
+      },
+      "temporal_study": null,
+      "temporal_verification": {
+        "evidence_ref": null,
+        "rationale": "integrated exactly in time along verified discrete eigenvectors; no time-step error",
+        "status": "not_applicable"
+      }
+    },
+    {
+      "claim_ceiling": "mathematical_oracle",
+      "code_verification": {
+        "evidence_ref": null,
+        "rationale": null,
+        "status": "not_assessed"
+      },
+      "context_of_use": "manufactured solution u* = sum a_i phi_i (Lame modes) and kappa = 1 + 0.4 * sin(2 pi x + 0.3) * cos(3 pi y) on the unit equilateral triangle, homogeneous Dirichlet BC, source f = -div(kappa grad u*)",
+      "iterative_verification": {
+        "evidence_ref": null,
+        "rationale": null,
+        "status": "not_assessed"
+      },
+      "kind": "manufactured",
+      "measurement_uncertainty": null,
+      "numerical_uncertainty": null,
+      "oracle_verification": {
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "rationale": null,
+        "status": "pass"
+      },
+      "quantity_of_interest": "manufactured solution u* and source f",
+      "reference_id": "hex-mms-tri/oracle",
+      "spatial_study": null,
+      "spatial_verification": {
+        "evidence_ref": null,
+        "rationale": null,
+        "status": "not_assessed"
+      },
+      "temporal_study": null,
+      "temporal_verification": {
+        "evidence_ref": null,
+        "rationale": null,
+        "status": "not_assessed"
+      }
+    },
+    {
+      "claim_ceiling": "verified_numerical_reference",
+      "code_verification": {
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "rationale": null,
+        "status": "pass"
+      },
+      "context_of_use": "-div(kappa grad u) = f on the unit equilateral triangle, homogeneous Dirichlet BC, smooth kappa in [0.6, 1.4], two-point-flux hex FV with midpoint conductances, CG, h = 1/N for N = 24, 48, 96, 192",
+      "iterative_verification": {
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "rationale": null,
+        "status": "pass"
+      },
+      "kind": "numerical",
+      "measurement_uncertainty": null,
+      "numerical_uncertainty": {
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "kind": "relative_fraction",
+        "value": 0.00011381208759685008
+      },
+      "oracle_verification": {
+        "evidence_ref": null,
+        "rationale": null,
+        "status": "not_assessed"
+      },
+      "quantity_of_interest": "u_h at the centroid (1/2, sqrt(3)/6)",
+      "reference_id": "hex-mms-tri/v1",
+      "spatial_study": {
+        "asymptotic_range_checked": true,
+        "axis": "spatial",
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "fine_grid_relative_error_estimate": 0.00011381208759685008,
+        "levels": [
+          {
+            "characteristic_size": 0.005208333333333333,
+            "level_id": "N=192",
+            "quantity_value": 2.5983130335439717
+          },
+          {
+            "characteristic_size": 0.010416666666666666,
+            "level_id": "N=96",
+            "quantity_value": 2.5990236851086697
+          },
+          {
+            "characteristic_size": 0.020833333333333332,
+            "level_id": "N=48",
+            "quantity_value": 2.601869069777568
+          },
+          {
+            "characteristic_size": 0.041666666666666664,
+            "level_id": "N=24",
+            "quantity_value": 2.613295284064883
+          }
+        ],
+        "observed_order": 2.001409425173797,
+        "quantity_of_interest": "u_h at the centroid (1/2, sqrt(3)/6)"
+      },
+      "spatial_verification": {
+        "evidence_ref": "results/2026-10-07_phase0_reference.json",
+        "rationale": null,
+        "status": "pass"
+      },
+      "temporal_study": null,
+      "temporal_verification": {
+        "evidence_ref": null,
+        "rationale": "steady problem",
+        "status": "not_applicable"
+      }
+    }
+  ],
+  "source": {
+    "git_sha": "292fa9a81cf4603ee279a1bdaa733cd5727c4b0d",
+    "worktree_dirty": false
+  },
+  "studies": {
+    "hex-heat-torus": {
+      "celik_coarse": {
+        "eps21": -0.3871695380957476,
+        "eps32": -1.5336290940646649,
+        "extrapolated": 92.11766540416059,
+        "gci_fine": 0.0017767551460071414,
+        "observed_order": 1.9859122581959363,
+        "oscillatory": false,
+        "relative_change_fine": 0.00420896318605125
+      },
+      "celik_fine": {
+        "eps21": -0.09702889817700111,
+        "eps32": -0.3871695380957476,
+        "extrapolated": 92.11639214890464,
+        "gci_fine": 0.00044047345117026324,
+        "observed_order": 1.996479052878129,
+        "oscillatory": false,
+        "relative_change_fine": 0.0010537005068871439
+      },
+      "code_under_test": "src/hexantk_v3.py:hex_laplacian_stencil_weight",
+      "code_verification_pass": true,
+      "config": {
+        "kappa": 1.0,
+        "levels": [
+          16,
+          32,
+          64,
+          128
+        ],
+        "modes": [
+          [
+            0,
+            0,
+            "cos",
+            0.3
+          ],
+          [
+            1,
+            1,
+            "cos",
+            1.0
+          ],
+          [
+            2,
+            -1,
+            "sin",
+            0.5
+          ],
+          [
+            1,
+            0,
+            "sin",
+            0.25
+          ]
+        ],
+        "qoi_mode": [
+          1,
+          1,
+          "cos"
+        ],
+        "refinement_ratio": 2.0,
+        "t_final": 0.01
+      },
+      "criteria": {
+        "C10_conservation": true,
+        "C1_eigen_residual": true,
+        "C2_rayleigh_matches_closed_form": true,
+        "C3_isotropic_coefficient": true,
+        "C4_heat_error_order": true,
+        "C5_observed_order": true,
+        "C6_monotone": true,
+        "C7_asymptotic_range": true,
+        "C8_gci_reported": true,
+        "C9_gci_covers_exact_error": true
+      },
+      "heat_error_orders": [
+        2.014013750771981,
+        2.00351139170204,
+        2.0008781904235833
+      ],
+      "levels": [
+        {
+          "coefficient_ratio": {
+            "0,0,cos": null,
+            "1,0,sin": 0.9953006088266203,
+            "1,1,cos": 0.9896493490910881,
+            "2,-1,sin": 0.979663269683868
+          },
+          "conservation_residual": 1.258612808948724e-16,
+          "eigen_residual_max": 1.2397365875225426e-14,
+          "h": 0.0625,
+          "heat_max_error": 0.01569542791348999,
+          "heat_rel_l2_error": 0.017600423891844297,
+          "lambda_exact": 92.11630774350067,
+          "lambda_h_closed_form": 90.06611619257603,
+          "lambda_rq": 90.06611619257602,
+          "n": 16,
+          "num_nodes": 256
+        },
+        {
+          "coefficient_ratio": {
+            "0,0,cos": null,
+            "1,0,sin": 0.9988227795548899,
+            "1,1,cos": 0.9974008506001639,
+            "2,-1,sin": 0.9948737124785866
+          },
+          "conservation_residual": 1.6874516835737697e-17,
+          "eigen_residual_max": 6.45028318295042e-14,
+          "h": 0.03125,
+          "heat_max_error": 0.0038830812104331813,
+          "heat_rel_l2_error": 0.004357572052509015,
+          "lambda_exact": 92.11630774350067,
+          "lambda_h_closed_form": 91.59974528664073,
+          "lambda_rq": 91.59974528664068,
+          "n": 32,
+          "num_nodes": 1024
+        },
+        {
+          "coefficient_ratio": {
+            "0,0,cos": null,
+            "1,0,sin": 0.9997055463803954,
+            "1,1,cos": 0.9993494921917682,
+            "2,-1,sin": 0.9987157796107246
+          },
+          "conservation_residual": 6.488089290811075e-18,
+          "eigen_residual_max": 2.6456033171838766e-13,
+          "h": 0.015625,
+          "heat_max_error": 0.0009682089034230845,
+          "heat_rel_l2_error": 0.0010867447513325358,
+          "lambda_exact": 92.11630774350067,
+          "lambda_h_closed_form": 91.98691482473677,
+          "lambda_rq": 91.98691482473643,
+          "n": 64,
+          "num_nodes": 4096
+        },
+        {
+          "coefficient_ratio": {
+            "0,0,cos": null,
+            "1,0,sin": 0.9999263772090892,
+            "1,1,cos": 0.9998373279783832,
+            "2,-1,sin": 0.9996787791092234
+          },
+          "conservation_residual": 1.6139252427193097e-18,
+          "eigen_residual_max": 1.0378742135653231e-12,
+          "h": 0.0078125,
+          "heat_max_error": 0.0002418919605082226,
+          "heat_rel_l2_error": 0.00027152085864089783,
+          "lambda_exact": 92.11630774350067,
+          "lambda_h_closed_form": 92.08394372291346,
+          "lambda_rq": 92.08394372291343,
+          "n": 128,
+          "num_nodes": 16384
+        }
+      ],
+      "passed": true,
+      "qoi_exact_rel_error_fine": 0.0003513386649989935,
+      "reference_id": "hex-heat-torus/v1",
+      "schema": "hexantk_reference_case_hex_heat_torus_v1",
+      "solution_verification_pass": true,
+      "spec": "spec/REFERENCE_CASES_HEX_PHASE0B_v1.md",
+      "thresholds": {
+        "asymptotic_tol": 0.05,
+        "coefficient_band": [
+          0.99,
+          1.01
+        ],
+        "conservation_tol": 1e-12,
+        "eigen_residual_tol": 1e-10,
+        "gci_safety_factor": 1.25,
+        "order_band": [
+          1.95,
+          2.05
+        ],
+        "rayleigh_tol": 1e-10
+      }
+    },
+    "hex-heat-tri": {
+      "celik_coarse": {
+        "eps21": -0.12663115623873722,
+        "eps32": -0.5040885066171867,
+        "extrapolated": 52.63810828068608,
+        "gci_fine": 0.001009656502406495,
+        "observed_order": 1.9930446527113261,
+        "oscillatory": false,
+        "relative_change_fine": 0.0024076366639011813
+      },
+      "celik_fine": {
+        "eps21": -0.03169595673047354,
+        "eps32": -0.12663115623873722,
+        "extrapolated": 52.637903734813854,
+        "gci_fine": 0.00025135018543212046,
+        "observed_order": 1.998261687123784,
+        "oscillatory": false,
+        "relative_change_fine": 0.0006022718974119681
+      },
+      "code_under_test": "src/hexantk_v3.py:hex_laplacian_stencil_weight",
+      "code_verification_pass": true,
+      "config": {
+        "kappa": 1.0,
+        "levels": [
+          16,
+          32,
+          64,
+          128
+        ],
+        "modes": [
+          [
+            1,
+            1,
+            "sin",
+            1.0
+          ],
+          [
+            1,
+            2,
+            "sin",
+            0.5
+          ],
+          [
+            1,
+            2,
+            "cos",
+            0.25
+          ]
+        ],
+        "qoi_mode": [
+          1,
+          1,
+          "sin"
+        ],
+        "refinement_ratio": 2.0,
+        "t_final": 0.01
+      },
+      "criteria": {
+        "C1_eigen_residual": true,
+        "C2_rayleigh_matches_closed_form": true,
+        "C3_isotropic_coefficient": true,
+        "C4_heat_error_order": true,
+        "C5_observed_order": true,
+        "C6_monotone": true,
+        "C7_asymptotic_range": true,
+        "C8_gci_reported": true,
+        "C9_gci_covers_exact_error": true
+      },
+      "heat_error_orders": [
+        2.0022465693717337,
+        2.000582966204191,
+        2.000147068056247
+      ],
+      "levels": [
+        {
+          "coefficient_ratio": {
+            "1,1,sin": 0.9948737124785653,
+            "1,2,cos": 0.9873185820419563,
+            "1,2,sin": 0.9873185820419487
+          },
+          "eigen_residual_max": 8.075145865454085e-15,
+          "h": 0.0625,
+          "heat_max_error": 0.0376424966956348,
+          "heat_rel_l2_error": 0.00972669074259779,
+          "lambda_exact": 52.637890139143245,
+          "lambda_h_closed_form": 51.96490580562824,
+          "lambda_rq": 51.96490580562824,
+          "n": 16,
+          "num_nodes": 105
+        },
+        {
+          "coefficient_ratio": {
+            "1,1,sin": 0.998715779610178,
+            "1,2,cos": 0.9968127936457803,
+            "1,2,sin": 0.9968127936458575
+          },
+          "eigen_residual_max": 3.898645533321316e-14,
+          "h": 0.03125,
+          "heat_max_error": 0.00951371718284122,
+          "heat_rel_l2_error": 0.002427889023828676,
+          "lambda_exact": 52.637890139143245,
+          "lambda_h_closed_form": 52.4689943122454,
+          "lambda_rq": 52.46899431224543,
+          "n": 32,
+          "num_nodes": 465
+        },
+        {
+          "coefficient_ratio": {
+            "1,1,sin": 0.9996787791041811,
+            "1,2,cos": 0.9992021407062295,
+            "1,2,sin": 0.9992021407064765
+          },
+          "eigen_residual_max": 1.309309309722685e-13,
+          "h": 0.015625,
+          "heat_max_error": 0.002381162736640352,
+          "heat_rel_l2_error": 0.0006067270393169523,
+          "lambda_exact": 52.637890139143245,
+          "lambda_h_closed_form": 52.59562546848415,
+          "lambda_rq": 52.595625468484165,
+          "n": 64,
+          "num_nodes": 1953
+        },
+        {
+          "coefficient_ratio": {
+            "1,1,sin": 0.9999196844166682,
+            "1,2,cos": 0.9998004689969315,
+            "1,2,sin": 0.9998004690011296
+          },
+          "eigen_residual_max": 5.763867660656896e-13,
+          "h": 0.0078125,
+          "heat_max_error": 0.0005956967041282901,
+          "heat_rel_l2_error": 0.00015166629820777315,
+          "lambda_exact": 52.637890139143245,
+          "lambda_h_closed_form": 52.627321425214724,
+          "lambda_rq": 52.62732142521464,
+          "n": 128,
+          "num_nodes": 8001
+        }
+      ],
+      "passed": true,
+      "qoi_exact_rel_error_fine": 0.00020078148840443178,
+      "reference_id": "hex-heat-tri/v1",
+      "schema": "hexantk_reference_case_hex_heat_tri_v1",
+      "solution_verification_pass": true,
+      "spec": "spec/REFERENCE_CASE_HEX_HEAT_TRI_v1.md",
+      "thresholds": {
+        "asymptotic_tol": 0.05,
+        "coefficient_band": [
+          0.99,
+          1.01
+        ],
+        "eigen_residual_tol": 1e-10,
+        "gci_safety_factor": 1.25,
+        "order_band": [
+          1.95,
+          2.05
+        ],
+        "rayleigh_tol": 1e-10
+      }
+    },
+    "hex-mms-tri": {
+      "celik_coarse": {
+        "eps21": 0.0028453846688982765,
+        "eps32": 0.011426214287315162,
+        "extrapolated": 2.5980801616646634,
+        "gci_fine": 0.0004537874401705441,
+        "observed_order": 2.005651882148834,
+        "oscillatory": false,
+        "relative_change_fine": 0.0010947898186542714
+      },
+      "celik_fine": {
+        "eps21": 0.0007106515646979616,
+        "eps32": 0.0028453846688982765,
+        "extrapolated": 2.5980764579995093,
+        "gci_fine": 0.00011381208759685008,
+        "observed_order": 2.001409425173797,
+        "oscillatory": false,
+        "relative_change_fine": 0.0002735049840121333
+      },
+      "code_under_test": "src/toolkit/hex_fv_solver_hex_v3.py (conductances, operator, CG)",
+      "code_verification_pass": true,
+      "config": {
+        "kappa": "1 + 0.4 * sin(2 pi x + 0.3) * cos(3 pi y)",
+        "kappa_range": [
+          0.6,
+          1.4
+        ],
+        "levels": [
+          24,
+          48,
+          96,
+          192
+        ],
+        "modes": [
+          [
+            1,
+            1,
+            "sin",
+            -0.5
+          ],
+          [
+            1,
+            2,
+            "cos",
+            0.2
+          ]
+        ],
+        "qoi_point": [
+          0.5,
+          0.28867513459481287
+        ],
+        "refinement_ratio": 2.0
+      },
+      "criteria": {
+        "C5_observed_order": true,
+        "C6_monotone": true,
+        "C7_asymptotic_range": true,
+        "C8_gci_reported": true,
+        "C9_gci_covers_exact_error": true,
+        "I1_iterative_error_negligible": true,
+        "M1_error_order": true,
+        "M2_conductance_symmetric": true,
+        "M3_positivity_gate": true,
+        "O1_boundary_zero": true,
+        "O2_source_matches_flux_divergence": true,
+        "O3_kappa_positive": true
+      },
+      "iterative_verification_pass": true,
+      "levels": [
+        {
+          "cg_iterations": 71,
+          "cg_iterations_loose": 59,
+          "cg_relative_residual": 7.040660743187984e-14,
+          "conductance_symmetric": true,
+          "h": 0.041666666666666664,
+          "iterative_error_estimate": 2.5155655336561722e-11,
+          "iterative_to_discretisation_ratio": 1.1556221561341436e-09,
+          "kappa_min": 0.6015960884322343,
+          "max_error": 0.02176806251336849,
+          "n": 24,
+          "num_nodes": 253,
+          "positivity_dt_bound": 0.00031191911442456967,
+          "rel_l2_error": 0.006566623729016477,
+          "u_centroid": 2.613295284064883
+        },
+        {
+          "cg_iterations": 147,
+          "cg_iterations_loose": 121,
+          "cg_relative_residual": 7.130106547605687e-14,
+          "conductance_symmetric": true,
+          "h": 0.020833333333333332,
+          "iterative_error_estimate": 2.3168023055575304e-11,
+          "iterative_to_discretisation_ratio": 4.232406193198827e-09,
+          "kappa_min": 0.6000095508481693,
+          "max_error": 0.0054739602008910815,
+          "n": 48,
+          "num_nodes": 1081,
+          "positivity_dt_bound": 7.767037180266624e-05,
+          "rel_l2_error": 0.0016353584135244542,
+          "u_centroid": 2.601869069777568
+        },
+        {
+          "cg_iterations": 298,
+          "cg_iterations_loose": 248,
+          "cg_relative_residual": 9.646844743118688e-14,
+          "conductance_symmetric": true,
+          "h": 0.010416666666666666,
+          "iterative_error_estimate": 1.7373102956241837e-11,
+          "iterative_to_discretisation_ratio": 1.270962691462129e-08,
+          "kappa_min": 0.6001520479337048,
+          "max_error": 0.001366924699910399,
+          "n": 96,
+          "num_nodes": 4465,
+          "positivity_dt_bound": 1.9381189426526812e-05,
+          "rel_l2_error": 0.00040844900539549483,
+          "u_centroid": 2.5990236851086697
+        },
+        {
+          "cg_iterations": 606,
+          "cg_iterations_loose": 503,
+          "cg_relative_residual": 9.820660578773049e-14,
+          "conductance_symmetric": true,
+          "h": 0.005208333333333333,
+          "iterative_error_estimate": 1.3947398791458454e-11,
+          "iterative_to_discretisation_ratio": 4.0794969570893274e-08,
+          "kappa_min": 0.6000272582036019,
+          "max_error": 0.0003418901628844395,
+          "n": 192,
+          "num_nodes": 18145,
+          "positivity_dt_bound": 4.844394131956769e-06,
+          "rel_l2_error": 0.00010208788512422408,
+          "u_centroid": 2.5983130335439717
+        }
+      ],
+      "max_error_orders": [
+        1.9915561542678388,
+        2.0016511743817396,
+        1.999328952868523
+      ],
+      "oracle": {
+        "boundary_ratio": 1.3883175093885455e-15,
+        "source_rel_error_vs_fd": 2.425000255806544e-13
+      },
+      "oracle_id": "hex-mms-tri/oracle",
+      "oracle_verification_pass": true,
+      "passed": true,
+      "qoi_exact": 2.5980762113533142,
+      "qoi_exact_rel_error_fine": 9.115290368410755e-05,
+      "reference_id": "hex-mms-tri/v1",
+      "rel_l2_error_orders": [
+        2.005544931615648,
+        2.001378983663018,
+        2.0003442997858984
+      ],
+      "schema": "hexantk_reference_case_hex_mms_tri_v1",
+      "solution_verification_pass": true,
+      "spec": "spec/REFERENCE_CASES_HEX_PHASE0B_v1.md",
+      "thresholds": {
+        "asymptotic_tol": 0.05,
+        "boundary_tol": 1e-12,
+        "cg_rtol": 1e-13,
+        "cg_rtol_loose": 1e-10,
+        "fd_points": 64,
+        "fd_step": 0.0001,
+        "gci_safety_factor": 1.25,
+        "iterative_ratio": 0.001,
+        "order_band": [
+          1.95,
+          2.05
+        ],
+        "source_tol": 1e-08
+      }
+    }
+  },
+  "study_sha256": {
+    "hex-heat-torus": "b22895a0df5b51dbf4652acfab9e69c025448ab778b8d23b4d9fda0eca1d0772",
+    "hex-heat-tri": "6a366cdb253ea00776e5e95f93ca4f8d23f46311e4b7b5f00ba6a3c1ed5db8ee",
+    "hex-mms-tri": "12918048112de349e42e31e3b76b7303fc386b73a1eaec417c70d2c7ac27a3c9"
+  }
+}

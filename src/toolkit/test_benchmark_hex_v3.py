@@ -853,5 +853,43 @@ class TestMetricSpecV4(unittest.TestCase):
         self.assertIsNone(migrated["threshold_crossing_step"])
 
 
+class TestPublicApiMatchesMetricSpecV4(unittest.TestCase):
+    """Issue #59 (P2): every name spec/METRIC_SPEC_v4.md section 0 lists as
+    part of the v4 contract is exported in ``__all__`` and exists. Before the
+    fix ``metric_semantics_label`` was public in the spec but missing from
+    ``__all__`` (Codex round 3 on #58)."""
+
+    _SPEC = Path(__file__).resolve().parents[2] / "spec" / "METRIC_SPEC_v4.md"
+
+    def _spec_public_names(self) -> list:
+        text = self._SPEC.read_text(encoding="utf-8")
+        section = text.split("## 0. Oeffentliche Namen", 1)
+        self.assertEqual(len(section), 2, "spec section 0 is missing")
+        body = section[1].split("\n## ", 1)[0]
+        names = [line[3:-1] for line in body.splitlines()
+                 if line.startswith("- `") and line.endswith("`")]
+        self.assertGreaterEqual(len(names), 1)
+        return names
+
+    def test_spec_public_names_are_exported(self) -> None:
+        names = self._spec_public_names()
+        self.assertIn("metric_semantics_label", names)
+        for name in names:
+            with self.subTest(name=name):
+                self.assertIn(name, benchmark.__all__)
+                self.assertTrue(callable(getattr(benchmark, name)))
+
+    def test_star_import_provides_metric_semantics_label(self) -> None:
+        namespace: dict = {}
+        exec("from benchmark_hex_v3 import *", namespace)
+        self.assertIs(namespace["metric_semantics_label"], benchmark.metric_semantics_label)
+
+    def test_all_names_resolve(self) -> None:
+        self.assertEqual(len(benchmark.__all__), len(set(benchmark.__all__)))
+        for name in benchmark.__all__:
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(benchmark, name))
+
+
 if __name__ == "__main__":
     unittest.main()
