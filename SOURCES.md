@@ -648,3 +648,9 @@
 | C2E9300E82426EA8 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): test_heat_operator_task_hex_v3.py |
 | A18A6C82BB0DC292 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): gino_adapter_hex_v3.py |
 | 55DCBCF24EFAB6D4 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): test_gino_adapter_hex_v3.py |
+
+## PR #75 engine-ownership wording (append-only, 2026-10-14, fix/public-metadata-claims)
+
+> Docstring only: the engine's maintenance location is open (Issue #74). Prior rows remain lineage.
+
+| 54464888B78D897F | 2026-10-14 00:00 | scripts | in-repo derived, PR #75 engine-ownership wording: engine_gate.py |
