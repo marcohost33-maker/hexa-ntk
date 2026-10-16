@@ -26,6 +26,7 @@ class Linear(torch.nn.Module):
         super().__init__()
         self.register_buffer("a", torch.tensor(a))
         self.theta = torch.nn.Parameter(torch.tensor(RNG.standard_normal(a.shape[1])))
+        self.eval()  # param_ntk measures eval-mode models only
 
     def forward(self) -> torch.Tensor:
         return self.a @ self.theta
@@ -38,6 +39,7 @@ class ComplexScale(torch.nn.Module):
         super().__init__()
         self.register_buffer("u", torch.tensor(u))
         self.c = torch.nn.Parameter(torch.tensor(0.3 - 0.7j, dtype=torch.complex64))
+        self.eval()
 
     def forward(self) -> torch.Tensor:
         return self.c.real * self.u + self.c.imag * self.u**2
@@ -114,6 +116,27 @@ class TestParamNTK(unittest.TestCase):
             _run(Detaching(a), model_dtype="float32")
         with self.assertRaises(ValueError):
             _run(Linear(a), model_dtype="float16")
+
+    def test_training_mode_is_refused(self) -> None:
+        # Codex P1 on #71: dropout/batch-norm in training mode would make the kernel random.
+        model = Linear(RNG.standard_normal((M, 3)))
+        _run(model)  # positive control: eval mode
+        model.train()
+        with self.assertRaisesRegex(pn.ParamNTKError, "training mode"):
+            _run(model)
+        model.eval()
+        model.add_module("drop", torch.nn.Dropout(0.5))  # a submodule left in training mode
+        model.drop.train()
+        with self.assertRaisesRegex(pn.ParamNTKError, "training mode"):
+            _run(model)
+
+    def test_modes_must_be_w_orthonormal(self) -> None:
+        # Codex P1 on #71: raw (unnormalized) modes rescale rows and eigenvalues silently.
+        model = Linear(RNG.standard_normal((M, 3)))
+        with self.assertRaisesRegex(ValueError, "W-orthonormal"):
+            pn.param_ntk(model, lambda m: m(), 2.0 * MODES, WEIGHTS)
+        with self.assertRaisesRegex(ValueError, "W-orthonormal"):
+            pn.param_ntk(model, lambda m: m(), MODES, 2.0 * WEIGHTS)
 
     def test_shape_and_basis_contract(self) -> None:
         with self.assertRaises(pn.ParamNTKError):

@@ -687,3 +687,11 @@
 | EB2540E4E6DF9FAC | 2026-10-16 | src/toolkit | PARAM_NTK_v1 (E1015M-03): parameter NTK, float64 shim + float32 cross-check: test_param_ntk_hex_v3.py |
 | 08BA7746C3BBE57A | 2026-10-16 | src/toolkit | PARAM_NTK_v1 (E1015M-03): parameter NTK, float64 shim + float32 cross-check: test_gino_adapter_hex_v3.py |
 | 0FFA4E5D26AEDAF1 | 2026-10-16 | spec | PARAM_NTK_v1 (E1015M-03): parameter NTK, float64 shim + float32 cross-check: PARAM_NTK_v1.md |
+
+| 0409908D3F5BB815 | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): param_ntk_hex_v3.py |
+| 02CA14BCB98BA89D | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): test_param_ntk_hex_v3.py |
+| 3CB31A92B9ED1DD7 | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): linear_baseline_hex_v3.py |
+| CC76BABD1ABCEB68 | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): test_linear_baseline_hex_v3.py |
+| 12AD7404789A08D5 | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): spectral_audit_hex_v3.py |
+| E2F65F122FE10146 | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): test_spectral_audit_hex_v3.py |
+| 83BC52A73A92B66F | 2026-10-16 | spec | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): SPECTRAL_AUDIT_v1.md |

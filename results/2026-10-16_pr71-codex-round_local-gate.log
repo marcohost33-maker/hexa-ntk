@@ -1,0 +1,24 @@
+==================================================================
+HexaNTK Gate-Run -- PR #71 nach Codex-Runde auf 0372a0f (8 Befunde)
+Datum:    2026-10-16
+Geprueft: f93710d (Arbeitsbaum vor dem Commit dieses Logs; dirty=7 Dateien)
+Umgebung: MINGW64_NT-10.0-26200 | Python 3.12.10 | torch 2.6.0+cpu | numpy 2.5.3
+Exit-Codes je Kommando direkt gemessen (cmd > tmp 2>&1; rc=$?), keine Pipe.
+==================================================================
+
+$ ruff check src scripts
+  exit 0 -- All checks passed! 
+
+$ python scripts/verify_sources.py
+  exit 0 -- [VERIFY-SOURCES] 44 Toolkit-Eintraege + 14 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (68 Dateien) | PASS 
+
+$ unittest discover (toolkit)
+  exit 0 -- Ran 808 tests in 14.782s OK (skipped=11) 
+
+$ coverage run + report (fail_under)
+  exit 0 -- TOTAL                                                                                                                                                                            12760   1040    92% 
+
+$ GINO gate (neuraloperator 2.0.0 venv)
+  exit 0 -- Ran 25 tests in 3.906s OK 
+
+GESAMT: alle Kommandos exit 0

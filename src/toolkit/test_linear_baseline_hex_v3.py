@@ -133,7 +133,7 @@ class TestViewsAndInvariance(unittest.TestCase):
     def test_scale_equivariance(self):
         g = self.model.matrix()
         scale = np.max(np.abs(g))
-        for c in (1e-30, 1e30):
+        for c in (1e-30, 1e30, 1e-200, 1e200):  # 1e+-200: s^2 left float64 range (Codex P2 on #71)
             with self.subTest(c=c):
                 both = PODRidgeBaseline(TRI.w).fit(c * self.u0, c * self.ut, self.ids)
                 self.assertLessEqual(np.max(np.abs(both.matrix() - g)) / scale, 1e-12)

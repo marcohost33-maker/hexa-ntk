@@ -1,10 +1,11 @@
 # Spectral audit v1 — input Jacobian on the T1 modes, and a linear POD-ridge baseline
 
 **Version:** 1.0
-**Status:** PROPOSED — a secondary instrument for Phase 1. It is NOT part of
-the preregistration (`spec/PREREGISTRATION_PHASE1_v1.md`, DRAFT) and changes
-none of its metrics or decision rules. Whether it enters a preregistration
-version as a secondary measurement is the owner's decision.
+**Status:** ADOPTED as a secondary measurement of Phase 1 (owner decision
+2026-10-13, recorded in `spec/PREREGISTRATION_PHASE1_v1.md`, section
+"Secondary measurement: spectral audit"): every trained seed and the selected
+test samples are audited. It changes none of the preregistration's metrics or
+decision rules.
 **Implementation:** `src/toolkit/spectral_audit_hex_v3.py` (audit),
 `src/toolkit/linear_baseline_hex_v3.py` (baseline).
 **Tests:** `test_spectral_audit_hex_v3.py` (contract, torch, fail-closed),

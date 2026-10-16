@@ -42,6 +42,7 @@ FD_REL_TOL = 1e-6  # float64 central difference vs autograd, relative to |J v|
 # still refuses a detached parameter (relative error 1).
 FD_REL_TOL_FLOAT32 = 1e-3
 _FD_STEP = {torch.float64: 1e-6, torch.float32: 4e-3}
+MODE_ORTHONORMAL_TOL = 1e-8  # max |phi^T W phi - I|
 
 
 class ParamNTKError(ValueError):
@@ -101,6 +102,11 @@ def _projector(modes: Any, weights: Any) -> np.ndarray:
         raise ValueError("modes must be (M, K) and weights (M,)")
     if not (np.all(np.isfinite(phi)) and np.all(np.isfinite(w)) and np.all(w > 0)):
         raise ValueError("modes must be finite and weights finite and positive")
+    # The kernel is defined in a W-ORTHONORMAL basis; raw (unnormalized) modes would
+    # silently rescale rows and eigenvalues (Codex P1 on #71).
+    gram = phi.T @ (w[:, None] * phi)
+    if not np.max(np.abs(gram - np.eye(phi.shape[1]))) <= MODE_ORTHONORMAL_TOL:  # NaN fails closed
+        raise ValueError("modes must be W-orthonormal (phi^T W phi = I); normalize them first")
     return (w[:, None] * phi).T  # (K, M): P = projector @ y
 
 
@@ -126,15 +132,16 @@ def _gram_rows(model, forward, projector) -> tuple[torch.Tensor, list[torch.Tens
 
 def _fd_check(model, forward, projector, seed: int, step: float) -> float:
     """Central difference of one random projection along one random parameter direction."""
-    gen = torch.Generator().manual_seed(seed)
+    gen = torch.Generator().manual_seed(seed)  # CPU generator: reproducible on any device
     params = _trainable(model)
-    coeff = torch.randn(projector.shape[0], generator=gen, dtype=torch.float64)
-    proj = torch.as_tensor(projector, dtype=torch.float64)
+    device = params[0].device  # FD tensors live with the model (Codex P2 on #71)
+    coeff = torch.randn(projector.shape[0], generator=gen, dtype=torch.float64).to(device)
+    proj = torch.as_tensor(projector, dtype=torch.float64, device=device)
 
     def scalar() -> torch.Tensor:
         return coeff @ (proj @ forward(model).to(torch.float64))
 
-    directions = [torch.randn(p.shape, generator=gen, dtype=p.dtype) for p in params]
+    directions = [torch.randn(p.shape, generator=gen, dtype=p.dtype).to(device) for p in params]
     value = scalar()
     grads = torch.autograd.grad(value, params, allow_unused=True)
     jv = sum(float((_as_real(g) * _as_real(d)).sum()) for g, d in zip(grads, directions) if g is not None)
@@ -175,6 +182,11 @@ def param_ntk(
         raise TypeError("model must be a torch.nn.Module")
     if model_dtype not in ("float64", "float32"):
         raise ValueError("model_dtype must be 'float64' or 'float32'")
+    # Dropout/batch-norm in training mode make the Gram rows and the FD forwards use
+    # different masks or mutate buffers in between: the kernel would be random
+    # (Codex P1 on #71). The caller decides; we only measure an eval-mode model.
+    if any(m.training for m in model.modules()):
+        raise ParamNTKError("model (or a submodule) is in training mode; call model.eval() first")
     _check_parameters(model, params)
     projector = _projector(modes, weights)
 

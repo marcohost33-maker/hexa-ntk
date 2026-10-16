@@ -455,6 +455,13 @@ def _relative_errors(diag: np.ndarray, oracle: np.ndarray) -> Tuple[np.ndarray, 
     return abs_err, rel
 
 
+def _scaled_column_norms(a: np.ndarray) -> np.ndarray:
+    """Euclidean column norms without overflow/underflow: scale by the column max."""
+    scale = np.max(np.abs(a), axis=0)
+    safe = np.where(scale > 0.0, scale, 1.0)
+    return np.where(scale > 0.0, scale * np.sqrt(np.sum((a / safe) ** 2, axis=0)), 0.0)
+
+
 def input_jacobian_spectrum(
     operator: Any,
     modes: Any,
@@ -545,8 +552,11 @@ def input_jacobian_spectrum(
     if jq is not None:
         s = q.T @ (w[:, None] * jq)
         residual = jq - q @ s
-        num = np.sqrt(np.sum(w[:, None] * residual * residual, axis=0))
-        den = np.sqrt(np.sum(w[:, None] * jq * jq, axis=0))
+        # Weighted column norms via a max-scaled sum: squaring entries above ~1e154
+        # overflowed to inf and gave out_of_span = inf/inf = NaN (Codex P2 on #71).
+        sw = np.sqrt(w)[:, None]
+        num = _scaled_column_norms(sw * residual)
+        den = _scaled_column_norms(sw * jq)
         with np.errstate(divide="ignore", invalid="ignore"):
             out_of_span = np.where(den > 0.0, num / np.where(den > 0.0, den, 1.0), 0.0)
     else:
@@ -556,8 +566,12 @@ def input_jacobian_spectrum(
         raise NonFiniteOutputError("projected Jacobian S is not finite")
     diag = np.diag(s).copy()
     off = s - np.diag(diag)
-    total = float(np.linalg.norm(s))
-    coupling = float(np.linalg.norm(off)) / total if total > 0.0 else None
+    total = float(_scaled_column_norms(s.reshape(-1, 1))[0])  # Frobenius, max-scaled
+    coupling = float(_scaled_column_norms(off.reshape(-1, 1))[0]) / total if total > 0.0 else None
+    # Fail closed on every derived metric, not only on S (Codex P2 on #71).
+    if (out_of_span is not None and not np.all(np.isfinite(out_of_span))) or \
+            not math.isfinite(total) or (coupling is not None and not math.isfinite(coupling)):
+        raise NonFiniteOutputError("derived spectral metrics (out-of-span, coupling) are not finite")
     abs_err = rel_err = spectral = None
     if o is not None:
         abs_err, rel_err = _relative_errors(diag, o)

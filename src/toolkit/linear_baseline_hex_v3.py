@@ -191,9 +191,14 @@ class PODRidgeBaseline:
         a = x @ (self.weights[:, None] * p_in)  # (S, r_in)
         c = y @ (self.weights[:, None] * p_out)  # (S, r_out)
         ua, sa, vta = np.linalg.svd(a, full_matrices=False)
-        alpha = float(self.config.alpha_rel) * float(sa[0]) ** 2
-        # B = V diag(s / (s^2 + alpha)) U^T C: stable for alpha = 0 as long as s > 0, which the POD rank ensures.
-        b = vta.T @ ((sa / (sa * sa + alpha))[:, None] * (ua.T @ c))
+        alpha = float(self.config.alpha_rel) * float(sa[0]) * float(sa[0])  # report only; inf if s_max^2 leaves float64
+        # B = V diag(s / (s^2 + alpha)) U^T C, formed with s normalized by s_max:
+        # s/(s^2 + alpha) = (t / (t^2 + alpha_rel)) / s_max with t = s / s_max, so neither
+        # s^2 nor alpha can overflow or underflow, and the fit stays scale-equivariant
+        # (Codex P2 on #71). Stable for alpha = 0 as long as s > 0 (POD rank ensures it).
+        t = sa / sa[0]
+        filt = (t / (t * t + float(self.config.alpha_rel))) / sa[0]
+        b = vta.T @ (filt[:, None] * (ua.T @ c))
         if not np.all(np.isfinite(b)):
             raise ValueError("ridge solution is not finite")
         for arr in (p_in, p_out, b, s_in, s_out):

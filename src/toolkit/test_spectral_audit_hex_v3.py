@@ -130,6 +130,16 @@ class TestTorchBackend(unittest.TestCase):
         self.assertLessEqual(np.max(np.abs(numpy_result.projection - torch_result.projection)) / self.scale, 1e-13)
         self.assertLessEqual(np.max(np.abs(numpy_result.out_of_span - torch_result.out_of_span)), 1e-12)
 
+    def test_huge_finite_jacobian_keeps_derived_metrics_finite(self):
+        # Codex P2 on #71: entries ~1e200 squared to inf, out_of_span became inf/inf = NaN
+        # while only S was checked. Norms are max-scaled now; metrics equal the 1x case.
+        base = sa.input_jacobian_spectrum(lambda u: self.matrix @ u, self.q, self.w)
+        big = sa.input_jacobian_spectrum(lambda u: (1e200 * self.matrix) @ u, self.q, self.w)
+        self.assertTrue(np.all(np.isfinite(big.out_of_span)))
+        np.testing.assert_allclose(big.out_of_span, base.out_of_span, rtol=1e-9, atol=1e-12)
+        self.assertTrue(np.isfinite(big.coupling_fraction))
+        self.assertAlmostEqual(big.coupling_fraction, base.coupling_fraction, delta=1e-9)
+
     def test_float32_module_smoke(self):
         torch.manual_seed(0)
         m = self.lattice.num_nodes
