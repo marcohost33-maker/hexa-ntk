@@ -1,0 +1,42 @@
+# HexaNTK gate log, spectral audit (input Jacobian on the T1 modes) + linear POD-ridge baseline - local branch claude/hexa-ntk-spectral-audit-20261013
+# Tested commit: 80a91d34bd3c05065534514a435331141a434dc6 (dirty=0); baseline 6d219d9800496d3dfa25cbfcee0b201d80de8c44 (PR #61 head)
+# Claim: local Windows run, CI open. Instruments only; no model fitted to T1 data.
+# Baseline @6d219d9 (same chain, same venv, 2026-10-13): ruff 0, compileall 0, verify_sources PASS 35+10+10, engine 49/49,
+#   unittest Ran 701 OK (skipped=6) exit 0, coverage TOTAL 93 % exit 0.
+# Discrimination (Tools/diskriminierung.py, ledger diskriminierung_runs.jsonl, provenance VOLL):
+#   DK-20261013T105045-f52f63b0e807 @44840e6 11/13 (DK-SA03, DK-SA09 BLIND -> tests sharpened)
+#   DK-20261013T105406-82fe0edb040f @bf72a9e 2/2
+#   DK-20261013T105959-dc4832e0c3a5 @6d1ddbb 4/5 (DK-LB04 red by IndexError only -> test sharpened)
+#   DK-20261013T110257-bd515d860dc6 @e4a7a03 1/1
+
+## ci.yml chain (ruff check src scripts; compileall -q src; verify_sources.py; engine_gate.py;
+##   coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"; coverage report)
+
+# local gate, spectral audit, 2026-10-13T13:06:12+02:00
+commit 80a91d34bd3c05065534514a435331141a434dc6
+status_porcelain_lines 0
+python 3.12.10 numpy 2.5.4 torch 2.6.0+cpu
+ruff ruff 0.16.9 coverage Coverage.py, version 7.16.2 with C extension
+os Windows 11 (win32)
+## ruff check src scripts
+All checks passed!
+exit 0
+## python -m compileall src
+exit 0
+## python scripts/verify_sources.py
+[VERIFY-SOURCES] 40 Toolkit-Eintraege + 11 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (61 Dateien) | PASS
+exit 0
+## python scripts/engine_gate.py
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+exit 0
+## coverage run -m unittest discover -s src/toolkit -t src/toolkit -p test_*.py -v
+exit 0
+Ran 761 tests in 18.808s
+
+OK (skipped=6)
+skipped_lines 6
+## coverage report
+src\toolkit\linear_baseline_hex_v3.py            135      1     60      1    99%
+src\toolkit\spectral_audit_hex_v3.py             316      2    122      3    99%
+TOTAL                                           3641    185   1354    132    93%
+exit 0

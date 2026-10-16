@@ -176,6 +176,15 @@ plus data cost is amortised.
 **Negative results** (no advantage, OOD failure) are reported with the same
 prominence as positive ones (AGENTS.md: first-class).
 
+**Secondary measurement: spectral audit** (owner decision 2026-10-13, `spec/SPECTRAL_AUDIT_v1.md`).
+- Every trained GINO seed is audited at base point `0` and at the first 8 sample ids
+  of each test set, against oracle (iii) (`exp(-kappa lambda T)`, T1 truth).
+- Reported per mode: `diag_rel_error`, `coupling_fraction`, `out_of_span`; the
+  mechanistic baseline is audited at the same `(N, steps)` next to it.
+- The POD-ridge baseline (`spec/SPECTRAL_AUDIT_v1.md` section 6) is fit on the training
+  split only and reported as an additional baseline, not a decision baseline.
+- No decision rule in section 6 depends on these numbers.
+
 ## 6. Decision rules (per test set)
 
 **Equal runtime.**
@@ -231,6 +240,23 @@ reported.
 | D6 | Torus shift naming | treat it as composite domain/topology/BC OOD in v1; reserve "BC-family" for same-domain Neumann/Robin in v2 |
 | D7 | Add `neuraloperator==2.0.0` as an optional dependency | accept (MIT) |
 | D8 | Optional licence request to the GAOT/GINOT authors (#60) | external action, Marco's call |
+
+Owner `[M]`, 2026-10-13: D1-D8 accepted as recommended; T1 is a calibration study (a negative
+result is an accepted outcome); the spectral audit is adopted as a secondary measurement
+(section 5); the licence request (D8) is drafted for the owner to send. Still open before the
+status line can change: the concrete D4 grid (at most 8 configurations) and the named D5 machine.
+
+2026-10-15 (owner decision E1015M-01: enter D4/D5 now, only with content from the approved
+source). The approval of 2026-10-13 (E1013M-01) rests on the research synthesis of 2026-10-13,
+question 1 (Vero research archive, not in this repo:
+`Recherche/2026-10-13_neuronale-operatoren-und-hexa-ntk/01_SYNTHESE.md`, line 33, recommendation
+1(d) "D5 = CPU"; rationale in `04_T2_hexa-ntk.md`, line 118: the default GINO spectral weights
+need about 11 MB, `N = 32` has 465 nodes).
+- **D5, filled:** compute = CPU, no GPU.
+- **D5, still open:** the named machine. The source names no machine.
+- **D4, still open:** the source contains no grid and no epoch budget.
+
+The status line therefore stays DRAFT; nothing here allows a fit on T1 data.
 
 ## 9. Claim boundary
 

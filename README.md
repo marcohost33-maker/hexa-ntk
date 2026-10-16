@@ -48,7 +48,7 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
   Diskretisierung sind die Phase-0-Referenzfaelle (unten): Code- und Loesungsverifikation gegen
   exakte bzw. hergestellte Loesungen, eng begrenzte Contexts of Use, keine Physik-Aussage.
 
-## Reifegrad / Evidenz (Lauf 2026-10-15 nach Einsammeln des Stapels #62..#66, #70, #72; lokal Windows, Exit-Codes gesehen)
+## Reifegrad / Evidenz (Lauf 2026-10-15: #61-Stapel #62..#66, #70, #72 + Spektral-Audit #71 + Haertungen; lokal Windows, Exit-Codes gesehen)
 
 > **Phase 0b I1: V1 BLOCKED (historisch), V2 erfuellt (E1012-07 = A, 2026-10-12).**
 > - **V1** (`rtol = 1e-13` auf dem **wahren** Residuum `||b - A x||`, `spec/HEX_FV_SOLVER_v1.md`
@@ -67,15 +67,15 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 |---|---|---|
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
-| Provenance | `python scripts/verify_sources.py` | 37 Toolkit- + 12 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 722 Tests, Ergebnis und Exit-Code im Gate-Log `results/2026-10-15_pr61-stack-collection_local-gate.log` (I1 nach V2; das V1-Rot ist ein erwarteter Befund im Test `TestMmsI1V1Historical`, kein roter Test); Skips je Plattform: Gate-Log |
+| Provenance | `python scripts/verify_sources.py` | 44 Toolkit- + 14 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 809 Tests, Ergebnis und Exit-Code im Gate-Log `results/2026-10-17_pr71-fd-kernel-rows_local-gate.log` (Windows; FD-Pruefung auf den Kernel-Zeilen, mit Mutanten-Beleg); Vorlaeufer `results/2026-10-16_pr71-codex-round_local-gate.log` (808 Tests, @59693d8; #61-Stapel + Spektral-Audit + Haertungen 2026-10-15, mit Negativ-zuerst- und Mutanten-Beleg), `results/2026-10-13_spectral-audit_local-gate.log` (@80a91d3) und 701 Tests im Gate-Log `results/2026-10-12_pr61-i1-v2_local-gate.log` (I1 nach V2; das V1-Rot ist ein erwarteter Befund im Test `TestMmsI1V1Historical`, kein roter Test); Skips je Plattform: Gate-Log |
 | Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
 | Mutation | `python scripts/mutation_probe.py` | 50/51 Mutanten getoetet, volle Probe @9db9cbc unter Windows, Baseline gruen, exit 1: einzig M02 ueberlebt, und das ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped; so schon 2026-09-28). Der I1-Mutant (Iterationsfehler-Verhaeltnis entfernt) zielt seit 2026-10-12 auf `_i1_level_holds`. Letzter voller Lauf unter Linux: 49/49, exit 0, 2026-10-07 (alte Zaehlung) |
 
 Lokale Umgebung des Laufs 2026-10-15: Windows 11, Python 3.12.10, `torch` 2.6.0+cpu, `numpy`
 2.5.3, coverage 7.16.2, ruff 0.16.9, GINO-Gate mit `neuraloperator` 2.0.0, OpenBLAS-Kernel-Schleife;
-Log `results/2026-10-15_pr61-stack-collection_local-gate.log` (Vorlaeufer
-`results/2026-10-12_pr61-i1-v2_local-gate.log`, `results/2026-10-12_pr61-hardening_local-gate.log`)
+Log `results/2026-10-15_pr71-hardening_local-gate.log` (Vorlaeufer
+`results/2026-10-15_pr61-stack-collection_local-gate.log`, `results/2026-10-12_pr61-i1-v2_local-gate.log`, `results/2026-10-12_pr61-hardening_local-gate.log`)
 (gepruefter Commit-SHA, Kommandos, Exit-Codes, Zahlen; der Commit mit Log und README aendert
 keinen Code). Vorlauf 2026-10-07 (659 Tests am Commit f4137f8; danach kamen vier Tests ohne
 eigenen Gate-Lauf hinzu, Codex P2 auf #61) in folgender Umgebung:
@@ -129,10 +129,11 @@ in `spec/`, offene Lint-/Test-Schuld in `docs/ROADMAP.md`.
 
 - **Engine:** `src/hexantk_v3.py` (1773 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
   Train-Step, Operator-Vertraege, 26 Selftests inline)
-- **Toolkit:** `src/toolkit/` — 16 Module + 21 Testmodule (Benchmark, Checkpoint-Integration,
-  Dataloader-Utils, Dataset-Split, EMA, Failure-Signature, Hex-FV-Loeser, Operator-Adapter,
-  Phase-0-Referenzfaelle, Phase-1-Aufgabe T1, ReferenceSpec, Resume-Utils, Runner, Stress,
-  Warmstart-Utils; dazu die Tests des Provenance-Gates, des DCP-Bundle-Protokolls und des
+- **Toolkit:** `src/toolkit/` — 19 Module + 25 Testmodule (Parameter-NTK, Benchmark, Checkpoint-Integration,
+  Dataloader-Utils, Dataset-Split, EMA, Failure-Signature, Hex-FV-Loeser, Lineare POD-Ridge-Baseline,
+  Operator-Adapter,
+  Phase-0-Referenzfaelle, Phase-1-Aufgabe T1, ReferenceSpec, Resume-Utils, Runner,
+  Spektral-Audit, Stress, Warmstart-Utils; dazu die Tests des Provenance-Gates, des DCP-Bundle-Protokolls und des
   Zeitschritt-Vertrags)
 
 ## Reality Anchor Phase 0: Referenzfaelle (#60)
@@ -184,6 +185,16 @@ Vor jedem Training festgelegt, ohne Modell und ohne Lern-Claim:
   GINO (`neuraloperator==2.0.0`, MIT, auf PyPI verifiziert) gegen diese Baseline nach
   McGreivy & Hakim (gleiche Laufzeit / gleiche Genauigkeit, Kosten-Genauigkeits-Kurve,
   Break-even inkl. Training und Datengenerierung), >= 5 Seeds, IQM + stratifiziertes Bootstrap.
+- **Spektral-Audit** (`spec/SPECTRAL_AUDIT_v1.md`, `src/toolkit/spectral_audit_hex_v3.py`;
+  Sekundaerinstrument, NICHT Teil der Vorregistrierung): Eingabe-Jacobi `J` eines beliebigen
+  Operators (numpy, torch, `nn.Module`), projiziert auf die W-orthonormierte T1-Basis,
+  `S = Q^T W J Q`. Liefert Frequenzgang je Mode, Modenkopplung und Antwort ausserhalb der Basis
+  gegen geschlossene Orakel (semidiskret `exp(-kappa lambda_h T)`, Crank-Nicolson, T1-Wahrheit
+  `exp(-kappa lambda T)`). Fail-closed bei NaN/Inf, Budget, nicht orthonormaler Basis. Ist
+  NICHT die Parameter-NTK (die liegt separat in `src/toolkit/param_ntk_hex_v3.py`, Spec
+  `spec/PARAM_NTK_v1.md`). Dazu eine lineare POD-Ridge-Baseline
+  (`src/toolkit/linear_baseline_hex_v3.py`) mit vorab fixierten Rang-/Regularisierungsregeln
+  und Leckage-Waechter, nur auf synthetischen Daten getestet.
 
 ## Reproduzieren
 
@@ -198,7 +209,7 @@ python scripts/verify_sources.py                               # Provenance-Gate
 # python -m pip install -r requirements-operator.txt
 # python -m unittest discover -s src/toolkit -t src/toolkit -p "test_gino_adapter_hex_v3.py" -v
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 722 Unit-Tests (2026-10-16; Codex-Runde #61) + Coverage-Gate
+python -m coverage report                                      # 809 Unit-Tests (2026-10-17; FD-Kernel-Zeilen #71) + Coverage-Gate
 python scripts/mutation_probe.py                               # optional: 51 Mutanten der Review-Fixes
 python scripts/oracles/hex_phase0_reference_oracle.py         # Phase-0-Referenzfaelle (exit 0 = alle Gates gruen)
 ```
@@ -215,10 +226,10 @@ nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
   synthetischem Optimizerschritt (kein T1-Training). Fehlendes Backend => FAIL.
   Achtung: Abweichung von der noch nicht genehmigten D7-Preregistrierung, die
   `CI stays torch-only` vorsieht: siehe `docs/ADR/ADR-002-Phase1-GINO-required-gate-proposal.md`.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (722, Stand 2026-10-16; Codex-Runde #61) unter Branch-Coverage;
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (809, Stand 2026-10-17; FD-Kernel-Zeilen #71) unter Branch-Coverage;
   danach die torch-freien FV-/Reference-Suites unter jedem portablen OpenBLAS-Kernel
   (`OPENBLAS_CORETYPE` Prescott/Sandybridge/Haswell/Zen, SkylakeX bei AVX-512), weil die
-  CG-Stoppregel-Tests an der Rundung von BLAS-`ddot` haengen (2026-10-14).
+  CG-Stoppregel-Tests an der Rundung von BLAS-`ddot` haengen (2026-10-14). Das Spektral-Orakel (torch) bleibt ausserhalb: unter erzwungenem OPENBLAS_CORETYPE stuerzt es auf dem Runner ab (Exit 139, Haswell, 2026-10-16); seine CN-Toleranz ist stattdessen aus dem CG-Abbruch hergeleitet und lokal unter vier Kerneln gruen.
 
 **Adapter-Ressourcenbudget (Wave19):** Vor kanonischer Gitterallokation werden
 Arrayform, n und Dtype geprüft. Die GINO-Linie akzeptiert maximal n=512,

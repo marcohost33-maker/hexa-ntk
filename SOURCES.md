@@ -584,6 +584,18 @@
 | 725151FC09B80F9C | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 V2 non-finite floor test fails by assertion for any exception type: test_hex_fv_solver_hex_v3.py |
 | F70F0D7AB9D8444E | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: reference_case_hex_v3.py |
 | 71769EC73D62DE94 | 2026-10-12 00:00 | src/toolkit | in-repo derived, 2026-10-12 E1012-07 I1 level field cg_converged only where rtol was reached, cg_returned for I1: test_reference_case_hex_v3.py |
+| E6BE1CB1FEF2FFD7 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 spectral audit B1 (input Jacobian projected on the T1 modes, fail-closed): spectral_audit_hex_v3.py |
+| 0D37A6EDD1C091C9 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 spectral audit B1 (input Jacobian projected on the T1 modes, fail-closed): test_spectral_audit_hex_v3.py |
+| 763B5F2160112190 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 spectral audit B2 (oracles: semidiscrete semigroup, Crank-Nicolson, negative controls, metamorphic): test_spectral_audit_oracles_hex_v3.py |
+| 880A7A1923CBBC0D | 2026-10-13 00:00 | src/toolkit | in-repo derived, 2026-10-13 spectral audit DK-SA03/DK-SA09 were BLIND: base-point NaN test, coupling-only verdict: test_spectral_audit_hex_v3.py |
+| EA13FFBFE0DEE643 | 2026-10-13 00:00 | src/toolkit | in-repo derived, 2026-10-13 spectral audit DK-SA03/DK-SA09 were BLIND: base-point NaN test, coupling-only verdict: test_spectral_audit_oracles_hex_v3.py |
+| 28D86FE9CC41299B | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 B3 linear POD-ridge baseline with leakage guard, checked by the spectral audit: linear_baseline_hex_v3.py |
+| 35F70875438E85C4 | 2026-10-13 00:00 | src/toolkit | in-repo new, 2026-10-13 B3 linear POD-ridge baseline with leakage guard, checked by the spectral audit: test_linear_baseline_hex_v3.py |
+| 76D0289C9F3E1531 | 2026-10-13 00:00 | src/toolkit | in-repo derived, 2026-10-13 DK-LB04 was red by IndexError only: all-zero training test fails by assertion: test_linear_baseline_hex_v3.py |
+| 02C803DBBE6DEC98 | 2026-10-13 00:00 | src/toolkit | in-repo derived, 2026-10-13 B4 citation narrowed to Higham 2002 section 3.1: spectral_audit_hex_v3.py |
+| 996CB2636D266724 | 2026-10-13 00:00 | spec | in-repo new, 2026-10-13 B4 spectral audit and linear POD-ridge baseline contract (secondary instrument, not preregistered): SPECTRAL_AUDIT_v1.md |
+| 3EC5B4A4B6B3C5DA | 2026-10-13 13:13 | spec | in-repo derived, owner decision 2026-10-13 (spectral audit adopted as secondary measurement): PREREGISTRATION_PHASE1_v1.md |
+| 29C3C1737A70F951 | 2026-10-13 13:13 | spec | in-repo derived, owner decision 2026-10-13 (spectral audit adopted as secondary measurement): SPECTRAL_AUDIT_v1.md |
 ## Phase-1 external GINO adapter v1 — GPT-5.6 Sol (append-only, 2026-10-07)
 
 > Optional neuraloperator==2.0.0 adapter, synthetic forward smoke and explicit
@@ -642,6 +654,24 @@
 
 | D58885C8EA67AE42 | 2026-10-14 00:00 | src/toolkit | in-repo derived, 2026-10-14 CG V2 tests use _RTOL_BELOW_ROUNDING=1e-17 (kernel-independent stagnation premise), scaling test pins status: test_hex_fv_solver_hex_v3.py |
 
+| F80BB66072969523 | 2026-10-15 00:00 | spec | in-repo derived, 2026-10-15 E1015M-01 D5 = CPU entered from the approved source, D4 grid and D5 machine still open, status stays DRAFT: PREREGISTRATION_PHASE1_v1.md |
+
+> **2026-10-15, hardening negative-first (B3a, B4, B9, B6).** GINO adapter: float64
+> refusal over every submodule; runtime radius-tie refusal in build_gino and
+> prepare_gino_batch. POD-ridge: content leakage via canonical row hashes
+> (-0.0 -> 0.0). Spectral audit: determinism preflight (two forwards bitwise
+> equal, global RNG unchanged), counted in the evaluation budget. Prior rows
+> remain lineage.
+
+| E209AE93528788AE | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): gino_adapter_hex_v3.py |
+| 8625301D301E8588 | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): test_gino_adapter_hex_v3.py |
+| E06B6E507C83A789 | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): linear_baseline_hex_v3.py |
+| 65676123D70A84DE | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): test_linear_baseline_hex_v3.py |
+| CCDEFBC9270C645A | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): spectral_audit_hex_v3.py |
+| 7EC0CFA6715BC616 | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): test_spectral_audit_hex_v3.py |
+| 1314D4BF9583957B | 2026-10-15 00:00 | src/toolkit | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): test_spectral_audit_oracles_hex_v3.py |
+| 6DA42EA6DFEDF763 | 2026-10-15 00:00 | spec | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): GINO_ADAPTER_PHASE1_v2.md |
+| D1D3D3B2D2DB39A7 | 2026-10-15 00:00 | spec | in-repo derived, 2026-10-15 hardening B3a/B4/B9/B6 (negative-first, mutants in results/): SPECTRAL_AUDIT_v1.md |
 | 2EF9B114873DAFF8 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): hex_fv_solver_hex_v3.py |
 | 6D8721D56E9B9942 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): test_hex_fv_solver_hex_v3.py |
 | 5F14BC566BD97CE8 | 2026-10-16 | src/toolkit | Codex R on #61 dd24538 (V2 last-iterate, canonical lattice, dataset [S,M], GINO config binding): heat_operator_task_hex_v3.py |
@@ -654,3 +684,27 @@
 > Docstring only: the engine's maintenance location is open (Issue #74). Prior rows remain lineage.
 
 | 54464888B78D897F | 2026-10-14 00:00 | scripts | in-repo derived, PR #75 engine-ownership wording: engine_gate.py |
+
+| 73DB4059487654BA | 2026-10-16 | src/toolkit | merge #61 1b9c2c4 + CN oracle tolerance derived from CG rtol (E5): gino_adapter_hex_v3.py |
+| 5822365C94CED266 | 2026-10-16 | src/toolkit | merge #61 1b9c2c4 + CN oracle tolerance derived from CG rtol (E5): test_gino_adapter_hex_v3.py |
+| 3176497F2398A499 | 2026-10-16 | src/toolkit | merge #61 1b9c2c4 + CN oracle tolerance derived from CG rtol (E5): test_spectral_audit_oracles_hex_v3.py |
+
+| BEAD5188822CAE4A | 2026-10-16 | src/toolkit | PARAM_NTK_v1 (E1015M-03): parameter NTK, float64 shim + float32 cross-check: param_ntk_hex_v3.py |
+| EB2540E4E6DF9FAC | 2026-10-16 | src/toolkit | PARAM_NTK_v1 (E1015M-03): parameter NTK, float64 shim + float32 cross-check: test_param_ntk_hex_v3.py |
+| 08BA7746C3BBE57A | 2026-10-16 | src/toolkit | PARAM_NTK_v1 (E1015M-03): parameter NTK, float64 shim + float32 cross-check: test_gino_adapter_hex_v3.py |
+| 0FFA4E5D26AEDAF1 | 2026-10-16 | spec | PARAM_NTK_v1 (E1015M-03): parameter NTK, float64 shim + float32 cross-check: PARAM_NTK_v1.md |
+
+| 0409908D3F5BB815 | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): param_ntk_hex_v3.py |
+| 02CA14BCB98BA89D | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): test_param_ntk_hex_v3.py |
+| 3CB31A92B9ED1DD7 | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): linear_baseline_hex_v3.py |
+| CC76BABD1ABCEB68 | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): test_linear_baseline_hex_v3.py |
+| 12AD7404789A08D5 | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): spectral_audit_hex_v3.py |
+| E2F65F122FE10146 | 2026-10-16 | src/toolkit | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): test_spectral_audit_hex_v3.py |
+| 83BC52A73A92B66F | 2026-10-16 | spec | Codex R on #71 0372a0f (param NTK: eval/orthonormal/device; ridge scaling; scaled spectral norms; spec status): SPECTRAL_AUDIT_v1.md |
+
+## PR #71 FD check on the kernel rows (append-only, 2026-10-17)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| A07219EA8B48FAFC | 2026-10-17 00:00 | src/toolkit | FD check validates the kernel rows mode by mode (007acc2 v6 finding, 2026-10-17): param_ntk_hex_v3.py |
+| 2D71C953BB65872E | 2026-10-17 00:00 | src/toolkit | FD check validates the kernel rows mode by mode (007acc2 v6 finding, 2026-10-17): test_param_ntk_hex_v3.py |

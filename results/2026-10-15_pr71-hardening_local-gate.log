@@ -1,0 +1,104 @@
+==================================================================
+HexaNTK Gate-Run -- PR #71 auf #61-Kopf dd24538 + Haertungen B3a/B4/B9/B6
+Datum:    2026-10-15
+Geprueft: 59693d8 (Arbeitsbaum vor dem Commit dieses Logs; der Log-Commit aendert keinen Code)
+Anlass:   Block 2/3: #61-Stapel in #71 gemergt (9674c98), Prereg D5 (2a7f3a2), vier Haertungen negative-first (59693d8)
+Umgebung: Windows 11 | Python 3.12.10 | torch 2.6.0+cpu | numpy 2.5.3 | ruff 0.16.9 |
+          coverage 7.16.2; GINO-Gate in eigenem venv mit neuraloperator 2.0.0 (wie ci.yml gate).
+Exit-Codes je Kommando direkt gemessen (cmd > log 2>&1; rc=$?), keine Pipe.
+==================================================================
+
+$ ruff check src scripts
+  exit 0  -- All checks passed!
+$ python -m compileall src
+  exit 0  -- (leer, exit 0)
+$ python scripts/verify_sources.py
+  exit 0  -- [VERIFY-SOURCES] 42 Toolkit-Eintraege + 13 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (65 Dateien) | PASS
+$ [venv + neuraloperator==2.0.0] version/GINO import check
+  exit 0  -- (leer, exit 0)
+$ [venv + neuraloperator==2.0.0] unittest -p test_gino_adapter_hex_v3.py
+  exit 0  -- Ran 24 tests in 11.072s | OK
+$ python scripts/engine_gate.py
+  exit 0  -- ====================================================================== | [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+$ coverage run -m unittest discover -s src/toolkit -t src/toolkit -p test_*.py
+  exit 0  -- Ran 793 tests in 63.783s | OK (skipped=10)
+$ python -m coverage report
+  exit 0  -- TOTAL                                           3872    197   1442    142    93%
+$ OPENBLAS_CORETYPE=Prescott unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
+  exit ?  -- OK
+$ OPENBLAS_CORETYPE=Sandybridge unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
+  exit ?  -- OK
+$ OPENBLAS_CORETYPE=Haswell unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
+  exit ?  -- (nicht gelaufen)
+$ OPENBLAS_CORETYPE=Zen unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
+  exit ?  -- (nicht gelaufen)
+$ OPENBLAS_CORETYPE=SkylakeX unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
+  exit ?  -- (nicht gelaufen)
+
+### Negative-first: new tests on the OLD code (9674c98/2a7f3a2 sources, tests added)
+-- venv without neuraloperator:
+  skipped 'optional neuraloperator backend not installed' test_gino_adapter_hex_v3.TestGinoHardening20261015.test_actual_backend_float64_wrapper_is_refused
+  ok           test_gino_adapter_hex_v3.TestGinoHardening20261015.test_default_radius_without_ties_runs
+  ok           test_gino_adapter_hex_v3.TestGinoHardening20261015.test_float32_wrapper_around_neuralop_submodule_runs
+  FAIL         test_gino_adapter_hex_v3.TestGinoHardening20261015.test_float64_wrapper_around_neuralop_submodule_is_refused
+  FAIL         test_gino_adapter_hex_v3.TestGinoHardening20261015.test_radius_ties_are_refused_when_building
+  FAIL         test_gino_adapter_hex_v3.TestGinoHardening20261015.test_radius_ties_are_refused_when_preparing_a_batch
+  FAIL         test_linear_baseline_hex_v3.TestLeakageGuard.test_content_duplicate_with_a_new_id_is_leakage
+  ok           test_linear_baseline_hex_v3.TestLeakageGuard.test_disjoint_content_with_new_ids_is_scored
+  ok           test_linear_baseline_hex_v3.TestLeakageGuard.test_id_validation
+  ok           test_linear_baseline_hex_v3.TestLeakageGuard.test_refit_replaces_the_training_ids
+  FAIL         test_linear_baseline_hex_v3.TestLeakageGuard.test_signed_zero_duplicate_is_leakage
+  ok           test_linear_baseline_hex_v3.TestLeakageGuard.test_trained_ids_are_refused
+  FAIL         test_spectral_audit_hex_v3.TestDeterminismPreflight.test_deterministic_operators_pass_and_keep_the_rng
+  FAIL         test_spectral_audit_hex_v3.TestDeterminismPreflight.test_eval_module_with_noise_is_refused
+  FAIL         test_spectral_audit_hex_v3.TestDeterminismPreflight.test_numpy_rng_consumer_is_refused
+  FAIL         test_spectral_audit_hex_v3.TestDeterminismPreflight.test_rng_consumer_with_identical_output_is_refused
+  FAIL         test_spectral_audit_hex_v3.TestDeterminismPreflight.test_stateful_operator_without_rng_is_refused
+  AssertionError: Exception not raised
+  AssertionError: RuntimeError('optional backend missing; install neuraloperator==2.0.0') is not an instance of <class 'ValueError'> : expected ValueError, got RuntimeError
+  AssertionError: Exception not raised
+  AssertionError: Exception not raised
+  AssertionError: Exception not raised
+  AssertionError: False is not true
+  AssertionError: Exception not raised
+  AssertionError: Exception not raised
+  AssertionError: Exception not raised
+  AssertionError: Exception not raised
+-- venv with neuraloperator 2.0.0:
+  FAIL         test_gino_adapter_hex_v3.TestGinoHardening20261015.test_actual_backend_float64_wrapper_is_refused
+  ok           test_gino_adapter_hex_v3.TestGinoHardening20261015.test_default_radius_without_ties_runs
+  ok           test_gino_adapter_hex_v3.TestGinoHardening20261015.test_float32_wrapper_around_neuralop_submodule_runs
+  FAIL         test_gino_adapter_hex_v3.TestGinoHardening20261015.test_float64_wrapper_around_neuralop_submodule_is_refused
+  FAIL         test_gino_adapter_hex_v3.TestGinoHardening20261015.test_radius_ties_are_refused_when_building
+  FAIL         test_gino_adapter_hex_v3.TestGinoHardening20261015.test_radius_ties_are_refused_when_preparing_a_batch
+  AssertionError: RuntimeError('Input type (float) and bias type (double) should be the same') is not an instance of <class 'ValueError'> : expected ValueError, got RuntimeError
+  AssertionError: Exception not raised
+  AssertionError: Exception not raised
+  AssertionError: Exception not raised
+Notes: every new negative test failed by AssertionError (no crash); positive controls passed.
+  The positive control test_deterministic_operators_pass_and_keep_the_rng first failed on the
+  old code because nn.Linear init drew from the RNG after the snapshot; fixed in the test
+  (construct before snapshot), then green on the old code. test_stateful_operator_without_rng
+  ran at base 0 in this first pass (drift invisible at 0); it now uses base_point=1 and is
+  proven by mutant H8b below.
+
+### Discrimination (G:/Meine Ablage/Vero/Tools/diskriminierung.py, one mutant per guard, head 59693d8)
+run_id DK-20261015T201227-b830fca05bda (venv without neuraloperator): 8/8 DISKRIMINIERT
+  H5   float64 refusal back to type(model) only -> test_float64_wrapper_around_neuralop_submodule_is_refused
+  H6a  tie check removed from prepare_gino_batch -> test_radius_ties_are_refused_when_preparing_a_batch
+  H6b  tie check removed from build_gino -> test_radius_ties_are_refused_when_building
+  H7a  content-leak check off -> test_content_duplicate_with_a_new_id_is_leakage
+  H7b  signed-zero canonicalisation removed -> test_signed_zero_duplicate_is_leakage
+  H8a  RNG check off -> test_rng_consumer_with_identical_output_is_refused
+  H8a' RNG check off -> test_numpy_rng_consumer_is_refused
+  H8b  bitwise repeat check off -> test_stateful_operator_without_rng_is_refused
+run_id DK-20261015T201413-ecfc8ceec8dc (venv with neuraloperator 2.0.0): 2/2 DISKRIMINIERT
+  H5r  float64 refusal back to type(model) only -> test_actual_backend_float64_wrapper_is_refused
+  H6b-r tie check removed from build_gino -> test_radius_ties_are_refused_when_building
+
+### Radius-tie measurement (float64, |d - r| <= 1e-6 r, r = radius_factor/32)
+  tri N=32: latent 8: rf 2.5 -> 0, rf 5.0 -> 8; latent 32: rf 2.5 -> 0, rf 5.0 -> 8
+  tri N=16: latent 8/16/32, rf 2.5 and 5.0 -> 0
+  tri N=64: latent 32: rf 2.5 -> 4 (default config!), rf 5.0 -> 8
+  tri N=128: latent 32: rf 2.5 -> 4 (default config!), rf 5.0 -> 8
+  torus N=32: latent 8/16/32: rf 2.5 -> 0; rf 5.0 -> 18/6/18
