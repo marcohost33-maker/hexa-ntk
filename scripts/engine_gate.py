@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""engine_gate.py — exit-korrektes Gate fuer die kanonische Engine.
+"""engine_gate.py — exit-korrektes Gate fuer die v3-Engine.
 
 Hintergrund: `python src/hexantk_v3.py` exitet IMMER mit 0, weil der
 __main__-Block den Rueckgabewert von run_all_tests() nicht auswertet. Fuer ein
 echtes CI-Gate (Exit != 0 bei Fehlern) wird die Engine hier als Modul importiert
-und Doctests + Selftests werden ausgewertet — ohne die kanonische Datei zu
-editieren (AGENTS.md §Project: Engine wird ueber coworker-dde gepflegt).
+und Doctests + Selftests werden ausgewertet — ohne die Engine-Datei zu
+editieren (AGENTS.md §Project: Pflegeort der Engine offen, Issue #74).
 
 Lauf: python scripts/engine_gate.py   (aus dem Repo-Root)
 """

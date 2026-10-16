@@ -14,11 +14,11 @@
 target-version = "py312"
 line-length = 120
 
-# Kanonische Engine: src/hexantk_v3.py ist byte-identisch mit coworker-dde/src
-# (SOURCES.md, Equalita-Audit 2026-06-04). Aenderungen muessen dort und hier
-# synchron bleiben (AGENTS.md §Project), darum wird sie hier NICHT lint-enforced
-# — Best Practice: Code, den man nicht in diesem Repo pflegt, vom Lint-Gate
-# ausnehmen (Ruff FAQ/docs). Aenderungen an der Engine laufen ueber coworker-dde.
+# Engine: src/hexantk_v3.py war als Byte-Mirror von coworker-dde/src angelegt
+# (SOURCES.md, Equalita-Audit 2026-06-04); Stand 2026-10-14 sind die Kopien
+# auseinandergelaufen (AGENTS.md §Project). Welche kanonisch ist und wo Engine-
+# Aenderungen laufen, entscheidet Issue #74. Bis dahin bleibt sie vom Lint-Gate
+# ausgenommen (Ruff FAQ/docs: fremd gepflegten Code nicht lint-enforcen).
 extend-exclude = ["src/hexantk_v3.py"]
 
 [tool.ruff.lint]
@@ -29,8 +29,8 @@ select = ["E", "F", "W"]
 #   python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
 #   python -m coverage report
 # Branch-Coverage als ehrlichere Metrik (Scientific-Python-Guide). Nur die hier
-# gepflegten Toolkit-Module zaehlen; die kanonische Engine src/hexantk_v3.py ist
-# wie beim Lint-Gate ausgenommen (Pflege via coworker-dde), ihre Abdeckung
+# gepflegten Toolkit-Module zaehlen; die Engine src/hexantk_v3.py ist wie beim
+# Lint-Gate ausgenommen (Pflegeort offen, Issue #74), ihre Abdeckung
 # liefert das Engine-Gate (49 Doctests + 26 Selftests) separat.
 [tool.coverage.run]
 branch = true

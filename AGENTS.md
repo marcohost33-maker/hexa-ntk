@@ -9,7 +9,7 @@ project: HexaNTK
 KI-Coding-Agent-Anweisungen. Reihenfolge: §1 Working agreements > §2 Conventions > §3 Don't > §4 When stuck.
 
 ## Project
-- **Was:** Trainings-/Experiment-Infrastruktur fuer Neural-Operator-Laeufe auf hexagonalen Gittern: Checkpoint/EMA/DDP-Integration, Dataset-Split, Failure-Signatures, Benchmark. **Die Operatoren GINO/GINOT/GAOT sind NICHT implementiert** — nur Config-Vertrag + Shape-Validierung (src/hexantk_v3.py:856-859). Keine Paper-Ergebnisse nachgemessen.
+- **Was:** Trainings-/Experiment-Infrastruktur fuer Neural-Operator-Laeufe auf hexagonalen Gittern: Checkpoint/EMA/DDP-Integration, Dataset-Split, Failure-Signatures, Benchmark. **Die Operatoren GINO/GINOT/GAOT sind NICHT implementiert** — nur Config-Vertrag + Shape-Validierung (src/hexantk_v3.py:857-860). Keine Paper-Ergebnisse nachgemessen.
 - **Stack:** Python >= 3.12 (py3.10/3.11 gedroppt, Commit 7e06ad9; CI faehrt 3.12 mit torch==2.6.0 CPU-Wheel).
 - **Provenance:** `SOURCES.md` ist der Provenance-/Integritaets-Index — Quelle + mtime + ein
   16-hex **SHA-256-Prefix** (64 bit, LF-normalisiert) der **aktuellen Repo-Bytes** jeder
@@ -25,8 +25,11 @@ KI-Coding-Agent-Anweisungen. Reihenfolge: §1 Working agreements > §2 Conventio
   einen reinen Original-Locator [u6 Option A / k-theory #13], das Gate (Skript seit
   PR #5, LF-Normalisierung PR #6, CI-blocking seit 2026-07-03 laut `docs/ROADMAP.md`) prueft
   die aktuellen Bytes — der Text folgt jetzt der gelebten Praxis.)
-  Kanonische v3-Engines leben zusaetzlich in `coworker-dde/src` — Aenderungen dort und
-  hier synchron halten (Byte-Mirror, per git-Blob verifiziert).
+  Eine weitere v3-Engine-Kopie lebt in `coworker-dde/src`. Ziel war ein Byte-Mirror (Gleichheit
+  per git-Blob belegt); **Stand 2026-10-14 sind die Kopien auseinandergelaufen** (hexa-Blob
+  7b2c475 auf diesem Stand, vor #73 a28fbf1, zuletzt gleich bis zum Commit vor #47; coworker-dde
+  3a64658, Code-Unterschiede). Welche kanonisch ist und wie synchronisiert wird,
+  entscheidet Issue #74 -- bis dahin keine Gleichheit annehmen und keine Aussage "verifiziert".
 
 ## Working agreements
 1. **Reality-Anchor.** "Tests N/N PASS (verified <date>)" statt "sollte gehen". Gate-Logs in `results/` sind die Evidenz.

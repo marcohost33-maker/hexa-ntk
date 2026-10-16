@@ -6,9 +6,11 @@ authors:
     affiliation: "Coworker Research (Coworkerz)"
 title: "hexa-ntk"
 abstract: >-
-  Research workbench for neural operators on hexagonal finite-volume grids,
-  verified against exact reference solutions, with a preregistered evaluation.
-  Developed with the DI (digital intelligence) Coworker system.
+  Research infrastructure for neural-operator runs on hexagonal grids:
+  checkpoint, EMA and DDP tooling plus config and shape contracts for
+  GINO/GAOT. The operators themselves are not implemented here and no model
+  has been trained yet. Developed with the DI (digital intelligence) Coworker
+  system.
 license: Apache-2.0
 repository-code: "https://github.com/marcohost33-maker/hexa-ntk"
 keywords:

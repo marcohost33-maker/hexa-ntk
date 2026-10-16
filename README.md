@@ -20,7 +20,7 @@ vorbereitet ist. Der Engine-Header sagt das woertlich:
 > "This config is a FUTURE-EXTENSION HOOK. The actual PyTorch implementation is kept in a
 > separate training-adapter session; here we declare the contract and validate shapes so
 > the rest of our infrastructure (dataset split, checkpoint semantics, OperatorAdapter) is
-> GAOT-ready." — `src/hexantk_v3.py:856-859`
+> GAOT-ready." — `src/hexantk_v3.py:857-860`
 
 Hex-spezifisch im engeren Sinn sind drei getrennte numerische Aussagen implementiert:
 `hex_laplacian_stencil_weight` (7-Punkt-FV-Gewicht `2/(3h^2)`),
@@ -68,7 +68,7 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
 | Provenance | `python scripts/verify_sources.py` | 44 Toolkit- + 14 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 809 Tests, Ergebnis und Exit-Code im Gate-Log `results/2026-10-16_pr71-codex-round_local-gate.log` (geprueft @59693d8, Windows; #61-Stapel + Spektral-Audit + Haertungen 2026-10-15, mit Negativ-zuerst- und Mutanten-Beleg); Vorlaeufer `results/2026-10-13_spectral-audit_local-gate.log` (@80a91d3) und 701 Tests im Gate-Log `results/2026-10-12_pr61-i1-v2_local-gate.log` (I1 nach V2; das V1-Rot ist ein erwarteter Befund im Test `TestMmsI1V1Historical`, kein roter Test); Skips je Plattform: Gate-Log |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 809 Tests, Ergebnis und Exit-Code im Gate-Log `results/2026-10-17_pr71-fd-kernel-rows_local-gate.log` (Windows; FD-Pruefung auf den Kernel-Zeilen, mit Mutanten-Beleg); Vorlaeufer `results/2026-10-16_pr71-codex-round_local-gate.log` (808 Tests, @59693d8; #61-Stapel + Spektral-Audit + Haertungen 2026-10-15, mit Negativ-zuerst- und Mutanten-Beleg), `results/2026-10-13_spectral-audit_local-gate.log` (@80a91d3) und 701 Tests im Gate-Log `results/2026-10-12_pr61-i1-v2_local-gate.log` (I1 nach V2; das V1-Rot ist ein erwarteter Befund im Test `TestMmsI1V1Historical`, kein roter Test); Skips je Plattform: Gate-Log |
 | Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
 | Mutation | `python scripts/mutation_probe.py` | 50/51 Mutanten getoetet, volle Probe @9db9cbc unter Windows, Baseline gruen, exit 1: einzig M02 ueberlebt, und das ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped; so schon 2026-09-28). Der I1-Mutant (Iterationsfehler-Verhaeltnis entfernt) zielt seit 2026-10-12 auf `_i1_level_holds`. Letzter voller Lauf unter Linux: 49/49, exit 0, 2026-10-07 (alte Zaehlung) |
 
@@ -127,7 +127,7 @@ in `spec/`, offene Lint-/Test-Schuld in `docs/ROADMAP.md`.
 
 ## Kern
 
-- **Engine:** `src/hexantk_v3.py` (1772 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
+- **Engine:** `src/hexantk_v3.py` (1773 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
   Train-Step, Operator-Vertraege, 26 Selftests inline)
 - **Toolkit:** `src/toolkit/` — 19 Module + 25 Testmodule (Parameter-NTK, Benchmark, Checkpoint-Integration,
   Dataloader-Utils, Dataset-Split, EMA, Failure-Signature, Hex-FV-Loeser, Lineare POD-Ridge-Baseline,
@@ -209,7 +209,7 @@ python scripts/verify_sources.py                               # Provenance-Gate
 # python -m pip install -r requirements-operator.txt
 # python -m unittest discover -s src/toolkit -t src/toolkit -p "test_gino_adapter_hex_v3.py" -v
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 809 Unit-Tests (2026-10-16; Codex-Runde #71) + Coverage-Gate
+python -m coverage report                                      # 809 Unit-Tests (2026-10-17; FD-Kernel-Zeilen #71) + Coverage-Gate
 python scripts/mutation_probe.py                               # optional: 51 Mutanten der Review-Fixes
 python scripts/oracles/hex_phase0_reference_oracle.py         # Phase-0-Referenzfaelle (exit 0 = alle Gates gruen)
 ```
@@ -217,8 +217,8 @@ python scripts/oracles/hex_phase0_reference_oracle.py         # Phase-0-Referenz
 CI (`.github/workflows/ci.yml`), beide Jobs scheitern mit exit != 0 (ob `tests (cpu)` auch
 den Merge blockiert, entscheidet der Branch-Schutz — laut externem Bericht vom 2026-09-21 ist
 nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
-- **gate** — Lint (`ruff check src scripts`; die kanonische Engine `src/hexantk_v3.py` ist
-  vom Lint-Gate ausgenommen und wird stromaufwaerts gepflegt), `compileall`, Provenance,
+- **gate** — Lint (`ruff check src scripts`; die Engine `src/hexantk_v3.py` ist vom
+  Lint-Gate ausgenommen; wo sie kanonisch gepflegt wird, ist offen, Issue #74), `compileall`, Provenance,
   **zusaetzlich** bei vorhandenem GINO-Adapter: Installation von `torch==2.6.0` und
   `requirements-operator.txt` in einer isolierten CI-Jobumgebung, `neuraloperator==2.0.0`
   Versions-Check, dann `python -m unittest discover -s src/toolkit -t src/toolkit
@@ -226,7 +226,7 @@ nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
   synthetischem Optimizerschritt (kein T1-Training). Fehlendes Backend => FAIL.
   Achtung: Abweichung von der noch nicht genehmigten D7-Preregistrierung, die
   `CI stays torch-only` vorsieht: siehe `docs/ADR/ADR-002-Phase1-GINO-required-gate-proposal.md`.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (809, Stand 2026-10-16; Codex-Runde #71) unter Branch-Coverage;
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (809, Stand 2026-10-17; FD-Kernel-Zeilen #71) unter Branch-Coverage;
   danach die torch-freien FV-/Reference-Suites unter jedem portablen OpenBLAS-Kernel
   (`OPENBLAS_CORETYPE` Prescott/Sandybridge/Haswell/Zen, SkylakeX bei AVX-512), weil die
   CG-Stoppregel-Tests an der Rundung von BLAS-`ddot` haengen (2026-10-14). Das Spektral-Orakel (torch) bleibt ausserhalb: unter erzwungenem OPENBLAS_CORETYPE stuerzt es auf dem Runner ab (Exit 139, Haswell, 2026-10-16); seine CN-Toleranz ist stattdessen aus dem CG-Abbruch hergeleitet und lokal unter vier Kerneln gruen.
@@ -250,7 +250,7 @@ SOURCES.md  Provenance: Quelle + SHA-256 + mtime je Datei
 
 ## Referenzen (fremde Verfahren — nicht Ergebnisse dieses Repos)
 
-Der vollstaendige Referenz-Block mit Kontext steht in `src/hexantk_v3.py:43-67`.
+Der vollstaendige Referenz-Block mit Kontext steht in `src/hexantk_v3.py:44-68`.
 
 - **[Li23]** Z. Li, N. Kovachki, C. Choy et al., *Geometry-Informed Neural Operator for
   Large-Scale 3D PDEs*, NeurIPS 2023, arXiv:2309.00583. — Ursprung von **GINO**.
@@ -258,17 +258,18 @@ Der vollstaendige Referenz-Block mit Kontext steht in `src/hexantk_v3.py:43-67`.
   ScienceDirect S0045782525009405 (Dez. 2025).
 - **[GAOT25]** S. Wen et al., *Geometry Aware Operator Transformer*, arXiv:2505.18781.
   Die 2D-Default-Hyperparameter in `GAOTConfig` sind aus dieser Arbeit uebernommen;
-  fuer 3D gibt es dort **keinen** validierten Default (siehe `src/hexantk_v3.py:846-854`).
+  fuer 3D gibt es dort **keinen** validierten Default (siehe `src/hexantk_v3.py:847-855`).
 - **[Sarkar25]** S. Sarkar et al., *Physics- and geometry-aware spatio-spectral graph
   neural operator* (piG-Sp2GNO / mGNO), arXiv Aug. 2025.
-- Hex-FV-Stencil: Lee & Tien 2014 / Lee 2017 (`src/hexantk_v3.py:658`).
+- Hex-FV-Stencil: Lee & Tien 2014 / Lee 2017 (`src/hexantk_v3.py:659`).
 
 Die Herkunft jeder Datei (inkl. der in-repo gehaerteten Ableitungen) ist in `SOURCES.md`
 mit SHA-256 gepinnt und mit `scripts/verify_sources.py` nachpruefbar.
 
 ## Verwandte Repos
 
-`coworker-dde` ist die stromaufwaerts liegende Quelle der kanonischen v3-Engine;
+`coworker-dde` haelt eine weitere Kopie der v3-Engine (die Kopien sind auseinandergelaufen;
+welche kanonisch ist, entscheidet Issue #74);
 `HQST`, `hex-hqst`, `u2-dualspec`, `u6-bifurcation` gehoeren zur selben Serie.
 **Diese Repos sind privat und von aussen nicht erreichbar.** Oeffentlich zugaenglich ist
 aus der Serie nur [`phi-hex`](https://github.com/marcohost33-maker/phi-hex).

@@ -33,3 +33,16 @@ Lokales Artefakt: src/toolkit/.coverage (git-ignoriert, vom Lauf 2026-10-16) lie
 test_readme_provenance_counts_current 45 statt 44 Dateien zaehlen; verschoben.
 
 GESAMT: alle Kommandos exit 0
+
+------------------------------------------------------------------
+Nachtrag 2026-10-17: nach Merge von origin/main (0e0f03c, #75) in #71
+Konflikt nur SOURCES.md (append-only): #75-Block vor den #71-Bloecken; keine
+Datei in beiden Bloecken (geprueft), daher keine Pin-Wirkung der Reihenfolge.
+README: Gate-Log-Verweis und Stand auf diesen Log umgestellt (809 stand
+vorher faelschlich beim Log vom 2026-10-16, der 808 belegt).
+Gleiche venvs, Exit-Codes direkt gemessen:
+$ ruff check src scripts                -> exit 0
+$ python scripts/verify_sources.py      -> exit 0, PASS (44 + 14 + 10)
+$ unittest discover (toolkit)           -> exit 0, Ran 809 tests, OK (skipped=11)
+$ GINO gate (test_gino*.py)             -> exit 0, Ran 25 tests, OK
+GESAMT: alle Kommandos exit 0
