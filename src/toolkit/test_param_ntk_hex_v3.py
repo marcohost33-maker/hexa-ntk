@@ -163,5 +163,39 @@ class TestParamNTK(unittest.TestCase):
             pn.param_ntk(Linear(RNG.standard_normal((M, 2))), lambda m: m(), MODES, -WEIGHTS)
 
 
+class Constant(torch.nn.Module):
+    """Trainable parameter, output independent of it: the parameter NTK is zero."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.register_buffer("y", torch.tensor(RNG.standard_normal(M)))
+        self.theta = torch.nn.Parameter(torch.zeros(2, dtype=torch.float64))
+        self.eval()
+
+    def forward(self) -> torch.Tensor:
+        return self.y.clone()
+
+
+class TestCodexFollowup76(unittest.TestCase):
+    def test_constant_output_gives_the_zero_kernel(self) -> None:
+        result = _run(Constant())
+        np.testing.assert_array_equal(result.kernel, np.zeros((K, K)))
+        np.testing.assert_array_equal(result.eigenvalues, np.zeros(K))
+        self.assertEqual(result.float32_relative_deviation, 0.0)
+
+    def test_tiny_kernel_lost_in_float32_is_not_reported_as_agreement(self) -> None:
+        # Entries ~1e-200: the unscaled Frobenius norm underflows; float32 rounds a to 0.
+        result = _run(Linear(1e-100 * RNG.standard_normal((M, 4))))
+        self.assertGreater(np.abs(result.kernel).max(), 0.0)
+        self.assertAlmostEqual(result.float32_relative_deviation, 1.0, places=12)
+
+    def test_relative_deviation_contract(self) -> None:
+        ref = np.array([[2.0, 1.0], [1.0, 3.0]])
+        self.assertEqual(pn._relative_deviation(ref, ref), 0.0)
+        self.assertEqual(pn._relative_deviation(np.zeros((2, 2)), np.zeros((2, 2))), 0.0)
+        self.assertEqual(pn._relative_deviation(np.zeros((2, 2)), ref), float("inf"))
+        self.assertAlmostEqual(pn._relative_deviation(1e-200 * ref, 1.1e-200 * ref), 0.1, places=12)
+
+
 if __name__ == "__main__":
     unittest.main()

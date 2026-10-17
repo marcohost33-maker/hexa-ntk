@@ -193,7 +193,8 @@ T1 value, coefficients from a private RNG):
 - **Input Jacobian, not the parameter NTK.** `S` is the derivative with
   respect to the INPUT at one base point. The neural tangent kernel
   `J_theta J_theta^T` (derivative with respect to the parameters) describes
-  training dynamics. It is not measured here and stays open in issue #60.
+  training dynamics. It is a separate instrument, implemented in
+  `src/toolkit/param_ntk_hex_v3.py` (contract `spec/PARAM_NTK_v1.md`).
 - **Local.** For a nonlinear model `S` holds at its base point only. One
   audit says nothing about other inputs.
 - **Span.** `S` sees the basis only. Response outside it is visible only
@@ -204,6 +205,9 @@ T1 value, coefficients from a private RNG):
   change under such a rotation.
 - **Finite differences.** For a nonlinear numpy operator the result carries
   the truncation error `O(h^2)`. Prefer the torch backend for models.
+- **Device of a torch callable.** A plain torch callable gets its inputs on
+  `torch_device` (default CPU); an `nn.Module` runs on its own device and a
+  conflicting `torch_device` is rejected.
 - **No T1 fit.** Nothing here is fitted to or evaluated on T1 data. The
   preregistration forbids that before approval.
 

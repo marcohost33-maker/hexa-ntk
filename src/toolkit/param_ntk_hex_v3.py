@@ -121,13 +121,29 @@ def _gram_rows(model, forward, projector) -> tuple[torch.Tensor, list[torch.Tens
     p_all = proj @ y
     rows = []
     for k in range(p_all.shape[0]):
-        grads = torch.autograd.grad(p_all[k], params, retain_graph=True, allow_unused=True)
+        # An output independent of every parameter has no grad_fn, and autograd.grad
+        # raises before allow_unused applies; its NTK is the zero kernel (Codex P2 on #71).
+        grads = (torch.autograd.grad(p_all[k], params, retain_graph=True, allow_unused=True)
+                 if p_all.requires_grad else [None] * len(params))
         rows.append(torch.cat([
             _as_real(g) if g is not None else torch.zeros(_as_real(p).numel(), dtype=_as_real(p).dtype,
                                                           device=p.device)
             for g, p in zip(grads, params)
         ]))
     return torch.stack(rows), params
+
+
+def _relative_deviation(reference: np.ndarray, candidate: np.ndarray) -> float:
+    """||candidate - reference||_F / ||reference||_F with both scaled by max|reference|.
+
+    The unscaled Frobenius norm of a valid kernel with entries ~1e-200 underflows to
+    zero, which reported a float32 copy rounded to zero as exact agreement (Codex P2 on
+    #71). A zero reference agrees only with a zero candidate; otherwise it is inf.
+    """
+    scale = float(np.abs(reference).max())
+    if scale == 0.0:
+        return 0.0 if not np.any(candidate) else math.inf
+    return float(np.linalg.norm((candidate - reference) / scale) / np.linalg.norm(reference / scale))
 
 
 def _fd_check(model, forward, projector, rows: torch.Tensor, seed: int, step: float) -> float:
@@ -220,8 +236,7 @@ def param_ntk(
         else:
             g32 = g.detach()
         k32 = (g32 @ g32.T).to(torch.float64).cpu().numpy()
-        norm = np.linalg.norm(kernel)
-        deviation = float(np.linalg.norm(k32 - kernel) / norm) if norm > 0 else 0.0
+        deviation = _relative_deviation(kernel, k32)
 
     eigenvalues = np.linalg.eigvalsh(kernel)
     n_real = int(sum(_as_real(p).numel() for p in twin_params))

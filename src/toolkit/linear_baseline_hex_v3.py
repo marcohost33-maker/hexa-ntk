@@ -162,12 +162,17 @@ class PODRidgeBaseline:
 
     @property
     def info(self) -> Dict[str, Any]:
-        """Ranks, the ridge alpha actually used and the singular values (copies)."""
+        """Ranks, the ridge alpha actually used and the singular values (copies).
+
+        ``alpha`` is None when alpha_rel * s_max^2 leaves float64 (the fit never forms it);
+        ``log10_alpha`` always holds the value (-inf for alpha_rel = 0).
+        """
         fit = self._require_fit()
         return {
             "rank_in": fit["p_in"].shape[1],
             "rank_out": fit["p_out"].shape[1],
             "alpha": fit["alpha"],
+            "log10_alpha": fit["log10_alpha"],
             "singular_values_in": fit["s_in"].copy(),
             "singular_values_out": fit["s_out"].copy(),
             "num_train": len(fit["train_ids"]),
@@ -191,7 +196,14 @@ class PODRidgeBaseline:
         a = x @ (self.weights[:, None] * p_in)  # (S, r_in)
         c = y @ (self.weights[:, None] * p_out)  # (S, r_out)
         ua, sa, vta = np.linalg.svd(a, full_matrices=False)
-        alpha = float(self.config.alpha_rel) * float(sa[0]) * float(sa[0])  # report only; inf if s_max^2 leaves float64
+        # Report the alpha actually used without ever storing inf (Codex P2 on #71): the fit
+        # below never forms alpha, so it stays scale-equivariant even where alpha itself
+        # leaves float64; then "alpha" is None and "log10_alpha" carries the value.
+        rel, s_max = float(self.config.alpha_rel), float(sa[0])
+        alpha = (rel * s_max) * s_max  # (rel * s) * s overflows only if alpha does
+        log10_alpha = math.log10(rel) + 2.0 * math.log10(s_max) if rel > 0.0 else -math.inf
+        if not math.isfinite(alpha) or (rel > 0.0 and alpha == 0.0):  # overflow or underflow (Codex P2 on #77)
+            alpha = None
         # B = V diag(s / (s^2 + alpha)) U^T C, formed with s normalized by s_max:
         # s/(s^2 + alpha) = (t / (t^2 + alpha_rel)) / s_max with t = s / s_max, so neither
         # s^2 nor alpha can overflow or underflow, and the fit stays scale-equivariant
@@ -203,7 +215,8 @@ class PODRidgeBaseline:
             raise ValueError("ridge solution is not finite")
         for arr in (p_in, p_out, b, s_in, s_out):
             arr.flags.writeable = False
-        self._fitted = {"p_in": p_in, "p_out": p_out, "b": b, "alpha": alpha, "s_in": s_in, "s_out": s_out,
+        self._fitted = {"p_in": p_in, "p_out": p_out, "b": b, "alpha": alpha, "log10_alpha": log10_alpha,
+                        "s_in": s_in, "s_out": s_out,
                         "train_ids": frozenset(ids), "train_rows": frozenset(_row_hashes(x))}
         return self
 

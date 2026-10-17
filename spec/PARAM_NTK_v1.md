@@ -12,6 +12,8 @@ The inner product runs over every real degree of freedom. Complex parameters (FN
 
 ## Precision
 
+An output independent of every trainable parameter has the zero kernel (not an error). `float32_relative_deviation` is the Frobenius deviation with both kernels scaled by `max|K_64|`, so a tiny valid kernel does not underflow to "exact agreement"; a zero reference against a nonzero cross-check reports `inf`.
+
 | `model_dtype` | Model copy | Kernel assembly | Cross-check reported as `float32_relative_deviation` |
 |---|---|---|---|
 | `float64` (default) | float64 / complex128 | float64 | the same measurement with a float32 model copy |
@@ -22,7 +24,7 @@ The caller's model is never modified: measurement always runs on a cast copy.
 ## Fail-closed guards
 
 1. **Complete parameter set.** An explicit `params` list must be exactly the model's trainable parameters, in order. A partial list would report the NTK of a sub-model.
-2. **Autograd agrees with the output.** A central difference of one random projection along one random parameter direction must match autograd.
+2. **Autograd agrees with the output.** A central difference of **all K projected modes** along one random parameter direction must match `G v`, the very Gram rows the kernel is built from (worst mode against the largest component). A separately recomputed scalar projection is not sufficient.
    - float64: step 1e-6 relative, tolerance `FD_REL_TOL = 1e-6`.
    - float32: step 4e-3 (~u^(1/3)), tolerance `FD_REL_TOL_FLOAT32 = 1e-3` (expected error ~u^(2/3) ~ 1.5e-5).
    - A forward that detaches or swaps a parameter outside autograd is refused (its relative error is ~1).
