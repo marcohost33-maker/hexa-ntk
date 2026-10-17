@@ -202,7 +202,7 @@ class PODRidgeBaseline:
         rel, s_max = float(self.config.alpha_rel), float(sa[0])
         alpha = (rel * s_max) * s_max  # (rel * s) * s overflows only if alpha does
         log10_alpha = math.log10(rel) + 2.0 * math.log10(s_max) if rel > 0.0 else -math.inf
-        if not math.isfinite(alpha):
+        if not math.isfinite(alpha) or (rel > 0.0 and alpha == 0.0):  # overflow or underflow (Codex P2 on #77)
             alpha = None
         # B = V diag(s / (s^2 + alpha)) U^T C, formed with s normalized by s_max:
         # s/(s^2 + alpha) = (t / (t^2 + alpha_rel)) / s_max with t = s / s_max, so neither

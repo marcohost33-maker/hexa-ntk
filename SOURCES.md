@@ -721,3 +721,12 @@
 | BA8531392DA74D11 | 2026-10-17 12:00 | src/toolkit | Codex follow-up to #71 (issue #76): test_spectral_audit_hex_v3.py |
 | F37C83501D40A4A8 | 2026-10-17 12:00 | spec | Codex follow-up to #71 (issue #76): PARAM_NTK_v1.md |
 | FE8BE1A0DD5372F3 | 2026-10-17 12:00 | spec | Codex follow-up to #71 (issue #76): SPECTRAL_AUDIT_v1.md |
+
+## PR #77 Codex round (append-only, 2026-10-17)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| 56E08D448D0D8312 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): linear_baseline_hex_v3.py |
+| DEE4F9877D3084B6 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): spectral_audit_hex_v3.py |
+| 2B2B46B400902638 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): test_linear_baseline_hex_v3.py |
+| 0E250206AC0EF5E9 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): test_spectral_audit_hex_v3.py |

@@ -44,3 +44,13 @@ Cross-Family-Eingang 007acc2 (GPT-6 R10-R12) als Inhaltskandidat gelesen; dessen
 (R11 zurueckgezogen, R12) NICHT benutzt -- Aenderungen hier eigenstaendig gebaut und gegatet.
 
 GESAMT: alle lokal gelaufenen Kommandos exit 0
+
+------------------------------------------------------------------
+Nachtrag 2026-10-17: Codex-Runde auf #77 (Kopf b70b0d8), zwei P2
+  torch_device unter backend="auto" waehlt jetzt den torch-Pfad; backend="numpy" + torch_device -> ValueError
+  alpha-Unterlauf (alpha_rel > 0, alpha == 0.0) -> info["alpha"] None wie beim Ueberlauf
+Diskriminierung: die zwei Code-Dateien auf b70b0d8 zurueckgesetzt -> 2 failed; neu -> gruen
+$ ruff check src scripts                 exit 0
+$ python scripts/verify_sources.py       exit 0 -- PASS
+$ unittest discover (toolkit)            exit 0 -- Ran 819 tests OK (skipped=12)
+$ coverage run + report                  exit 0 -- TOTAL 4046 statements, 1508 branches, 93%

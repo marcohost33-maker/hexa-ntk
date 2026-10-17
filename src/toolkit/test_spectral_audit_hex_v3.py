@@ -534,7 +534,7 @@ class TestCodexFollowup76(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "conflicts"):
             sa._torch_device(lin, "cuda:0")
 
-    def _device_seen(self, device):
+    def _device_seen(self, device, backend="torch"):
         _, hm = _setup(TRI, 16)
         seen = set()
 
@@ -542,12 +542,18 @@ class TestCodexFollowup76(unittest.TestCase):
             seen.add(u.device.type)
             return 2.0 * u
 
-        result = sa.input_jacobian_spectrum(op, hm.modes, hm.weights, backend="torch", torch_device=device)
+        result = sa.input_jacobian_spectrum(op, hm.modes, hm.weights, backend=backend, torch_device=device)
         np.testing.assert_allclose(np.diag(result.projection), 2.0, rtol=1e-12)
         return seen
 
     def test_torch_device_reaches_the_callable(self):
         self.assertEqual(self._device_seen("cpu"), {"cpu"})
+
+    def test_torch_device_selects_torch_under_auto_and_is_refused_for_numpy(self):
+        self.assertEqual(self._device_seen("cpu", backend="auto"), {"cpu"})  # a numpy array has no .type
+        _, hm = _setup(TRI, 16)
+        with self.assertRaisesRegex(ValueError, "torch backend"):
+            sa.input_jacobian_spectrum(lambda u: u, hm.modes, hm.weights, backend="numpy", torch_device="cpu")
 
     @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA")
     def test_cuda_callable(self):

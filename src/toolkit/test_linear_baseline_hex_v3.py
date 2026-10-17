@@ -287,7 +287,7 @@ class TestCodexFollowup76(unittest.TestCase):
         u0, ut = TRI.data(TRI.k)
         base = PODRidgeBaseline(TRI.w, LinearBaselineConfig()).fit(u0, ut, range(TRI.k)).info
         self.assertAlmostEqual(base["log10_alpha"], np.log10(base["alpha"]), places=12)
-        for c, finite in ((1e150, True), (1e200, False)):
+        for c, finite in ((1e150, True), (1e200, False), (1e-200, False)):
             with self.subTest(c=c):
                 info = PODRidgeBaseline(TRI.w, LinearBaselineConfig()).fit(u0 * c, ut * c, range(TRI.k)).info
                 self.assertEqual(info["alpha"] is not None, finite)

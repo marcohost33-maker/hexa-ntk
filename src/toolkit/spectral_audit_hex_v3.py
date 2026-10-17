@@ -549,7 +549,11 @@ def input_jacobian_spectrum(
     if not defect <= tol:
         raise ValueError(f"modes are not W-orthonormal: max|Q^T W Q - I| = {defect:.3e} > {tol:.3e}")
 
-    use_torch = backend == "torch" or (backend == "auto" and isinstance(operator, torch.nn.Module))
+    if backend == "numpy" and torch_device is not None:
+        raise ValueError("torch_device needs the torch backend; backend='numpy' passes numpy arrays")
+    # A torch_device names a torch callable, so "auto" takes the torch path for it (Codex P2 on #77).
+    use_torch = backend == "torch" or (backend == "auto" and (isinstance(operator, torch.nn.Module)
+                                                              or torch_device is not None))
     mode_used: Optional[str] = None
     if use_torch:
         if isinstance(operator, torch.nn.Module) and operator.training and not allow_train_mode:
