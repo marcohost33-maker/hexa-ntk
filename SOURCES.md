@@ -708,3 +708,16 @@
 
 | A07219EA8B48FAFC | 2026-10-17 00:00 | src/toolkit | FD check validates the kernel rows mode by mode (007acc2 v6 finding, 2026-10-17): param_ntk_hex_v3.py |
 | 2D71C953BB65872E | 2026-10-17 00:00 | src/toolkit | FD check validates the kernel rows mode by mode (007acc2 v6 finding, 2026-10-17): test_param_ntk_hex_v3.py |
+
+## Issue #76 Codex follow-up to #71 (append-only, 2026-10-17)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| 9E5E59D9397613A3 | 2026-10-17 12:00 | src/toolkit | Codex follow-up to #71 (issue #76): linear_baseline_hex_v3.py |
+| 47C2D0A9D4B6D514 | 2026-10-17 12:00 | src/toolkit | Codex follow-up to #71 (issue #76): param_ntk_hex_v3.py |
+| 5EFC3E34567E1F28 | 2026-10-17 12:00 | src/toolkit | Codex follow-up to #71 (issue #76): spectral_audit_hex_v3.py |
+| 1013013F44771EDD | 2026-10-17 12:00 | src/toolkit | Codex follow-up to #71 (issue #76): test_linear_baseline_hex_v3.py |
+| EFE1C5D512872227 | 2026-10-17 12:00 | src/toolkit | Codex follow-up to #71 (issue #76): test_param_ntk_hex_v3.py |
+| BA8531392DA74D11 | 2026-10-17 12:00 | src/toolkit | Codex follow-up to #71 (issue #76): test_spectral_audit_hex_v3.py |
+| F37C83501D40A4A8 | 2026-10-17 12:00 | spec | Codex follow-up to #71 (issue #76): PARAM_NTK_v1.md |
+| FE8BE1A0DD5372F3 | 2026-10-17 12:00 | spec | Codex follow-up to #71 (issue #76): SPECTRAL_AUDIT_v1.md |

@@ -514,5 +514,45 @@ class TestResponses(unittest.TestCase):
             sa.default_orthonormality_tol(0)
 
 
+class TestCodexFollowup76(unittest.TestCase):
+    """Issue #76: CN oracle overflow and the device of a torch callable."""
+
+    def test_crank_nicolson_survives_an_overflowing_intermediate(self):
+        # kappa * lambda = 2^1030 overflows, z = kappa * lambda * dt = 1 does not: r = 1/3.
+        r = sa.crank_nicolson_response(np.array([2.0 ** 30]), kappa=2.0 ** 1000, dt=2.0 ** -1030, steps=1)
+        np.testing.assert_allclose(r, [1.0 / 3.0], rtol=4 * EPS, atol=0.0)
+
+    def test_crank_nicolson_overflowing_z_has_the_limit_minus_one(self):
+        r = sa.crank_nicolson_response(np.array([0.0, 1e300]), kappa=1e300, dt=1.0, steps=3)
+        np.testing.assert_array_equal(r, [1.0, -1.0])
+
+    def test_device_selection(self):
+        lin = torch.nn.Linear(2, 2).double()
+        self.assertEqual(sa._torch_device(lambda u: u), torch.device("cpu"))
+        self.assertEqual(sa._torch_device(lambda u: u, "cuda:0"), torch.device("cuda:0"))
+        self.assertEqual(sa._torch_device(lin), torch.device("cpu"))
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            sa._torch_device(lin, "cuda:0")
+
+    def _device_seen(self, device):
+        _, hm = _setup(TRI, 16)
+        seen = set()
+
+        def op(u):
+            seen.add(u.device.type)
+            return 2.0 * u
+
+        result = sa.input_jacobian_spectrum(op, hm.modes, hm.weights, backend="torch", torch_device=device)
+        np.testing.assert_allclose(np.diag(result.projection), 2.0, rtol=1e-12)
+        return seen
+
+    def test_torch_device_reaches_the_callable(self):
+        self.assertEqual(self._device_seen("cpu"), {"cpu"})
+
+    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA")
+    def test_cuda_callable(self):
+        self.assertEqual(self._device_seen("cuda"), {"cuda"})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,46 @@
+==================================================================
+HexaNTK Gate-Run -- Issue #76: eight Codex findings from the #71 round (6cb3b63)
+Datum:    2026-10-17
+Geprueft: Arbeitsbaum auf origin/main 3f09784 + diese Aenderung (vor dem Commit dieses Logs)
+Umgebung: MINGW64_NT-10.0-26200 | Python 3.12.10 | torch 2.6.0+cpu | numpy 2.5.3
+          (neu aufgebaute venv, gleiche Versionen wie results/2026-10-17_pr71-fd-kernel-rows_local-gate.log)
+Exit-Codes je Kommando direkt gemessen (cmd > tmp 2>&1; rc=$?), keine Pipe.
+==================================================================
+
+$ ruff check src scripts
+  exit 0 -- All checks passed!
+
+$ python scripts/verify_sources.py
+  exit 0 -- [VERIFY-SOURCES] 44 Toolkit-Eintraege + 14 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (68 Dateien) | PASS
+
+$ unittest discover (toolkit)
+  exit 0 -- Ran 818 tests in 19.530s OK (skipped=12)
+  (+9 gegenueber 809: 8 neue Tests TestCodexFollowup76 + 1 CUDA-Test, hier geskippt)
+
+$ coverage run + report (fail_under aus pyproject.toml), von der Repo-Wurzel wie README
+  exit 0 -- TOTAL 4044 statements, 1506 branches, 93%
+
+$ GINO gate (neuraloperator 2.0.0 venv)
+  NICHT lokal gelaufen (venv nicht vorhanden). param_ntk_hex_v3.py ist geaendert;
+  test_parameter_ntk_of_the_real_gino laeuft im CI-GINO-Schritt -- dort ablesen.
+
+Diskriminierung (die drei Code-Dateien auf origin/main zurueckgesetzt, neue Tests behalten):
+  -k Followup76 gegen alten Code -> 8 failed, 1 skipped
+  -k Followup76 gegen neuen Code -> 8 passed, 1 skipped
+  Jeder der acht neuen Tests faellt am alten Code.
+
+Befund -> Aenderung:
+  P1 README Spektral-Audit "NICHT Teil der Vorregistrierung" -> Teil der Vorregistrierung (Sekundaermessung)
+  P2 linear_baseline: info["alpha"] nie inf; None wenn nicht float64-darstellbar, neu info["log10_alpha"].
+     Abweisen statt None wurde verworfen: test_scale_equivariance verlangt den Fit bis c=1e200.
+  P2 spectral_audit: neuer Parameter torch_device fuer torch-Callables; Konflikt mit Modul-Geraet -> ValueError
+  P2 spectral_audit: CN-Orakel z aus frexp/ldexp (Exponenten heben sich auf), z=+-inf -> Grenzwert -1
+  P2 SPECTRAL_AUDIT_v1.md: Parameter-NTK nicht mehr "offen", Verweis auf PARAM_NTK_v1.md
+  P2 PARAM_NTK_v1.md: FD-Pruefung ueber alle K Moden gegen G v dokumentiert
+  P2 param_ntk: float32-Abweichung max-skaliert; Nullreferenz vs. Nicht-Null-Gegenprobe -> inf
+  P2 param_ntk: parameterunabhaengige Ausgabe -> Null-Kern statt Absturz
+
+Cross-Family-Eingang 007acc2 (GPT-6 R10-R12) als Inhaltskandidat gelesen; dessen Apply-Werkzeuge
+(R11 zurueckgezogen, R12) NICHT benutzt -- Aenderungen hier eigenstaendig gebaut und gegatet.
+
+GESAMT: alle lokal gelaufenen Kommandos exit 0

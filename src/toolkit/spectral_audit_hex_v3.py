@@ -279,9 +279,18 @@ def crank_nicolson_response(eigenvalues: Any, *, kappa: float, dt: float, steps:
     lam = _real_array(eigenvalues, name="eigenvalues")
     if lam.ndim != 1 or not np.all(lam >= 0.0):
         raise ValueError("eigenvalues must be a 1-D array of values >= 0")
-    z = _positive_finite(kappa, name="kappa") * lam * _positive_finite(dt, name="dt")
+    kap = _positive_finite(kappa, name="kappa")
+    delta = _positive_finite(dt, name="dt")
     n = _positive_int(steps, name="steps")
-    return ((1.0 - 0.5 * z) / (1.0 + 0.5 * z)) ** n
+    # z from mantissas and exponents: kappa * lambda may overflow although z itself is
+    # moderate (tiny dt), and a z that truly overflows has the finite limit r = -1
+    # instead of inf/inf = NaN (Codex P2 on #71).
+    (mk, ek), (md, ed) = math.frexp(kap), math.frexp(delta)
+    ml, el = np.frexp(lam)
+    with np.errstate(over="ignore", invalid="ignore"):
+        z = np.ldexp(ml * (mk * md), el + (ek + ed))
+        r = np.where(np.isinf(z), -1.0, (1.0 - 0.5 * z) / (1.0 + 0.5 * z))
+    return r ** n
 
 
 # ------------------------------------------------------------------
@@ -391,11 +400,20 @@ def _torch_dtype(operator: Any, torch_dtype: Optional[torch.dtype]) -> torch.dty
     return torch.float64
 
 
-def _torch_device(operator: Any) -> torch.device:
+def _torch_device(operator: Any, torch_device: Any = None) -> torch.device:
+    """The module's own device; for a plain callable ``torch_device`` (default CPU).
+
+    A plain torch callable gives no device to inspect, so a closure around a CUDA
+    operator needs ``torch_device`` (Codex P2 on #71). For a module an override that
+    conflicts with its parameters is rejected rather than silently moving inputs.
+    """
+    wanted = None if torch_device is None else torch.device(torch_device)
     if isinstance(operator, torch.nn.Module):
         for tensor in list(operator.parameters()) + list(operator.buffers()):
+            if wanted is not None and wanted != tensor.device:
+                raise ValueError(f"torch_device {wanted} conflicts with the module device {tensor.device}")
             return tensor.device
-    return torch.device("cpu")
+    return wanted if wanted is not None else torch.device("cpu")
 
 
 def _torch_output(value: Any, num_nodes: int) -> torch.Tensor:
@@ -472,6 +490,7 @@ def input_jacobian_spectrum(
     backend: str = "auto",
     torch_mode: str = "forward",
     torch_dtype: Optional[torch.dtype] = None,
+    torch_device: Any = None,
     fd_step: Optional[float] = None,
     max_evaluations: int = _DEFAULT_MAX_EVALUATIONS,
     max_seconds: Optional[float] = None,
@@ -485,6 +504,8 @@ def input_jacobian_spectrum(
     an ``nn.Module`` (``"auto"`` picks torch for modules, numpy otherwise).
     ``modes`` is Q with shape (M, K) and W-orthonormal columns, ``weights`` the
     diagonal of W. ``oracle`` (K,) is the expected diagonal of S, if known.
+    ``torch_device`` places the inputs of a torch callable (default CPU); a
+    module always runs on its own device and rejects a conflicting override.
 
     Fail-closed: invalid input raises TypeError/ValueError; Q not W-orthonormal
     within ``orthonormality_tol`` raises ValueError; a non-finite operator
@@ -534,7 +555,7 @@ def input_jacobian_spectrum(
         if isinstance(operator, torch.nn.Module) and operator.training and not allow_train_mode:
             raise ValueError("module is in training mode; call .eval() or pass allow_train_mode=True")
         dtype = _torch_dtype(operator, torch_dtype)
-        device = _torch_device(operator)
+        device = _torch_device(operator, torch_device)
         budget.require(_REPEAT_EVALUATIONS + (k if torch_mode == "forward" else k + 1))
         _repeat_check(operator, base, m, True, dtype, device, budget)
         jq, rows = _jq_torch(operator, q, w, base, dtype, device, torch_mode, budget)

@@ -282,5 +282,21 @@ class TestFailClosed(unittest.TestCase):
             model(np.full(m, np.inf))
 
 
+class TestCodexFollowup76(unittest.TestCase):
+    def test_unrepresentable_ridge_alpha_is_never_stored_as_inf(self):
+        u0, ut = TRI.data(TRI.k)
+        base = PODRidgeBaseline(TRI.w, LinearBaselineConfig()).fit(u0, ut, range(TRI.k)).info
+        self.assertAlmostEqual(base["log10_alpha"], np.log10(base["alpha"]), places=12)
+        for c, finite in ((1e150, True), (1e200, False)):
+            with self.subTest(c=c):
+                info = PODRidgeBaseline(TRI.w, LinearBaselineConfig()).fit(u0 * c, ut * c, range(TRI.k)).info
+                self.assertEqual(info["alpha"] is not None, finite)
+                if finite:
+                    self.assertTrue(np.isfinite(info["alpha"]))
+                self.assertAlmostEqual(info["log10_alpha"], base["log10_alpha"] + 2 * np.log10(c), places=9)
+        zero = PODRidgeBaseline(TRI.w, LinearBaselineConfig(alpha_rel=0.0)).fit(u0, ut, range(TRI.k)).info
+        self.assertEqual((zero["alpha"], zero["log10_alpha"]), (0.0, -np.inf))
+
+
 if __name__ == "__main__":
     unittest.main()
