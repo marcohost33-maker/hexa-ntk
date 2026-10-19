@@ -741,3 +741,9 @@
 | B63BAD75B28B4D96 | 2026-10-19 00:00 | spec | cross-reference to PHASE1_PROTOCOL_v1 + D4 radius-tie decision support (no decision, status DRAFT unchanged): PREREGISTRATION_PHASE1_v1.md |
 | 92C3031ECC5476D4 | 2026-10-19 00:00 | spec | amendment 2026-10-19 radius-tie survey (decision support only): GINO_ADAPTER_PHASE1_v2.md |
 | D4D36437B9A9B2B7 | 2026-10-19 00:00 | scripts/oracles | in-repo created, D4 decision support with the adapter tie rule: gino_radius_tie_survey.py |
+
+## Phase 1 protocol tests: asymmetric latency designs (append-only, 2026-10-19, claude/hexa-ntk-neural-operator-sh43u7)
+
+> Pin for the bytes of this block. Prior rows remain lineage.
+
+| 1ED5FF0D1DD2F535 | 2026-10-19 12:00 | src/toolkit | mutation probe in git clones (M09 median->mean survived a symmetric design): asymmetric latency designs: test_phase1_protocol_hex_v3.py |

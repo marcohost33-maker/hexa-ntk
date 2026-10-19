@@ -81,16 +81,19 @@ class TestMeasureLatency(unittest.TestCase):
         self.assertEqual(json.loads(json.dumps(m.to_dict()))["median_s"], 0.5)
 
     def test_variable_durations(self):
-        readings = iter([0.0, 1.0, 10.0, 13.0, 20.0, 22.0, 30.0, 34.0])  # durations 1, 3, 2, 4
+        # Durations 1, 3, 2, 10: the median (2.5) differs from the mean (4.0), so a
+        # mean-based latency fails here (mutant M09 of the 2026-10-19 probe survived
+        # a symmetric 1, 3, 2, 4 design).
+        readings = iter([0.0, 1.0, 10.0, 13.0, 20.0, 22.0, 30.0, 40.0])
         protocol = pp.TimingProtocol(warmup=0, repeats=4, bootstrap_resamples=500, seed=3)
         m = pp.measure_latency(lambda: None, protocol, clock=lambda: next(readings))
-        self.assertEqual(m.times_s, (1.0, 3.0, 2.0, 4.0))
+        self.assertEqual(m.times_s, (1.0, 3.0, 2.0, 10.0))
         self.assertEqual(m.median_s, 2.5)
         self.assertLessEqual(1.0, m.ci_low_s)
         self.assertLessEqual(m.ci_low_s, m.median_s)
         self.assertLessEqual(m.median_s, m.ci_high_s)
-        self.assertLessEqual(m.ci_high_s, 4.0)
-        again = iter([0.0, 1.0, 10.0, 13.0, 20.0, 22.0, 30.0, 34.0])
+        self.assertLessEqual(m.ci_high_s, 10.0)
+        again = iter([0.0, 1.0, 10.0, 13.0, 20.0, 22.0, 30.0, 40.0])
         self.assertEqual(pp.measure_latency(lambda: None, protocol, clock=lambda: next(again)), m)
 
     def test_backwards_clock_and_bad_arguments_fail_closed(self):
@@ -476,15 +479,19 @@ class TestCostAccuracyCurve(unittest.TestCase):
         readings = []
 
         def clock():
+            # Cubic readings: the k-th timed call lasts (2k)^3 - (2k-1)^3, so the
+            # per-point durations are skewed and the median differs from the mean.
             readings.append(len(readings))
-            return float(len(readings))
+            return float(len(readings)) ** 3
 
         points = pp.baseline_cost_accuracy_curve(self.config, self.u0, self.truth, self.lattice,
                                                  steps_grid=(1, 2), protocol=self.protocol,
                                                  timed_samples=1, clock=clock)
         self.assertEqual(len(readings), 2 * 1 * self.protocol.repeats * 2)   # steps x samples x repeats x 2
         self.assertEqual([p.timed_samples for p in points], [1, 1])
-        self.assertEqual([p.median_wall_time_s for p in points], [1.0, 1.0])
+        # steps=1: durations 7, 37, 91 (median 37, mean 45); steps=2: 169, 271, 397 (median 271, mean 279)
+        self.assertEqual([p.median_wall_time_s for p in points], [37.0, 271.0])
+        self.assertEqual([p.wall_time_ci_s for p in points], [(37.0, 37.0), (271.0, 271.0)])
 
     def test_continuous_truth_floors_and_the_frontier_keeps_the_best_point(self):
         points = pp.baseline_cost_accuracy_curve(self.config, self.u0, self.truth, self.lattice,
