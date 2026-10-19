@@ -22,6 +22,24 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Phase-1-Protokoll-Instrumente + D4-Entscheidungshilfe Radius-Ties (2026-10-19, Linux-Container).**
+  Vorregistrierungs-Abschnitte 4-7 hatten keinen Code: wie die Kosten-Genauigkeits-Kurve, die Latenz,
+  der IQM, sein Konfidenzintervall, die Entscheidungsregeln, der Break-even und das Lauf-Manifest
+  berechnet werden, stand nur als Prosa. Neu `spec/PHASE1_PROTOCOL_v1.md` + `phase1_protocol_hex_v3.py`
+  (numpy): Timing-Protokoll (Warm-up/Wiederholungen, Median, Perzentil-Bootstrap, injizierbare Uhr),
+  Baseline-Sweep je `(N, steps)` mit Cluster-Bootstrap der Latenz, Pareto-Front + log-log-Interpolation
+  (ausserhalb des Messbereichs `None`, nie Extrapolation), IQM als getrimmtes Mittel (`int(0.25 n)` je
+  Seite; fuer 5 Seeds die mittleren drei), zweistufiger gepaarter Bootstrap (Indexsaetze EINMAL gezogen,
+  fuer alle Testsets identisch, Chunking ohne Einfluss), `decide_test_set` (gleiche Laufzeit / gleiche
+  Genauigkeit / Baseline-Floor / kein Claim), `break_even_queries`, `build_run_manifest` (fail-closed
+  Schema, SHA-256 ueber kanonisches JSON). 37 Tests mit Closed-Form-Orakeln; 12/12 Mutanten rot
+  (`results/2026-10-19_phase1-protocol_local-gate.log`). Dazu `scripts/oracles/gino_radius_tie_survey.py`
+  (Adapter-Regel `_radius_ties`): Default latent 32 / 2.5 hat auf N=64 und N=128 je 4 Ties; tie-frei auf
+  allen fuenf vorregistrierten Gittern sind latent 16/24/48 mit `radius_factor` 1.5/2.25/2.5/2.75
+  (12/48). Keine Default-Aenderung, kein Modell, kein T1-Fit; D4/D5 bleiben Owner-Entscheid.
+  _Evidenz:_ `results/2026-10-19_phase1-protocol_local-gate.log`,
+  `results/2026-10-19_gino_radius_tie_survey.json` (quellgebunden, exit 0).
+
 - [x] **CI rot auf #61 (`tests (cpu)`, Head 6d219d9): CG-V2-Tests hingen am BLAS-Kernel
   (2026-10-14).** `test_at_rounding_floor_where_v1_stagnates` und
   `test_acceptance_hangs_on_true_comparisons` setzten voraus, dass V1 `rtol=1e-16` auf
@@ -246,7 +264,10 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   optionale Abhaengigkeit `neuraloperator==2.0.0`, Lizenzanfrage GAOT/GINOT). Erst nach Freigabe:
   Datensaetze mit Manifest erzeugen, GINO-Raster auf Validierung, 5 Seeds, Testsets einmal,
   Kosten-Genauigkeits-Kurve der Baseline, Bericht mit IQM + Bootstrap-KI. Neumann-Achse braeuchte
-  ein Neumann-Gitter im Loeser (v2).
+  ein Neumann-Gitter im Loeser (v2). Nachtrag 2026-10-19: die Rechenvorschriften der Abschnitte 4-7
+  sind als Instrument festgelegt (`spec/PHASE1_PROTOCOL_v1.md`, oben unter Erledigt); offen bleiben
+  D4 (Raster, <= 8 Konfigurationen; Radius-Tie-Tabelle als Entscheidungshilfe in
+  `results/2026-10-19_gino_radius_tie_survey.json`) und die D5-Maschine.
 - [ ] **ReferenceSpec v1 (#33), Review-Befund.** `ConvergenceStudy.observed_order` wird nur auf
   endlich/positiv geprueft, nicht gegen die Werte der Levels nachgerechnet; ein Aufrufer kann eine
   Ordnung behaupten, die die Daten nicht tragen. Vorschlag: bei konstantem r und >= 3 Levels

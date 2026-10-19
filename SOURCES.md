@@ -730,3 +730,14 @@
 | DEE4F9877D3084B6 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): spectral_audit_hex_v3.py |
 | 2B2B46B400902638 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): test_linear_baseline_hex_v3.py |
 | 0E250206AC0EF5E9 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): test_spectral_audit_hex_v3.py |
+
+## Phase 1 protocol instruments + D4 radius-tie survey (append-only, 2026-10-19, claude/hexa-ntk-neural-operator-sh43u7)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| 5C684F9C961FF410 | 2026-10-19 00:00 | src/toolkit | in-repo created, Phase 1 protocol instruments (spec/PHASE1_PROTOCOL_v1.md): phase1_protocol_hex_v3.py |
+| C05A442FA9716B6D | 2026-10-19 00:00 | src/toolkit | in-repo created, oracles/negative controls for the protocol instruments: test_phase1_protocol_hex_v3.py |
+| F54A49A15D157F5F | 2026-10-19 00:00 | spec | in-repo created, contract for preregistration sections 4-7: PHASE1_PROTOCOL_v1.md |
+| B63BAD75B28B4D96 | 2026-10-19 00:00 | spec | cross-reference to PHASE1_PROTOCOL_v1 + D4 radius-tie decision support (no decision, status DRAFT unchanged): PREREGISTRATION_PHASE1_v1.md |
+| 92C3031ECC5476D4 | 2026-10-19 00:00 | spec | amendment 2026-10-19 radius-tie survey (decision support only): GINO_ADAPTER_PHASE1_v2.md |
+| D4D36437B9A9B2B7 | 2026-10-19 00:00 | scripts/oracles | in-repo created, D4 decision support with the adapter tie rule: gino_radius_tie_survey.py |

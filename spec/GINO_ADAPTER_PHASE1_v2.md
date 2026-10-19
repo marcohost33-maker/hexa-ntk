@@ -21,6 +21,14 @@
   - float64 refusal: the check covers every submodule (`model.modules()`, which includes the model itself), so a caller-side wrapper outside `neuralop.*` around a float64 neuraloperator module is rejected too. Before, only `type(model).__module__` was checked; with the real 2.0.0 backend such a wrapper failed deep in the backend with a RuntimeError.
   - Radius ties: `build_gino` (training lattice) and `prepare_gino_batch` (every lattice it is given) count node-latent distances `d` with `|d - r| <= 1e-6 r` in float64, `r = radius_factor / 32`, and raise ValueError on any tie. Measured with this rule (latent grid as in `prepare_gino_batch`): N=32, latent 8 and latent 32: 8 ties at `radius_factor=5.0`, 0 at 2.5. **With the default configuration (latent 32, 2.5) the resolution-axis lattices N=64 and N=128 have 4 ties each** (N=16 has 0); those evaluations are refused until the owner fixes the radius or latent grid for them. This is an open owner decision, not a tolerance to widen.
 
+- **Amendment 2026-10-19 (radius-tie survey, decision support only).** `scripts/oracles/gino_radius_tie_survey.py`
+  applies the tie rule above to 6 latent resolutions x 8 radius factors on the five preregistered lattices
+  (triangle `N = 16, 32, 64, 128`, torus `N = 32`). Measured (`results/2026-10-19_gino_radius_tie_survey.json`):
+  the default (latent 32, 2.5) has 4 ties on `N = 64` and on `N = 128`; latent 8, 32 and 64 tie on at least one
+  lattice for every radius factor tried; latent 16, 24 and 48 with `radius_factor` 1.5, 2.25, 2.5 or 2.75 are
+  tie-free on all five lattices (12 of 48 candidates); `radius_factor` 2.0, 3.0 and 4.0 tie on the torus for
+  every latent resolution. The default stays as it is; choosing a pair is the owner's D4 decision.
+
 ## Testing and falsification
 
 - Construct a config with `(R=128, m=63, C=512, L=16)` without allocating neuraloperator; it MUST be rejected due to the combined budget even though every *individual* ceiling passes.
