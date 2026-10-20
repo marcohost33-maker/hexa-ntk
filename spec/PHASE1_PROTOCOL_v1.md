@@ -122,6 +122,24 @@ baseline_errors)` evaluates both rules for one test set and one lattice:
 `gino.high` is its upper interval bound. `gino_latency_s` is GINO's median
 latency per sample at batch size 1 (section 1).
 
+**Binding to the preregistered statistic (amendment 2026-10-20, review
+finding F-E1).** The rules are defined on the upper **95 %** bound of the IQM
+from the **10 000**-resample two-stage bootstrap (preregistration sections 5
+and 6). `decide_test_set` therefore accepts `gino` only with
+`confidence == 0.95`, `n_resamples == 10000` and `proportion == 0.25`
+(module constants `PREREGISTERED_CONFIDENCE`,
+`PREREGISTERED_BOOTSTRAP_RESAMPLES`, `PREREGISTERED_IQM_PROPORTION`, which are
+also the defaults of sections 1 and 4), with finite `low <= point <= high`;
+anything else raises `DecisionInputError` (a `ValueError`) before a rule is
+evaluated. A percentile interval is not guaranteed to contain the point
+estimate; a run where it does not is refused rather than decided (fail-closed;
+in 400 random designs with 5 seeds, 2026-10-20, it never happened). Before
+this amendment a summary at confidence 0.5 or with one
+resample was evaluated and could turn `H0` into `advantage` on the same data.
+`DecisionSummary.to_dict()` carries the summary under `gino`, so the
+confidence level, the resample count and the trimming proportion stand next to
+the verdict.
+
 Not evaluable, with the reason recorded and **no claim**:
 - the latency lies outside the measured time range (no extrapolation);
 - the error lies below the frontier's smallest error: **baseline floor**, no

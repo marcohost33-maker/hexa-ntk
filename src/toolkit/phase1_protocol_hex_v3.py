@@ -26,6 +26,9 @@ from __future__ import annotations
 
 __all__ = [
     "PROTOCOL_ID",
+    "PREREGISTERED_CONFIDENCE",
+    "PREREGISTERED_BOOTSTRAP_RESAMPLES",
+    "PREREGISTERED_IQM_PROPORTION",
     "TimingProtocol",
     "LatencyMeasurement",
     "measure_latency",
@@ -39,6 +42,7 @@ __all__ = [
     "paired_bootstrap_iqm",
     "RuleVerdict",
     "DecisionSummary",
+    "DecisionInputError",
     "decide_test_set",
     "break_even_queries",
     "RunManifestError",
@@ -70,6 +74,14 @@ from hex_fv_solver_hex_v3 import HexLattice
 PROTOCOL_ID = "PHASE1_PROTOCOL_v1"
 _MANIFEST_SCHEMA = "hexantk_phase1_run_manifest_v1"
 _DEFAULT_STEPS_GRID = (1, 2, 4, 8, 16, 32, 64)
+# The preregistered statistic, single source for every default below and for
+# the binding in ``decide_test_set``: spec/PREREGISTRATION_PHASE1_v1.md
+# section 5 ("the IQM of the five seed-level mean errors; its 95 % interval
+# uses a two-stage paired bootstrap with 10 000 resamples") and section 6 ("the
+# upper 95 % CI bound"); spec/PHASE1_PROTOCOL_v1.md sections 1, 4 and 5.
+PREREGISTERED_CONFIDENCE = 0.95
+PREREGISTERED_BOOTSTRAP_RESAMPLES = 10_000
+PREREGISTERED_IQM_PROPORTION = 0.25
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ROOT = Path(__file__).resolve().parents[2]
@@ -169,9 +181,9 @@ class TimingProtocol:
 
     warmup: int = 3
     repeats: int = 10
-    bootstrap_resamples: int = 10_000
+    bootstrap_resamples: int = PREREGISTERED_BOOTSTRAP_RESAMPLES
     seed: int = 0
-    confidence: float = 0.95
+    confidence: float = PREREGISTERED_CONFIDENCE
 
     def __post_init__(self) -> None:
         _int_at_least(self.warmup, name="warmup", minimum=0)
@@ -436,7 +448,7 @@ def _iqm_rows(rows: np.ndarray, proportion: float) -> np.ndarray:
     return np.mean(ordered[:, cut:n - cut], axis=1)
 
 
-def interquartile_mean(values: Any, proportion: float = 0.25) -> float:
+def interquartile_mean(values: Any, proportion: float = PREREGISTERED_IQM_PROPORTION) -> float:
     """Trimmed mean (Agarwal et al. 2021): for five values the mean of the middle three."""
     arr = _finite_vector(values, name="values")
     return float(_iqm_rows(arr[None, :], _proportion(proportion))[0])
@@ -491,10 +503,10 @@ def _error_table(errors: Any) -> Dict[str, np.ndarray]:
 def paired_bootstrap_iqm(
     errors: Any,
     *,
-    n_resamples: int = 10_000,
+    n_resamples: int = PREREGISTERED_BOOTSTRAP_RESAMPLES,
     seed: int = 0,
-    confidence: float = 0.95,
-    proportion: float = 0.25,
+    confidence: float = PREREGISTERED_CONFIDENCE,
+    proportion: float = PREREGISTERED_IQM_PROPORTION,
     chunk_elements: int = 4_000_000,
 ) -> Dict[str, BootstrapSummary]:
     """IQM of the seed-level means with a two-stage paired bootstrap (spec section 4).
@@ -554,14 +566,60 @@ class RuleVerdict:
 
 @dataclass(frozen=True)
 class DecisionSummary:
+    """Verdict of both rules for one test set and lattice, with the statistic it rests on.
+
+    ``gino`` is the bootstrap summary the rules used; ``to_dict`` carries it so
+    the confidence level, the resample count and the trimming proportion stay
+    visible next to the verdict.
+    """
+
     test_set: str
     n: int
     verdict: str
     rules: Tuple[RuleVerdict, ...]
+    gino: BootstrapSummary
 
     def to_dict(self) -> Dict[str, Any]:
         return {"test_set": self.test_set, "n": self.n, "verdict": self.verdict,
-                "rules": [r.to_dict() for r in self.rules]}
+                "rules": [r.to_dict() for r in self.rules], "gino": self.gino.to_dict()}
+
+
+class DecisionInputError(ValueError):
+    """The GINO summary handed to the decision rule is not the preregistered statistic.
+
+    Raised when the confidence level, the resample count or the trimming
+    proportion differ from the preregistered values, or when the summary is
+    not a finite, ordered interval (``low <= point <= high``). A rule
+    evaluated on another statistic would be a different, unregistered test.
+    """
+
+
+def _preregistered_summary(gino: BootstrapSummary) -> Tuple[float, float, float]:
+    """``(low, point, high)`` of ``gino`` after binding it to the preregistered statistic."""
+    binding = (
+        ("confidence", gino.confidence, PREREGISTERED_CONFIDENCE, numbers.Real),
+        ("n_resamples", gino.n_resamples, PREREGISTERED_BOOTSTRAP_RESAMPLES, numbers.Integral),
+        ("proportion", gino.proportion, PREREGISTERED_IQM_PROPORTION, numbers.Real),
+    )
+    for name, value, expected, kind in binding:
+        if isinstance(value, bool) or not isinstance(value, kind) or value != expected:
+            raise DecisionInputError(
+                f"gino.{name} = {value!r}, but the preregistered decision statistic uses "
+                f"{name} = {expected!r} (spec/PREREGISTRATION_PHASE1_v1.md sections 5-6)")
+    for name, value in (("n_seeds", gino.n_seeds), ("n_samples", gino.n_samples)):
+        if isinstance(value, bool) or not isinstance(value, numbers.Integral) or value < 1:
+            raise DecisionInputError(f"gino.{name} must be an int >= 1, got {value!r}")
+    bounds = []
+    for name in ("low", "point", "high"):
+        value = getattr(gino, name)
+        if not _is_real(value) or not math.isfinite(float(value)):
+            raise DecisionInputError(f"gino.{name} must be a finite real number, got {value!r}")
+        bounds.append(float(value))
+    low, point, high = bounds
+    if not low <= point <= high:
+        raise DecisionInputError(
+            f"gino must satisfy low <= point <= high, got low={low!r}, point={point!r}, high={high!r}")
+    return low, point, high
 
 
 def decide_test_set(
@@ -573,12 +631,19 @@ def decide_test_set(
     baseline_times_s: Any,
     baseline_errors: Any,
 ) -> DecisionSummary:
-    """Both preregistered rules for one test set and lattice (spec section 5)."""
+    """Both preregistered rules for one test set and lattice (spec section 5).
+
+    ``gino`` must be the preregistered statistic (confidence
+    ``PREREGISTERED_CONFIDENCE``, ``PREREGISTERED_BOOTSTRAP_RESAMPLES`` resamples,
+    trimming ``PREREGISTERED_IQM_PROPORTION``) with a finite ordered interval;
+    anything else raises ``DecisionInputError`` before a rule is evaluated.
+    """
     if not isinstance(test_set, str) or not test_set:
         raise TypeError("test_set must be a non-empty string")
     n = _int_at_least(n, name="n", minimum=1)
     if not isinstance(gino, BootstrapSummary):
         raise TypeError("gino must be a BootstrapSummary")
+    _preregistered_summary(gino)
     upper = _positive_float(gino.high, name="gino.high")
     latency = _positive_float(gino_latency_s, name="gino_latency_s")
     _, ft, fe = _frontier_arrays(baseline_times_s, baseline_errors)
@@ -622,7 +687,7 @@ def decide_test_set(
             upper, latency, t_base)
 
     verdict = "advantage" if (runtime.claim or accuracy.claim) else "H0"
-    return DecisionSummary(test_set=test_set, n=n, verdict=verdict, rules=(runtime, accuracy))
+    return DecisionSummary(test_set=test_set, n=n, verdict=verdict, rules=(runtime, accuracy), gino=gino)
 
 
 # ------------------------------------------------------------------

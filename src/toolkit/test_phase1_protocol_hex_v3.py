@@ -321,6 +321,64 @@ class TestDecisionRules(unittest.TestCase):
         # Equal is not "faster": latency 2.0 where the baseline needs 2.0 s for error 4.0.
         self.assertFalse(self._decide(high=4.0, latency=2.0).rules[1].claim)
 
+    def test_the_decision_is_bound_to_the_preregistered_statistic(self):
+        # F-E1 (Equalita 2026-10-20): the same data at confidence 0.5 has a lower upper
+        # bound, so an unbound rule turned H0 into "advantage". The frontier is placed
+        # between the two upper bounds: e_base(4 s) = e lies above the 50 % bound and
+        # below the 95 % bound.
+        rng = np.random.default_rng(7)
+        errors = 0.12 + 0.03 * rng.standard_normal((5, 40)) ** 2
+        prereg = pp.paired_bootstrap_iqm(errors)[""]
+        loose = pp.paired_bootstrap_iqm(errors, confidence=0.5)[""]
+        self.assertLess(loose.high, prereg.high)
+        e = 0.5 * (loose.high + prereg.high)
+        times, frontier = [1.0, 2.0, 4.0, 8.0], [4 * e, 2 * e, e, e / 2]
+
+        def decide(summary):
+            return pp.decide_test_set(test_set="id", n=32, gino=summary, gino_latency_s=4.0,
+                                      baseline_times_s=times, baseline_errors=frontier)
+
+        d = decide(prereg)
+        self.assertEqual(d.verdict, "H0")
+        self.assertTrue(d.rules[0].evaluable and d.rules[1].evaluable)
+        self.assertLess(loose.high, d.rules[0].baseline_value)     # unbound, 0.5 would claim
+        for summary in (loose, pp.paired_bootstrap_iqm(errors, n_resamples=1)[""],
+                        pp.paired_bootstrap_iqm(errors, proportion=0.0, confidence=0.8)[""],
+                        pp.paired_bootstrap_iqm(errors, n_resamples=9_999)[""]):
+            with self.subTest(confidence=summary.confidence, n_resamples=summary.n_resamples,
+                              proportion=summary.proportion), self.assertRaises(pp.DecisionInputError):
+                decide(summary)
+        # The verdict carries the statistic it rests on.
+        record = json.loads(json.dumps(d.to_dict()))["gino"]
+        self.assertEqual((record["confidence"], record["n_resamples"], record["proportion"]),
+                         (0.95, 10_000, 0.25))
+        self.assertEqual(record["high"], prereg.high)
+        self.assertIs(d.gino, prereg)
+
+    def test_malformed_summaries_fail_closed(self):
+        good = _summary(1.5)
+        cases = [
+            {"low": 0.9, "point": 0.5, "high": 0.1},                 # inverted (Equalita probe)
+            {"low": 1.4, "point": 1.6, "high": 1.5},                 # point above high
+            {"low": 1.5, "point": 1.2, "high": 1.5},                 # point below low
+            {"low": float("nan")}, {"point": float("inf")}, {"low": "1"},
+            {"confidence": 0.9}, {"confidence": float("nan")}, {"confidence": True},
+            {"n_resamples": 10_000.0}, {"n_resamples": True}, {"proportion": 0.2},
+            {"n_seeds": 0}, {"n_samples": 0}, {"n_seeds": 5.0},
+        ]
+        for change in cases:
+            fields = {**good.to_dict(), **change}
+            with self.subTest(change=change), self.assertRaises(pp.DecisionInputError):
+                pp.decide_test_set(test_set="id", n=32, gino=pp.BootstrapSummary(**fields), gino_latency_s=2.0,
+                                   baseline_times_s=self.TIMES, baseline_errors=self.ERRORS)
+        self.assertTrue(issubclass(pp.DecisionInputError, ValueError))
+        # numpy scalars of the preregistered values are the same statistic.
+        numpy_typed = pp.BootstrapSummary(**{**good.to_dict(), "confidence": np.float64(0.95),
+                                             "n_resamples": np.int64(10_000), "proportion": np.float64(0.25)})
+        self.assertEqual(pp.decide_test_set(test_set="id", n=32, gino=numpy_typed, gino_latency_s=2.0,
+                                            baseline_times_s=self.TIMES, baseline_errors=self.ERRORS).verdict,
+                         "advantage")
+
     def test_validation(self):
         for kwargs in ({"test_set": ""}, {"n": 0}, {"gino": {"high": 1.0}}, {"gino_latency_s": 0.0},
                        {"gino_latency_s": float("nan")}, {"baseline_errors": [8, 4, 2]}):

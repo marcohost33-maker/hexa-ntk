@@ -747,3 +747,11 @@
 > Pin for the bytes of this block. Prior rows remain lineage.
 
 | 1ED5FF0D1DD2F535 | 2026-10-19 12:00 | src/toolkit | mutation probe in git clones (M09 median->mean survived a symmetric design): asymmetric latency designs: test_phase1_protocol_hex_v3.py |
+
+## Phase 1 protocol review fixes (append-only, 2026-10-20, claude/hexa-ntk-neural-operator-sh43u7)
+
+> Pins for the bytes of each fix block (Equalita review of f1b54bc). Prior rows remain lineage; the last row per file is authoritative.
+
+| 77321258A0FF2A58 | 2026-10-20 10:45 | src/toolkit | F-E1: decide_test_set bound to the preregistered statistic (0.95 / 10000 / 0.25, single-source constants), DecisionInputError, verdict carries the summary: phase1_protocol_hex_v3.py |
+| 67AA8F179A1AC793 | 2026-10-20 10:45 | src/toolkit | F-E1 tests: confidence-0.5 flip refused, malformed summaries fail closed: test_phase1_protocol_hex_v3.py |
+| 577A6CD39743FA8F | 2026-10-20 10:45 | spec | F-E1 amendment to section 5 (binding to the preregistered statistic): PHASE1_PROTOCOL_v1.md |
