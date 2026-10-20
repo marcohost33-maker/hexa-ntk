@@ -213,7 +213,14 @@ Vor jedem Training festgelegt, ohne Modell und ohne Lern-Claim:
   den Aufloesungs-Gittern N=64 und N=128 je 4 Ties hat (dort verweigert der Adapter), waehrend
   `latent_resolution` 16, 24 oder 48 mit `radius_factor` 1.5 / 2.25 / 2.5 / 2.75 auf allen fuenf
   vorregistrierten Gittern tie-frei sind (12 von 48 Kandidaten). Die Wahl ist Owner-Entscheid D4; der Default
-  bleibt unveraendert.
+  bleibt unveraendert. **Korrektur 2026-10-20 (Review-Befund F-S4):** tie-frei heisst nicht "float32 und
+  float64 bauen denselben Graphen". Die Survey vergleicht jetzt beide GNO-Nachbargraphen, wie das gepinnte
+  Backend sie baut (neuraloperator 2.0.0, native Suche; 960 Graphen gegen die Backend-Suche geprueft, 0
+  Abweichungen): latent 48 mit 1.5 / 2.25 / 2.5 flippt (8 / 8 / 3 Kanten), empfohlen werden nur noch die
+  9 tie- und flip-freien Kandidaten (latent 16 und 24 mit 1.5 / 2.25 / 2.5 / 2.75, latent 48 mit 2.75;
+  `results/2026-10-20_gino_radius_tie_survey_float32-graphs.json`). Nur 3 davon haben eine Marge von
+  mindestens dem Doppelten des gemessenen float32-Distanzfehlers; geforderte Marge und eine breitere
+  Tie-Toleranz im Adapter sind offene Owner-Fragen.
 
 ## Reproduzieren
 
@@ -231,7 +238,7 @@ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "te
 python -m coverage report                                      # 856 Unit-Tests (2026-10-19; Phase-1-Protokoll) + Coverage-Gate
 python scripts/mutation_probe.py                               # optional: 51 Mutanten der Review-Fixes
 python scripts/oracles/hex_phase0_reference_oracle.py         # Phase-0-Referenzfaelle (exit 0 = alle Gates gruen)
-python scripts/oracles/gino_radius_tie_survey.py              # D4-Entscheidungshilfe: Radius-Ties je (latent, radius_factor) x Gitter
+python scripts/oracles/gino_radius_tie_survey.py              # D4-Entscheidungshilfe: Radius-Ties + float32/float64-Graphvergleich je (latent, radius_factor) x Gitter (braucht requirements-operator.txt)
 ```
 
 CI (`.github/workflows/ci.yml`), beide Jobs scheitern mit exit != 0 (ob `tests (cpu)` auch

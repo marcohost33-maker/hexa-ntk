@@ -269,6 +269,18 @@ would be refused. Tie-free on all five lattices of section 2 are `latent_resolut
 or 48 with `radius_factor` 1.5, 2.25, 2.5 or 2.75 (12 of 48 candidates;
 `results/2026-10-19_gino_radius_tie_survey.json`). The D4 grid must name a tie-free pair for
 every evaluation lattice; the adapter default is unchanged until the owner decides.
+*(Candidate list superseded on 2026-10-20, next paragraph.)*
+
+2026-10-20 (review finding F-S4, decision support, no decision): tie-free is not enough. The same
+survey now compares the float32 and float64 neighbour graphs that the pinned backend
+(neuraloperator 2.0.0, native neighbour search) builds; latent 48 with `radius_factor` 1.5, 2.25 or
+2.5 is tie-free but builds different graphs on `N = 128` (2.25 also on `N = 64`). Tie-free and
+flip-free on all five lattices are latent 16 and 24 with `radius_factor` 1.5, 2.25, 2.5 or 2.75, and
+latent 48 with 2.75 (9 of 48; `results/2026-10-20_gino_radius_tie_survey_float32-graphs.json`,
+`spec/GINO_ADAPTER_PHASE1_v2.md` amendment 2026-10-20, which also lists each candidate's margin
+over the measured float32 distance error). The D4 grid must name a tie-free and flip-free pair for
+every evaluation lattice. The required margin and a wider tie band in the adapter are open owner
+questions.
 
 The status line therefore stays DRAFT; nothing here allows a fit on T1 data.
 

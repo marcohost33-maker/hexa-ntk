@@ -28,6 +28,32 @@
   lattice for every radius factor tried; latent 16, 24 and 48 with `radius_factor` 1.5, 2.25, 2.5 or 2.75 are
   tie-free on all five lattices (12 of 48 candidates); `radius_factor` 2.0, 3.0 and 4.0 tie on the torus for
   every latent resolution. The default stays as it is; choosing a pair is the owner's D4 decision.
+  *(As a recommendation superseded by the amendment of 2026-10-20: three of these twelve build different
+  float32 and float64 graphs.)*
+
+- **Amendment 2026-10-20 (float32 graph check, review finding F-S4; decision support only).** "Tie-free"
+  under the rule above is not "float32 and float64 build the same neighbour graph". The survey now rebuilds
+  both GNO graphs as the pinned backend builds them (neuraloperator 2.0.0 `native_neighbor_search`, used
+  because `build_gino` sets `gno_use_open3d=False`: `torch.cdist(queries, data)`, edge iff `<= radius`;
+  input GNO latent grid against nodes, output GNO nodes against latent grid; geometry of
+  `prepare_gino_batch`) in float32 and in float64, and checks every graph against the backend's own search
+  (960 graphs, 0 mismatches). Measured (`results/2026-10-20_gino_radius_tie_survey_float32-graphs.json`,
+  Windows, Python 3.12.10, torch 2.6.0+cpu, neuraloperator 2.0.0, source 69740d1):
+  - latent 48 with `radius_factor` 1.5, 2.25 and 2.5 is tie-free but its float32 and float64 graphs differ
+    by 8, 8 and 3 edges (both directions; on `N = 128`, for 2.25 also on `N = 64`; minimal margin
+    2.3e-6 to 6.3e-6 r). These three are **no longer recommended**. Positive control: the default
+    (32, 2.5) differs by 4 edges per direction on `N = 64` and on `N = 128`.
+  - Tie-free **and** flip-free on all five lattices here: latent 16 and 24 with `radius_factor` 1.5, 2.25,
+    2.5 or 2.75, and latent 48 with 2.75 (9 of 48 candidates). Only these may be named in the D4 grid.
+  - The float32 error of `torch.cdist` near the radius (largest `|d32 - d64| / r` over pairs with
+    `|d - r| <= 0.1 r`) is 1.7e-5 to 6.9e-5 r on these nine, 17 to 69 times the tie band of 1e-6 r.
+    Minimal margin over that error: (16, 1.5) 3.53, (16, 2.75) 2.20, (16, 2.25) 2.10, (24, 2.5) 1.32,
+    (24, 1.5) 1.14, (16, 2.5) 1.11, (24, 2.25) 0.82, (24, 2.75) 0.80, (48, 2.75) 0.32. Below 1 the
+    candidate is flip-free on this machine only through the rounding of this torch/BLAS; flips on Linux/CI
+    were not measured.
+  - **Open owner questions, not decided here:** which margin-over-error factor the D4 choice must meet, and
+    whether the adapter's tie band (1e-6 r) should be widened towards the measured float32 error so that the
+    adapter refuses every pair that can flip. The default and the adapter are unchanged.
 
 ## Testing and falsification
 

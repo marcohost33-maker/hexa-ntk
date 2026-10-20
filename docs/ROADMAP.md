@@ -39,6 +39,11 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   (12/48). Keine Default-Aenderung, kein Modell, kein T1-Fit; D4/D5 bleiben Owner-Entscheid.
   _Evidenz:_ `results/2026-10-19_phase1-protocol_local-gate.log`,
   `results/2026-10-19_gino_radius_tie_survey.json` (quellgebunden, exit 0).
+  _Korrektur 2026-10-20 (Equalita-Review von f1b54bc):_ F-E1 `decide_test_set` an die vorregistrierte
+  Statistik gebunden (0.95 / 10 000 / 0.25, sonst `DecisionInputError`); Orakel-Tests gegen die
+  ueberlebenden Mutanten D4/D5/D10 (Konfidenzniveau, Seed-Achse); F-S4 Survey vergleicht float32- und
+  float64-Graphen des Backends: 9 statt 12 Kandidaten empfohlen
+  (`results/2026-10-20_gino_radius_tie_survey_float32-graphs.json`).
 
 - [x] **CI rot auf #61 (`tests (cpu)`, Head 6d219d9): CG-V2-Tests hingen am BLAS-Kernel
   (2026-10-14).** `test_at_rounding_floor_where_v1_stagnates` und
