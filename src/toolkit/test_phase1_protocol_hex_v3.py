@@ -349,7 +349,9 @@ class TestDecisionRules(unittest.TestCase):
                               proportion=summary.proportion), self.assertRaises(pp.DecisionInputError):
                 decide(summary)
         # The verdict carries the statistic it rests on.
-        record = json.loads(json.dumps(d.to_dict()))["gino"]
+        as_dict = json.loads(json.dumps(d.to_dict()))
+        self.assertIn("gino", as_dict)
+        record = as_dict["gino"]
         self.assertEqual((record["confidence"], record["n_resamples"], record["proportion"]),
                          (0.95, 10_000, 0.25))
         self.assertEqual(record["high"], prereg.high)
