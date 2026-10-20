@@ -25,11 +25,13 @@ KI-Coding-Agent-Anweisungen. Reihenfolge: §1 Working agreements > §2 Conventio
   einen reinen Original-Locator [u6 Option A / k-theory #13], das Gate (Skript seit
   PR #5, LF-Normalisierung PR #6, CI-blocking seit 2026-07-03 laut `docs/ROADMAP.md`) prueft
   die aktuellen Bytes — der Text folgt jetzt der gelebten Praxis.)
-  Eine weitere v3-Engine-Kopie lebt in `coworker-dde/src`. Ziel war ein Byte-Mirror (Gleichheit
-  per git-Blob belegt); **Stand 2026-10-14 sind die Kopien auseinandergelaufen** (hexa-Blob
-  7b2c475 auf diesem Stand, vor #73 a28fbf1, zuletzt gleich bis zum Commit vor #47; coworker-dde
-  3a64658, Code-Unterschiede). Welche kanonisch ist und wie synchronisiert wird,
-  entscheidet Issue #74 -- bis dahin keine Gleichheit annehmen und keine Aussage "verifiziert".
+  Eine weitere v3-Engine-Kopie lebt in `coworker-dde/src` als Byte-Mirror. **Dieses Repo ist
+  kanonisch** (Issue #74): Aenderungen entstehen hier und werden nach coworker-dde gespiegelt,
+  nie umgekehrt. Stand 2026-10-20 ist die Gleichheit wieder per git-Blob belegt: beide `main`
+  tragen `src/hexantk_v3.py` als Blob 7b2c475 (hexa-ntk c074ac8, coworker-dde 16344ae nach
+  coworker-dde #53). Zwischen 2026-09-28 (#47) und dem 2026-10-20 waren die Kopien
+  auseinandergelaufen (coworker-dde 3a64658 == hexa-ntk vor #47). Gleichheit gilt nur fuer den
+  gemessenen Commit-Stand; nach jeder Aenderung hier erneut messen und spiegeln.
 
 ## Working agreements
 1. **Reality-Anchor.** "Tests N/N PASS (verified <date>)" statt "sollte gehen". Gate-Logs in `results/` sind die Evidenz.
