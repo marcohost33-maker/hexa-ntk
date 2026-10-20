@@ -396,7 +396,7 @@ class TestDecisionRules(unittest.TestCase):
         # between the two upper bounds: e_base(4 s) = e lies above the 50 % bound and
         # below the 95 % bound.
         rng = np.random.default_rng(7)
-        errors = 0.12 + 0.03 * rng.standard_normal((5, 40)) ** 2
+        errors = 0.12 + 0.03 * rng.standard_normal((pp.PREREGISTERED_SEEDS, pp.PREREGISTERED_TEST_SAMPLES)) ** 2
         prereg = pp.paired_bootstrap_iqm(errors)[""]
         loose = pp.paired_bootstrap_iqm(errors, confidence=0.5)[""]
         self.assertLess(loose.high, prereg.high)
@@ -435,7 +435,13 @@ class TestDecisionRules(unittest.TestCase):
             {"low": float("nan")}, {"point": float("inf")}, {"low": "1"},
             {"confidence": 0.9}, {"confidence": float("nan")}, {"confidence": True},
             {"n_resamples": 10_000.0}, {"n_resamples": True}, {"proportion": 0.2},
-            {"n_seeds": 0}, {"n_samples": 0}, {"n_seeds": 5.0},
+            {"n_seeds": 0}, {"n_samples": 0}, {"n_seeds": 5.0}, {"n_seeds": True},
+            # Equalita R2-P2-1: subsets with honest labels are another statistic.
+            {"n_seeds": 3}, {"n_seeds": 6}, {"n_samples": 20}, {"n_samples": 499},
+            # Equalita R2 P3: NEP 50 makes np.float32(0.95) == 0.95 although it is 0.949999988.
+            {"confidence": np.float32(0.95)}, {"confidence": np.float16(0.9502)},
+            {"confidence": 0.95 + 1e-12}, {"n_resamples": 10_001},
+            {"low": -0.1},                                           # rel_l2 is non-negative
         ]
         for change in cases:
             fields = {**good.to_dict(), **change}
@@ -449,6 +455,26 @@ class TestDecisionRules(unittest.TestCase):
         self.assertEqual(pp.decide_test_set(test_set="id", n=32, gino=numpy_typed, gino_latency_s=2.0,
                                             baseline_times_s=self.TIMES, baseline_errors=self.ERRORS).verdict,
                          "advantage")
+
+    def test_the_rule_reads_the_validated_bound_once(self):
+        # Equalita R2 P3 (TOCTOU): a summary whose ``high`` changes between reads must
+        # not pass validation with one value and drive the rule with another.
+        class Shifty(pp.BootstrapSummary):
+            reads = 0
+
+            def __getattribute__(self, name):
+                if name == "high":
+                    type(self).reads += 1
+                    return 1.5 if type(self).reads == 1 else 0.01
+                return super().__getattribute__(name)
+
+        shifty = Shifty(**_summary(1.5).to_dict())
+        d = pp.decide_test_set(test_set="id", n=32, gino=shifty, gino_latency_s=2.0,
+                               baseline_times_s=self.TIMES, baseline_errors=self.ERRORS)
+        self.assertEqual([r.gino_upper_rel_l2 for r in d.rules], [1.5, 1.5])
+        honest = pp.decide_test_set(test_set="id", n=32, gino=_summary(1.5), gino_latency_s=2.0,
+                                    baseline_times_s=self.TIMES, baseline_errors=self.ERRORS)
+        self.assertEqual(d.verdict, honest.verdict)
 
     def test_validation(self):
         for kwargs in ({"test_set": ""}, {"n": 0}, {"gino": {"high": 1.0}}, {"gino_latency_s": 0.0},

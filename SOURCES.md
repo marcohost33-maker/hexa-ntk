@@ -764,3 +764,8 @@
 | 06519E807F079D32 | 2026-10-20 11:20 | src/toolkit | E3 test with dominated points outside the frontier range: test_phase1_protocol_hex_v3.py |
 | D87F420DA34BD810 | 2026-10-20 11:20 | spec | E3 amendment to section 5 (the frontier range counts, conservative reading): PHASE1_PROTOCOL_v1.md |
 | 6071A853C6E66A0D | 2026-10-20 11:20 | spec | section 6 clarified: "measured range" is the Pareto-efficient part (status DRAFT unchanged): PREREGISTRATION_PHASE1_v1.md |
+| 6DA63CDA3F9849A4 | 2026-10-20 12:10 | src/toolkit | Equalita R2: decide_test_set binds n_seeds == 5 and n_samples == 500, compares as Python numbers (NEP 50), requires low >= 0, reads the validated high once (TOCTOU): phase1_protocol_hex_v3.py |
+| 287AAE9833753B0F | 2026-10-20 12:10 | src/toolkit | Equalita R2 forgers (seed/sample subsets, float32 label, negative low) + TOCTOU test; binding test on the preregistered 5x500 shape: test_phase1_protocol_hex_v3.py |
+| 50C52B56667C09B5 | 2026-10-20 12:10 | spec | section 5 amendment: seed and sample counts bound, provenance not bound (#82), unverified "400 designs" replaced: PHASE1_PROTOCOL_v1.md |
+| 094E1326D5CDD3FF | 2026-10-20 12:10 | spec | section 8: flip-free is machine-specific; (48, 2.75) no longer recommended, 8 candidates (status DRAFT unchanged): PREREGISTRATION_PHASE1_v1.md |
+| 73874D088CF6EFFE | 2026-10-20 12:10 | spec | amendment: (48, 2.75) flips under 248 of 864 emulated float32 summation orders, only 8 candidates may be named: GINO_ADAPTER_PHASE1_v2.md |

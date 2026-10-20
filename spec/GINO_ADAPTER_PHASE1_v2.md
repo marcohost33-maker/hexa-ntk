@@ -44,7 +44,14 @@
     2.3e-6 to 6.3e-6 r). These three are **no longer recommended**. Positive control: the default
     (32, 2.5) differs by 4 edges per direction on `N = 64` and on `N = 128`.
   - Tie-free **and** flip-free on all five lattices here: latent 16 and 24 with `radius_factor` 1.5, 2.25,
-    2.5 or 2.75, and latent 48 with 2.75 (9 of 48 candidates). Only these may be named in the D4 grid.
+    2.5 or 2.75, and latent 48 with 2.75 (9 of 48 candidates).
+  - **Amendment 2026-10-20 (second review, Equalita R2 @35a5a45):** "flip-free here" is a statement about
+    this machine's summation order. Emulating the float32 path of `torch.cdist` under 864 summation orders,
+    (48, 2.75) flips under 248 of them (pairwise summation in natural order already flips 8 edges); the other
+    eight flip under none, the default (32, 2.5) under all 864 (positive control). Linux/CUDA/OpenBLAS
+    orders are not measured. **(48, 2.75) is therefore no longer recommended; only the remaining 8 (latent 16
+    and 24 with 1.5, 2.25, 2.5 or 2.75) may be named in the D4 grid.** The probe is a review artifact, not a
+    gate result; the owner questions below stay open.
   - The float32 error of `torch.cdist` near the radius (largest `|d32 - d64| / r` over pairs with
     `|d - r| <= 0.1 r`) is 1.7e-5 to 6.9e-5 r on these nine, 17 to 69 times the tie band of 1e-6 r.
     Minimal margin over that error: (16, 1.5) 3.53, (16, 2.75) 2.20, (16, 2.25) 2.10, (24, 2.5) 1.32,

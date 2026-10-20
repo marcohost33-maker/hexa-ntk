@@ -82,6 +82,10 @@ _DEFAULT_STEPS_GRID = (1, 2, 4, 8, 16, 32, 64)
 PREREGISTERED_CONFIDENCE = 0.95
 PREREGISTERED_BOOTSTRAP_RESAMPLES = 10_000
 PREREGISTERED_IQM_PROPORTION = 0.25
+# Section 3 [D2] seeds 0-4 and [D3] 500 samples per test set: a summary over a
+# subset of seeds or samples is another statistic (Equalita R2-P2-1).
+PREREGISTERED_SEEDS = 5
+PREREGISTERED_TEST_SAMPLES = 500
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ROOT = Path(__file__).resolve().parents[2]
@@ -587,9 +591,10 @@ class DecisionSummary:
 class DecisionInputError(ValueError):
     """The GINO summary handed to the decision rule is not the preregistered statistic.
 
-    Raised when the confidence level, the resample count or the trimming
-    proportion differ from the preregistered values, or when the summary is
-    not a finite, ordered interval (``low <= point <= high``). A rule
+    Raised when the confidence level, the resample count, the trimming
+    proportion, the seed count or the per-test-set sample count differ from the
+    preregistered values, or when the summary is not a finite, non-negative,
+    ordered interval (``0 <= low <= point <= high``). A rule
     evaluated on another statistic would be a different, unregistered test.
     """
 
@@ -600,15 +605,17 @@ def _preregistered_summary(gino: BootstrapSummary) -> Tuple[float, float, float]
         ("confidence", gino.confidence, PREREGISTERED_CONFIDENCE, numbers.Real),
         ("n_resamples", gino.n_resamples, PREREGISTERED_BOOTSTRAP_RESAMPLES, numbers.Integral),
         ("proportion", gino.proportion, PREREGISTERED_IQM_PROPORTION, numbers.Real),
+        ("n_seeds", gino.n_seeds, PREREGISTERED_SEEDS, numbers.Integral),
+        ("n_samples", gino.n_samples, PREREGISTERED_TEST_SAMPLES, numbers.Integral),
     )
     for name, value, expected, kind in binding:
-        if isinstance(value, bool) or not isinstance(value, kind) or value != expected:
+        # Compare as Python numbers: under NEP 50 np.float32(0.95) == 0.95 is True
+        # although its value is 0.949999988 (Equalita R2 P3).
+        if (isinstance(value, bool) or not isinstance(value, kind)
+                or (float(value) if kind is numbers.Real else int(value)) != expected):
             raise DecisionInputError(
                 f"gino.{name} = {value!r}, but the preregistered decision statistic uses "
-                f"{name} = {expected!r} (spec/PREREGISTRATION_PHASE1_v1.md sections 5-6)")
-    for name, value in (("n_seeds", gino.n_seeds), ("n_samples", gino.n_samples)):
-        if isinstance(value, bool) or not isinstance(value, numbers.Integral) or value < 1:
-            raise DecisionInputError(f"gino.{name} must be an int >= 1, got {value!r}")
+                f"{name} = {expected!r} (spec/PREREGISTRATION_PHASE1_v1.md sections 3, 5-6)")
     bounds = []
     for name in ("low", "point", "high"):
         value = getattr(gino, name)
@@ -616,9 +623,10 @@ def _preregistered_summary(gino: BootstrapSummary) -> Tuple[float, float, float]
             raise DecisionInputError(f"gino.{name} must be a finite real number, got {value!r}")
         bounds.append(float(value))
     low, point, high = bounds
-    if not low <= point <= high:
+    if not 0.0 <= low <= point <= high:
         raise DecisionInputError(
-            f"gino must satisfy low <= point <= high, got low={low!r}, point={point!r}, high={high!r}")
+            f"gino must satisfy 0 <= low <= point <= high (rel_l2 is non-negative), "
+            f"got low={low!r}, point={point!r}, high={high!r}")
     return low, point, high
 
 
@@ -643,8 +651,10 @@ def decide_test_set(
     n = _int_at_least(n, name="n", minimum=1)
     if not isinstance(gino, BootstrapSummary):
         raise TypeError("gino must be a BootstrapSummary")
-    _preregistered_summary(gino)
-    upper = _positive_float(gino.high, name="gino.high")
+    # The rule uses the validated value, not a second read of gino.high (TOCTOU,
+    # Equalita R2 P3).
+    _, _, high = _preregistered_summary(gino)
+    upper = _positive_float(high, name="gino.high")
     latency = _positive_float(gino_latency_s, name="gino_latency_s")
     _, ft, fe = _frontier_arrays(baseline_times_s, baseline_errors)
     # "Measured range" of preregistration section 6 is read as the range of the

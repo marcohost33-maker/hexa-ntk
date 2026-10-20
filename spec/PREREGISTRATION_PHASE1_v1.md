@@ -280,8 +280,10 @@ survey now compares the float32 and float64 neighbour graphs that the pinned bac
 flip-free on all five lattices are latent 16 and 24 with `radius_factor` 1.5, 2.25, 2.5 or 2.75, and
 latent 48 with 2.75 (9 of 48; `results/2026-10-20_gino_radius_tie_survey_float32-graphs.json`,
 `spec/GINO_ADAPTER_PHASE1_v2.md` amendment 2026-10-20, which also lists each candidate's margin
-over the measured float32 distance error). The D4 grid must name a tie-free and flip-free pair for
-every evaluation lattice. The required margin and a wider tie band in the adapter are open owner
+over the measured float32 distance error). Flip-free means flip-free on the measuring machine: a
+second review (Equalita R2, 2026-10-20) found that (48, 2.75) flips under 248 of 864 emulated float32
+summation orders, the other eight under none; it is therefore not recommended, leaving 8 candidates
+(latent 16 and 24). The D4 grid must name a tie-free and flip-free pair for every evaluation lattice. The required margin and a wider tie band in the adapter are open owner
 questions.
 
 The status line therefore stays DRAFT; nothing here allows a fit on T1 data.

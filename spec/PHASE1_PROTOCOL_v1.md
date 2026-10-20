@@ -129,11 +129,19 @@ and 6). `decide_test_set` therefore accepts `gino` only with
 `confidence == 0.95`, `n_resamples == 10000` and `proportion == 0.25`
 (module constants `PREREGISTERED_CONFIDENCE`,
 `PREREGISTERED_BOOTSTRAP_RESAMPLES`, `PREREGISTERED_IQM_PROPORTION`, which are
-also the defaults of sections 1 and 4), with finite `low <= point <= high`;
-anything else raises `DecisionInputError` (a `ValueError`) before a rule is
-evaluated. A percentile interval is not guaranteed to contain the point
-estimate; a run where it does not is refused rather than decided (fail-closed;
-in 400 random designs with 5 seeds, 2026-10-20, it never happened). Before
+also the defaults of sections 1 and 4), over all `n_seeds == 5` seeds and
+`n_samples == 500` samples of the test set (`PREREGISTERED_SEEDS`,
+`PREREGISTERED_TEST_SAMPLES`; preregistration [D2], [D3]), with finite
+`0 <= low <= point <= high`; the values are compared as Python numbers (so
+`np.float32(0.95)` is not 0.95) and the rule uses the validated upper bound,
+not a second read. Anything else raises `DecisionInputError` (a `ValueError`)
+before a rule is evaluated. **Amendment 2026-10-20 (second review, Equalita
+R2):** with honest labels, a summary over 3 of 5 seeds or 20 of 40 samples had
+turned `H0` into `advantage`; the seed and sample counts are now bound. Not
+bound: provenance — a summary computed at another level and relabelled is
+still accepted (issue #82). A percentile interval is not guaranteed to contain
+the point estimate; a run where it does not is refused rather than decided
+(fail-closed; the review searched 6 800 designs and found no case). Before
 this amendment a summary at confidence 0.5 or with one
 resample was evaluated and could turn `H0` into `advantage` on the same data.
 `DecisionSummary.to_dict()` carries the summary under `gino`, so the

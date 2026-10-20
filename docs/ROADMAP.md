@@ -44,6 +44,11 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   ueberlebenden Mutanten D4/D5/D10 (Konfidenzniveau, Seed-Achse); F-S4 Survey vergleicht float32- und
   float64-Graphen des Backends: 9 statt 12 Kandidaten empfohlen
   (`results/2026-10-20_gino_radius_tie_survey_float32-graphs.json`).
+  _Zweite Runde 2026-10-20 (Equalita R2 @35a5a45):_ Teilmengen-Faelscher (3 von 5 Seeds, 20 von 500
+  Samples) kippten H0 in "advantage" -> `decide_test_set` bindet jetzt auch `n_seeds == 5` und
+  `n_samples == 500`; NEP-50-Vergleich, `low >= 0` und einmaliges Lesen von `high` (TOCTOU) gehaertet.
+  Latent 48 / 2.75 flippt unter 248 von 864 emulierten Summationsreihenfolgen -> 8 Kandidaten empfohlen.
+  Rest in #82.
 
 - [x] **CI rot auf #61 (`tests (cpu)`, Head 6d219d9): CG-V2-Tests hingen am BLAS-Kernel
   (2026-10-14).** `test_at_rounding_floor_where_v1_stagnates` und
