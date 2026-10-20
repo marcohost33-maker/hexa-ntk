@@ -141,10 +141,19 @@ confidence level, the resample count and the trimming proportion stand next to
 the verdict.
 
 Not evaluable, with the reason recorded and **no claim**:
-- the latency lies outside the measured time range (no extrapolation);
+- the latency lies outside the frontier's time range (no extrapolation);
 - the error lies below the frontier's smallest error: **baseline floor**, no
   speed claim;
 - the error lies above the frontier's largest error: no extrapolation.
+
+**Which range counts (amendment 2026-10-20, review finding E3).** The
+preregistration's "measured range" (section 6) is read as the range of the
+**Pareto-efficient part** of the measured curve, in time for the
+equal-runtime rule and in error for the equal-accuracy rule. A dominated point
+can lie outside that range (a slow point with a large error); it does not
+widen the range in which a rule is evaluable. This is the narrower and
+therefore conservative reading; the behaviour is unchanged. The reasons name
+the frontier range and, next to it, the range of all measured points.
 
 The verdict is `advantage` if at least one rule claims, otherwise `H0` (no
 advantage). Each rule's verdict, reason and the numbers it used are returned.

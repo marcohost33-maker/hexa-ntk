@@ -343,7 +343,7 @@ class TestDecisionRules(unittest.TestCase):
         runtime, accuracy = d.rules
         self.assertEqual(d.verdict, "H0")
         self.assertFalse(runtime.evaluable)
-        self.assertIn("outside the measured baseline range", runtime.reason)
+        self.assertIn("outside the time range of the baseline's Pareto frontier", runtime.reason)
         self.assertFalse(accuracy.evaluable)
         self.assertIn("baseline floor", accuracy.reason)
         self.assertIsNone(runtime.baseline_value)
@@ -354,6 +354,23 @@ class TestDecisionRules(unittest.TestCase):
         self.assertEqual(d.verdict, "H0")
         self.assertIn("above the coarsest", d.rules[1].reason)
         self.assertIn("no extrapolation", d.rules[0].reason)
+
+    def test_reasons_name_the_frontier_range_not_the_measured_range(self):
+        # E3 (Equalita 2026-10-20): with a dominated slow point the measured times span
+        # [1, 4] s but the frontier only [1, 2] s. The rule uses the frontier (no claim at
+        # 3 s, conservative); the reason must say so instead of calling [1, 2] "measured".
+        d = pp.decide_test_set(test_set="id", n=32, gino=_summary(5.0), gino_latency_s=3.0,
+                               baseline_times_s=[1.0, 2.0, 4.0], baseline_errors=[4.0, 2.0, 3.0])
+        runtime, accuracy = d.rules
+        self.assertFalse(runtime.evaluable)
+        self.assertIn("Pareto frontier [1, 2] s (all measured points: [1, 4] s)", runtime.reason)
+        self.assertNotIn("measured baseline range", runtime.reason)
+        # Errors: frontier [2, 4], measured up to 5 through a dominated point.
+        d = pp.decide_test_set(test_set="id", n=32, gino=_summary(4.5), gino_latency_s=1.5,
+                               baseline_times_s=[1.0, 2.0, 4.0], baseline_errors=[4.0, 2.0, 5.0])
+        self.assertFalse(d.rules[1].evaluable)
+        self.assertIn("Pareto frontier 4 (all measured points up to 5)", d.rules[1].reason)
+        self.assertEqual(d.verdict, "H0")
 
     def test_one_rule_evaluable_decides_alone(self):
         d = self._decide(high=3.0, latency=16.0)

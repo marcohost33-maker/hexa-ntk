@@ -647,13 +647,21 @@ def decide_test_set(
     upper = _positive_float(gino.high, name="gino.high")
     latency = _positive_float(gino_latency_s, name="gino_latency_s")
     _, ft, fe = _frontier_arrays(baseline_times_s, baseline_errors)
+    # "Measured range" of preregistration section 6 is read as the range of the
+    # Pareto-efficient part (the interpolation never leaves it). A dominated
+    # point can extend the measured times or errors beyond it; the reasons name
+    # both ranges so the narrower, conservative one is visible (E3, 2026-10-20).
+    measured_t = _positive_vector(baseline_times_s, name="baseline_times_s")
+    measured_e = _positive_vector(baseline_errors, name="baseline_errors")
 
     e_base = error_at_time(ft, fe, latency)
     if e_base is None:
         runtime = RuleVerdict(
             "equal_runtime", False, False,
-            f"GINO latency {latency:.6g} s lies outside the measured baseline range "
-            f"[{ft[0]:.6g}, {ft[-1]:.6g}] s; no equal-runtime claim (no extrapolation)",
+            f"GINO latency {latency:.6g} s lies outside the time range of the baseline's Pareto "
+            f"frontier [{ft[0]:.6g}, {ft[-1]:.6g}] s (all measured points: "
+            f"[{float(measured_t.min()):.6g}, {float(measured_t.max()):.6g}] s); "
+            "no equal-runtime claim (no extrapolation)",
             upper, latency, None)
     else:
         claim = upper < e_base
@@ -673,7 +681,8 @@ def decide_test_set(
     elif upper > coarsest:
         accuracy = RuleVerdict(
             "equal_accuracy", False, False,
-            f"rel_l2 {upper:.6g} lies above the coarsest measured baseline error {coarsest:.6g}; "
+            f"rel_l2 {upper:.6g} lies above the coarsest error of the baseline's Pareto frontier "
+            f"{coarsest:.6g} (all measured points up to {float(measured_e.max()):.6g}); "
             "no equal-accuracy claim (no extrapolation)",
             upper, latency, None)
     else:

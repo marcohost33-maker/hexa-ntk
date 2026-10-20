@@ -198,7 +198,9 @@ prominence as positive ones (AGENTS.md: first-class).
 - `e_base(t_NO)` is the baseline error at `t_NO`, interpolated log-log on
   the **Pareto-efficient** part of its cost-accuracy curve. No extrapolation is
   allowed; if `t_NO` lies outside the measured range, no equal-runtime claim
-  is made.
+  is made. (Clarified 2026-10-20: "measured range" here and in the
+  equal-accuracy rule is the range of the Pareto-efficient part;
+  `spec/PHASE1_PROTOCOL_v1.md` section 5.)
 - GINO is "more accurate at equal runtime" only if the upper 95 % CI bound of
   its IQM `rel_l2` is below `e_base(t_NO)`.
 

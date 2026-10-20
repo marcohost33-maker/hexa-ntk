@@ -760,3 +760,7 @@
 | 51B0BD2F0CF1D8D1 | 2026-10-20 11:05 | scripts/oracles | F-S4: float32 vs float64 neighbour graphs of both GNO directions (torch.cdist as neuraloperator 2.0.0 native_neighbor_search, cross-checked against the backend), minimal relative margin, float32 distance error near the radius: gino_radius_tie_survey.py |
 | E8D9E5CDB1554287 | 2026-10-20 11:10 | spec | amendment 2026-10-20 float32 graph check (F-S4): 9 tie- and flip-free candidates, margin over float32 error, open owner questions; 2026-10-19 list marked superseded: GINO_ADAPTER_PHASE1_v2.md |
 | 20D080BA9E8B14FC | 2026-10-20 11:10 | spec | D4 decision support corrected 2026-10-20 (F-S4, tie-free and flip-free; status DRAFT unchanged): PREREGISTRATION_PHASE1_v1.md |
+| 101FC9F9B68FE738 | 2026-10-20 11:20 | src/toolkit | E3: decision reasons name the Pareto-frontier range next to the range of all measured points (behaviour unchanged): phase1_protocol_hex_v3.py |
+| 06519E807F079D32 | 2026-10-20 11:20 | src/toolkit | E3 test with dominated points outside the frontier range: test_phase1_protocol_hex_v3.py |
+| D87F420DA34BD810 | 2026-10-20 11:20 | spec | E3 amendment to section 5 (the frontier range counts, conservative reading): PHASE1_PROTOCOL_v1.md |
+| 6071A853C6E66A0D | 2026-10-20 11:20 | spec | section 6 clarified: "measured range" is the Pareto-efficient part (status DRAFT unchanged): PREREGISTRATION_PHASE1_v1.md |
