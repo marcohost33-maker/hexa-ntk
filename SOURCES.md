@@ -757,3 +757,4 @@
 | 577A6CD39743FA8F | 2026-10-20 10:45 | spec | F-E1 amendment to section 5 (binding to the preregistered statistic): PHASE1_PROTOCOL_v1.md |
 | 69860D34BC97A56D | 2026-10-20 10:35 | src/toolkit | F-E1 test asserts the "gino" key before reading it (mutant to_dict-without-gino died by KeyError, not by assertion): test_phase1_protocol_hex_v3.py |
 | 0120C11C5BB2A1CE | 2026-10-20 10:50 | src/toolkit | review test gap D4/D5/D10: binomial closed-form 95 % oracle at default arguments, exact law of the seed-axis IQM, constants pinned to the preregistration text: test_phase1_protocol_hex_v3.py |
+| 51B0BD2F0CF1D8D1 | 2026-10-20 11:05 | scripts/oracles | F-S4: float32 vs float64 neighbour graphs of both GNO directions (torch.cdist as neuraloperator 2.0.0 native_neighbor_search, cross-checked against the backend), minimal relative margin, float32 distance error near the radius: gino_radius_tie_survey.py |
