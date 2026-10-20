@@ -179,6 +179,58 @@ class TestPairedBootstrap(unittest.TestCase):
         self.assertGreater(wide.high - wide.low, base.high - base.low)
         self.assertGreater(wide.high, base.high)
 
+    def test_default_interval_is_the_95_percent_binomial_oracle(self):
+        # Closed-form oracle (Equalita mutants D4 alpha = 1 - c and D5 default 0.90
+        # survived the module, 2026-10-20). One seed, 16 sample ids, eight zeros and
+        # eight ones: a resampled mean is Binomial(16, 1/2) / 16. Its exact 2.5 % and
+        # 97.5 % quantiles are 4/16 and 12/16; the 5 % and 95 % quantiles are 5/16
+        # and 11/16. The exact CDF is at least 0.0115 away from every one of these
+        # levels (about 7 standard errors of a 10 000-resample empirical CDF),
+        # so the percentile interval lands on the atoms exactly.
+        cdf = np.cumsum([math.comb(16, j) for j in range(17)]) / 2.0 ** 16
+        for level, atom in ((0.025, 4), (0.975, 12), (0.05, 5), (0.95, 11)):
+            self.assertEqual(int(np.argmax(cdf > level)), atom)
+            self.assertGreater(min(cdf[atom] - level, level - cdf[atom - 1]), 0.0115)
+        row = np.array([0.0, 1.0] * 8)
+        for design in (row[None, :], np.tile(row, (5, 1))):   # 5 identical seeds: seed draws change nothing
+            out = pp.paired_bootstrap_iqm(design)[""]          # every argument at its default
+            with self.subTest(seeds=design.shape[0]):
+                self.assertEqual((out.confidence, out.n_resamples, out.proportion), (0.95, 10_000, 0.25))
+                self.assertEqual((out.low, out.point, out.high), (4 / 16, 0.5, 12 / 16))
+        ninety = pp.paired_bootstrap_iqm(row[None, :], confidence=0.90)[""]
+        self.assertEqual((ninety.low, ninety.high), (5 / 16, 11 / 16))
+
+    def test_the_seed_axis_is_resampled(self):
+        # Equalita mutant D10 (seed indices drawn but never applied) survived the module.
+        # Every seed row is constant, so the sample-id draws change nothing and the whole
+        # interval width comes from the seed draws. Exact law of the IQM of five draws
+        # with replacement from {1, 2, 3, 4, 5} (5**5 equally likely tuples, IQM = mean of
+        # the middle three): 5 % quantile 5/3, 95 % quantile 13/3, support [1, 5]. The
+        # 95 % percentile interval must reach at least as far out as the 90 % quantiles.
+        law = sorted(sum(sorted(t)[1:4]) / 3.0 for t in itertools.product(range(1, 6), repeat=5))
+        q05, q95 = law[int(0.05 * len(law))], law[int(0.95 * len(law))]
+        self.assertEqual((q05, q95), (5 / 3, 13 / 3))
+        design = np.repeat(np.arange(1.0, 6.0)[:, None], 16, axis=1)
+        out = pp.paired_bootstrap_iqm(design)[""]
+        self.assertEqual(out.point, 3.0)
+        self.assertGreater(out.high - out.low, 0.0)          # the seed axis contributes variance
+        self.assertLessEqual(4 / 3 - 1e-12, out.low)
+        self.assertLessEqual(out.low, q05 + 1e-12)
+        self.assertLessEqual(q95 - 1e-12, out.high)
+        self.assertLessEqual(out.high, 14 / 3 + 1e-12)
+        # Negative control: identical seed rows leave only the sample axis.
+        flat = pp.paired_bootstrap_iqm(np.full((5, 16), 3.0))[""]
+        self.assertEqual(flat.high - flat.low, 0.0)
+
+    def test_the_preregistered_constants_match_the_preregistration(self):
+        self.assertEqual((pp.PREREGISTERED_CONFIDENCE, pp.PREREGISTERED_BOOTSTRAP_RESAMPLES,
+                          pp.PREREGISTERED_IQM_PROPORTION), (0.95, 10_000, 0.25))
+        text = (_ROOT / "spec" / "PREREGISTRATION_PHASE1_v1.md").read_text(encoding="utf-8")
+        text = " ".join(text.split())
+        self.assertIn("its 95 % interval uses a two-stage paired bootstrap with 10 000 resamples", text)
+        self.assertIn("upper 95 % CI bound", text)
+        self.assertIn("IQM of the five seed-level mean errors", text)
+
     def test_validation(self):
         good = np.ones((3, 4))
         for bad in (np.ones(4), np.ones((0, 4)), np.ones((3, 0)), np.full((3, 4), np.nan),

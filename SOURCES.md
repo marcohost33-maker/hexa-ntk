@@ -756,3 +756,4 @@
 | 67AA8F179A1AC793 | 2026-10-20 10:45 | src/toolkit | F-E1 tests: confidence-0.5 flip refused, malformed summaries fail closed: test_phase1_protocol_hex_v3.py |
 | 577A6CD39743FA8F | 2026-10-20 10:45 | spec | F-E1 amendment to section 5 (binding to the preregistered statistic): PHASE1_PROTOCOL_v1.md |
 | 69860D34BC97A56D | 2026-10-20 10:35 | src/toolkit | F-E1 test asserts the "gino" key before reading it (mutant to_dict-without-gino died by KeyError, not by assertion): test_phase1_protocol_hex_v3.py |
+| 0120C11C5BB2A1CE | 2026-10-20 10:50 | src/toolkit | review test gap D4/D5/D10: binomial closed-form 95 % oracle at default arguments, exact law of the seed-axis IQM, constants pinned to the preregistration text: test_phase1_protocol_hex_v3.py |
