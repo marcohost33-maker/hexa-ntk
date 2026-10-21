@@ -58,7 +58,12 @@ protocol, timed_samples, rtol)` runs `mechanistic_baseline`
 | `median_wall_time_s` | median over ALL timed calls (`timed_samples` samples x `repeats`) |
 | `wall_time_ci_s` | cluster bootstrap of that median: samples are resampled with replacement, each drawn sample contributes all its timed calls |
 | `cg_iterations_mean` | mean total CG iterations per sample |
-| `domain` | `lattice.domain` (`triangle_dirichlet`, `torus_periodic`); last field, added 2026-10-21 (Equalita R4-F1), no default |
+| `domain` | `lattice.domain` (`triangle_dirichlet`, `torus_periodic`); added 2026-10-21 (Equalita R4-F1), no default |
+| `kappa`, `t_final` | the diffusivity and the horizon `T` of the `config` the solver ran with (`dt = t_final / steps`); added 2026-10-21 (Equalita R5-F1), no default |
+| `task_config_sha256` | `config.digest()`, the whole task configuration (`lambda_cutoff`, spectral decay and domain included) |
+| `rtol` | the CG tolerance the solver ran with |
+| `warmup`, `repeats` | of the `protocol` the timed samples ran with |
+| `timing_protocol_sha256` | `protocol.digest()` (`TimingProtocol.digest`: SHA-256 of `canonical()`, bootstrap resamples, seed and confidence of `wall_time_ci_s` included) |
 
 The first `timed_samples` inputs are timed with the protocol of section 1;
 the others are solved once (the solver is deterministic, the prediction does
@@ -233,7 +238,16 @@ recomputed (claim boundary).
 - `baseline_curve` is the tuple (or list) of `CostAccuracyPoint` returned by
   `baseline_cost_accuracy_curve`; anything else, including the former two
   float lists, a subclass of the point or its `to_dict`, raises `TypeError`.
-  Every point is checked by its own coordinates, in this order, else
+  Every field of every point is read once into a plain `int`, `float` or
+  `str` (Equalita R5-F3: a coordinate read twice let an `int()` that changes
+  between the reads be checked as 32 and recorded as 64); the checks and the
+  record use only this copy. Types and plausibility first, else
+  `DecisionInputError` (R5-F4): every number finite; `dt`, `kappa`,
+  `t_final`, `rtol`, mean `rel_l2` and median time `> 0`; median `rel_l2`,
+  `rel_h1`, `rel_max` and `cg_iterations_mean` `>= 0`; `wall_time_ci_s` a pair
+  with `0 <= low <= high` (whether it contains the median is not required:
+  the percentile bootstrap does not guarantee it). Then every point is checked
+  by its own coordinates, in this order, else
   `DecisionInputError` naming the first deviating coordinate (Equalita R4-F1):
   the `steps` of the points, in order, are exactly `1, 2, 4, 8, 16, 32, 64`
   (preregistration :134-137; a subset, another grid or another order is
@@ -241,10 +255,20 @@ recomputed (claim boundary).
   the genuine curve on steps `(1, 8, 16, 24, 32, 48, 64)` reaching
   `advantage`); every point's `n` is the decided lattice (:134-135; R4-F1: the
   genuine `n = 64` curve under `n = 32` reached `advantage`); its `domain` is
-  the test set's domain in the lattice's spelling; its `sample_count` is 500
+  the test set's domain in the lattice's spelling; the settings it was
+  computed with are the registered ones (Equalita R5-F1: the genuine curve
+  solved with `kappa = 2` or `T = 0.02` against the registered truth reached
+  `advantage`, and for `kappa` its record was indistinguishable from a
+  registered run): `kappa = 1` and `t_final = 0.01` ([D1], preregistration
+  :51-55), `dt == t_final / steps` exactly (the producer's own division),
+  `task_config_sha256` the digest of `HeatOperatorTaskConfig(domain=...)` of
+  the test set's domain (the whole [D1] configuration), `rtol = 1e-12` (the
+  tolerance of `mechanistic_baseline` as verified; the preregistration names
+  the method at :128-133 but writes out no tolerance, owner question),
+  `warmup = 3` and `repeats = 10` (:145) and `timing_protocol_sha256` the
+  digest of `TimingProtocol()`; its `sample_count` is 500
   (:62-68 [D3], :136 "on the same test inputs"); `1 <= timed_samples <=
-  sample_count`; values and the interval are finite, mean `rel_l2`, median
-  time and `dt` `> 0`. No time and no error may repeat: the same two points
+  sample_count`. No time and no error may repeat: the same two points
   copied to seven would keep the chord. This catches only the literal
   repetition; copies shifted by one ulp or `1e-12` and chord points pass
   (Equalita R4-F2, see the claim boundary). `provenance` is written from the
@@ -304,8 +328,22 @@ R4-F1 fix):
   inputs of the same domain and lattice passes. Binding it needs an input
   digest in the point compared with the manifest's dataset digest per
   `(test_set, n)` (R4-F4, owner).
-- `dt` (the horizon `T = dt * steps`), the solver tolerance, and the
-  baseline's warm-ups and repeats are recorded, not checked.
+- Corrected 2026-10-21 (Equalita R5-F2): this list said that `dt`, the
+  solver tolerance and the baseline's warm-ups and repeats were "recorded,
+  not checked". `dt` was recorded but not compared with the preregistration;
+  the tolerance, the warm-ups, the repeats and `kappa` were not in the record
+  at all. Since R5-F1 they are carried, checked and recorded (see the list of
+  checks above).
+- The machine and thread policy are not checked. The preregistration requires
+  GINO and the baseline on the **same CPU machine and thread policy** (:141)
+  with the thread counts in the manifest (:144). Neither side carries a
+  machine identity the function could compare: the baseline point has none,
+  the GINO latency calls are bare numbers, and the manifest's `hardware`
+  block is the GINO run's, of which only `cuda`, `dtype` and `amp` are fixed
+  (D5 open). A stamp written by the caller would be self-declared, i.e. the
+  `authenticity` class. Equalita R5 saw the baseline times of two curves in
+  one process differ by a factor 2 to 4 under load, enough to flip a verdict:
+  the time axis holds only for the recorded run conditions (owner question).
 - Copies shifted by one ulp or `1e-12` and chord points pass the repeat check
   (R4-F2); only a recomputation of the errors or an attestation of the times
   closes that.
@@ -325,6 +363,19 @@ field `domain`. Run manifests for a preregistered decision need hardware
 `baseline_n` is now a list (the points' lattices). `decide_test_set` (the
 diagnostic helper) keeps the float lists. Whether the API stays so is an
 owner decision (Equalita R4 owner question 2); this form fails closed.
+
+**API and format change (2026-10-21, Equalita R5-F1/F3/F4, breaking):**
+`CostAccuracyPoint` gains seven required fields after `domain`: `kappa`,
+`t_final`, `task_config_sha256`, `rtol`, `warmup`, `repeats`,
+`timing_protocol_sha256` (a construction without them raises `TypeError`);
+`TimingProtocol` gains `digest()`. `baseline_cost_accuracy_curve` keeps its
+signature and writes them. `decide_preregistered` refuses curves computed
+with other settings than the registered ones (other `kappa`/`T`/task
+configuration, `rtol != 1e-12`, a timing protocol other than
+`TimingProtocol()`), a `dt` that is not `t_final / steps`, negative record
+fields and an inverted interval. The record's `baseline_points` entries gain
+the seven fields, so a record written before this change does not verify
+against the new code. `decide_test_set` is unchanged.
 
 ## 6. Break-even (preregistration section 4)
 

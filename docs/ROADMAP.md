@@ -65,6 +65,13 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   werden abgelehnt (`TypeError`). Manifest braucht `hardware.amp = False` (R4-F3). Grenzen:
   Eingabe-Identitaet (sample_ids/Dataset-Digest je (test_set, n), R4-F4), Fast-Kopien (R4-F2),
   Handbau-Punkte (authenticity) -> spec/PHASE1_PROTOCOL_v1.md 5a.
+  _Equalita R5-F1 2026-10-21 (@d6cfdec):_ echte Kurven mit Solver kappa=2 bzw. T=0.02 gegen die
+  registrierte Wahrheit kippten H0 in "advantage" (Record bei kappa ununterscheidbar). **API-/Format-
+  Bruch:** `CostAccuracyPoint` traegt sieben neue Pflichtfelder (kappa, t_final, task_config_sha256,
+  rtol, warmup, repeats, timing_protocol_sha256), geprueft gegen [D1], dt == t_final/steps, rtol 1e-12
+  und `TimingProtocol()`; Record-Eintraege der Punkte wachsen entsprechend (alte Records verifizieren
+  nicht mehr). R5-F3 einmaliges Lesen jedes Felds, R5-F4 Plausibilitaet (>= 0, CI geordnet). Grenze neu
+  benannt: Maschine/Threads (Prereg :141/:144, keine Seite traegt eine Maschinen-Identitaet; Owner).
 
 - [x] **CI rot auf #61 (`tests (cpu)`, Head 6d219d9): CG-V2-Tests hingen am BLAS-Kernel
   (2026-10-14).** `test_at_rounding_floor_where_v1_stagnates` und
