@@ -153,7 +153,9 @@ class TestPairedBootstrap(unittest.TestCase):
     def test_pairing_scales_exactly(self):
         # The same seed and sample-id index sets are applied to every matrix: a
         # matrix equal to twice another must yield exactly twice its bounds.
-        out = pp.paired_bootstrap_iqm({"n16": self.a, "n32": 2.0 * self.a}, n_resamples=400, seed=5)
+        ids = range(100000, 100040)
+        out = pp.paired_bootstrap_iqm({"n16": self.a, "n32": 2.0 * self.a}, sample_ids={"n16": ids, "n32": ids},
+                                      n_resamples=400, seed=5)
         self.assertEqual(out["n32"].low, 2.0 * out["n16"].low)
         self.assertEqual(out["n32"].high, 2.0 * out["n16"].high)
         self.assertEqual(out["n32"].point, 2.0 * out["n16"].point)
@@ -161,8 +163,43 @@ class TestPairedBootstrap(unittest.TestCase):
     def test_pairing_negative_control(self):
         # Without a shared index set the bounds of an unrelated matrix are not a multiple.
         other = 2.0 * self.a[:, ::-1]
-        out = pp.paired_bootstrap_iqm({"a": self.a, "b": other}, n_resamples=400, seed=5)
+        ids = list(range(40))
+        out = pp.paired_bootstrap_iqm({"a": self.a, "b": other}, sample_ids={"a": ids, "b": ids},
+                                      n_resamples=400, seed=5)
         self.assertNotEqual(out["b"].low, 2.0 * out["a"].low)
+
+    def test_pairing_is_bound_to_equal_sample_ids(self):
+        # GPT-6 R2 (2026-10-19): the triangle sets share ids 100000..100499, the torus
+        # OOD set uses 200000..200499; equal array shape is no physical pairing.
+        triangle, torus = range(100000, 100040), range(200000, 200040)
+        pair = {"triangle": self.a, "torus": 2.0 * self.a}
+        refusals = [
+            {},                                                            # no ids: shape alone
+            {"sample_ids": {"triangle": triangle, "torus": torus}},        # disjoint ids
+            {"sample_ids": {"triangle": triangle, "torus": list(triangle)[::-1]}},  # same ids, other order
+            {"sample_ids": {"triangle": triangle, "torus": [*triangle[:-1], 100040]}},  # one id differs
+            {"sample_ids": list(triangle)},                                # one list asserted for both
+        ]
+        for kwargs in refusals:
+            with self.subTest(kwargs=kwargs), self.assertRaises(pp.PairingError):
+                pp.paired_bootstrap_iqm(pair, n_resamples=50, **kwargs)
+        self.assertTrue(issubclass(pp.PairingError, ValueError))
+        # Positive control: the same ids in the same order pair, and the result is the
+        # one of the unchecked computation (the check changes no number).
+        ok = pp.paired_bootstrap_iqm(pair, sample_ids={"triangle": triangle, "torus": triangle}, n_resamples=50)
+        alone = pp.paired_bootstrap_iqm(self.a, sample_ids=triangle, n_resamples=50)[""]
+        self.assertEqual(ok["triangle"], alone)
+        self.assertEqual(ok["torus"].high, 2.0 * alone.high)
+        # Separate bootstraps stay possible for unpaired sets.
+        self.assertEqual(pp.paired_bootstrap_iqm({"torus": self.a}, sample_ids={"torus": torus},
+                                                 n_resamples=50)["torus"], alone)
+        for bad in ({"sample_ids": {"triangle": triangle}},                         # a set without ids
+                    {"sample_ids": {"triangle": triangle, "torus": range(200000, 200039)}},  # wrong length
+                    {"sample_ids": {"triangle": [0] * 40, "torus": [0] * 40}},      # repeated id
+                    {"sample_ids": {"triangle": [-1, *range(39)], "torus": [-1, *range(39)]}},
+                    {"sample_ids": {"triangle": "abc", "torus": "abc"}}):
+            with self.subTest(bad=bad), self.assertRaises((TypeError, ValueError)):
+                pp.paired_bootstrap_iqm(pair, n_resamples=50, **bad)
 
     def test_chunking_does_not_change_the_result_and_seeds_do(self):
         one = pp.paired_bootstrap_iqm(self.a, n_resamples=300, seed=11)[""]

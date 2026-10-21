@@ -39,6 +39,7 @@ __all__ = [
     "time_at_error",
     "interquartile_mean",
     "BootstrapSummary",
+    "PairingError",
     "paired_bootstrap_iqm",
     "RuleVerdict",
     "DecisionSummary",
@@ -476,6 +477,61 @@ class BootstrapSummary:
         return asdict(self)
 
 
+class PairingError(ValueError):
+    """Error matrices were to share bootstrap index sets without sharing their sample ids.
+
+    The same resampled column index means the same sample only if column ``j``
+    holds the same ``sample_id`` in every matrix. Equal array shapes do not
+    make a physical pairing: the triangle test sets share ids 100000..100499,
+    the torus OOD set uses 200000..200499 (GPT-6 R2, 2026-10-19).
+    """
+
+
+def _sample_id_list(value: Any, *, name: str, length: int) -> Tuple[int, ...]:
+    if isinstance(value, (str, bytes, Mapping)) or not isinstance(value, (Sequence, np.ndarray, range)):
+        raise TypeError(f"{name} must be a sequence of non-negative ints")
+    out = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, numbers.Integral) or item < 0:
+            raise TypeError(f"{name} must contain non-negative ints, got {item!r}")
+        out.append(int(item))
+    if len(out) != length:
+        raise ValueError(f"{name} names {len(out)} sample ids for {length} columns")
+    if len(set(out)) != len(out):
+        raise ValueError(f"{name} must not repeat a sample id")
+    return tuple(out)
+
+
+def _paired_sample_ids(table: Mapping[str, np.ndarray], sample_ids: Any) -> Optional[Tuple[int, ...]]:
+    """Column ids shared by every matrix; ``PairingError`` unless the pairing is by id."""
+    n_samples = next(iter(table.values())).shape[1]
+    if sample_ids is None:
+        if len(table) > 1:
+            raise PairingError(
+                f"{len(table)} error matrices would share one sample-id draw, but no sample_ids were "
+                "given; equal shapes are not a pairing. Pass sample_ids per test set, or bootstrap "
+                "the test sets separately.")
+        return None
+    if not isinstance(sample_ids, Mapping):
+        if len(table) > 1:
+            raise PairingError("several error matrices need sample_ids as a mapping test set -> ids")
+        return _sample_id_list(sample_ids, name="sample_ids", length=n_samples)
+    if set(sample_ids) != set(table):
+        raise ValueError(f"sample_ids must name exactly the test sets {sorted(table)}, got {sorted(sample_ids)}")
+    lists = {name: _sample_id_list(sample_ids[name], name=f"sample_ids[{name!r}]", length=n_samples)
+             for name in table}
+    first_name, first = next(iter(lists.items()))
+    for name, ids in lists.items():
+        if ids != first:
+            same_set = set(ids) == set(first)
+            raise PairingError(
+                f"test sets {first_name!r} and {name!r} "
+                + ("hold the same sample ids in a different column order; align the columns first"
+                   if same_set else "do not share their sample ids")
+                + " -- one sample-id draw for both would pair different samples")
+    return first
+
+
 def _error_table(errors: Any) -> Dict[str, np.ndarray]:
     if isinstance(errors, Mapping):
         items = list(errors.items())
@@ -507,6 +563,7 @@ def _error_table(errors: Any) -> Dict[str, np.ndarray]:
 def paired_bootstrap_iqm(
     errors: Any,
     *,
+    sample_ids: Any = None,
     n_resamples: int = PREREGISTERED_BOOTSTRAP_RESAMPLES,
     seed: int = 0,
     confidence: float = PREREGISTERED_CONFIDENCE,
@@ -519,8 +576,15 @@ def paired_bootstrap_iqm(
     (all the same shape). Seeds are resampled first, then sample ids; the same
     index sets are applied to every matrix. ``chunk_elements`` bounds memory
     only; the result depends on ``(seed, n_resamples, S, M)`` alone.
+
+    ``sample_ids`` names the sample id of every column: one sequence for a
+    single matrix, a mapping test set -> sequence for several. Several
+    matrices are paired only when every one holds the same ids in the same
+    column order; without ``sample_ids``, or with different ids, they raise
+    ``PairingError`` (equal shape is no pairing).
     """
     table = _error_table(errors)
+    _paired_sample_ids(table, sample_ids)
     n_resamples = _int_at_least(n_resamples, name="n_resamples", minimum=1)
     seed = _int_at_least(seed, name="seed", minimum=0)
     confidence = _confidence(confidence)

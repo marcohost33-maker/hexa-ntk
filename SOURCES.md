@@ -769,3 +769,6 @@
 | 50C52B56667C09B5 | 2026-10-20 12:10 | spec | section 5 amendment: seed and sample counts bound, provenance not bound (#82), unverified "400 designs" replaced: PHASE1_PROTOCOL_v1.md |
 | 094E1326D5CDD3FF | 2026-10-20 12:10 | spec | section 8: flip-free is machine-specific; (48, 2.75) no longer recommended, 8 candidates (status DRAFT unchanged): PREREGISTRATION_PHASE1_v1.md |
 | 73874D088CF6EFFE | 2026-10-20 12:10 | spec | amendment: (48, 2.75) flips under 248 of 864 emulated float32 summation orders, only 8 candidates may be named: GINO_ADAPTER_PHASE1_v2.md |
+| 06F964CF13846ACF | 2026-10-21 10:10 | src/toolkit | GPT-6 R2 pairing: paired_bootstrap_iqm pairs matrices only by equal sample ids (sample_ids, PairingError): phase1_protocol_hex_v3.py |
+| 118E2C34FFA85A17 | 2026-10-21 10:10 | src/toolkit | pairing tests: shape-only, disjoint (triangle/torus), reordered and asserted ids refused; positive control bit-identical: test_phase1_protocol_hex_v3.py |
+| 551410BA7A6495D3 | 2026-10-21 10:10 | spec | section 4 amendment: pairing by sample id, not by shape (API change): PHASE1_PROTOCOL_v1.md |

@@ -101,6 +101,19 @@ sample-id axis shared), and:
 4. reports the point estimate (IQM of the seed-level means of the original
    matrix) and the percentile interval of the resampled statistic.
 
+**Pairing is by sample id, not by shape (amendment 2026-10-21, GPT-6 R2).**
+`paired_bootstrap_iqm(..., sample_ids=...)` names the `sample_id` of every
+column: one sequence for a single matrix, a mapping test set -> sequence for
+several. Several matrices share one index draw only if every matrix holds the
+same ids in the same column order; with no ids, different ids or a different
+column order the call raises `PairingError` (a `ValueError`) before any
+resample. The triangle sets (ID test and resolution OOD, `N = 16, 32, 64, 128`)
+share ids `100000..100499` and are paired; the torus OOD set uses
+`200000..200499` and is bootstrapped on its own. The check changes no number:
+with equal ids the result is bit-identical to the unchecked computation.
+**API change:** a mapping of two or more matrices without `sample_ids`, accepted
+before, is now refused.
+
 The index sets depend only on `(seed, n_resamples, S, M)`; the evaluation is
 chunked for memory and the chunk size does not change the result. Resampling
 seeds first and sample ids second is the two-stage bootstrap of Davison and
