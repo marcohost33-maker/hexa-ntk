@@ -90,6 +90,11 @@ from hex_fv_solver_hex_v3 import HexLattice
 PROTOCOL_ID = "PHASE1_PROTOCOL_v1"
 _MANIFEST_SCHEMA = "hexantk_phase1_run_manifest_v1"
 _DEFAULT_STEPS_GRID = (1, 2, 4, 8, 16, 32, 64)
+# The CG tolerance of the baseline. The preregistration names the method (:128-133,
+# ``mechanistic_baseline`` as verified in Phase 0) but writes out no tolerance; this is
+# the verified default, and decide_preregistered requires it (Equalita R5-F1; whether
+# the preregistration should name it is an owner question).
+_REGISTERED_BASELINE_RTOL = 1e-12
 # The preregistered statistic, single source for every default below and for
 # the binding in ``decide_test_set``: spec/PREREGISTRATION_PHASE1_v1.md
 # section 5 ("the IQM of the five seed-level mean errors; its 95 % interval
@@ -241,6 +246,10 @@ class TimingProtocol:
             "confidence": float(self.confidence),
         }
 
+    def digest(self) -> str:
+        """SHA-256 of ``canonical()`` (as ``HeatOperatorTaskConfig.digest``); a baseline point carries it."""
+        return hashlib.sha256(_canonical_json(self.canonical())).hexdigest()
+
 
 @dataclass(frozen=True)
 class LatencyMeasurement:
@@ -327,8 +336,13 @@ class CostAccuracyPoint:
     ``domain``, ``steps``, ``sample_count``, ``timed_samples``), written by
     ``baseline_cost_accuracy_curve`` from the lattice and inputs it ran on.
     ``decide_preregistered`` checks them against the preregistration
-    (Equalita R4-F1). ``domain`` is the last field and has no default, so a
-    positional construction from before it was added fails loudly.
+    (Equalita R4-F1). Since Equalita R5-F1 the point also carries the settings
+    that determine its values besides the lattice and the inputs: the task
+    configuration (``kappa``, ``t_final`` and ``task_config_sha256``, the
+    digest of the whole ``HeatOperatorTaskConfig``), the solver tolerance
+    ``rtol``, and the timing protocol (``warmup``, ``repeats`` and
+    ``timing_protocol_sha256``). The fields after ``cg_iterations_mean`` have
+    no default, so a construction from before they were added fails loudly.
     """
 
     n: int
@@ -344,6 +358,13 @@ class CostAccuracyPoint:
     wall_time_ci_s: Tuple[float, float]
     cg_iterations_mean: float
     domain: str
+    kappa: float
+    t_final: float
+    task_config_sha256: str
+    rtol: float
+    warmup: int
+    repeats: int
+    timing_protocol_sha256: str
 
     def to_dict(self) -> Dict[str, Any]:
         out = asdict(self)
@@ -381,7 +402,7 @@ def baseline_cost_accuracy_curve(
     steps_grid: Sequence[int] = _DEFAULT_STEPS_GRID,
     protocol: TimingProtocol = TimingProtocol(),
     timed_samples: Optional[int] = None,
-    rtol: float = 1e-12,
+    rtol: float = _REGISTERED_BASELINE_RTOL,
     clock: Callable[[], float] = time.perf_counter,
 ) -> Tuple[CostAccuracyPoint, ...]:
     """The mechanistic baseline on every input, for every ``steps``: accuracy and latency per point."""
@@ -401,6 +422,12 @@ def baseline_cost_accuracy_curve(
     if timed > samples:
         raise ValueError(f"timed_samples={timed} exceeds the {samples} samples")
     rtol = _positive_float(rtol, name="rtol")
+    # Equalita R5-F1: the settings the values depend on travel with every point, read once here.
+    settings = {
+        "kappa": float(config.kappa), "t_final": float(config.t_final), "task_config_sha256": config.digest(),
+        "rtol": rtol, "warmup": int(protocol.warmup), "repeats": int(protocol.repeats),
+        "timing_protocol_sha256": protocol.digest(),
+    }
     points = []
     for steps in grid:
         predictions = np.empty_like(inputs)
@@ -423,12 +450,12 @@ def baseline_cost_accuracy_curve(
         rel_l2 = np.asarray(metrics["rel_l2"], dtype=np.float64)
         low, high = _bootstrap_median_rows(rows, protocol)
         points.append(CostAccuracyPoint(
-            n=int(lattice.n), steps=int(steps), dt=float(config.t_final) / steps,
+            n=int(lattice.n), steps=int(steps), dt=settings["t_final"] / steps,
             sample_count=int(samples), timed_samples=int(timed),
             mean_rel_l2=float(np.mean(rel_l2)), median_rel_l2=float(np.median(rel_l2)),
             mean_rel_h1=float(np.mean(metrics["rel_h1"])), mean_rel_max=float(np.mean(metrics["rel_max"])),
             median_wall_time_s=float(np.median(rows)), wall_time_ci_s=(low, high),
-            cg_iterations_mean=float(np.mean(iterations)), domain=str(lattice.domain),
+            cg_iterations_mean=float(np.mean(iterations)), domain=str(lattice.domain), **settings,
         ))
     return tuple(points)
 
@@ -973,10 +1000,62 @@ def _point_int(value: Any, *, name: str) -> int:
     return int(value)
 
 
-def _point_float(value: Any, *, name: str, positive: bool = False) -> float:
-    if not _is_real(value) or not math.isfinite(float(value)) or (positive and float(value) <= 0.0):
-        raise DecisionInputError(f"{name} must be a finite real number{' > 0' if positive else ''}, got {value!r}")
-    return float(value)
+def _point_float(value: Any, *, name: str, minimum: Optional[float] = None, strict: bool = False) -> float:
+    """One conversion to a plain float; finite, and ``> minimum`` (strict) or ``>= minimum``."""
+    if not _is_real(value):
+        raise DecisionInputError(f"{name} must be a finite real number, got {value!r}")
+    result = float(value)
+    if not math.isfinite(result) or (minimum is not None and (result <= minimum if strict else result < minimum)):
+        bound = "" if minimum is None else f" {'>' if strict else '>='} {minimum:g}"
+        raise DecisionInputError(f"{name} must be a finite real number{bound}, got {value!r}")
+    return result
+
+
+def _point_str(value: Any, *, name: str) -> str:
+    if not isinstance(value, str):
+        raise DecisionInputError(f"{name} must be a str, got {value!r}")
+    # str.__str__ copies the characters into a plain str: a subclass's __eq__/__ne__/__str__ do not reach
+    # the checks or the record (Equalita R5-F3).
+    return str.__str__(value)
+
+
+# Read order of one point: every field exactly once, converted to a plain value (Equalita R5-F3).
+_POINT_INTS = ("n", "steps", "sample_count", "timed_samples", "warmup", "repeats")
+_POINT_STRS = ("domain", "task_config_sha256", "timing_protocol_sha256")
+# (field, lower bound, strict): R5-F4 plausibility of the fields that only enter the record.
+_POINT_FLOATS = (
+    ("dt", 0.0, True), ("kappa", 0.0, True), ("t_final", 0.0, True), ("rtol", 0.0, True),
+    ("mean_rel_l2", 0.0, True), ("median_wall_time_s", 0.0, True),
+    ("median_rel_l2", 0.0, False), ("mean_rel_h1", 0.0, False), ("mean_rel_max", 0.0, False),
+    ("cg_iterations_mean", 0.0, False),
+)
+
+
+def _point_copy(point: "CostAccuracyPoint") -> Dict[str, Any]:
+    """The point as plain ints, floats and strs, each field read once; checks and record use only this copy."""
+    copy: Dict[str, Any] = {}
+    for field in _POINT_INTS:
+        copy[field] = _point_int(getattr(point, field), name=f"baseline_curve {field}")
+    for field in _POINT_STRS:
+        copy[field] = _point_str(getattr(point, field), name=f"baseline_curve {field}")
+    for field, minimum, strict in _POINT_FLOATS:
+        copy[field] = _point_float(getattr(point, field), name=f"baseline_curve {field}", minimum=minimum,
+                                   strict=strict)
+    ci = point.wall_time_ci_s
+    if isinstance(ci, (str, bytes)) or not isinstance(ci, Sequence):
+        raise DecisionInputError(f"baseline_curve wall_time_ci_s must be a (low, high) pair, got {ci!r}")
+    ci = tuple(ci)
+    if len(ci) != 2:
+        raise DecisionInputError(f"baseline_curve wall_time_ci_s must be a (low, high) pair, got {ci!r}")
+    low, high = (_point_float(c, name="baseline_curve wall_time_ci_s", minimum=0.0) for c in ci)
+    if low > high:
+        # R5-F4: an interval is ordered. Whether it contains the median is not required: the
+        # percentile bootstrap does not guarantee it, and a genuine curve must not be refused.
+        raise DecisionInputError(f"baseline_curve wall_time_ci_s ({low!r}, {high!r}) is not ordered low <= high")
+    copy["wall_time_ci_s"] = [low, high]
+    if set(copy) != {f.name for f in dataclasses.fields(CostAccuracyPoint)}:
+        raise AssertionError("_point_copy does not cover every CostAccuracyPoint field")  # pragma: no cover
+    return copy
 
 
 def _registered_baseline_points(curve: Any, *, test_set: str, n: int) -> List[Dict[str, Any]]:
@@ -987,8 +1066,13 @@ def _registered_baseline_points(curve: Any, *, test_set: str, n: int) -> List[Di
     reached "advantage" while the record named the registered steps and n. Here the
     coordinates come with each point (``baseline_cost_accuracy_curve`` writes them from the
     lattice and inputs it ran on) and are compared with the preregistration; the record is
-    written from the checked points. Checks run in a fixed order (steps, n, domain, sample
-    count, timed samples, values), so each refusal names the first coordinate that differs.
+    written from the checked points. R5 found the same class on the settings: a genuine curve
+    solved with kappa = 2 or T = 0.02 reached "advantage" too; the point now also carries the
+    task configuration, the tolerance and the timing protocol, checked here. Each point is read
+    once into plain values (R5-F3); the checks and the record use only that copy. Types and
+    plausibility come first (R5-F4), then the coordinates in a fixed order (steps, n, domain,
+    kappa, t_final, dt, task configuration digest, rtol, warm-ups, repeats, timing protocol
+    digest, sample count, timed samples), so each refusal names the first one that differs.
     """
     if isinstance(curve, (str, bytes, Mapping, np.ndarray)) or not isinstance(curve, Sequence):
         curve = None
@@ -1003,50 +1087,70 @@ def _registered_baseline_points(curve: Any, *, test_set: str, n: int) -> List[Di
             "(API change 2026-10-21, Equalita R4-F1)")
     grid = _DEFAULT_STEPS_GRID
     domain = _LATTICE_DOMAIN[PREREGISTERED_TEST_SETS[test_set][0]]
-    steps = tuple(_point_int(p.steps, name="baseline_curve steps") for p in curve)
+    # Equalita R5-F1: the settings a point must have been computed with. [D1] task configuration
+    # of the test set's domain (preregistration :51-55), timing protocol 3 warm-ups / 10 measured
+    # repeats with the registered bootstrap (:145, spec section 1), the baseline's CG tolerance.
+    registered_config = HeatOperatorTaskConfig(domain=domain)
+    registered_timing = TimingProtocol()
+    # R5-F3: every field of every point read once into plain values; checks and record use only these.
+    points = [_point_copy(p) for p in curve]
+    steps = tuple(p["steps"] for p in points)
     if steps != grid:
         # :134-137 the baseline runs with steps 1, 2, 4, 8, 16, 32, 64. A subset, another grid
         # or another order is another frontier (a chord lies above a convex curve).
         raise DecisionInputError(
             f"baseline_curve steps {list(steps)} are not the registered steps {list(grid)}, one point "
             "each in that order (preregistration :134-137)")
-    for p in curve:
-        if _point_int(p.n, name="baseline_curve n") != n:
+    for p in points:
+        at = f"baseline_curve point steps={p['steps']}"
+        if p["n"] != n:
             # :134-135 the curve runs on the evaluation lattice N_eval itself.
             raise DecisionInputError(
-                f"baseline_curve point steps={p.steps} was measured on lattice n = {p.n}, the decision is "
+                f"{at} was measured on lattice n = {p['n']}, the decision is "
                 f"for n = {n} (preregistration :134-135, the evaluation lattice)")
-        if p.domain != domain:
+        if p["domain"] != domain:
             raise DecisionInputError(
-                f"baseline_curve point steps={p.steps} was measured on domain {p.domain!r}, test set "
+                f"{at} was measured on domain {p['domain']!r}, test set "
                 f"{test_set!r} is registered on {domain!r} (preregistration :62-68 [D3])")
-        if _point_int(p.sample_count, name="baseline_curve sample_count") != PREREGISTERED_TEST_SAMPLES:
+        for field in ("kappa", "t_final"):
+            # R5-F1: a solver kappa = 2 or T = 0.02 against the registered truth reached "advantage".
+            registered = float(getattr(registered_config, field))
+            if p[field] != registered:
+                raise DecisionInputError(
+                    f"{at} was solved with {field} = {p[field]!r}; the preregistered task configuration "
+                    f"has {field} = {registered!r} (preregistration :51-55 [D1])")
+        if p["dt"] != p["t_final"] / p["steps"]:
+            # mechanistic_baseline steps with dt = T / steps (spec/HEAT_OPERATOR_TASK_v1.md section 6).
+            raise DecisionInputError(
+                f"{at} has dt = {p['dt']!r}, not t_final / steps = {p['t_final'] / p['steps']!r}")
+        if p["task_config_sha256"] != registered_config.digest():
+            # The whole [D1] configuration, lambda_cutoff and spectral decay included.
+            raise DecisionInputError(
+                f"{at} carries task configuration digest {p['task_config_sha256']!r}, not the digest of the "
+                f"preregistered [D1] configuration {registered_config.canonical()} (preregistration :51-55)")
+        if p["rtol"] != _REGISTERED_BASELINE_RTOL:
+            raise DecisionInputError(
+                f"{at} was solved with rtol = {p['rtol']!r}; the baseline's tolerance is "
+                f"{_REGISTERED_BASELINE_RTOL!r} (mechanistic_baseline as verified, preregistration :128-133)")
+        for field in ("warmup", "repeats"):
+            registered = int(getattr(registered_timing, field))
+            if p[field] != registered:
+                raise DecisionInputError(
+                    f"{at} was timed with {field} = {p[field]}; the preregistered timing protocol has "
+                    f"3 warm-up runs and 10 measured repeats, {field} = {registered} (preregistration :145)")
+        if p["timing_protocol_sha256"] != registered_timing.digest():
+            # Bootstrap resamples, seed and confidence of wall_time_ci_s (spec section 1).
+            raise DecisionInputError(
+                f"{at} carries timing protocol digest {p['timing_protocol_sha256']!r}, not the digest of "
+                f"the preregistered protocol {registered_timing.canonical()} (preregistration :145)")
+        if p["sample_count"] != PREREGISTERED_TEST_SAMPLES:
             # :62-68 [D3] 500 ids per test set; :136 "on the same test inputs".
             raise DecisionInputError(
-                f"baseline_curve point steps={p.steps} has sample_count {p.sample_count}; the curve runs on "
+                f"{at} has sample_count {p['sample_count']}; the curve runs on "
                 f"the {PREREGISTERED_TEST_SAMPLES} registered test inputs (preregistration :62-68, :136)")
-        timed = _point_int(p.timed_samples, name="baseline_curve timed_samples")
-        if not 1 <= timed <= p.sample_count:
+        if not 1 <= p["timed_samples"] <= p["sample_count"]:
             raise DecisionInputError(
-                f"baseline_curve point steps={p.steps} has timed_samples {timed}, outside 1..{p.sample_count}")
-    points = []
-    for p in curve:
-        ci = p.wall_time_ci_s
-        if isinstance(ci, (str, bytes)) or not isinstance(ci, Sequence) or len(ci) != 2:
-            raise DecisionInputError(f"baseline_curve wall_time_ci_s must be a (low, high) pair, got {ci!r}")
-        points.append({
-            "n": int(p.n), "domain": p.domain, "steps": int(p.steps), "sample_count": int(p.sample_count),
-            "timed_samples": int(p.timed_samples),
-            "dt": _point_float(p.dt, name="baseline_curve dt", positive=True),
-            "mean_rel_l2": _point_float(p.mean_rel_l2, name="baseline_curve mean_rel_l2", positive=True),
-            "median_wall_time_s": _point_float(p.median_wall_time_s, name="baseline_curve median_wall_time_s",
-                                               positive=True),
-            "median_rel_l2": _point_float(p.median_rel_l2, name="baseline_curve median_rel_l2"),
-            "mean_rel_h1": _point_float(p.mean_rel_h1, name="baseline_curve mean_rel_h1"),
-            "mean_rel_max": _point_float(p.mean_rel_max, name="baseline_curve mean_rel_max"),
-            "wall_time_ci_s": [_point_float(c, name="baseline_curve wall_time_ci_s") for c in ci],
-            "cg_iterations_mean": _point_float(p.cg_iterations_mean, name="baseline_curve cg_iterations_mean"),
-        })
+                f"{at} has timed_samples {p['timed_samples']}, outside 1..{p['sample_count']}")
     times = [p["median_wall_time_s"] for p in points]
     errors = [p["mean_rel_l2"] for p in points]
     # Self-check after R3 F1: two genuine points copied to seven pass a count check. This
@@ -1147,8 +1251,15 @@ def decide_preregistered(
       (preregistration :134-137); every point's ``n`` is the decided lattice
       and its ``domain`` the test set's domain; every ``sample_count`` is the
       500 registered test inputs (:62-68 [D3], :136 "on the same test
-      inputs"); ``1 <= timed_samples <= sample_count``. The record's baseline
-      fields are written from the points, never from constants or arguments.
+      inputs"); ``1 <= timed_samples <= sample_count``. Since Equalita R5-F1
+      also the settings: ``kappa`` and ``t_final`` of [D1] (:51-55), ``dt ==
+      t_final / steps``, ``task_config_sha256`` the digest of the [D1]
+      configuration of the domain, ``rtol`` the baseline's 1e-12, ``warmup``
+      3 and ``repeats`` 10 (:145) and ``timing_protocol_sha256`` the digest of
+      ``TimingProtocol()``. Every field is read once into a plain value
+      (R5-F3) and checked for plausibility (R5-F4: finite, errors, times and
+      iteration counts ``>= 0``, the interval ordered). The record's baseline
+      fields are this checked copy, never constants or arguments.
 
     Rows and columns are put into ascending seed and sample-id order, so the
     result does not depend on the caller's order, and the bootstrap and the

@@ -544,17 +544,24 @@ _REGISTERED_STEPS = (1, 2, 4, 8, 16, 32, 64)
 
 
 def _curve_points(times, errors, *, steps=_REGISTERED_STEPS, n=32, domain="triangle_dirichlet", sample_count=500,
-                  timed_samples=5):
+                  timed_samples=5, config=None, protocol=None, rtol=1e-12):
     """Baseline points with explicit measurement coordinates, as ``baseline_cost_accuracy_curve`` writes them.
 
     The coordinates are the ones under test (Equalita R4-F1); the values are given. Hand-built
     points stand for a measured curve here; that a value belongs to its coordinates is not
-    checkable from the point (claim boundary, see the test of the relabelled curve).
+    checkable from the point (claim boundary, see the test of the relabelled curve). The settings
+    default to the preregistered ones and are written as the producer writes them (Equalita
+    R5-F2: the former fixture had dt = 1/steps, i.e. T = 1, against the registered T = 0.01).
     """
+    config = HeatOperatorTaskConfig(domain=domain if domain in ("triangle_dirichlet", "torus_periodic")
+                                    else "triangle_dirichlet") if config is None else config
+    protocol = pp.TimingProtocol() if protocol is None else protocol
     return tuple(pp.CostAccuracyPoint(
-        n=n, steps=s, dt=1.0 / s, sample_count=sample_count, timed_samples=timed_samples,
+        n=n, steps=s, dt=float(config.t_final) / s, sample_count=sample_count, timed_samples=timed_samples,
         mean_rel_l2=float(e), median_rel_l2=float(e), mean_rel_h1=float(e), mean_rel_max=float(e),
-        median_wall_time_s=float(t), wall_time_ci_s=(float(t), float(t)), cg_iterations_mean=1.0, domain=domain)
+        median_wall_time_s=float(t), wall_time_ci_s=(float(t), float(t)), cg_iterations_mean=1.0, domain=domain,
+        kappa=float(config.kappa), t_final=float(config.t_final), task_config_sha256=config.digest(), rtol=rtol,
+        warmup=protocol.warmup, repeats=protocol.repeats, timing_protocol_sha256=protocol.digest())
         for s, t, e in zip(steps, times, errors))
 
 
@@ -914,7 +921,12 @@ class TestPreregisteredDecision(unittest.TestCase):
             pp.decide_preregistered(**self.kwargs(errors=errors, gino_latency_times_s=latency,
                                                   baseline_curve=reversed_points))
 
-    def test_every_measurement_coordinate_of_a_point_is_checked(self):
+    def test_point_coordinates_and_settings_are_checked_against_the_preregistration(self):
+        # Renamed after Equalita R5-F2 (formerly "every_measurement_coordinate..._is_checked", which
+        # overclaimed: dt was not compared with the preregistration). Checked: steps, n, domain,
+        # kappa, t_final, dt, task configuration digest, rtol, warm-ups, repeats, timing protocol
+        # digest, sample count, timed samples. Not checked (claim boundary, spec section 5a): which
+        # 500 inputs, the machine and thread policy.
         # Domain, sample count and timed samples are coordinates too: an n = 32 torus curve has the
         # registered n and steps but other inputs; a 50-input curve is not "the same test inputs".
         cases = (
@@ -925,6 +937,16 @@ class TestPreregisteredDecision(unittest.TestCase):
             ({"timed_samples": 0}, "timed_samples 0"),
             ({"timed_samples": 501}, "timed_samples 501"),
             ({"n": 16}, "lattice n = 16"),
+            # Equalita R5-F1: the settings, each alone (the fixture writes them as the producer does).
+            ({"config": HeatOperatorTaskConfig(kappa=2.0)}, r"solved with kappa = 2\.0;.*:51-55 \[D1\]"),
+            ({"config": HeatOperatorTaskConfig(t_final=0.02)}, r"solved with t_final = 0\.02;"),
+            ({"config": HeatOperatorTaskConfig(lambda_cutoff=500.0)}, "task configuration digest"),
+            ({"config": HeatOperatorTaskConfig(spectral_decay=2.0)}, "task configuration digest"),
+            ({"rtol": 1e-6}, r"rtol = 1e-06; the baseline's tolerance is 1e-12"),
+            ({"protocol": pp.TimingProtocol(warmup=0)}, r"warmup = 0; .* \(preregistration :145\)"),
+            ({"protocol": pp.TimingProtocol(repeats=1)}, r"repeats = 1; .* \(preregistration :145\)"),
+            ({"protocol": pp.TimingProtocol(bootstrap_resamples=200)}, "timing protocol digest"),
+            ({"protocol": pp.TimingProtocol(seed=1)}, "timing protocol digest"),
         )
         for coords, reason in cases:
             with self.subTest(coords=coords):
@@ -934,7 +956,13 @@ class TestPreregisteredDecision(unittest.TestCase):
         # One deviating point among seven is enough.
         for field, value, reason in (("n", 64, "lattice n = 64"),
                                      ("domain", "torus_periodic", "domain 'torus_periodic'"),
-                                     ("sample_count", 499, "sample_count 499")):
+                                     ("sample_count", 499, "sample_count 499"),
+                                     ("kappa", 2.0, "kappa = 2.0"),
+                                     # dt inconsistent with t_final / steps (R5 matrix: dt = 0.01 at every
+                                     # steps, and the former fixture's dt = 1 / steps)
+                                     ("dt", 0.01, r"dt = 0\.01, not t_final / steps = 0\.000625"),
+                                     ("dt", 1.0 / 16, r"dt = 0\.0625, not t_final / steps"),
+                                     ("warmup", 2, "warmup = 2")):
             with self.subTest(single=field):
                 points = list(_curve_points(self.times, self.curve))
                 points[4] = dataclasses.replace(points[4], **{field: value})
@@ -946,19 +974,108 @@ class TestPreregisteredDecision(unittest.TestCase):
         # Types and values of the coordinates fail closed, not by coercion.
         for field, value in (("steps", 1.0), ("steps", True), ("n", 32.0), ("sample_count", "500"),
                              ("mean_rel_l2", float("nan")), ("median_wall_time_s", 0.0),
-                             ("median_rel_l2", float("inf")), ("wall_time_ci_s", (1.0,)), ("dt", -1.0)):
+                             ("median_rel_l2", float("inf")), ("wall_time_ci_s", (1.0,)), ("dt", -1.0),
+                             ("kappa", "1.0"), ("t_final", True), ("rtol", float("nan")), ("warmup", 3.0),
+                             ("repeats", True), ("task_config_sha256", None), ("timing_protocol_sha256", b"x")):
             with self.subTest(field=field, value=value):
                 points = list(_curve_points(self.times, self.curve))
                 points[0] = dataclasses.replace(points[0], **{field: value})
                 with self.assertRaises(pp.DecisionInputError):
                     pp.decide_preregistered(**self.kwargs(baseline_curve=tuple(points)))
 
+    def test_record_only_fields_are_plausible(self):
+        # Equalita R5-F4: fields that do not enter the verdict still stand in the decision-grade
+        # record; an inverted interval, a negative error or a negative iteration count was accepted.
+        for field, value, reason in (("wall_time_ci_s", (9.0, 1.0), r"\(9\.0, 1\.0\) is not ordered low <= high"),
+                                     ("wall_time_ci_s", (-1.0, 1.0), r"wall_time_ci_s must be .* >= 0"),
+                                     ("median_rel_l2", -1.0, r"median_rel_l2 must be .* >= 0"),
+                                     ("mean_rel_h1", -1e-9, r"mean_rel_h1 must be .* >= 0"),
+                                     ("mean_rel_max", -1.0, r"mean_rel_max must be .* >= 0"),
+                                     ("cg_iterations_mean", -5.0, r"cg_iterations_mean must be .* >= 0")):
+            with self.subTest(field=field, value=value):
+                points = list(_curve_points(self.times, self.curve))
+                points[3] = dataclasses.replace(points[3], **{field: value})
+                with self.assertRaisesRegex(pp.DecisionInputError, reason):
+                    pp.decide_preregistered(**self.kwargs(baseline_curve=tuple(points)))
+        # Positive control at the bounds: zero errors and iterations, a degenerate and a wide
+        # interval (a median outside the interval is not refused: the percentile bootstrap does
+        # not guarantee containment, and a genuine curve must pass).
+        for field, value in (("median_rel_l2", 0.0), ("mean_rel_h1", 0.0), ("mean_rel_max", 0.0),
+                             ("cg_iterations_mean", 0.0), ("wall_time_ci_s", (0.0, 0.0)),
+                             ("wall_time_ci_s", (1.0, 1e9)), ("wall_time_ci_s", [2.0, 3.0])):
+            with self.subTest(accepted=field, value=value):
+                points = list(_curve_points(self.times, self.curve))
+                points[3] = dataclasses.replace(points[3], **{field: value})
+                record = pp.decide_preregistered(**self.kwargs(baseline_curve=tuple(points))).to_dict()
+                expected = list(value) if field == "wall_time_ci_s" else value
+                self.assertEqual(record["provenance"]["baseline_points"][3][field], expected)
+
+    def test_each_field_is_read_once_into_the_record(self):
+        # Equalita R5-F3: the checks read a coordinate through _point_int and the record read it
+        # again with int(); a numbers.Integral whose int() gives 32 first and 64 afterwards was
+        # checked as 32 and recorded as n = [64]. Now one plain copy serves checks and record.
+        import numbers
+
+        class FlipInt(numbers.Integral):
+            def __init__(self, first, then):
+                self.values = [first, then]
+
+            def __int__(self):
+                return self.values.pop(0) if len(self.values) > 1 else self.values[0]
+
+            __index__ = __int__
+
+            def __eq__(self, other):
+                return int(self.values[0]) == other
+
+            def __hash__(self):
+                return 0
+
+        for name in ("__abs__", "__add__", "__and__", "__ceil__", "__floor__", "__floordiv__", "__invert__",
+                     "__le__", "__lshift__", "__lt__", "__mod__", "__mul__", "__neg__", "__or__", "__pos__",
+                     "__pow__", "__radd__", "__rand__", "__rfloordiv__", "__rlshift__", "__rmod__", "__rmul__",
+                     "__ror__", "__round__", "__rpow__", "__rrshift__", "__rshift__", "__rtruediv__", "__rxor__",
+                     "__truediv__", "__trunc__", "__xor__"):
+            setattr(FlipInt, name, lambda self, *a: NotImplemented)
+        FlipInt.__abstractmethods__ = frozenset()
+
+        class SameStr(str):
+            def __eq__(self, other):
+                return True
+
+            def __ne__(self, other):
+                return False
+
+            __hash__ = str.__hash__
+
+        honest = pp.decide_preregistered(**self.kwargs()).to_dict()
+        for field, make in (("n", lambda: FlipInt(32, 64)), ("steps", None), ("sample_count", lambda: FlipInt(500, 50)),
+                            ("repeats", lambda: FlipInt(10, 1))):
+            with self.subTest(field=field):
+                points = list(_curve_points(self.times, self.curve))
+                if field == "steps":
+                    points = [dataclasses.replace(p, steps=FlipInt(p.steps, 3)) for p in points]
+                else:
+                    points = [dataclasses.replace(p, **{field: make()}) for p in points]
+                self.assertEqual(pp.decide_preregistered(**self.kwargs(baseline_curve=tuple(points))).to_dict(),
+                                 honest)
+        # A str subclass that equals everything is checked and recorded by its characters.
+        points = [dataclasses.replace(p, domain=SameStr("torus_periodic")) for p in _curve_points(self.times, self.curve)]
+        with self.assertRaisesRegex(pp.DecisionInputError, "measured on domain 'torus_periodic'"):
+            pp.decide_preregistered(**self.kwargs(baseline_curve=tuple(points)))
+        points = [dataclasses.replace(p, domain=SameStr("triangle_dirichlet"))
+                  for p in _curve_points(self.times, self.curve)]
+        record = pp.decide_preregistered(**self.kwargs(baseline_curve=tuple(points))).to_dict()
+        self.assertEqual(record, honest)
+        self.assertIs(type(pp._point_copy(points[0])["domain"]), str)
+
     def test_genuine_curve_output_passes_steps_lattice_and_domain(self):
         # Fehler 2. Art against the producer itself, not against hand-built points: the coordinates
         # baseline_cost_accuracy_curve writes (lattice spelling of the domain included) must pass
         # the steps, n and domain checks; with 2 instead of 500 inputs the first refusal is the
-        # sample count, which the checks reach only after steps, n and domain of that point.
-        protocol = pp.TimingProtocol(warmup=1, repeats=3, bootstrap_resamples=200)
+        # sample count, which the checks reach only after steps, n, domain and the settings
+        # (R5-F1) of that point, so the producer's settings with the registered protocol pass.
+        protocol = pp.TimingProtocol()
         for test_set, domain, ids in (("id", "triangle_dirichlet", [100000, 100001]),
                                       ("composite_ood", "torus_periodic", [200000, 200001])):
             with self.subTest(test_set=test_set):
@@ -972,6 +1089,37 @@ class TestPreregisteredDecision(unittest.TestCase):
                           "baseline_curve": points}
                 with self.assertRaisesRegex(pp.DecisionInputError, r"steps=1 has sample_count 2;"):
                     pp.decide_preregistered(**self.kwargs(**change))
+
+    def test_genuine_curve_with_other_settings_is_refused(self):
+        # Equalita R5-F1 (probes/r5_real.out @d6cfdec): the genuine producer run with solver kappa = 2
+        # or T = 0.02 against the registered truth reached "advantage" (e_base 0.4797 at S = 500),
+        # its record indistinguishable from a registered run for kappa. The producer now writes the
+        # settings into every point and the gate refuses them before the sample count (here one
+        # input, so a point that passes every setting is refused at sample_count 1).
+        registered = HeatOperatorTaskConfig()
+        data = generate_dataset(registered, n=32, sample_ids=[100000], dataset_seed=1)
+        cases = (
+            (HeatOperatorTaskConfig(kappa=2.0), {}, r"steps=1 was solved with kappa = 2\.0;"),
+            (HeatOperatorTaskConfig(t_final=0.02), {}, r"steps=1 was solved with t_final = 0\.02;"),
+            (HeatOperatorTaskConfig(lambda_cutoff=500.0), {}, r"steps=1 carries task configuration digest"),
+            (registered, {"rtol": 1e-6}, r"steps=1 was solved with rtol = 1e-06;"),
+            (registered, {"protocol": pp.TimingProtocol(warmup=0, repeats=1)}, r"steps=1 was timed with warmup = 0;"),
+            (registered, {"protocol": pp.TimingProtocol(bootstrap_resamples=200)},
+             r"steps=1 carries timing protocol digest"),
+            (registered, {}, r"steps=1 has sample_count 1;"),                       # positive control
+        )
+        for config, extra, reason in cases:
+            with self.subTest(config=config.canonical(), extra=extra):
+                points = pp.baseline_cost_accuracy_curve(config, data["u0"], data["uT"], data["lattice"],
+                                                         timed_samples=1, clock=_fake_clock(), **extra)
+                self.assertEqual({(p.kappa, p.t_final, p.task_config_sha256, p.rtol) for p in points},
+                                 {(config.kappa, config.t_final, config.digest(), extra.get("rtol", 1e-12))})
+                protocol = extra.get("protocol", pp.TimingProtocol())
+                self.assertEqual({(p.warmup, p.repeats, p.timing_protocol_sha256) for p in points},
+                                 {(protocol.warmup, protocol.repeats, protocol.digest())})
+                self.assertEqual([p.dt for p in points], [config.t_final / s for s in _REGISTERED_STEPS])
+                with self.assertRaisesRegex(pp.DecisionInputError, reason):
+                    pp.decide_preregistered(**self.kwargs(baseline_curve=points))
 
     def test_the_former_float_list_form_is_refused(self):
         # API change 2026-10-21 (Equalita R4-F1): two bare float lists carry no coordinates.
