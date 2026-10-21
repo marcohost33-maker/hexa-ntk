@@ -777,5 +777,6 @@
 | A6AE29206BE48805 | 2026-10-21 10:20 | spec | section 5 diagnostic helper, new section 5a decision-grade entry with claim boundary (unattested), C-order note (API change): PHASE1_PROTOCOL_v1.md |
 | 13F4ECD979D37BA9 | 2026-10-21 10:26 | src/toolkit | GPT-6 HEX-P2-02 D4 tools: cdist_rounding_margin (order-independent float32 bound, Higham gamma_6) and radius_graph_stability (budget fixed beforehand, frozen-order branch, NaN fail-closed): phase1_protocol_hex_v3.py |
 | 9A206F29217304F8 | 2026-10-21 10:26 | src/toolkit | HEX-P2-02 tests: closed forms, 48-order float32 emulation oracle (positive/negative control), committed survey oracle, verdict truth table: test_phase1_protocol_hex_v3.py |
+| F7B392170B94C6C0 | 2026-10-21 10:30 | src/toolkit | diskriminierung DK-20261021T082910: grade check asserts instead of crashing with KeyError when the field is missing: test_phase1_protocol_hex_v3.py |
 | A147F2A1B522E7D7 | 2026-10-21 10:26 | spec | new section 11: D4 float-order stability instruments (no threshold changed): PHASE1_PROTOCOL_v1.md |
 | 08863B0165DEA61F | 2026-10-21 10:26 | spec | amendment 2026-10-21: float budget criterion; no tie-free candidate clears the order-independent bound; tie band and prereg unchanged: GINO_ADAPTER_PHASE1_v2.md |

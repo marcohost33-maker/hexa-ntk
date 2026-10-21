@@ -579,7 +579,7 @@ class TestPreregisteredDecision(unittest.TestCase):
         diagnostic = pp.decide_test_set(test_set="id", n=32, gino=forged, gino_latency_s=4.0,
                                         baseline_times_s=self.times, baseline_errors=self.curve)
         self.assertEqual(diagnostic.verdict, "advantage")
-        self.assertEqual(diagnostic.to_dict()["grade"], "diagnostic")
+        self.assertEqual(diagnostic.to_dict().get("grade"), "diagnostic")
         # (1) The decision-grade entry has no slot for a summary.
         self.assertNotIn("gino", inspect.signature(pp.decide_preregistered).parameters)
         with self.assertRaises(TypeError):
