@@ -66,3 +66,18 @@ Nicht gebunden / offen: Datei hinter metric_spec_sha256 (Prereg:230 "instrument 
 PROTOCOL Abschnitt 7 HEAT_OPERATOR_TASK_v1.md), Maschinenname (D5 offen), exakter 1800/200-Split,
 Schreibweise von cuda/dtype im Manifest (hier cuda = False, dtype = "float32"); F10
 (Latenzzeilen an sample_ids, batch_size) Owner-Entscheid; Linux/CI-Lauf folgt im PR.
+
+------------------------------------------------------------------
+Nachtrag 13:55 - 13:57 +02:00: F1-Klasse gegen den eigenen F1-Waechter (Commit 457405d)
+------------------------------------------------------------------
+Befund @ef4e797 (pad_probe, Modul == cf27798): die echten Punkte {1,64} bzw. {2,64}, durch
+Wiederholung auf 7 Eintraege aufgefuellt, bestehen die Anzahlpruefung -> ACCEPTED grade
+"preregistered" verdict "advantage" (3/3 Varianten). Fix 457405d: keine Zeit und kein Fehler
+der Kurve darf sich wiederholen (DecisionInputError); danach 3/3 REFUSED, PK weiter H0.
+Diskriminierung DK-20261021T115450-b221d25f1db0 @457405d, VOLL: 2/2 (F1a Raster-Pruefung weg,
+F1c Wiederholungs-Pruefung weg).
+Arbeitsbaum = Commit 457405d4aa720add13dc06f9e51e385b4e18ab95 (sauber), gleiche Umgebung:
+  ruff rc=0 | compileall rc=0 | verify_sources rc=0 PASS 46+15+11 | engine_gate rc=0 49/49
+  | unittest+coverage rc=0, Ran 882, OK (skipped=12) | TOTAL 4752 211 1776 156 94%,
+  phase1_protocol_hex_v3.py 706 8 268 6 99% | FV+Referenz rc=0 Ran 117 OK (nur nativer Kernel)
+Equalita-Proben q2/q2b/q2c @457405d: Verdikte identisch zu @d0e5727.
