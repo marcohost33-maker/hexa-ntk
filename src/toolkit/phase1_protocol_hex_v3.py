@@ -117,6 +117,11 @@ _AUTHENTICITY = ("unattested: the record_sha256 is a self-digest; it shows that 
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ROOT = Path(__file__).resolve().parents[2]
+# Run-manifest content fixed by spec/PREREGISTRATION_PHASE1_v1.md (Equalita R3 F2): the
+# file itself (:222), the train pool 0..1999 of the [D3] table (:66) and D7 (:94).
+_PREREGISTRATION_FILE = _ROOT / "spec" / "PREREGISTRATION_PHASE1_v1.md"
+_REGISTERED_TRAIN_POOL = range(0, 2000)
+_REGISTERED_NEURALOPERATOR = "2.0.0"
 
 
 # ------------------------------------------------------------------
@@ -873,6 +878,56 @@ def _verified_run_manifest(run_manifest: Any) -> Dict[str, Any]:
     return rebuilt
 
 
+def _check_registered_manifest_content(manifest: Mapping[str, Any], test_set: str) -> None:
+    """Equalita R3 F2: the manifest fields the preregistration fixes; ``DecisionProvenanceError`` otherwise.
+
+    Only what spec/PREREGISTRATION_PHASE1_v1.md states is checked (file:line in each
+    message). Not checked, because the preregistration does not fix it: the machine
+    name (D5 still open, :263), the metric spec file behind ``metric_spec_sha256``
+    (:230 "the instrument spec", PHASE1_PROTOCOL_v1.md section 7 names another file),
+    the exact 1800/200 split (needs ``split_dataset_by_trajectory``), the torch version.
+    """
+    pool = _REGISTERED_TRAIN_POOL
+    for part in ("train", "val"):
+        outside = [i for i in manifest["split_ids"][part] if i not in pool]
+        if outside:
+            # :66 train pool 0..1999; :71-75 the split comes from the pool and the disjoint
+            # id ranges keep every test set out of the split and out of model selection.
+            raise DecisionProvenanceError(
+                f"run_manifest split_ids[{part!r}] holds ids outside the registered train pool "
+                f"{pool.start}..{pool.stop - 1} (preregistration :66, :71-75), e.g. {outside[:3]}")
+    if test_set not in manifest["datasets"]:
+        # :87-88 and :223: the dataset_sha256 of every set goes into the manifest.
+        raise DecisionProvenanceError(
+            f"run_manifest datasets name no digest for the decided test set {test_set!r} "
+            "(preregistration :87-88, :223)")
+    try:
+        registered = file_sha256(_PREREGISTRATION_FILE)
+    except OSError as exc:
+        raise DecisionProvenanceError(f"the preregistration file cannot be read: {exc}") from exc
+    if manifest["preregistration"]["sha256"] != registered:
+        # :222 "this file's version and SHA-256".
+        raise DecisionProvenanceError(
+            f"run_manifest preregistration sha256 {manifest['preregistration']['sha256']} is not the "
+            f"file_sha256 {registered} of {_PREREGISTRATION_FILE.name} (preregistration :222)")
+    hardware = manifest["hardware"]
+    if hardware["cuda"] is not False:
+        # :140-143 same CPU machine for the algorithmic comparison; :262 D5 "compute = CPU, no GPU".
+        raise DecisionProvenanceError(
+            f"run_manifest hardware cuda = {hardware['cuda']!r}; the registered compute is CPU without "
+            "GPU, recorded as cuda = False (preregistration :140-143, :262)")
+    if hardware["dtype"] != "float32":
+        # :103 "Precision: float32 for training".
+        raise DecisionProvenanceError(
+            f"run_manifest hardware dtype = {hardware['dtype']!r}; registered is float32 "
+            "(preregistration :103)")
+    if manifest["backend"].get("neuraloperator") != _REGISTERED_NEURALOPERATOR:
+        # :94 D7 neuraloperator==2.0.0.
+        raise DecisionProvenanceError(
+            f"run_manifest backend neuraloperator = {manifest['backend'].get('neuraloperator')!r}; "
+            f"registered is {_REGISTERED_NEURALOPERATOR} (preregistration :94, D7)")
+
+
 def _latency_times(value: Any) -> np.ndarray:
     arr = np.asarray(value)
     if arr.dtype == np.bool_ or np.iscomplexobj(arr) or not np.issubdtype(arr.dtype, np.number):
@@ -961,19 +1016,28 @@ def decide_preregistered(
       registered ids of ``test_set``, ``n`` one of its registered lattices;
     - ``run_manifest`` is the output of ``build_run_manifest`` (git SHA,
       dataset digests, split ids, backend, hardware, seed set) and must still
-      match its digest; its seed set must equal ``seeds``;
+      match its digest; its seed set must equal ``seeds``, and the content the
+      preregistration fixes must hold (``_check_registered_manifest_content``:
+      split ids in the train pool, the test set's dataset digest, the
+      preregistration file's digest, CPU without CUDA, float32, neuraloperator
+      2.0.0), else ``DecisionProvenanceError``;
     - ``gino_latency_times_s``: the timed calls, exactly ``TimingProtocol().repeats``
       (10) per sample: shape (10,) for one sample or (samples, 10); any other count
       raises ``DecisionInputError``. The latency is their median, as for the
       baseline curve. Warm-ups are not visible in these numbers.
+    - ``baseline_times_s``, ``baseline_errors``: exactly one point per registered
+      ``steps`` value 1, 2, 4, ..., 64 in that order (preregistration section 4),
+      else ``DecisionInputError``; steps and ``n`` are written into the record.
 
     Rows and columns are put into ascending seed and sample-id order, so the
     result does not depend on the caller's order, and the bootstrap and the
     IQM are computed here with the preregistered settings. No parameter
-    accepts a summary. The record binds SHA-256 digests of the canonical raw
+    accepts a summary of GINO's errors; the baseline curve enters as its
+    per-point summaries (mean ``rel_l2``, median wall time; spec section 2).
+    The record binds SHA-256 digests of the canonical raw
     bytes, the sample ids, the latency calls and the run manifest, the baseline
-    curve values and the seed list; ``verify_preregistered_decision`` recomputes
-    it from the raw data.
+    curve values with their steps and lattice, and the seed list;
+    ``verify_preregistered_decision`` recomputes it from the raw data.
     """
     if not isinstance(test_set, str) or test_set not in PREREGISTERED_TEST_SETS:
         raise DecisionInputError(
@@ -1005,9 +1069,20 @@ def decide_preregistered(
     if sorted(manifest["seeds"]) != sorted(seed_list):
         raise DecisionProvenanceError(
             f"run_manifest seeds {manifest['seeds']} differ from the error table's seeds {list(seed_list)}")
+    _check_registered_manifest_content(manifest, test_set)
     latency_calls = _latency_times(gino_latency_times_s)
     times = _positive_vector(baseline_times_s, name="baseline_times_s")
     curve_errors = _positive_vector(baseline_errors, name="baseline_errors")
+    # Equalita R3 F1: spec/PREREGISTRATION_PHASE1_v1.md:134-137 runs the baseline on the
+    # evaluation lattice with steps 1, 2, 4, 8, 16, 32, 64. Entry k of the curve belongs to
+    # steps _DEFAULT_STEPS_GRID[k] on lattice n; a subset of the points is another frontier
+    # (a chord lies above a convex curve) and is refused. Steps and n go into the record.
+    grid = _DEFAULT_STEPS_GRID
+    if times.shape != (len(grid),) or curve_errors.shape != (len(grid),):
+        raise DecisionInputError(
+            f"baseline_times_s and baseline_errors must hold one point per registered steps value "
+            f"{list(grid)} (preregistration section 4), in that order, got {times.size} and "
+            f"{curve_errors.size} points")
 
     rows = np.argsort(np.asarray(seed_list), kind="stable")
     cols = np.argsort(np.asarray(ids), kind="stable")
@@ -1029,6 +1104,8 @@ def decide_preregistered(
         "gino_latency_times_shape": list(latency_calls.shape),
         "baseline_times_s": [float(t) for t in times],
         "baseline_errors": [float(e) for e in curve_errors],
+        "baseline_steps": list(grid),
+        "baseline_n": n,
         "run_manifest_sha256": manifest["manifest_sha256"],
         "git_sha": manifest["git_sha"],
         "preregistration": manifest["preregistration"],
@@ -1311,7 +1388,8 @@ def cdist_rounding_margin(
 class RadiusStabilityVerdict:
     """Whether a radius candidate may enter the D4 grid under a pre-specified float error budget.
 
-    ``status``: ``"stable"`` (margin above the budget: no flip for any summation
+    ``status``: ``"stable"`` (margin above the budget and no measured flip
+    contradicting it: no flip for any summation
     order within the budget), ``"frozen_order_required"`` (not stable, but
     measured flip-free on one frozen hardware/kernel order, which must then be
     pinned in the run manifest), ``"refused"`` otherwise. Margin and budget are
@@ -1339,7 +1417,9 @@ def radius_graph_stability(
     ``budget_relative`` is the float error budget relative to ``r``, fixed
     BEFORE the candidates are compared (for instance ``cdist_rounding_margin``
     for an order-independent bound, or an owner-specified measured budget).
-    Equality is not stable. ``frozen_order_flips`` is the flip count measured on
+    Equality is not stable, and neither is a margin above the budget when
+    ``frozen_order_flips > 0`` (the measurement contradicts the budget:
+    ``"refused"``). ``frozen_order_flips`` is the flip count measured on
     the one frozen hardware/kernel order the owner pins (``None``: no frozen
     order). Every argument is validated; NaN or inf raises ``ValueError``.
     This is not a tie band: the adapter's ``1e-6 r`` stays as it is and is
@@ -1350,6 +1430,13 @@ def radius_graph_stability(
     if frozen_order_flips is not None:
         frozen_order_flips = _int_at_least(frozen_order_flips, name="frozen_order_flips", minimum=0)
     ratio = margin / budget
+    if margin > budget and frozen_order_flips:
+        # Equalita R3 F4: flips measured on the frozen order contradict the budget the margin
+        # clears (the budget or the measurement is wrong); "stable" would be fail-open.
+        return RadiusStabilityVerdict(
+            "refused", margin, budget, ratio,
+            f"min |d - r| / r = {margin:.6g} exceeds the float budget {budget:.6g}, but "
+            f"{frozen_order_flips} measured flips on the frozen order contradict that budget")
     if margin > budget:
         return RadiusStabilityVerdict(
             "stable", margin, budget, ratio,

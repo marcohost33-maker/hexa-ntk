@@ -194,7 +194,10 @@ A verdict names its test set and its `N` and extends to nothing else.
 
 `decide_preregistered(test_set, n, errors, sample_ids, seeds, run_manifest,
 gino_latency_times_s, baseline_times_s, baseline_errors)` is the only entry
-whose result is a preregistered decision. No parameter accepts a summary.
+whose result is a preregistered decision. No parameter accepts a summary of
+GINO's errors. The baseline curve does enter as summaries, one point per
+`steps` (mean `rel_l2` and median wall time, section 2); it is bound to the
+registered grid below, not recomputed (claim boundary).
 
 - `test_set` is one of the registered sets of preregistration section 2
   (`PREREGISTERED_TEST_SETS`): `id` (triangle, `N = 32`, ids
@@ -207,7 +210,26 @@ whose result is a preregistered decision. No parameter accepts a summary.
   ids exactly the registered ids of the set.
 - `run_manifest` is the output of `build_run_manifest` (section 7); it is
   rebuilt from its own fields and must match its `manifest_sha256`, and its
-  seed set must equal `seeds`.
+  seed set must equal `seeds`. Its content must hold what the preregistration
+  fixes (Equalita R3 F2, amendment 2026-10-21), else `DecisionProvenanceError`:
+  every `split_ids` id in the train pool `0..1999` (preregistration section 2,
+  which keeps the test ids out of the split); a `datasets` digest under the
+  name of the decided test set (section 2 "Recording", section 7); the
+  preregistration `sha256` equal to `file_sha256` of
+  `spec/PREREGISTRATION_PHASE1_v1.md` in the repository (section 7); hardware
+  `cuda` = `False` and `dtype` = `"float32"` (section 4 same CPU machine,
+  section 3 float32, D5 CPU without GPU); backend `neuraloperator` = `"2.0.0"`
+  (D7). Not checked, because the preregistration does not fix it: the machine
+  name (D5 open), the file behind `metric_spec_sha256` (preregistration "the
+  instrument spec" vs. section 7 here), the exact 1800/200 split, the torch
+  version.
+- `baseline_times_s`, `baseline_errors` hold exactly one point per registered
+  `steps` value `1, 2, 4, 8, 16, 32, 64` (preregistration section 4), entry
+  `k` for the `k`-th value, on the decided lattice `n`; any other count raises
+  `DecisionInputError` (Equalita R3 F1: two genuine points alone, steps
+  `{1, 64}`, reached `advantage` because the chord lies above the convex
+  curve). `provenance` records `baseline_steps` and `baseline_n`. That the
+  values belong to those steps is declared, not measured (claim boundary).
 - `gino_latency_times_s` are the timed calls, exactly the preregistered 10
   measured repeats per sample (`TimingProtocol().repeats`, section 1): shape
   `(10,)` for one sample or `(samples, 10)`; any other count, including a flat
@@ -219,8 +241,11 @@ whose result is a preregistered decision. No parameter accepts a summary.
 
 Rows and columns are sorted by seed and sample id (C order), the bootstrap and
 the IQM are computed with the preregistered settings of section 4, and both
-rules of section 5 are applied. Any violation raises `DecisionInputError`
-(registration) or `DecisionProvenanceError` (manifest) before a rule runs.
+rules of section 5 are applied. A violation of any check listed in this
+section raises `DecisionInputError` (registration) or
+`DecisionProvenanceError` (manifest) before a rule runs. Only these checks
+are made: what the list names as not checked, the latency's sample ids and
+batch size, and the authenticity of all numbers are not.
 
 The result `PreregisteredDecision` serialises (`to_dict`) to a record with
 `"grade": "preregistered"`, the verdict, both rules, the summary, and
@@ -337,7 +362,9 @@ preregistered threshold and not the adapter's tie band (`1e-6 r`).
   to the working dtype, and `input_abs_error` for the rounded coordinates.
 - `radius_graph_stability(min_relative_margin, *, budget_relative,
   frozen_order_flips=None)` returns `stable` only if the margin strictly
-  exceeds the budget, `frozen_order_required` if not but the candidate was
+  exceeds the budget and no flip was measured on the frozen order (flips > 0
+  contradict the budget: `refused`, Equalita R3 F4), `frozen_order_required` if
+  not but the candidate was
   measured flip-free (`frozen_order_flips == 0`) on the one frozen
   hardware/kernel order the run manifest must then pin, and `refused`
   otherwise. Equality is not stable; NaN or inf raise `ValueError`.
