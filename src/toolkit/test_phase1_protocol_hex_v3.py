@@ -544,7 +544,7 @@ _REGISTERED_STEPS = (1, 2, 4, 8, 16, 32, 64)
 
 
 def _curve_points(times, errors, *, steps=_REGISTERED_STEPS, n=32, domain="triangle_dirichlet", sample_count=500,
-                  timed_samples=5, config=None, protocol=None, rtol=1e-12):
+                  timed_samples=5, config=None, protocol=None, rtol=1e-12, clock="time.perf_counter"):
     """Baseline points with explicit measurement coordinates, as ``baseline_cost_accuracy_curve`` writes them.
 
     The coordinates are the ones under test (Equalita R4-F1); the values are given. Hand-built
@@ -561,7 +561,7 @@ def _curve_points(times, errors, *, steps=_REGISTERED_STEPS, n=32, domain="trian
         mean_rel_l2=float(e), median_rel_l2=float(e), mean_rel_h1=float(e), mean_rel_max=float(e),
         median_wall_time_s=float(t), wall_time_ci_s=(float(t), float(t)), cg_iterations_mean=1.0, domain=domain,
         kappa=float(config.kappa), t_final=float(config.t_final), task_config_sha256=config.digest(), rtol=rtol,
-        warmup=protocol.warmup, repeats=protocol.repeats, timing_protocol_sha256=protocol.digest())
+        warmup=protocol.warmup, repeats=protocol.repeats, timing_protocol_sha256=protocol.digest(), clock=clock)
         for s, t, e in zip(steps, times, errors))
 
 
@@ -947,6 +947,7 @@ class TestPreregisteredDecision(unittest.TestCase):
             ({"protocol": pp.TimingProtocol(repeats=1)}, r"repeats = 1; .* \(preregistration :145\)"),
             ({"protocol": pp.TimingProtocol(bootstrap_resamples=200)}, "timing protocol digest"),
             ({"protocol": pp.TimingProtocol(seed=1)}, "timing protocol digest"),
+            ({"clock": "custom:count.__next__"}, r"timed with clock 'custom:count\.__next__'"),
         )
         for coords, reason in cases:
             with self.subTest(coords=coords):
@@ -1082,7 +1083,7 @@ class TestPreregisteredDecision(unittest.TestCase):
                 config = HeatOperatorTaskConfig(domain=domain)
                 data = generate_dataset(config, n=32, sample_ids=ids, dataset_seed=1)
                 points = pp.baseline_cost_accuracy_curve(config, data["u0"], data["uT"], data["lattice"],
-                                                         protocol=protocol, timed_samples=1, clock=_fake_clock())
+                                                         protocol=protocol, timed_samples=1)
                 self.assertEqual([(p.n, p.domain, p.steps) for p in points],
                                  [(32, domain, s) for s in _REGISTERED_STEPS])
                 change = {"test_set": test_set, "sample_ids": list(range(ids[0], ids[0] + 500)),
@@ -1106,12 +1107,17 @@ class TestPreregisteredDecision(unittest.TestCase):
             (registered, {"protocol": pp.TimingProtocol(warmup=0, repeats=1)}, r"steps=1 was timed with warmup = 0;"),
             (registered, {"protocol": pp.TimingProtocol(bootstrap_resamples=200)},
              r"steps=1 carries timing protocol digest"),
+            # Self-check of the fix (same class): the clock is a producer parameter that sets the
+            # times; a slow fake clock makes the baseline look slow.
+            (registered, {"clock": _fake_clock(10.0)}, r"steps=1 was timed with clock 'custom:"),
             (registered, {}, r"steps=1 has sample_count 1;"),                       # positive control
         )
         for config, extra, reason in cases:
-            with self.subTest(config=config.canonical(), extra=extra):
+            with self.subTest(config=config.canonical(), extra=sorted(extra)):
                 points = pp.baseline_cost_accuracy_curve(config, data["u0"], data["uT"], data["lattice"],
-                                                         timed_samples=1, clock=_fake_clock(), **extra)
+                                                         timed_samples=1, **extra)
+                self.assertEqual({p.clock for p in points},
+                                 {"time.perf_counter" if "clock" not in extra else pp._clock_name(extra["clock"])})
                 self.assertEqual({(p.kappa, p.t_final, p.task_config_sha256, p.rtol) for p in points},
                                  {(config.kappa, config.t_final, config.digest(), extra.get("rtol", 1e-12))})
                 protocol = extra.get("protocol", pp.TimingProtocol())

@@ -67,9 +67,9 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   Handbau-Punkte (authenticity) -> spec/PHASE1_PROTOCOL_v1.md 5a.
   _Equalita R5-F1 2026-10-21 (@d6cfdec):_ echte Kurven mit Solver kappa=2 bzw. T=0.02 gegen die
   registrierte Wahrheit kippten H0 in "advantage" (Record bei kappa ununterscheidbar). **API-/Format-
-  Bruch:** `CostAccuracyPoint` traegt sieben neue Pflichtfelder (kappa, t_final, task_config_sha256,
-  rtol, warmup, repeats, timing_protocol_sha256), geprueft gegen [D1], dt == t_final/steps, rtol 1e-12
-  und `TimingProtocol()`; Record-Eintraege der Punkte wachsen entsprechend (alte Records verifizieren
+  Bruch:** `CostAccuracyPoint` traegt acht neue Pflichtfelder (kappa, t_final, task_config_sha256,
+  rtol, warmup, repeats, timing_protocol_sha256, clock), geprueft gegen [D1], dt == t_final/steps, rtol
+  1e-12, `TimingProtocol()` und `time.perf_counter`; Record-Eintraege der Punkte wachsen entsprechend (alte Records verifizieren
   nicht mehr). R5-F3 einmaliges Lesen jedes Felds, R5-F4 Plausibilitaet (>= 0, CI geordnet). Grenze neu
   benannt: Maschine/Threads (Prereg :141/:144, keine Seite traegt eine Maschinen-Identitaet; Owner).
 

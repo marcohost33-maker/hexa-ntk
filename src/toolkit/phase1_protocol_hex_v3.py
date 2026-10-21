@@ -95,6 +95,11 @@ _DEFAULT_STEPS_GRID = (1, 2, 4, 8, 16, 32, 64)
 # the verified default, and decide_preregistered requires it (Equalita R5-F1; whether
 # the preregistration should name it is an owner question).
 _REGISTERED_BASELINE_RTOL = 1e-12
+# The wall clock of the timing protocol (spec section 1, ``measure_latency``'s default). The
+# producer takes any ``clock`` (tests pass a fake one); a point timed with another clock carries
+# its name and is refused for a decision (self-check of the R5-F1 fix, same class: a producer
+# parameter that sets the time values).
+_REGISTERED_CLOCK = "time.perf_counter"
 # The preregistered statistic, single source for every default below and for
 # the binding in ``decide_test_set``: spec/PREREGISTRATION_PHASE1_v1.md
 # section 5 ("the IQM of the five seed-level mean errors; its 95 % interval
@@ -340,8 +345,10 @@ class CostAccuracyPoint:
     that determine its values besides the lattice and the inputs: the task
     configuration (``kappa``, ``t_final`` and ``task_config_sha256``, the
     digest of the whole ``HeatOperatorTaskConfig``), the solver tolerance
-    ``rtol``, and the timing protocol (``warmup``, ``repeats`` and
-    ``timing_protocol_sha256``). The fields after ``cg_iterations_mean`` have
+    ``rtol``, and the timing protocol (``warmup``, ``repeats``,
+    ``timing_protocol_sha256`` and ``clock``, the name of the clock the timed
+    calls were read with: ``"time.perf_counter"`` or ``"custom:<name>"``).
+    The fields after ``cg_iterations_mean`` have
     no default, so a construction from before they were added fails loudly.
     """
 
@@ -365,6 +372,7 @@ class CostAccuracyPoint:
     warmup: int
     repeats: int
     timing_protocol_sha256: str
+    clock: str
 
     def to_dict(self) -> Dict[str, Any]:
         out = asdict(self)
@@ -391,6 +399,13 @@ def _steps_grid(value: Any) -> Tuple[int, ...]:
     if len(set(grid)) != len(grid):
         raise ValueError("steps_grid must not repeat a value")
     return grid
+
+
+def _clock_name(clock: Callable[[], float]) -> str:
+    """``"time.perf_counter"`` for the wall clock of section 1, else ``"custom:<name>"`` (self-check of R5-F1)."""
+    if clock is time.perf_counter:
+        return _REGISTERED_CLOCK
+    return f"custom:{getattr(clock, '__qualname__', type(clock).__qualname__)}"
 
 
 def baseline_cost_accuracy_curve(
@@ -426,7 +441,7 @@ def baseline_cost_accuracy_curve(
     settings = {
         "kappa": float(config.kappa), "t_final": float(config.t_final), "task_config_sha256": config.digest(),
         "rtol": rtol, "warmup": int(protocol.warmup), "repeats": int(protocol.repeats),
-        "timing_protocol_sha256": protocol.digest(),
+        "timing_protocol_sha256": protocol.digest(), "clock": _clock_name(clock),
     }
     points = []
     for steps in grid:
@@ -1021,7 +1036,7 @@ def _point_str(value: Any, *, name: str) -> str:
 
 # Read order of one point: every field exactly once, converted to a plain value (Equalita R5-F3).
 _POINT_INTS = ("n", "steps", "sample_count", "timed_samples", "warmup", "repeats")
-_POINT_STRS = ("domain", "task_config_sha256", "timing_protocol_sha256")
+_POINT_STRS = ("domain", "task_config_sha256", "timing_protocol_sha256", "clock")
 # (field, lower bound, strict): R5-F4 plausibility of the fields that only enter the record.
 _POINT_FLOATS = (
     ("dt", 0.0, True), ("kappa", 0.0, True), ("t_final", 0.0, True), ("rtol", 0.0, True),
@@ -1072,7 +1087,7 @@ def _registered_baseline_points(curve: Any, *, test_set: str, n: int) -> List[Di
     once into plain values (R5-F3); the checks and the record use only that copy. Types and
     plausibility come first (R5-F4), then the coordinates in a fixed order (steps, n, domain,
     kappa, t_final, dt, task configuration digest, rtol, warm-ups, repeats, timing protocol
-    digest, sample count, timed samples), so each refusal names the first one that differs.
+    digest, clock, sample count, timed samples), so each refusal names the first one that differs.
     """
     if isinstance(curve, (str, bytes, Mapping, np.ndarray)) or not isinstance(curve, Sequence):
         curve = None
@@ -1143,6 +1158,10 @@ def _registered_baseline_points(curve: Any, *, test_set: str, n: int) -> List[Di
             raise DecisionInputError(
                 f"{at} carries timing protocol digest {p['timing_protocol_sha256']!r}, not the digest of "
                 f"the preregistered protocol {registered_timing.canonical()} (preregistration :145)")
+        if p["clock"] != _REGISTERED_CLOCK:
+            raise DecisionInputError(
+                f"{at} was timed with clock {p['clock']!r}; the latency is wall time read with "
+                f"{_REGISTERED_CLOCK!r} (spec section 1, preregistration :145)")
         if p["sample_count"] != PREREGISTERED_TEST_SAMPLES:
             # :62-68 [D3] 500 ids per test set; :136 "on the same test inputs".
             raise DecisionInputError(
@@ -1255,8 +1274,8 @@ def decide_preregistered(
       also the settings: ``kappa`` and ``t_final`` of [D1] (:51-55), ``dt ==
       t_final / steps``, ``task_config_sha256`` the digest of the [D1]
       configuration of the domain, ``rtol`` the baseline's 1e-12, ``warmup``
-      3 and ``repeats`` 10 (:145) and ``timing_protocol_sha256`` the digest of
-      ``TimingProtocol()``. Every field is read once into a plain value
+      3 and ``repeats`` 10 (:145), ``timing_protocol_sha256`` the digest of
+      ``TimingProtocol()`` and ``clock`` ``"time.perf_counter"``. Every field is read once into a plain value
       (R5-F3) and checked for plausibility (R5-F4: finite, errors, times and
       iteration counts ``>= 0``, the interval ordered). The record's baseline
       fields are this checked copy, never constants or arguments.

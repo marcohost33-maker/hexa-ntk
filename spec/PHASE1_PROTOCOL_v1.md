@@ -64,6 +64,7 @@ protocol, timed_samples, rtol)` runs `mechanistic_baseline`
 | `rtol` | the CG tolerance the solver ran with |
 | `warmup`, `repeats` | of the `protocol` the timed samples ran with |
 | `timing_protocol_sha256` | `protocol.digest()` (`TimingProtocol.digest`: SHA-256 of `canonical()`, bootstrap resamples, seed and confidence of `wall_time_ci_s` included) |
+| `clock` | `"time.perf_counter"` when the timed calls were read with the default wall clock, else `"custom:<qualname>"` (tests pass a fake clock) |
 
 The first `timed_samples` inputs are timed with the protocol of section 1;
 the others are solved once (the solver is deterministic, the prediction does
@@ -265,8 +266,10 @@ recomputed (claim boundary).
   the test set's domain (the whole [D1] configuration), `rtol = 1e-12` (the
   tolerance of `mechanistic_baseline` as verified; the preregistration names
   the method at :128-133 but writes out no tolerance, owner question),
-  `warmup = 3` and `repeats = 10` (:145) and `timing_protocol_sha256` the
-  digest of `TimingProtocol()`; its `sample_count` is 500
+  `warmup = 3` and `repeats = 10` (:145), `timing_protocol_sha256` the
+  digest of `TimingProtocol()` and `clock = "time.perf_counter"` (the wall
+  clock of section 1; a slow fake clock would make the baseline look slow);
+  its `sample_count` is 500
   (:62-68 [D3], :136 "on the same test inputs"); `1 <= timed_samples <=
   sample_count`. No time and no error may repeat: the same two points
   copied to seven would keep the chord. This catches only the literal
@@ -365,16 +368,16 @@ diagnostic helper) keeps the float lists. Whether the API stays so is an
 owner decision (Equalita R4 owner question 2); this form fails closed.
 
 **API and format change (2026-10-21, Equalita R5-F1/F3/F4, breaking):**
-`CostAccuracyPoint` gains seven required fields after `domain`: `kappa`,
+`CostAccuracyPoint` gains eight required fields after `domain`: `kappa`,
 `t_final`, `task_config_sha256`, `rtol`, `warmup`, `repeats`,
-`timing_protocol_sha256` (a construction without them raises `TypeError`);
+`timing_protocol_sha256`, `clock` (a construction without them raises `TypeError`);
 `TimingProtocol` gains `digest()`. `baseline_cost_accuracy_curve` keeps its
 signature and writes them. `decide_preregistered` refuses curves computed
 with other settings than the registered ones (other `kappa`/`T`/task
 configuration, `rtol != 1e-12`, a timing protocol other than
-`TimingProtocol()`), a `dt` that is not `t_final / steps`, negative record
-fields and an inverted interval. The record's `baseline_points` entries gain
-the seven fields, so a record written before this change does not verify
+`TimingProtocol()`, a clock other than `time.perf_counter`), a `dt` that is
+not `t_final / steps`, negative record fields and an inverted interval. The
+record's `baseline_points` entries gain the eight fields, so a record written before this change does not verify
 against the new code. `decide_test_set` is unchanged.
 
 ## 6. Break-even (preregistration section 4)
