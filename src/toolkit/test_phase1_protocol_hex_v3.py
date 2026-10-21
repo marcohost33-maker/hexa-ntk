@@ -931,5 +931,135 @@ class TestCostAccuracyCurve(unittest.TestCase):
                                             **{**kwargs, "protocol": None})
 
 
+# ------------------------------------------------------------------
+# Section 11: D4 float-order stability of a radius graph (HEX-P2-02)
+# ------------------------------------------------------------------
+
+
+_U32 = pp.FLOAT32_UNIT_ROUNDOFF
+# Geometry of the radius-tie survey: latent grid [0, 1] x [0, sqrt(3)/2] (corner
+# norm sqrt(7/4)), nodes inside the same box (max node norm 1.2934 on the torus).
+_SURVEY_NORM = math.sqrt(1.75)
+# Coordinates as computed in float32: nodes rounded from float64 (<= u |x|), the
+# latent axes by torch.linspace (measured <= 0.98 u per component, budgeted 3 u).
+_SURVEY_INPUT_ERROR = 4.0 * _U32 * _SURVEY_NORM
+
+
+def _emulated_cdist32(x64: np.ndarray, y64: np.ndarray) -> np.ndarray:
+    """float32 matmul-path distances under every order of the four-term sum: (orders, pairs)."""
+    f = np.float32
+    x, y = x64.astype(f), y64.astype(f)
+    nx = (x[:, 0] * x[:, 0] + x[:, 1] * x[:, 1]).astype(f)
+    ny = (y[:, 0] * y[:, 0] + y[:, 1] * y[:, 1]).astype(f)
+    terms = [(f(-2.0) * x[:, 0]) * y[:, 0], (f(-2.0) * x[:, 1]) * y[:, 1], nx * f(1.0), f(1.0) * ny]
+    sums = []
+    for order in itertools.permutations(range(4)):
+        acc = terms[order[0]]
+        for k in order[1:]:
+            acc = (acc + terms[k]).astype(f)                      # sequential, every order
+        sums.append(acc)
+        sums.append(((terms[order[0]] + terms[order[1]]).astype(f)
+                     + (terms[order[2]] + terms[order[3]]).astype(f)).astype(f))   # pairwise
+    return np.sqrt(np.maximum(np.stack(sums), f(1e-30))).astype(f)
+
+
+class TestRadiusFloatStability(unittest.TestCase):
+    def test_closed_forms(self):
+        r = 0.046875
+        self.assertLessEqual(pp.cdist_rounding_margin(r, max_point_norm=1.0, unit_roundoff=0.0), 1e-15)
+        self.assertAlmostEqual(pp.cdist_rounding_margin(r, max_point_norm=1.0, unit_roundoff=0.0,
+                                                        input_abs_error=1e-6), 1e-6 / r, delta=1e-15)
+        small = pp.cdist_rounding_margin(r, max_point_norm=0.5)
+        large = pp.cdist_rounding_margin(r, max_point_norm=1.5)
+        self.assertLess(small, large)                         # the matmul path loses (2R / r)^2
+        self.assertLess(pp.cdist_rounding_margin(r, max_point_norm=1.5, unit_roundoff=pp.FLOAT64_UNIT_ROUNDOFF),
+                        1e-11)
+        # Leading order: m ~ eps / (2 r^2) with eps = gamma_6 (2R)^2.
+        eps = 6 * _U32 * (2 * 1.5) ** 2
+        self.assertAlmostEqual(large / (eps / (2 * r * r)), 1.0, delta=0.01)
+
+    def test_the_bound_holds_for_every_emulated_summation_order(self):
+        # Independent oracle: emulate the float32 matmul path under all 24 sequential and
+        # 24 pairwise orders; no pair with a margin above the bound may flip, and the
+        # emulation must see flips below it (positive control: it is not blind).
+        rng = np.random.default_rng(2026)
+        r = 0.046875
+        x = rng.uniform([0.0, 0.0], [1.0 - 2.1 * r, math.sqrt(3) / 2 - 2.1 * r], size=(40_000, 2)) + 1.05 * r
+        theta = rng.uniform(0.0, 2 * math.pi, size=40_000)
+        t = rng.uniform(-6e-4, 6e-4, size=40_000)
+        y = x + (r * (1.0 + t))[:, None] * np.stack([np.cos(theta), np.sin(theta)], axis=1)
+        d = np.sqrt(np.sum((x - y) ** 2, axis=1))
+        margin = np.abs(d - r) / r
+        bound = pp.cdist_rounding_margin(r, max_point_norm=_SURVEY_NORM, input_abs_error=2 * _U32 * _SURVEY_NORM)
+        d32 = _emulated_cdist32(x, y).astype(np.float64)
+        flips = (d32 <= np.float32(r)) != (d <= r)[None, :]
+        self.assertTrue(flips.any())                                       # positive control
+        self.assertFalse(flips[:, margin > bound].any())
+        near = np.abs(d - r) <= 0.1 * r
+        self.assertLess(float(np.max(np.abs(d32[:, near] - d[near]))) / r, bound)
+        # Negative control: a bound that ignores the matmul cancellation (direct-difference
+        # accuracy, a few u) is violated by the emulation.
+        naive = 4 * _U32
+        self.assertTrue(flips[:, margin > naive].any())
+
+    def test_the_bound_covers_the_committed_float32_survey(self):
+        # Second oracle: torch 2.6.0 float32 vs float64 graphs measured by the survey (Windows,
+        # source 69740d1). The measured near-radius error never exceeds the bound, and no
+        # flipping candidate has a margin above it.
+        survey = json.loads((_ROOT / "results" / "2026-10-20_gino_radius_tie_survey_float32-graphs.json")
+                            .read_text(encoding="utf-8"))["survey"]
+        tie_free = [c for c in survey["candidates"] if c["tie_free_on_all"]]
+        self.assertEqual(len(tie_free), 12)
+        above = []
+        for c in survey["candidates"]:
+            bound = pp.cdist_rounding_margin(c["radius"], max_point_norm=_SURVEY_NORM,
+                                             input_abs_error=_SURVEY_INPUT_ERROR)
+            with self.subTest(latent=c["latent_resolution"], factor=c["radius_factor"]):
+                self.assertLess(c["float32_error_near_radius"], bound)
+                if c["float32_flips_total"] > 0:
+                    self.assertLessEqual(c["min_relative_margin"], bound)
+            if c["tie_free_on_all"] and c["min_relative_margin"] > bound:
+                above.append((c["latent_resolution"], c["radius_factor"]))
+        # Finding for the owner (spec/GINO_ADAPTER_PHASE1_v2.md, amendment 2026-10-21): no
+        # tie-free candidate clears the order-independent bound; the largest ratio is (16, 1.5).
+        self.assertEqual(above, [])
+        ratios = {(c["latent_resolution"], c["radius_factor"]):
+                  c["min_relative_margin"] / pp.cdist_rounding_margin(
+                      c["radius"], max_point_norm=_SURVEY_NORM, input_abs_error=_SURVEY_INPUT_ERROR)
+                  for c in tie_free}
+        self.assertEqual(max(ratios, key=ratios.get), (16, 1.5))
+
+    def test_stability_verdicts(self):
+        self.assertEqual(pp.radius_graph_stability(2e-4, budget_relative=1e-4).status, "stable")
+        equal = pp.radius_graph_stability(1e-4, budget_relative=1e-4)
+        self.assertEqual(equal.status, "refused")                              # equality is not stable
+        frozen = pp.radius_graph_stability(5e-5, budget_relative=1e-4, frozen_order_flips=0)
+        self.assertEqual(frozen.status, "frozen_order_required")
+        self.assertIn("pin", frozen.reason)
+        self.assertEqual(pp.radius_graph_stability(5e-5, budget_relative=1e-4, frozen_order_flips=3).status,
+                         "refused")
+        self.assertEqual(pp.radius_graph_stability(2e-4, budget_relative=1e-4, frozen_order_flips=3).status,
+                         "stable")
+        verdict = pp.radius_graph_stability(3e-4, budget_relative=1e-4)
+        self.assertEqual(verdict.to_dict()["margin_over_budget"], 3e-4 / 1e-4)
+        json.dumps(verdict.to_dict(), allow_nan=False)
+        for args, kwargs in (((float("nan"),), {"budget_relative": 1e-4}),
+                             ((2e-4,), {"budget_relative": float("nan")}),
+                             ((float("inf"),), {"budget_relative": 1e-4}),
+                             ((2e-4,), {"budget_relative": 0.0}), ((-1e-5,), {"budget_relative": 1e-4}),
+                             (("1",), {"budget_relative": 1e-4}),
+                             ((2e-4,), {"budget_relative": 1e-4, "frozen_order_flips": -1}),
+                             ((2e-4,), {"budget_relative": 1e-4, "frozen_order_flips": True}),
+                             ((2e-4,), {"budget_relative": 1e-4, "frozen_order_flips": 0.0})):
+            with self.subTest(args=args, kwargs=kwargs), self.assertRaises((TypeError, ValueError)):
+                pp.radius_graph_stability(*args, **kwargs)
+        for kwargs in ({"radius": 0.0}, {"radius": float("nan")}, {"max_point_norm": -1.0},
+                       {"unit_roundoff": float("nan")}, {"input_abs_error": -1e-9}, {"unit_roundoff": 0.2},
+                       {"radius": 1e-4}):          # rounding swamps r^2: no margin can help
+            full = {"radius": 0.05, "max_point_norm": 1.0, **kwargs}
+            with self.subTest(kwargs=kwargs), self.assertRaises((TypeError, ValueError)):
+                pp.cdist_rounding_margin(full.pop("radius"), **full)
+
+
 if __name__ == "__main__":
     unittest.main()

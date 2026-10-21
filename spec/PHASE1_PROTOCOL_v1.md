@@ -317,6 +317,33 @@ tree is dirty; a dirty tree is recorded, not hidden.
 - Nothing here is fitted to, tuned on, or scored against T1 data; the tests
   use synthetic numbers and the verified mechanistic baseline.
 
+## 11. D4 decision support: float-order stability of a radius graph (amendment 2026-10-21, GPT-6 HEX-P2-02)
+
+Two instruments for the owner's D4 choice; they decide nothing and change no
+preregistered threshold and not the adapter's tie band (`1e-6 r`).
+
+- `cdist_rounding_margin(radius, *, max_point_norm, unit_roundoff=2**-24,
+  input_abs_error=0)` returns the relative margin `m` such that every pair with
+  `|d - r| > m r` is decided `d <= r` as in exact arithmetic by the matmul path
+  of `torch.cdist` (`s = [-2x, |x|^2, 1] . [y, 1, |y|^2]`, then `sqrt`), for
+  every summation order: `|s_hat - s| <= gamma_6 (2R)^2` (Higham 2002, eq. 3.5
+  and lemma 3.3), a relative `u` for the square root and for the radius cast
+  to the working dtype, and `input_abs_error` for the rounded coordinates.
+- `radius_graph_stability(min_relative_margin, *, budget_relative,
+  frozen_order_flips=None)` returns `stable` only if the margin strictly
+  exceeds the budget, `frozen_order_required` if not but the candidate was
+  measured flip-free (`frozen_order_flips == 0`) on the one frozen
+  hardware/kernel order the run manifest must then pin, and `refused`
+  otherwise. Equality is not stable; NaN or inf raise `ValueError`.
+
+The budget is fixed before candidates are compared; choosing it after seeing
+the margins would be the post-hoc widening the review excludes. Tests: closed
+forms, an emulation of 48 summation orders as an independent oracle (positive
+and negative control), and the committed survey
+`results/2026-10-20_gino_radius_tie_survey_float32-graphs.json` (measured errors
+below the bound; no tie-free candidate clears it, `spec/GINO_ADAPTER_PHASE1_v2.md`
+amendment 2026-10-21).
+
 References: McGreivy and Hakim, Nat. Mach. Intell. 6:1256 (2024), rules 1-2
 (equal accuracy, equal runtime, no weak baseline); Agarwal, Schwarzer,
 Castro, Courville and Bellemare, NeurIPS 2021 (IQM, stratified bootstrap);

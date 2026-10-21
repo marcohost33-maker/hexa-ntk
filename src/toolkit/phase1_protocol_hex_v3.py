@@ -58,6 +58,11 @@ __all__ = [
     "file_sha256",
     "source_revision",
     "build_run_manifest",
+    "FLOAT32_UNIT_ROUNDOFF",
+    "FLOAT64_UNIT_ROUNDOFF",
+    "cdist_rounding_margin",
+    "RadiusStabilityVerdict",
+    "radius_graph_stability",
 ]
 
 import dataclasses
@@ -1227,3 +1232,126 @@ def build_run_manifest(fields: Mapping[str, Any]) -> Dict[str, Any]:
     payload = json.dumps(body, allow_nan=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     body["manifest_sha256"] = hashlib.sha256(payload).hexdigest()
     return body
+
+
+# ------------------------------------------------------------------
+# Section 11: D4 decision support -- float-order stability of a radius graph
+# (GPT-6 HEX-P2-02). A tool for the owner; it decides nothing and changes
+# neither the adapter's tie band (1e-6 r) nor any preregistered threshold.
+# ------------------------------------------------------------------
+
+
+FLOAT32_UNIT_ROUNDOFF = 2.0 ** -24
+FLOAT64_UNIT_ROUNDOFF = 2.0 ** -53
+
+
+def _gamma(k: int, u: float) -> float:
+    """Higham's gamma_k = k u / (1 - k u)."""
+    if k * u >= 1.0:
+        raise ValueError(f"gamma_{k} is undefined for unit roundoff {u!r}")
+    return k * u / (1.0 - k * u)
+
+
+def cdist_rounding_margin(
+    radius: Any,
+    *,
+    max_point_norm: Any,
+    unit_roundoff: Any = FLOAT32_UNIT_ROUNDOFF,
+    input_abs_error: Any = 0.0,
+) -> float:
+    """Relative margin above which a computed distance decides ``d <= radius`` exactly, in ANY summation order.
+
+    Model (ATen ``_euclidean_dist``, the matmul path of ``torch.cdist`` that
+    neuraloperator's native neighbour search uses for more than 25 points):
+    ``s = [-2x, |x|^2, 1] . [y, 1, |y|^2]``, then ``sqrt``. With IEEE
+    arithmetic of unit roundoff ``u``, Higham (2002, eq. 3.5 and lemma 3.3)
+    bounds the computed square for every summation order (blocked, FMA or
+    not) by ``|s_hat - s| <= gamma_6 (|x| + |y|)^2 <= gamma_6 (2 R)^2 = eps``,
+    ``R = max_point_norm``; the square root adds a relative ``u``.
+    ``input_abs_error`` bounds ``|x_hat - x| + |y_hat - y|`` (rounding of the
+    coordinates themselves); ``max_point_norm`` bounds the norm of the
+    coordinates as computed. The comparison ``d_hat <= r`` runs against the
+    radius rounded to the working precision (torch casts the Python scalar to
+    the tensor dtype), ``|r_hat - r| <= u r``.
+
+    A pair with ``d >= r (1 + m)`` stays a non-edge if
+    ``(1 - u) sqrt((r (1 + m) - e_in)^2 - eps) > r (1 + u)``; a pair with
+    ``d <= r (1 - m)`` stays an edge if
+    ``(1 + u) sqrt((r (1 - m) + e_in)^2 + eps) <= r (1 - u)``. Both are
+    monotone in ``d``; the returned ``m`` is the larger of the two boundary
+    values, so every pair with ``|d - r| > m r`` is decided as in exact
+    arithmetic. ``ValueError`` if no margin below 1 can guarantee it.
+    """
+    r = _positive_float(radius, name="radius")
+    big_r = _positive_float(max_point_norm, name="max_point_norm")
+    u = _non_negative_float(unit_roundoff, name="unit_roundoff")
+    e_in = _non_negative_float(input_abs_error, name="input_abs_error")
+    eps = _gamma(6, u) * (2.0 * big_r) ** 2
+    above = (e_in + math.sqrt((r * (1.0 + u) / (1.0 - u)) ** 2 + eps)) / r - 1.0
+    inner = (r * (1.0 - u) / (1.0 + u)) ** 2 - eps
+    if inner <= 0.0:
+        raise ValueError(f"rounding of size {eps!r} on r^2 = {r * r!r} can turn any edge into a non-edge")
+    below = 1.0 - (math.sqrt(inner) - e_in) / r
+    margin = max(above, below, 0.0)
+    if not margin < 1.0:  # NaN fails closed as well
+        raise ValueError(f"no margin below 1 guarantees an exact decision (got {margin!r})")
+    return margin
+
+
+@dataclass(frozen=True)
+class RadiusStabilityVerdict:
+    """Whether a radius candidate may enter the D4 grid under a pre-specified float error budget.
+
+    ``status``: ``"stable"`` (margin above the budget: no flip for any summation
+    order within the budget), ``"frozen_order_required"`` (not stable, but
+    measured flip-free on one frozen hardware/kernel order, which must then be
+    pinned in the run manifest), ``"refused"`` otherwise. Margin and budget are
+    relative to the radius.
+    """
+
+    status: str
+    min_relative_margin: float
+    budget_relative: float
+    margin_over_budget: float
+    reason: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def radius_graph_stability(
+    min_relative_margin: Any,
+    *,
+    budget_relative: Any,
+    frozen_order_flips: Optional[int] = None,
+) -> RadiusStabilityVerdict:
+    """D4 criterion of HEX-P2-02: a candidate is stable only if ``min |d - r| / r`` exceeds the float budget.
+
+    ``budget_relative`` is the float error budget relative to ``r``, fixed
+    BEFORE the candidates are compared (for instance ``cdist_rounding_margin``
+    for an order-independent bound, or an owner-specified measured budget).
+    Equality is not stable. ``frozen_order_flips`` is the flip count measured on
+    the one frozen hardware/kernel order the owner pins (``None``: no frozen
+    order). Every argument is validated; NaN or inf raises ``ValueError``.
+    This is not a tie band: the adapter's ``1e-6 r`` stays as it is and is
+    never widened after the fact.
+    """
+    margin = _non_negative_float(min_relative_margin, name="min_relative_margin")
+    budget = _positive_float(budget_relative, name="budget_relative")
+    if frozen_order_flips is not None:
+        frozen_order_flips = _int_at_least(frozen_order_flips, name="frozen_order_flips", minimum=0)
+    ratio = margin / budget
+    if margin > budget:
+        return RadiusStabilityVerdict(
+            "stable", margin, budget, ratio,
+            f"min |d - r| / r = {margin:.6g} exceeds the float budget {budget:.6g}: no flip within the budget")
+    if frozen_order_flips == 0:
+        return RadiusStabilityVerdict(
+            "frozen_order_required", margin, budget, ratio,
+            f"min |d - r| / r = {margin:.6g} does not exceed the float budget {budget:.6g}; flip-free only on "
+            "the measured frozen hardware/kernel order, which the run manifest must pin")
+    detail = ("no frozen order given" if frozen_order_flips is None
+              else f"{frozen_order_flips} flips on the frozen order")
+    return RadiusStabilityVerdict(
+        "refused", margin, budget, ratio,
+        f"min |d - r| / r = {margin:.6g} does not exceed the float budget {budget:.6g} ({detail})")

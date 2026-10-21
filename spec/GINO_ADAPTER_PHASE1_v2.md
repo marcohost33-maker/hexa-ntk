@@ -61,6 +61,30 @@
   - **Open owner questions, not decided here:** which margin-over-error factor the D4 choice must meet, and
     whether the adapter's tie band (1e-6 r) should be widened towards the measured float32 error so that the
     adapter refuses every pair that can flip. The default and the adapter are unchanged.
+- **Amendment 2026-10-21 (GPT-6 HEX-P2-02, D4 criterion as a tool; decision support only).** The float32
+  summation order belongs to the D4 criterion: a fixed tie band of `1e-6 r` lies 17 to 69 times below the
+  measured float32 distance error, and "flip-free on this machine" is a property of one kernel order.
+  `spec/PHASE1_PROTOCOL_v1.md` section 11 adds two instruments, nothing else changes:
+  - `radius_graph_stability(min_relative_margin, budget_relative, frozen_order_flips)`: a candidate is
+    `stable` only if its margin strictly exceeds a float error budget that is fixed **before** the
+    candidates are compared; otherwise `frozen_order_required` (measured flip-free on one frozen
+    hardware/kernel order, which the run manifest must then pin) or `refused`. NaN/inf fail closed.
+  - `cdist_rounding_margin(radius, max_point_norm, unit_roundoff, input_abs_error)`: an order-independent
+    float32 budget for the matmul path of `torch.cdist` (Higham 2002, eq. 3.5 + lemma 3.3:
+    `|s_hat - s| <= gamma_6 (2R)^2` for every summation order, plus `sqrt` and the radius rounding).
+    Checked against two independent oracles in the tests: a numpy emulation of 24 sequential and 24
+    pairwise orders (40 000 pairs, 609 flipping pairs, none above the bound; the largest emulated error is
+    about 1/6 of the bound) and the committed survey (the measured float32 error near the radius lies
+    at 7 to 12 % of the bound on all 48 candidates; every flipping candidate's margin lies below it).
+  - Measured with that budget on the committed survey (`R = sqrt(7/4)`, input error `4 u R`):
+    **no tie-free candidate clears it.** Margin over budget: (16, 1.5) 0.32, (16, 2.25) 0.21,
+    (16, 2.75) 0.21, (24, 1.5) 0.14, (24, 2.5) 0.14, (16, 2.5) 0.11, (24, 2.25) 0.09, (24, 2.75) 0.09,
+    (48, 2.75) 0.03. Under an order-independent budget every candidate therefore needs a frozen
+    hardware/kernel order; a budget below the worst case (for instance a multiple of the measured error
+    over the machines that will run) is an owner choice and must be written down before the comparison.
+  - No post-hoc widening of the tie band: the adapter's `1e-6 r` refusal rule is unchanged and is not
+    the D4 criterion. Which budget D4 uses, and whether a frozen order is acceptable, stay open owner
+    questions; the preregistration is not changed.
 
 ## Testing and falsification
 
