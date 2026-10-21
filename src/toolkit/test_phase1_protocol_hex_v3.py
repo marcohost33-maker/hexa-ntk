@@ -543,6 +543,43 @@ _IDS = list(range(100000, 100500))
 _REGISTERED_STEPS = (1, 2, 4, 8, 16, 32, 64)
 
 
+def _curve_points(times, errors, *, steps=_REGISTERED_STEPS, n=32, domain="triangle_dirichlet", sample_count=500,
+                  timed_samples=5):
+    """Baseline points with explicit measurement coordinates, as ``baseline_cost_accuracy_curve`` writes them.
+
+    The coordinates are the ones under test (Equalita R4-F1); the values are given. Hand-built
+    points stand for a measured curve here; that a value belongs to its coordinates is not
+    checkable from the point (claim boundary, see the test of the relabelled curve).
+    """
+    return tuple(pp.CostAccuracyPoint(
+        n=n, steps=s, dt=1.0 / s, sample_count=sample_count, timed_samples=timed_samples,
+        mean_rel_l2=float(e), median_rel_l2=float(e), mean_rel_h1=float(e), mean_rel_max=float(e),
+        median_wall_time_s=float(t), wall_time_ci_s=(float(t), float(t)), cg_iterations_mean=1.0, domain=domain)
+        for s, t, e in zip(steps, times, errors))
+
+
+# Equalita R4 (probes/f1_real_grid.json, real_curve_n64_S50.json, 2026-10-21, torch 2.6.0+cpu,
+# numpy 2.5.3): genuine baseline_cost_accuracy_curve output on the same 50 ID inputs (ids
+# 100000..100049, dataset_seed 1, timed_samples 5). Errors are deterministic; times are one laptop
+# run. Kept as committed values so the test needs no solver run; the coordinates are the measured ones.
+_R4_N32_REGISTERED = (  # steps 1, 2, 4, 8, 16, 32, 64 on n = 32
+    [0.0032430500141344965, 0.0062607500003650784, 0.009617199946660548, 0.008816150017082691,
+     0.010499300085939467, 0.028430950012989342, 0.12459750002017245],
+    [0.3596096322403904, 0.030100273908731393, 0.0046839673106014446, 0.0034570043610646513,
+     0.004812187650726048, 0.005176910099385276, 0.005269112770350161])
+_R4_N32_FOREIGN_STEPS = (1, 8, 16, 24, 32, 48, 64)
+_R4_N32_FOREIGN = (  # steps 1, 8, 16, 24, 32, 48, 64 on n = 32
+    [0.00421584997093305, 0.022238750010728836, 0.027673550066538155, 0.02444500004639849,
+     0.023852800019085407, 0.05212105001555756, 0.11880609998479486],
+    [0.3596096322403904, 0.0034570043610646513, 0.004812187650726048, 0.005081700399329767,
+     0.005176910099385276, 0.005245172492616448, 0.005269112770350161])
+_R4_N64_REGISTERED = (  # steps 1, 2, 4, 8, 16, 32, 64 on n = 64
+    [0.00466270005563274, 0.008051299955695868, 0.01315584999974817, 0.07461384998168796,
+     0.1163086500018835, 0.05254090001108125, 0.12720480002462864],
+    [0.36909290998520305, 0.0338011868274127, 0.0076028534651852685, 0.00117874875644159,
+     0.0008577921540806324, 0.001195746789200225, 0.0012868805465495873])
+
+
 def _raw_errors(seed: int = 7) -> np.ndarray:
     rng = np.random.default_rng(seed)
     return 0.12 + 0.03 * rng.standard_normal((pp.PREREGISTERED_SEEDS, pp.PREREGISTERED_TEST_SAMPLES)) ** 2
@@ -563,12 +600,18 @@ class TestPreregisteredDecision(unittest.TestCase):
         cls.times = [float(s) for s in (1, 2, 4, 8, 16, 32, 64)]
         cls.curve = [4 * cls.e0 / t for t in cls.times]
 
-    def kwargs(self, **change):
+    def kwargs(self, times=None, curve=None, **change):
+        """Decision arguments; the baseline curve gets the decided ``n`` and domain unless given."""
         full = {"test_set": "id", "n": 32, "errors": self.errors, "sample_ids": _IDS,
                 "seeds": list(pp.PREREGISTERED_TRAINING_SEEDS),
                 "run_manifest": pp.build_run_manifest(_manifest_fields()),
-                "gino_latency_times_s": [4.0] * 10, "baseline_times_s": self.times, "baseline_errors": self.curve}
+                "gino_latency_times_s": [4.0] * 10}
         full.update(change)
+        if "baseline_curve" not in change:
+            domain = pp._LATTICE_DOMAIN[pp.PREREGISTERED_TEST_SETS.get(full["test_set"], ("triangle",))[0]]
+            full["baseline_curve"] = _curve_points(self.times if times is None else times,
+                                                   self.curve if curve is None else curve,
+                                                   n=full["n"], domain=domain)
         return full
 
     def test_a_relabelled_summary_cannot_reach_a_preregistered_decision(self):
@@ -662,7 +705,7 @@ class TestPreregisteredDecision(unittest.TestCase):
         bumped[2, 17] = np.nextafter(bumped[2, 17], 1.0)
         other_manifest = pp.build_run_manifest({**_manifest_fields(), "git_sha": "c" * 40})
         for change in ({"errors": bumped}, {"gino_latency_times_s": [4.0] * 9 + [4.5]},
-                       {"run_manifest": other_manifest}, {"baseline_errors": [*self.curve[:6], self.curve[6] * 0.99]}):
+                       {"run_manifest": other_manifest}, {"curve": [*self.curve[:6], self.curve[6] * 0.99]}):
             with self.subTest(change=sorted(change)), self.assertRaises(pp.DecisionProvenanceError):
                 pp.verify_preregistered_decision(base, **self.kwargs(**change))
 
@@ -702,7 +745,7 @@ class TestPreregisteredDecision(unittest.TestCase):
                        # 10 calls each, so the repeats rule (HEXA-TIM-01) cannot mask the check under test
                        {"gino_latency_times_s": []}, {"gino_latency_times_s": [4.0] * 9 + [0.0]},
                        {"gino_latency_times_s": [4.0] * 9 + [float("nan")]}, {"gino_latency_times_s": [[[1.0]]]},
-                       {"gino_latency_times_s": [True] * 10}, {"baseline_errors": [8, 4, 2]}, {"n": 0}):
+                       {"gino_latency_times_s": [True] * 10}, {"curve": [8, 4, 2]}, {"n": 0}):
             with self.subTest(bad=sorted(change)), self.assertRaises((TypeError, ValueError)):
                 pp.decide_preregistered(**self.kwargs(**change))
         for bad in (None, {}, {"record_sha256": 1}, {"record_sha256": "x", "v": float("nan")}):
@@ -792,43 +835,195 @@ class TestPreregisteredDecision(unittest.TestCase):
                                             baseline_errors=[curve[0], curve[6]]).verdict, "advantage")
         subsets = ([0, 6], [0, 5], [1, 6], [0, 3, 6], [0], [0, 1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6])
         honest = pp.decide_preregistered(**self.kwargs(errors=errors, gino_latency_times_s=latency,
-                                                       baseline_times_s=times, baseline_errors=curve))
+                                                       times=times, curve=curve))
         self.assertEqual(honest.verdict, "H0")
         for keep in subsets:
-            change = {"errors": errors, "gino_latency_times_s": latency,
-                      "baseline_times_s": [times[i] for i in keep], "baseline_errors": [curve[i] for i in keep]}
+            # The subset's points with their own (genuine) steps coordinates.
+            points = _curve_points([times[i] for i in keep], [curve[i] for i in keep],
+                                   steps=[_REGISTERED_STEPS[i] for i in keep])
+            change = {"errors": errors, "gino_latency_times_s": latency, "baseline_curve": points}
             with self.subTest(steps=[_REGISTERED_STEPS[i] for i in keep]):
-                with self.assertRaisesRegex(pp.DecisionInputError, "steps"):
+                with self.assertRaisesRegex(pp.DecisionInputError, "are not the registered steps"):
                     pp.decide_preregistered(**self.kwargs(**change))
-                with self.assertRaisesRegex(pp.DecisionInputError, "steps"):
+                with self.assertRaisesRegex(pp.DecisionInputError, "are not the registered steps"):
                     pp.verify_preregistered_decision(honest.to_dict(), **self.kwargs(**change))
         # The same class one level up: the genuine subset padded to seven points by repetition
         # passes a count check and keeps the chord (measured on the first fix, ef4e797: advantage).
-        for pad in ([0, 6, 6, 6, 6, 6, 6], [0, 0, 0, 6, 6, 6, 6], [1, 1, 1, 6, 6, 6, 6]):
-            change = {"errors": errors, "gino_latency_times_s": latency,
-                      "baseline_times_s": [times[i] for i in pad], "baseline_errors": [curve[i] for i in pad]}
-            with self.subTest(padded=[_REGISTERED_STEPS[i] for i in pad]):
-                with self.assertRaisesRegex(pp.DecisionInputError, "repeat"):
+        # Equalita R4-F6: each half of the check is pinned on its own (only times repeated, only
+        # errors repeated), since the first three pads repeat both.
+        only_times = [times[0]] + [times[6]] * 6
+        only_errors = [curve[0]] + [curve[6]] * 6
+        pads = [([times[i] for i in pad], [curve[i] for i in pad], str(pad))
+                for pad in ([0, 6, 6, 6, 6, 6, 6], [0, 0, 0, 6, 6, 6, 6], [1, 1, 1, 6, 6, 6, 6])]
+        pads += [(only_times, curve, "times only"), (times, only_errors, "errors only")]
+        for pad_times, pad_errors, label in pads:
+            change = {"errors": errors, "gino_latency_times_s": latency, "times": pad_times, "curve": pad_errors}
+            with self.subTest(padded=label):
+                with self.assertRaisesRegex(pp.DecisionInputError, "must not repeat a time or an error"):
                     pp.decide_preregistered(**self.kwargs(**change))
         # An eighth point (steps 128) is not registered either.
-        with self.assertRaisesRegex(pp.DecisionInputError, "steps"):
-            pp.decide_preregistered(**self.kwargs(baseline_times_s=[*self.times, 128.0],
-                                                  baseline_errors=[*self.curve, self.curve[-1] / 2]))
+        with self.assertRaisesRegex(pp.DecisionInputError, "are not the registered steps"):
+            pp.decide_preregistered(**self.kwargs(baseline_curve=_curve_points(
+                [*self.times, 128.0], [*self.curve, self.curve[-1] / 2], steps=(*_REGISTERED_STEPS, 128))))
+
+    def _r4_case(self):
+        """Equalita R4-F1 setting, genuine n = 32 curve: GINO latency t(steps 4), upper bound 1.25 e(steps 4)."""
+        times, curve = _R4_N32_REGISTERED
+        self.assertEqual(len(times), len(curve))
+        raw = 1.0 + 0.3 * np.random.default_rng(7).random((5, 500))
+        high = 1.25 * curve[2]
+        errors = high * raw / pp.paired_bootstrap_iqm(raw, sample_ids=_IDS)[""].high
+        return errors, [times[2]] * 10
+
+    def test_a_genuine_curve_from_another_grid_or_lattice_is_refused(self):
+        # Equalita R4-F1 (2026-10-21, 646254d): R3 bound only the number of points. The GENUINE
+        # n = 32 curve measured on steps (1, 8, 16, 24, 32, 48, 64), and the genuine n = 64 curve
+        # submitted for n = 32, both reached "advantage" (registered: H0), and the record named
+        # steps [1..64] and n 32. Each point now carries its coordinates and they are checked.
+        errors, latency = self._r4_case()
+        summary = pp.paired_bootstrap_iqm(errors, sample_ids=_IDS)[""]
+        registered = _curve_points(*_R4_N32_REGISTERED)
+        foreign_grid = _curve_points(*_R4_N32_FOREIGN, steps=_R4_N32_FOREIGN_STEPS)
+        foreign_lattice = _curve_points(*_R4_N64_REGISTERED, n=64)
+        # Positive control of the attack (diagnostic helper, values only): both foreign curves flip H0.
+        for points, verdict in ((registered, "H0"), (foreign_grid, "advantage"), (foreign_lattice, "advantage")):
+            with self.subTest(diagnostic=points[0].n, steps=[p.steps for p in points]):
+                self.assertEqual(pp.decide_test_set(
+                    test_set="id", n=32, gino=summary, gino_latency_s=latency[0],
+                    baseline_times_s=[p.median_wall_time_s for p in points],
+                    baseline_errors=[p.mean_rel_l2 for p in points]).verdict, verdict)
+        # Positive control of the guard: the registered genuine curve is accepted with H0.
+        honest = pp.decide_preregistered(**self.kwargs(errors=errors, gino_latency_times_s=latency,
+                                                       baseline_curve=registered))
+        self.assertEqual(honest.verdict, "H0")
+        prov = honest.to_dict()["provenance"]
+        self.assertEqual(prov["baseline_steps"], list(_REGISTERED_STEPS))
+        self.assertEqual(prov["baseline_n"], [32])
+        for points, reason in ((foreign_grid, r"steps \[1, 8, 16, 24, 32, 48, 64\] are not the registered steps"),
+                               (foreign_lattice, "measured on lattice n = 64, the decision is for n = 32")):
+            change = {"errors": errors, "gino_latency_times_s": latency, "baseline_curve": points}
+            with self.subTest(refused=reason):
+                with self.assertRaisesRegex(pp.DecisionInputError, reason):
+                    pp.decide_preregistered(**self.kwargs(**change))
+                with self.assertRaisesRegex(pp.DecisionInputError, reason):
+                    pp.verify_preregistered_decision(honest.to_dict(), **self.kwargs(**change))
+        # The same values in another order (Equalita R4 E7: 31 permutations were accepted and
+        # recorded with wrong steps) carry their steps in another order and are refused.
+        reversed_points = tuple(reversed(registered))
+        with self.assertRaisesRegex(pp.DecisionInputError, "are not the registered steps"):
+            pp.decide_preregistered(**self.kwargs(errors=errors, gino_latency_times_s=latency,
+                                                  baseline_curve=reversed_points))
+
+    def test_every_measurement_coordinate_of_a_point_is_checked(self):
+        # Domain, sample count and timed samples are coordinates too: an n = 32 torus curve has the
+        # registered n and steps but other inputs; a 50-input curve is not "the same test inputs".
+        cases = (
+            ({"domain": "torus_periodic"}, "measured on domain 'torus_periodic'"),
+            ({"domain": "triangle"}, "measured on domain 'triangle'"),      # registry name, not the lattice's
+            ({"sample_count": 50}, "sample_count 50"),
+            ({"sample_count": 501}, "sample_count 501"),
+            ({"timed_samples": 0}, "timed_samples 0"),
+            ({"timed_samples": 501}, "timed_samples 501"),
+            ({"n": 16}, "lattice n = 16"),
+        )
+        for coords, reason in cases:
+            with self.subTest(coords=coords):
+                points = _curve_points(self.times, self.curve, **coords)
+                with self.assertRaisesRegex(pp.DecisionInputError, reason):
+                    pp.decide_preregistered(**self.kwargs(baseline_curve=points))
+        # One deviating point among seven is enough.
+        for field, value, reason in (("n", 64, "lattice n = 64"),
+                                     ("domain", "torus_periodic", "domain 'torus_periodic'"),
+                                     ("sample_count", 499, "sample_count 499")):
+            with self.subTest(single=field):
+                points = list(_curve_points(self.times, self.curve))
+                points[4] = dataclasses.replace(points[4], **{field: value})
+                with self.assertRaisesRegex(pp.DecisionInputError, reason):
+                    pp.decide_preregistered(**self.kwargs(baseline_curve=tuple(points)))
+        # The torus set accepts a torus curve (domain from the test set, not a constant).
+        torus = pp.decide_preregistered(**self.kwargs(test_set="composite_ood", sample_ids=list(range(200000, 200500))))
+        self.assertEqual({p["domain"] for p in torus.provenance["baseline_points"]}, {"torus_periodic"})
+        # Types and values of the coordinates fail closed, not by coercion.
+        for field, value in (("steps", 1.0), ("steps", True), ("n", 32.0), ("sample_count", "500"),
+                             ("mean_rel_l2", float("nan")), ("median_wall_time_s", 0.0),
+                             ("median_rel_l2", float("inf")), ("wall_time_ci_s", (1.0,)), ("dt", -1.0)):
+            with self.subTest(field=field, value=value):
+                points = list(_curve_points(self.times, self.curve))
+                points[0] = dataclasses.replace(points[0], **{field: value})
+                with self.assertRaises(pp.DecisionInputError):
+                    pp.decide_preregistered(**self.kwargs(baseline_curve=tuple(points)))
+
+    def test_genuine_curve_output_passes_steps_lattice_and_domain(self):
+        # Fehler 2. Art against the producer itself, not against hand-built points: the coordinates
+        # baseline_cost_accuracy_curve writes (lattice spelling of the domain included) must pass
+        # the steps, n and domain checks; with 2 instead of 500 inputs the first refusal is the
+        # sample count, which the checks reach only after steps, n and domain of that point.
+        protocol = pp.TimingProtocol(warmup=1, repeats=3, bootstrap_resamples=200)
+        for test_set, domain, ids in (("id", "triangle_dirichlet", [100000, 100001]),
+                                      ("composite_ood", "torus_periodic", [200000, 200001])):
+            with self.subTest(test_set=test_set):
+                config = HeatOperatorTaskConfig(domain=domain)
+                data = generate_dataset(config, n=32, sample_ids=ids, dataset_seed=1)
+                points = pp.baseline_cost_accuracy_curve(config, data["u0"], data["uT"], data["lattice"],
+                                                         protocol=protocol, timed_samples=1, clock=_fake_clock())
+                self.assertEqual([(p.n, p.domain, p.steps) for p in points],
+                                 [(32, domain, s) for s in _REGISTERED_STEPS])
+                change = {"test_set": test_set, "sample_ids": list(range(ids[0], ids[0] + 500)),
+                          "baseline_curve": points}
+                with self.assertRaisesRegex(pp.DecisionInputError, r"steps=1 has sample_count 2;"):
+                    pp.decide_preregistered(**self.kwargs(**change))
+
+    def test_the_former_float_list_form_is_refused(self):
+        # API change 2026-10-21 (Equalita R4-F1): two bare float lists carry no coordinates.
+        params = inspect.signature(pp.decide_preregistered).parameters
+        self.assertIn("baseline_curve", params)
+        self.assertNotIn("baseline_times_s", params)
+        self.assertNotIn("baseline_errors", params)
+        full = self.kwargs()
+        old = {k: v for k, v in full.items() if k != "baseline_curve"}
+        with self.assertRaisesRegex(TypeError, "baseline_times_s"):
+            pp.decide_preregistered(**old, baseline_times_s=self.times, baseline_errors=self.curve)
+        points = full["baseline_curve"]
+        subclass = type("PointLike", (pp.CostAccuracyPoint,), {})
+        for bad in (self.times, (self.times, self.curve), np.array([self.times, self.curve]),
+                    [p.to_dict() for p in points], {"times": self.times}, "points",
+                    tuple(subclass(**dataclasses.asdict(p)) for p in points)):
+            with self.subTest(bad=type(bad).__name__):
+                with self.assertRaisesRegex(TypeError, "tuple of CostAccuracyPoint"):
+                    pp.decide_preregistered(**{**old, "baseline_curve": bad})
+        # A list of points is accepted like the tuple.
+        self.assertEqual(pp.decide_preregistered(**{**old, "baseline_curve": list(points)}).to_dict(),
+                         pp.decide_preregistered(**full).to_dict())
+
+    def test_a_relabelled_curve_is_out_of_reach(self):
+        # Claim boundary (as for the raw table): a caller who builds points by hand can put the
+        # registered coordinates on values measured elsewhere. The point cannot show where it was
+        # measured; only a recomputation of the errors or an attestation of the timing run can.
+        errors, latency = self._r4_case()
+        relabelled = _curve_points(*_R4_N32_FOREIGN)              # foreign-grid values, registered steps
+        d = pp.decide_preregistered(**self.kwargs(errors=errors, gino_latency_times_s=latency,
+                                                  baseline_curve=relabelled))
+        self.assertEqual(d.verdict, "advantage")
+        self.assertTrue(d.provenance["authenticity"].startswith("unattested"))
 
     def test_the_registered_steps_grid_is_accepted_and_recorded(self):
-        # Positive control for F1: the full 7-point curve keeps its verdict, and the record names
-        # the steps and the lattice of every baseline point, so a reviewer can rerun them
+        # Positive control for F1: the full 7-point curve keeps its verdict, and the record is
+        # written from the points: every point with its coordinates, so a reviewer can rerun them
         # (spec/PHASE1_PROTOCOL_v1.md section 5a, claim boundary).
         self.assertEqual(tuple(pp._DEFAULT_STEPS_GRID), _REGISTERED_STEPS)
         times, curve, errors, latency = self._convex_case()
         legit = pp.decide_preregistered(**self.kwargs(errors=errors, gino_latency_times_s=latency,
-                                                      baseline_times_s=times, baseline_errors=curve))
+                                                      times=times, curve=curve))
         self.assertEqual(legit.verdict, "H0")
         for test_set, n in (("id", 32), ("resolution_ood", 16)):
             with self.subTest(test_set=test_set, n=n):
-                prov = pp.decide_preregistered(**self.kwargs(test_set=test_set, n=n)).to_dict()["provenance"]
+                change = self.kwargs(test_set=test_set, n=n)
+                prov = pp.decide_preregistered(**change).to_dict()["provenance"]
                 self.assertEqual(prov.get("baseline_steps"), list(_REGISTERED_STEPS))
-                self.assertEqual(prov.get("baseline_n"), n)
+                self.assertEqual(prov.get("baseline_n"), [n])
+                expected = [{**p.to_dict(), "wall_time_ci_s": list(p.wall_time_ci_s)}
+                            for p in change["baseline_curve"]]
+                self.assertEqual(prov.get("baseline_points"), expected)
 
     def test_the_run_manifest_content_is_bound_to_the_preregistration(self):
         # Equalita R3 F2 (2026-10-21): form and self-digest were checked, the content not; a
@@ -845,13 +1040,26 @@ class TestPreregisteredDecision(unittest.TestCase):
             ("split_ids", {"split_ids": {"train": [0, 1, 2], "val": [200000]}}),
             ("split_ids", {"split_ids": {"train": [0, 1, 2000], "val": [3]}}),       # outside the pool
             ("datasets", {"datasets": {"train_pool": "c" * 64, "resolution_ood": "d" * 64}}),
-            ("preregistration", {"preregistration": {"version": "PREREGISTRATION_PHASE1_v1 DRAFT",
-                                                     "sha256": "0" * 64}}),
+            # Equalita R4-F6: every F2 message cites "(preregistration :NN)", so the rule name
+            # "preregistration" matched any refusal; the digest rule's own words are pinned.
+            ("is not the file_sha256", {"preregistration": {"version": "PREREGISTRATION_PHASE1_v1 DRAFT",
+                                                            "sha256": "0" * 64}}),
             ("cuda", {"hardware": {**hardware, "cuda": "12.4"}}),
             ("cuda", {"hardware": {**hardware, "cuda": True}}),
             ("cuda", {"hardware": {**hardware, "cuda": None}}),
             ("dtype", {"hardware": {**hardware, "dtype": "float16-amp"}}),
+            # Equalita R4-F3: float32 with AMP or autocast was accepted (preregistration :103,
+            # :122, :228); AMP must be recorded, as False.
+            ("hardware amp = 'bfloat16'", {"hardware": {**hardware, "amp": "bfloat16"}}),
+            ("hardware amp = True", {"hardware": {**hardware, "amp": True}}),
+            ("hardware amp = None", {"hardware": {**hardware, "amp": None}}),
+            ("hardware amp = 0", {"hardware": {**hardware, "amp": 0}}),
+            ("hardware amp = '<missing>'", {"hardware": {k: v for k, v in hardware.items() if k != "amp"}}),
+            ("hardware autocast = True", {"hardware": {**hardware, "autocast": True}}),
+            ("hardware autocast = 'bf16'", {"hardware": {**hardware, "autocast": "bf16"}}),
             ("neuraloperator", {"backend": {**backend, "neuraloperator": "9.9"}}),
+            # R4-F6: the nearest version, which a prefix rule "2." or "2.0" would let through.
+            ("neuraloperator = '2.0.1'", {"backend": {**backend, "neuraloperator": "2.0.1"}}),
             ("neuraloperator", {"backend": {k: v for k, v in backend.items() if k != "neuraloperator"}}),
         )
         for rule, change in forged:
@@ -882,6 +1090,9 @@ class TestPreregisteredDecision(unittest.TestCase):
         # Positive control: the registered manifest (pool ids, the set's digest, the file's digest,
         # CPU without CUDA, float32, neuraloperator 2.0.0) is accepted with the same verdict.
         self.assertEqual(pp.decide_preregistered(**self.kwargs()).verdict, "H0")
+        self.assertIs(_manifest_fields()["hardware"]["amp"], False)
+        self.assertEqual(pp.decide_preregistered(**self.kwargs(
+            run_manifest=manifest(hardware={**hardware, "autocast": False}))).verdict, "H0")
         self.assertEqual(pp.decide_preregistered(**self.kwargs(
             run_manifest=manifest(split_ids={"train": list(range(1800)), "val": list(range(1800, 2000))}))).verdict,
             "H0")
@@ -904,7 +1115,7 @@ class TestPreregisteredDecision(unittest.TestCase):
         base = pp.decide_preregistered(**self.kwargs()).to_dict()
         self.assertEqual(base["provenance"].get("baseline_times_s"), self.times)
         self.assertEqual(base["provenance"].get("baseline_errors"), self.curve)
-        moved = self.kwargs(baseline_times_s=[*self.times[:6], 65.0])
+        moved = self.kwargs(times=[*self.times[:6], 65.0])
         self.assertEqual(pp.decide_preregistered(**moved).to_dict()["rules"], base["rules"])
         with self.assertRaisesRegex(pp.DecisionProvenanceError, "provenance"):
             pp.verify_preregistered_decision(base, **moved)
@@ -948,7 +1159,7 @@ def _manifest_fields():
         "backend": {"python": "3.12.10", "torch": "2.6.0", "numpy": "2.5.3", "neuraloperator": "2.0.0"},
         "config_digest": "e" * 64,
         "seeds": [0, 1, 2, 3, 4],
-        "hardware": {"machine": "test-box", "threads": 4, "dtype": "float32", "cuda": False},
+        "hardware": {"machine": "test-box", "threads": 4, "dtype": "float32", "cuda": False, "amp": False},
         "reference_spec_ids": ["hex-heat-tri", "hex-heat-torus"],
         "metric_spec_sha256": "f" * 64,
         "result_digests": {},
@@ -1236,6 +1447,11 @@ class TestRadiusFloatStability(unittest.TestCase):
         contradicted = pp.radius_graph_stability(2e-4, budget_relative=1e-4, frozen_order_flips=3)
         self.assertEqual(contradicted.status, "refused")
         self.assertIn("contradict", contradicted.reason)
+        # Equalita R4-F6: the boundary itself, a single measured flip, is a contradiction too
+        # (a mutant "flips >= 2" kept every test above green).
+        single = pp.radius_graph_stability(2e-4, budget_relative=1e-4, frozen_order_flips=1)
+        self.assertEqual(single.status, "refused")
+        self.assertIn("1 measured flips", single.reason)
         self.assertEqual(pp.radius_graph_stability(2e-4, budget_relative=1e-4, frozen_order_flips=0).status,
                          "stable")
         verdict = pp.radius_graph_stability(3e-4, budget_relative=1e-4)

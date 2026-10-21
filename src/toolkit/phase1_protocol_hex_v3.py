@@ -76,7 +76,7 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -111,6 +111,9 @@ PREREGISTERED_TEST_SETS: Mapping[str, Tuple[str, Tuple[int, ...], range]] = Mapp
     "resolution_ood": ("triangle", (16, 64, 128), range(100000, 100500)),
     "composite_ood": ("torus", (32,), range(200000, 200500)),
 })
+# The registered domain names above as the lattice spells them (HexLattice.domain,
+# heat_operator_task_hex_v3._DOMAINS): a baseline point carries the lattice's spelling.
+_LATTICE_DOMAIN: Mapping[str, str] = MappingProxyType({"triangle": "triangle_dirichlet", "torus": "torus_periodic"})
 _DECISION_SCHEMA = "hexantk_phase1_decision_record_v1"
 _AUTHENTICITY = ("unattested: the record_sha256 is a self-digest; it shows that the record follows from "
                  "the named raw bytes, not who produced those bytes (no signature, no pipeline attestation)")
@@ -318,7 +321,15 @@ def measure_latency(
 
 @dataclass(frozen=True)
 class CostAccuracyPoint:
-    """One ``(N, steps)`` point of the baseline's cost-accuracy curve (spec section 2)."""
+    """One ``(N, steps)`` point of the baseline's cost-accuracy curve (spec section 2).
+
+    The point carries its own measurement coordinates (lattice ``n`` and
+    ``domain``, ``steps``, ``sample_count``, ``timed_samples``), written by
+    ``baseline_cost_accuracy_curve`` from the lattice and inputs it ran on.
+    ``decide_preregistered`` checks them against the preregistration
+    (Equalita R4-F1). ``domain`` is the last field and has no default, so a
+    positional construction from before it was added fails loudly.
+    """
 
     n: int
     steps: int
@@ -332,6 +343,7 @@ class CostAccuracyPoint:
     median_wall_time_s: float
     wall_time_ci_s: Tuple[float, float]
     cg_iterations_mean: float
+    domain: str
 
     def to_dict(self) -> Dict[str, Any]:
         out = asdict(self)
@@ -416,7 +428,7 @@ def baseline_cost_accuracy_curve(
             mean_rel_l2=float(np.mean(rel_l2)), median_rel_l2=float(np.median(rel_l2)),
             mean_rel_h1=float(np.mean(metrics["rel_h1"])), mean_rel_max=float(np.mean(metrics["rel_max"])),
             median_wall_time_s=float(np.median(rows)), wall_time_ci_s=(low, high),
-            cg_iterations_mean=float(np.mean(iterations)),
+            cg_iterations_mean=float(np.mean(iterations)), domain=str(lattice.domain),
         ))
     return tuple(points)
 
@@ -921,6 +933,14 @@ def _check_registered_manifest_content(manifest: Mapping[str, Any], test_set: st
         raise DecisionProvenanceError(
             f"run_manifest hardware dtype = {hardware['dtype']!r}; registered is float32 "
             "(preregistration :103)")
+    for key in ("amp", "autocast"):
+        # :103 float32 for training (no mixed precision); :122 and :228 dtype/AMP go into the
+        # manifest, so `amp` must be recorded, as False (Equalita R4-F3). An `autocast` entry,
+        # where present, must be False too. Other spellings are not recognised (owner, R4-F5).
+        if (key == "amp" or key in hardware) and hardware.get(key) is not False:
+            raise DecisionProvenanceError(
+                f"run_manifest hardware {key} = {hardware.get(key, '<missing>')!r}; registered is float32 "
+                f"without AMP, recorded as {key} = False (preregistration :103, :122, :228)")
     if manifest["backend"].get("neuraloperator") != _REGISTERED_NEURALOPERATOR:
         # :94 D7 neuraloperator==2.0.0.
         raise DecisionProvenanceError(
@@ -945,6 +965,94 @@ def _latency_times(value: Any) -> np.ndarray:
             f"gino_latency_times_s must hold the {repeats} preregistered timed repeats per sample, "
             f"shape ({repeats},) or (samples, {repeats}), got shape {arr.shape}")
     return arr
+
+
+def _point_int(value: Any, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, numbers.Integral):
+        raise DecisionInputError(f"{name} must be an int, got {value!r}")
+    return int(value)
+
+
+def _point_float(value: Any, *, name: str, positive: bool = False) -> float:
+    if not _is_real(value) or not math.isfinite(float(value)) or (positive and float(value) <= 0.0):
+        raise DecisionInputError(f"{name} must be a finite real number{' > 0' if positive else ''}, got {value!r}")
+    return float(value)
+
+
+def _registered_baseline_points(curve: Any, *, test_set: str, n: int) -> List[Dict[str, Any]]:
+    """Equalita R4-F1: every baseline point checked by its own coordinates; the record's point list.
+
+    R3 bound only the number of values, R4 found that a genuine curve measured on another
+    steps grid (1, 8, 16, 24, 32, 48, 64) or on another lattice (n = 64 under n = 32) still
+    reached "advantage" while the record named the registered steps and n. Here the
+    coordinates come with each point (``baseline_cost_accuracy_curve`` writes them from the
+    lattice and inputs it ran on) and are compared with the preregistration; the record is
+    written from the checked points. Checks run in a fixed order (steps, n, domain, sample
+    count, timed samples, values), so each refusal names the first coordinate that differs.
+    """
+    if (isinstance(curve, (str, bytes, Mapping, np.ndarray)) or not isinstance(curve, Sequence)
+            or any(type(p) is not CostAccuracyPoint for p in curve)):
+        raise TypeError(
+            "baseline_curve must be the tuple of CostAccuracyPoint returned by baseline_cost_accuracy_curve; "
+            "bare time/error lists carry no steps, lattice or sample count and are not accepted "
+            "(API change 2026-10-21, Equalita R4-F1)")
+    grid = _DEFAULT_STEPS_GRID
+    domain = _LATTICE_DOMAIN[PREREGISTERED_TEST_SETS[test_set][0]]
+    steps = tuple(_point_int(p.steps, name="baseline_curve steps") for p in curve)
+    if steps != grid:
+        # :134-137 the baseline runs with steps 1, 2, 4, 8, 16, 32, 64. A subset, another grid
+        # or another order is another frontier (a chord lies above a convex curve).
+        raise DecisionInputError(
+            f"baseline_curve steps {list(steps)} are not the registered steps {list(grid)}, one point "
+            "each in that order (preregistration :134-137)")
+    for p in curve:
+        if _point_int(p.n, name="baseline_curve n") != n:
+            # :134-135 the curve runs on the evaluation lattice N_eval itself.
+            raise DecisionInputError(
+                f"baseline_curve point steps={p.steps} was measured on lattice n = {p.n}, the decision is "
+                f"for n = {n} (preregistration :134-135, the evaluation lattice)")
+        if p.domain != domain:
+            raise DecisionInputError(
+                f"baseline_curve point steps={p.steps} was measured on domain {p.domain!r}, test set "
+                f"{test_set!r} is registered on {domain!r} (preregistration :62-68 [D3])")
+        if _point_int(p.sample_count, name="baseline_curve sample_count") != PREREGISTERED_TEST_SAMPLES:
+            # :62-68 [D3] 500 ids per test set; :136 "on the same test inputs".
+            raise DecisionInputError(
+                f"baseline_curve point steps={p.steps} has sample_count {p.sample_count}; the curve runs on "
+                f"the {PREREGISTERED_TEST_SAMPLES} registered test inputs (preregistration :62-68, :136)")
+        timed = _point_int(p.timed_samples, name="baseline_curve timed_samples")
+        if not 1 <= timed <= p.sample_count:
+            raise DecisionInputError(
+                f"baseline_curve point steps={p.steps} has timed_samples {timed}, outside 1..{p.sample_count}")
+    points = []
+    for p in curve:
+        ci = p.wall_time_ci_s
+        if isinstance(ci, (str, bytes)) or not isinstance(ci, Sequence) or len(ci) != 2:
+            raise DecisionInputError(f"baseline_curve wall_time_ci_s must be a (low, high) pair, got {ci!r}")
+        points.append({
+            "n": int(p.n), "domain": p.domain, "steps": int(p.steps), "sample_count": int(p.sample_count),
+            "timed_samples": int(p.timed_samples),
+            "dt": _point_float(p.dt, name="baseline_curve dt", positive=True),
+            "mean_rel_l2": _point_float(p.mean_rel_l2, name="baseline_curve mean_rel_l2", positive=True),
+            "median_wall_time_s": _point_float(p.median_wall_time_s, name="baseline_curve median_wall_time_s",
+                                               positive=True),
+            "median_rel_l2": _point_float(p.median_rel_l2, name="baseline_curve median_rel_l2"),
+            "mean_rel_h1": _point_float(p.mean_rel_h1, name="baseline_curve mean_rel_h1"),
+            "mean_rel_max": _point_float(p.mean_rel_max, name="baseline_curve mean_rel_max"),
+            "wall_time_ci_s": [_point_float(c, name="baseline_curve wall_time_ci_s") for c in ci],
+            "cg_iterations_mean": _point_float(p.cg_iterations_mean, name="baseline_curve cg_iterations_mean"),
+        })
+    times = [p["median_wall_time_s"] for p in points]
+    errors = [p["mean_rel_l2"] for p in points]
+    # Self-check after R3 F1: two genuine points copied to seven pass a count check. This
+    # catches only the literal repetition of a value; copies shifted by 1 ulp or 1e-12, or
+    # chord points, pass (Equalita R4-F2): the values themselves cannot show where they were
+    # measured, only a recomputation or an attestation can (claim boundary, authenticity).
+    if len(set(times)) != len(times) or len(set(errors)) != len(errors):
+        raise DecisionInputError(
+            "baseline_curve must not repeat a time or an error: one measured point per registered "
+            f"steps value {list(grid)} (preregistration :134-137)")
+    return points
 
 
 @dataclass(frozen=True)
@@ -1005,8 +1113,7 @@ def decide_preregistered(
     seeds: Any,
     run_manifest: Mapping[str, Any],
     gino_latency_times_s: Any,
-    baseline_times_s: Any,
-    baseline_errors: Any,
+    baseline_curve: Any,
 ) -> PreregisteredDecision:
     """Both preregistered rules from GINO's raw per-sample errors (spec section 5a, HEX-P1-01).
 
@@ -1019,15 +1126,24 @@ def decide_preregistered(
       match its digest; its seed set must equal ``seeds``, and the content the
       preregistration fixes must hold (``_check_registered_manifest_content``:
       split ids in the train pool, the test set's dataset digest, the
-      preregistration file's digest, CPU without CUDA, float32, neuraloperator
-      2.0.0), else ``DecisionProvenanceError``;
+      preregistration file's digest, CPU without CUDA, float32 without AMP,
+      neuraloperator 2.0.0), else ``DecisionProvenanceError``;
     - ``gino_latency_times_s``: the timed calls, exactly ``TimingProtocol().repeats``
       (10) per sample: shape (10,) for one sample or (samples, 10); any other count
       raises ``DecisionInputError``. The latency is their median, as for the
       baseline curve. Warm-ups are not visible in these numbers.
-    - ``baseline_times_s``, ``baseline_errors``: exactly one point per registered
-      ``steps`` value 1, 2, 4, ..., 64 in that order (preregistration section 4),
-      else ``DecisionInputError``; steps and ``n`` are written into the record.
+    - ``baseline_curve``: the tuple of ``CostAccuracyPoint`` returned by
+      ``baseline_cost_accuracy_curve`` (Equalita R4-F1, API change 2026-10-21:
+      the former two float lists ``baseline_times_s``/``baseline_errors`` are
+      no longer parameters, and a sequence of anything but ``CostAccuracyPoint``
+      raises ``TypeError``). Every point carries its measurement coordinates and
+      each is checked against the preregistration, else ``DecisionInputError``:
+      the ``steps`` of the points, in order, are exactly 1, 2, 4, ..., 64
+      (preregistration :134-137); every point's ``n`` is the decided lattice
+      and its ``domain`` the test set's domain; every ``sample_count`` is the
+      500 registered test inputs (:62-68 [D3], :136 "on the same test
+      inputs"); ``1 <= timed_samples <= sample_count``. The record's baseline
+      fields are written from the points, never from constants or arguments.
 
     Rows and columns are put into ascending seed and sample-id order, so the
     result does not depend on the caller's order, and the bootstrap and the
@@ -1035,8 +1151,8 @@ def decide_preregistered(
     accepts a summary of GINO's errors; the baseline curve enters as its
     per-point summaries (mean ``rel_l2``, median wall time; spec section 2).
     The record binds SHA-256 digests of the canonical raw
-    bytes, the sample ids, the latency calls and the run manifest, the baseline
-    curve values with their steps and lattice, and the seed list;
+    bytes, the sample ids, the latency calls and the run manifest, every
+    baseline point with its own coordinates, and the seed list;
     ``verify_preregistered_decision`` recomputes it from the raw data.
     """
     if not isinstance(test_set, str) or test_set not in PREREGISTERED_TEST_SETS:
@@ -1071,25 +1187,9 @@ def decide_preregistered(
             f"run_manifest seeds {manifest['seeds']} differ from the error table's seeds {list(seed_list)}")
     _check_registered_manifest_content(manifest, test_set)
     latency_calls = _latency_times(gino_latency_times_s)
-    times = _positive_vector(baseline_times_s, name="baseline_times_s")
-    curve_errors = _positive_vector(baseline_errors, name="baseline_errors")
-    # Equalita R3 F1: spec/PREREGISTRATION_PHASE1_v1.md:134-137 runs the baseline on the
-    # evaluation lattice with steps 1, 2, 4, 8, 16, 32, 64. Entry k of the curve belongs to
-    # steps _DEFAULT_STEPS_GRID[k] on lattice n; a subset of the points is another frontier
-    # (a chord lies above a convex curve) and is refused. Steps and n go into the record.
-    grid = _DEFAULT_STEPS_GRID
-    if times.shape != (len(grid),) or curve_errors.shape != (len(grid),):
-        raise DecisionInputError(
-            f"baseline_times_s and baseline_errors must hold one point per registered steps value "
-            f"{list(grid)} (preregistration section 4), in that order, got {times.size} and "
-            f"{curve_errors.size} points")
-    # The same class one level up (self-check after F1): two genuine points padded to seven by
-    # repeating them pass a count check and give the same chord. Seven steps values are seven
-    # measurements, so neither a time nor an error may repeat.
-    if np.unique(times).size != times.size or np.unique(curve_errors).size != curve_errors.size:
-        raise DecisionInputError(
-            "baseline_times_s and baseline_errors must not repeat a value: one measured point per "
-            f"registered steps value {list(grid)} (preregistration section 4)")
+    points = _registered_baseline_points(baseline_curve, test_set=test_set, n=n)
+    times = np.array([p["median_wall_time_s"] for p in points], dtype=np.float64)
+    curve_errors = np.array([p["mean_rel_l2"] for p in points], dtype=np.float64)
 
     rows = np.argsort(np.asarray(seed_list), kind="stable")
     cols = np.argsort(np.asarray(ids), kind="stable")
@@ -1109,10 +1209,12 @@ def decide_preregistered(
         "sample_id_range": [canonical_ids[0], canonical_ids[-1]],
         "gino_latency_times_sha256": _array_sha256(latency_calls),
         "gino_latency_times_shape": list(latency_calls.shape),
-        "baseline_times_s": [float(t) for t in times],
-        "baseline_errors": [float(e) for e in curve_errors],
-        "baseline_steps": list(grid),
-        "baseline_n": n,
+        # Written from the checked points (Equalita R4-F1), not from _DEFAULT_STEPS_GRID or n.
+        "baseline_points": points,
+        "baseline_times_s": [p["median_wall_time_s"] for p in points],
+        "baseline_errors": [p["mean_rel_l2"] for p in points],
+        "baseline_steps": [p["steps"] for p in points],
+        "baseline_n": sorted({p["n"] for p in points}),
         "run_manifest_sha256": manifest["manifest_sha256"],
         "git_sha": manifest["git_sha"],
         "preregistration": manifest["preregistration"],
