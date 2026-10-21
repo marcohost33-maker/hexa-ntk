@@ -228,7 +228,9 @@ registered grid below, not recomputed (claim boundary).
   `k` for the `k`-th value, on the decided lattice `n`; any other count raises
   `DecisionInputError` (Equalita R3 F1: two genuine points alone, steps
   `{1, 64}`, reached `advantage` because the chord lies above the convex
-  curve). `provenance` records `baseline_steps` and `baseline_n`. That the
+  curve). No time and no error may repeat: seven steps values are seven
+  measurements, and the same two points padded to seven by repetition would
+  keep the chord. `provenance` records `baseline_steps` and `baseline_n`. That the
   values belong to those steps is declared, not measured (claim boundary).
 - `gino_latency_times_s` are the timed calls, exactly the preregistered 10
   measured repeats per sample (`TimingProtocol().repeats`, section 1): shape

@@ -1083,6 +1083,13 @@ def decide_preregistered(
             f"baseline_times_s and baseline_errors must hold one point per registered steps value "
             f"{list(grid)} (preregistration section 4), in that order, got {times.size} and "
             f"{curve_errors.size} points")
+    # The same class one level up (self-check after F1): two genuine points padded to seven by
+    # repeating them pass a count check and give the same chord. Seven steps values are seven
+    # measurements, so neither a time nor an error may repeat.
+    if np.unique(times).size != times.size or np.unique(curve_errors).size != curve_errors.size:
+        raise DecisionInputError(
+            "baseline_times_s and baseline_errors must not repeat a value: one measured point per "
+            f"registered steps value {list(grid)} (preregistration section 4)")
 
     rows = np.argsort(np.asarray(seed_list), kind="stable")
     cols = np.argsort(np.asarray(ids), kind="stable")

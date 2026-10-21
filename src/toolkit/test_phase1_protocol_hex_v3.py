@@ -802,6 +802,14 @@ class TestPreregisteredDecision(unittest.TestCase):
                     pp.decide_preregistered(**self.kwargs(**change))
                 with self.assertRaisesRegex(pp.DecisionInputError, "steps"):
                     pp.verify_preregistered_decision(honest.to_dict(), **self.kwargs(**change))
+        # The same class one level up: the genuine subset padded to seven points by repetition
+        # passes a count check and keeps the chord (measured on the first fix, ef4e797: advantage).
+        for pad in ([0, 6, 6, 6, 6, 6, 6], [0, 0, 0, 6, 6, 6, 6], [1, 1, 1, 6, 6, 6, 6]):
+            change = {"errors": errors, "gino_latency_times_s": latency,
+                      "baseline_times_s": [times[i] for i in pad], "baseline_errors": [curve[i] for i in pad]}
+            with self.subTest(padded=[_REGISTERED_STEPS[i] for i in pad]):
+                with self.assertRaisesRegex(pp.DecisionInputError, "repeat"):
+                    pp.decide_preregistered(**self.kwargs(**change))
         # An eighth point (steps 128) is not registered either.
         with self.assertRaisesRegex(pp.DecisionInputError, "steps"):
             pp.decide_preregistered(**self.kwargs(baseline_times_s=[*self.times, 128.0],
