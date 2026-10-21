@@ -1061,7 +1061,8 @@ class TestPreregisteredDecision(unittest.TestCase):
                 self.assertEqual(pp.decide_preregistered(**self.kwargs(baseline_curve=tuple(points))).to_dict(),
                                  honest)
         # A str subclass that equals everything is checked and recorded by its characters.
-        points = [dataclasses.replace(p, domain=SameStr("torus_periodic")) for p in _curve_points(self.times, self.curve)]
+        points = [dataclasses.replace(p, domain=SameStr("torus_periodic"))
+                  for p in _curve_points(self.times, self.curve)]
         with self.assertRaisesRegex(pp.DecisionInputError, "measured on domain 'torus_periodic'"):
             pp.decide_preregistered(**self.kwargs(baseline_curve=tuple(points)))
         points = [dataclasses.replace(p, domain=SameStr("triangle_dirichlet"))
