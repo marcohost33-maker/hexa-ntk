@@ -294,8 +294,10 @@ rules of section 5 are applied. A violation of any check listed in this
 section raises `DecisionInputError` (registration) or
 `DecisionProvenanceError` (manifest) before a rule runs. Only these checks
 are made: what the list names as not checked, the latency's sample ids and
-batch size, the baseline curve's input identity, horizon and timing protocol
-(claim boundary below), and the authenticity of all numbers are not.
+batch size, the baseline curve's input identity, its machine and thread
+policy, which `timed_samples` inputs were timed (claim boundary below), and
+the authenticity of all numbers are not. The baseline's horizon and timing
+protocol are checked since R5-F1 (list above).
 
 The result `PreregisteredDecision` serialises (`to_dict`) to a record with
 `"grade": "preregistered"`, the verdict, both rules, the summary, and
@@ -347,6 +349,10 @@ R4-F1 fix):
   `authenticity` class. Equalita R5 saw the baseline times of two curves in
   one process differ by a factor 2 to 4 under load, enough to flip a verdict:
   the time axis holds only for the recorded run conditions (owner question).
+- `timed_samples` is checked only for `1 <= timed_samples <= sample_count`.
+  It decides which inputs are timed (the first k, :69) and so
+  `median_wall_time_s`; the preregistration fixes no value, so a caller may
+  time a cheaper subset (Equalita R6-F2, owner question).
 - Copies shifted by one ulp or `1e-12` and chord points pass the repeat check
   (R4-F2); only a recomputation of the errors or an attestation of the times
   closes that.

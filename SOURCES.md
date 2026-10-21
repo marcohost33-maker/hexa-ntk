@@ -800,3 +800,4 @@
 | 2920094CE912830A | 2026-10-21 16:27 | src/toolkit | R5 tests: fixture with registered settings (was dt=1/s), renamed coordinate test, settings cases, genuine producer with kappa/T/config/rtol/protocol/clock refused, plausibility, read-once forgers: test_phase1_protocol_hex_v3.py |
 | 04B0E4D58E477B39 | 2026-10-21 16:27 | spec | section 2 eight new point fields; 5a read-once, plausibility, settings checks; claim boundary corrected (R5-F2) and machine/threads named; API/format change R5: PHASE1_PROTOCOL_v1.md |
 | 3B2A811310E79A8C | 2026-10-21 16:35 | src/toolkit | ruff E501: one line of the read-once test wrapped (no test change): test_phase1_protocol_hex_v3.py |
+| CD131B6A2788D847 | 2026-10-21 17:05 | spec | section 5a: horizon and timing protocol checked since R5-F1 (R6-F1 under-claim fixed); claim boundary names timed_samples (R6-F2): PHASE1_PROTOCOL_v1.md |
