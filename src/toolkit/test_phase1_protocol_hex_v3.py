@@ -860,8 +860,15 @@ class TestPreregisteredDecision(unittest.TestCase):
         original = getattr(pp, "_PREREGISTRATION_FILE", None)
         try:
             pp._PREREGISTRATION_FILE = _ROOT / "spec" / "does-not-exist.md"
-            with self.assertRaisesRegex(pp.DecisionProvenanceError, "preregistration"):
+            try:
                 pp.decide_preregistered(**self.kwargs())
+            except pp.DecisionProvenanceError as exc:
+                self.assertIn("preregistration file cannot be read", str(exc))
+            except OSError as exc:                                             # refusal type = test verdict
+                self.fail(f"an unreadable preregistration file escaped as {type(exc).__name__}, "
+                          "not as DecisionProvenanceError")
+            else:
+                self.fail("an unreadable preregistration file was accepted")
         finally:
             pp._PREREGISTRATION_FILE = original
         # Positive control: the registered manifest (pool ids, the set's digest, the file's digest,
@@ -887,8 +894,8 @@ class TestPreregisteredDecision(unittest.TestCase):
         # section 5a: the baseline curve values are bound in the record. A changed time far from
         # GINO's latency leaves both rules unchanged, so only the record can notice it.
         base = pp.decide_preregistered(**self.kwargs()).to_dict()
-        self.assertEqual(base["provenance"]["baseline_times_s"], self.times)
-        self.assertEqual(base["provenance"]["baseline_errors"], self.curve)
+        self.assertEqual(base["provenance"].get("baseline_times_s"), self.times)
+        self.assertEqual(base["provenance"].get("baseline_errors"), self.curve)
         moved = self.kwargs(baseline_times_s=[*self.times[:6], 65.0])
         self.assertEqual(pp.decide_preregistered(**moved).to_dict()["rules"], base["rules"])
         with self.assertRaisesRegex(pp.DecisionProvenanceError, "provenance"):
