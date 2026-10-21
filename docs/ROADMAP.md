@@ -57,6 +57,14 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   (Schritt 4) offen. `paired_bootstrap_iqm` paart nur noch bei gleichen `sample_ids` (`PairingError`;
   Dreieck 100000.. vs Torus 200000..) und rechnet in C-Ordnung (Punktschaetzer hing @3b041db um 1 ulp am
   Speicherlayout).
+  _Equalita R4-F1 2026-10-21 (@646254d):_ echte Baseline-Kurven auf fremdem steps-Gitter
+  (1,8,16,24,32,48,64) bzw. fremder Lattice (n=64 unter n=32) kippten H0 in "advantage", der Record
+  nannte trotzdem die registrierten steps/n. **API-Bruch:** `decide_preregistered` nimmt
+  `baseline_curve` (Tupel `CostAccuracyPoint`, neues Pflichtfeld `domain`); jeder Punkt wird an
+  steps/n/domain/sample_count geprueft, der Record aus den Punkten geschrieben; die zwei Float-Listen
+  werden abgelehnt (`TypeError`). Manifest braucht `hardware.amp = False` (R4-F3). Grenzen:
+  Eingabe-Identitaet (sample_ids/Dataset-Digest je (test_set, n), R4-F4), Fast-Kopien (R4-F2),
+  Handbau-Punkte (authenticity) -> spec/PHASE1_PROTOCOL_v1.md 5a.
 
 - [x] **CI rot auf #61 (`tests (cpu)`, Head 6d219d9): CG-V2-Tests hingen am BLAS-Kernel
   (2026-10-14).** `test_at_rounding_floor_where_v1_stagnates` und

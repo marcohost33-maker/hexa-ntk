@@ -52,11 +52,13 @@ protocol, timed_samples, rtol)` runs `mechanistic_baseline`
 | Field | Definition |
 |---|---|
 | `n`, `steps`, `dt` | the lattice and the time step |
+| `sample_count`, `timed_samples` | the number of inputs solved and the number of them timed |
 | `mean_rel_l2`, `median_rel_l2` | over the samples, `relative_l2` of the task spec |
 | `mean_rel_h1`, `mean_rel_max` | the secondary metrics, mean over the samples |
 | `median_wall_time_s` | median over ALL timed calls (`timed_samples` samples x `repeats`) |
 | `wall_time_ci_s` | cluster bootstrap of that median: samples are resampled with replacement, each drawn sample contributes all its timed calls |
 | `cg_iterations_mean` | mean total CG iterations per sample |
+| `domain` | `lattice.domain` (`triangle_dirichlet`, `torus_periodic`); last field, added 2026-10-21 (Equalita R4-F1), no default |
 
 The first `timed_samples` inputs are timed with the protocol of section 1;
 the others are solved once (the solver is deterministic, the prediction does
@@ -193,11 +195,12 @@ A verdict names its test set and its `N` and extends to nothing else.
 ## 5a. Decision-grade entry from raw errors (amendment 2026-10-21, GPT-6 HEX-P1-01)
 
 `decide_preregistered(test_set, n, errors, sample_ids, seeds, run_manifest,
-gino_latency_times_s, baseline_times_s, baseline_errors)` is the only entry
+gino_latency_times_s, baseline_curve)` is the only entry
 whose result is a preregistered decision. No parameter accepts a summary of
-GINO's errors. The baseline curve does enter as summaries, one point per
-`steps` (mean `rel_l2` and median wall time, section 2); it is bound to the
-registered grid below, not recomputed (claim boundary).
+GINO's errors. The baseline curve does enter as summaries, one
+`CostAccuracyPoint` per `steps` (section 2). Each point carries its own
+measurement coordinates, which are checked below; its values are not
+recomputed (claim boundary).
 
 - `test_set` is one of the registered sets of preregistration section 2
   (`PREREGISTERED_TEST_SETS`): `id` (triangle, `N = 32`, ids
@@ -218,20 +221,37 @@ registered grid below, not recomputed (claim boundary).
   preregistration `sha256` equal to `file_sha256` of
   `spec/PREREGISTRATION_PHASE1_v1.md` in the repository (section 7); hardware
   `cuda` = `False` and `dtype` = `"float32"` (section 4 same CPU machine,
-  section 3 float32, D5 CPU without GPU); backend `neuraloperator` = `"2.0.0"`
+  section 3 float32, D5 CPU without GPU); hardware `amp` present and `False`,
+  and `autocast`, where present, `False` (Equalita R4-F3, amendment
+  2026-10-21: preregistration :103 float32 for training, :122 and :228
+  dtype/AMP go into the manifest; other spellings of mixed precision are not
+  recognised, owner decision R4-F5); backend `neuraloperator` = `"2.0.0"`
   (D7). Not checked, because the preregistration does not fix it: the machine
   name (D5 open), the file behind `metric_spec_sha256` (preregistration "the
   instrument spec" vs. section 7 here), the exact 1800/200 split, the torch
   version.
-- `baseline_times_s`, `baseline_errors` hold exactly one point per registered
-  `steps` value `1, 2, 4, 8, 16, 32, 64` (preregistration section 4), entry
-  `k` for the `k`-th value, on the decided lattice `n`; any other count raises
-  `DecisionInputError` (Equalita R3 F1: two genuine points alone, steps
-  `{1, 64}`, reached `advantage` because the chord lies above the convex
-  curve). No time and no error may repeat: seven steps values are seven
-  measurements, and the same two points padded to seven by repetition would
-  keep the chord. `provenance` records `baseline_steps` and `baseline_n`. That the
-  values belong to those steps is declared, not measured (claim boundary).
+- `baseline_curve` is the tuple (or list) of `CostAccuracyPoint` returned by
+  `baseline_cost_accuracy_curve`; anything else, including the former two
+  float lists, a subclass of the point or its `to_dict`, raises `TypeError`.
+  Every point is checked by its own coordinates, in this order, else
+  `DecisionInputError` naming the first deviating coordinate (Equalita R4-F1):
+  the `steps` of the points, in order, are exactly `1, 2, 4, 8, 16, 32, 64`
+  (preregistration :134-137; a subset, another grid or another order is
+  another frontier: R3 F1 found the genuine points for steps `{1, 64}`, R4-F1
+  the genuine curve on steps `(1, 8, 16, 24, 32, 48, 64)` reaching
+  `advantage`); every point's `n` is the decided lattice (:134-135; R4-F1: the
+  genuine `n = 64` curve under `n = 32` reached `advantage`); its `domain` is
+  the test set's domain in the lattice's spelling; its `sample_count` is 500
+  (:62-68 [D3], :136 "on the same test inputs"); `1 <= timed_samples <=
+  sample_count`; values and the interval are finite, mean `rel_l2`, median
+  time and `dt` `> 0`. No time and no error may repeat: the same two points
+  copied to seven would keep the chord. This catches only the literal
+  repetition; copies shifted by one ulp or `1e-12` and chord points pass
+  (Equalita R4-F2, see the claim boundary). `provenance` is written from the
+  checked points, never from the registered grid or the `n` argument:
+  `baseline_points` (every point with all its fields), and derived from them
+  `baseline_times_s`, `baseline_errors`, `baseline_steps` and `baseline_n`
+  (the sorted list of the points' lattices).
 - `gino_latency_times_s` are the timed calls, exactly the preregistered 10
   measured repeats per sample (`TimingProtocol().repeats`, section 1): shape
   `(10,)` for one sample or `(samples, 10)`; any other count, including a flat
@@ -247,7 +267,8 @@ rules of section 5 are applied. A violation of any check listed in this
 section raises `DecisionInputError` (registration) or
 `DecisionProvenanceError` (manifest) before a rule runs. Only these checks
 are made: what the list names as not checked, the latency's sample ids and
-batch size, and the authenticity of all numbers are not.
+batch size, the baseline curve's input identity, horizon and timing protocol
+(claim boundary below), and the authenticity of all numbers are not.
 
 The result `PreregisteredDecision` serialises (`to_dict`) to a record with
 `"grade": "preregistered"`, the verdict, both rules, the summary, and
@@ -267,16 +288,43 @@ fabricated bytes and only its `raw_errors_sha256` differs. `provenance`
 therefore states `"authenticity": "unattested: ..."`. An independent review
 needs, in addition, a signature over the raw bytes or an authentic pipeline
 attestation (GPT-6 fix step 4; not implemented, owner decision). The same
-holds for the baseline curve: `baseline_times_s` and `baseline_errors` enter
-as values and are bound in the record, but `verify_preregistered_decision`
-does not rerun `baseline_cost_accuracy_curve`; a reviewer reproduces the
-errors from the datasets named in the manifest (the solver is deterministic)
-and the times only on the recorded machine.
+holds for the baseline curve: its points enter as values with coordinates and
+are bound in the record, but `verify_preregistered_decision` does not rerun
+`baseline_cost_accuracy_curve`; a reviewer reproduces the errors from the
+datasets named in the manifest (the solver is deterministic) and the times
+only on the recorded machine. In particular (Equalita R4, self-check of the
+R4-F1 fix):
+- The coordinates are those the producer wrote. A caller who builds
+  `CostAccuracyPoint`s by hand can put the registered coordinates on values
+  measured elsewhere (a foreign-grid curve relabelled with the registered
+  steps reaches `advantage`); this is a fabrication and falls under
+  `authenticity`, like a fabricated raw table.
+- Which 500 inputs the curve ran on is not bound: a point carries their
+  count, not their sample ids or a dataset digest, so a curve on 500 other
+  inputs of the same domain and lattice passes. Binding it needs an input
+  digest in the point compared with the manifest's dataset digest per
+  `(test_set, n)` (R4-F4, owner).
+- `dt` (the horizon `T = dt * steps`), the solver tolerance, and the
+  baseline's warm-ups and repeats are recorded, not checked.
+- Copies shifted by one ulp or `1e-12` and chord points pass the repeat check
+  (R4-F2); only a recomputation of the errors or an attestation of the times
+  closes that.
 
 **API change (2026-10-21):** callers that took `decide_test_set(...).to_dict()`
 as the decision must call `decide_preregistered` with the raw table instead;
 `decide_test_set` keeps its signature and verdicts, and its record gains
 `"grade": "diagnostic"`.
+
+**API change (2026-10-21, Equalita R4-F1, breaking):** `decide_preregistered`
+and `verify_preregistered_decision` take `baseline_curve` (the
+`CostAccuracyPoint` tuple) instead of `baseline_times_s` and
+`baseline_errors`; the old keywords raise `TypeError` (unexpected keyword),
+bare lists raise `TypeError`. `CostAccuracyPoint` gains the required last
+field `domain`. Run manifests for a preregistered decision need hardware
+`amp = False` (R4-F3). The record gains `provenance["baseline_points"]`;
+`baseline_n` is now a list (the points' lattices). `decide_test_set` (the
+diagnostic helper) keeps the float lists. Whether the API stays so is an
+owner decision (Equalita R4 owner question 2); this form fails closed.
 
 ## 6. Break-even (preregistration section 4)
 
