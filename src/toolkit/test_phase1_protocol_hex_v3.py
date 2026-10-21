@@ -995,6 +995,41 @@ class TestPreregisteredDecision(unittest.TestCase):
         self.assertEqual(pp.decide_preregistered(**{**old, "baseline_curve": list(points)}).to_dict(),
                          pp.decide_preregistered(**full).to_dict())
 
+    def test_the_checked_points_are_the_recorded_points(self):
+        # Self-check of the R4-F1 fix (same class one level up): checks and record read the curve
+        # in several passes. A sequence that yields the registered points on the first passes and
+        # the genuine n = 64 points afterwards had the n = 32 points checked and the n = 64 points
+        # decided and recorded. One snapshot serves every check and the record.
+        import collections.abc
+
+        errors, latency = self._r4_case()
+        registered = _curve_points(*_R4_N32_REGISTERED)
+        foreign = _curve_points(*_R4_N64_REGISTERED, n=64)
+
+        class Switching(collections.abc.Sequence):
+            def __init__(self, switch_after):
+                self.passes, self.switch_after = 0, switch_after
+
+            def __len__(self):
+                return len(registered)
+
+            def __getitem__(self, i):
+                return (registered if self.passes <= self.switch_after else foreign)[i]
+
+            def __iter__(self):
+                self.passes += 1
+                return iter(registered if self.passes <= self.switch_after else foreign)
+
+        honest = pp.decide_preregistered(**self.kwargs(errors=errors, gino_latency_times_s=latency,
+                                                       baseline_curve=registered)).to_dict()
+        self.assertEqual(honest["verdict"], "H0")
+        for switch_after in (1, 2, 3):
+            with self.subTest(switch_after=switch_after):
+                d = pp.decide_preregistered(**self.kwargs(errors=errors, gino_latency_times_s=latency,
+                                                          baseline_curve=Switching(switch_after))).to_dict()
+                self.assertEqual(d, honest)
+                self.assertEqual(d["provenance"]["baseline_n"], [32])
+
     def test_a_relabelled_curve_is_out_of_reach(self):
         # Claim boundary (as for the raw table): a caller who builds points by hand can put the
         # registered coordinates on values measured elsewhere. The point cannot show where it was

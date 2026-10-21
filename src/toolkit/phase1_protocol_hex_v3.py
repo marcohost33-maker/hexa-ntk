@@ -990,8 +990,13 @@ def _registered_baseline_points(curve: Any, *, test_set: str, n: int) -> List[Di
     written from the checked points. Checks run in a fixed order (steps, n, domain, sample
     count, timed samples, values), so each refusal names the first coordinate that differs.
     """
-    if (isinstance(curve, (str, bytes, Mapping, np.ndarray)) or not isinstance(curve, Sequence)
-            or any(type(p) is not CostAccuracyPoint for p in curve)):
+    if isinstance(curve, (str, bytes, Mapping, np.ndarray)) or not isinstance(curve, Sequence):
+        curve = None
+    else:
+        # One snapshot for every check and for the record: a sequence that yields other points on
+        # a second pass must not have one set checked and another recorded (self-check, TOCTOU).
+        curve = tuple(curve)
+    if curve is None or any(type(p) is not CostAccuracyPoint for p in curve):
         raise TypeError(
             "baseline_curve must be the tuple of CostAccuracyPoint returned by baseline_cost_accuracy_curve; "
             "bare time/error lists carry no steps, lattice or sample count and are not accepted "
