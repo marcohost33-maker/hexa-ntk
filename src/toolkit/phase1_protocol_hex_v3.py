@@ -41,10 +41,18 @@ __all__ = [
     "BootstrapSummary",
     "PairingError",
     "paired_bootstrap_iqm",
+    "PREREGISTERED_SEEDS",
+    "PREREGISTERED_TEST_SAMPLES",
+    "PREREGISTERED_TRAINING_SEEDS",
+    "PREREGISTERED_TEST_SETS",
     "RuleVerdict",
     "DecisionSummary",
     "DecisionInputError",
+    "DecisionProvenanceError",
     "decide_test_set",
+    "PreregisteredDecision",
+    "decide_preregistered",
+    "verify_preregistered_decision",
     "break_even_queries",
     "RunManifestError",
     "file_sha256",
@@ -52,6 +60,7 @@ __all__ = [
     "build_run_manifest",
 ]
 
+import dataclasses
 import hashlib
 import json
 import math
@@ -61,6 +70,7 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
@@ -87,6 +97,18 @@ PREREGISTERED_IQM_PROPORTION = 0.25
 # subset of seeds or samples is another statistic (Equalita R2-P2-1).
 PREREGISTERED_SEEDS = 5
 PREREGISTERED_TEST_SAMPLES = 500
+# The seeds and test sets themselves (preregistration section 2, [D2] training
+# seeds 0-4, [D3] sample-id table): the decision-grade entry
+# ``decide_preregistered`` accepts raw errors only for these.
+PREREGISTERED_TRAINING_SEEDS = (0, 1, 2, 3, 4)
+PREREGISTERED_TEST_SETS: Mapping[str, Tuple[str, Tuple[int, ...], range]] = MappingProxyType({
+    "id": ("triangle", (32,), range(100000, 100500)),
+    "resolution_ood": ("triangle", (16, 64, 128), range(100000, 100500)),
+    "composite_ood": ("torus", (32,), range(200000, 200500)),
+})
+_DECISION_SCHEMA = "hexantk_phase1_decision_record_v1"
+_AUTHENTICITY = ("unattested: the record_sha256 is a self-digest; it shows that the record follows from "
+                 "the named raw bytes, not who produced those bytes (no signature, no pipeline attestation)")
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ROOT = Path(__file__).resolve().parents[2]
@@ -488,18 +510,10 @@ class PairingError(ValueError):
 
 
 def _sample_id_list(value: Any, *, name: str, length: int) -> Tuple[int, ...]:
-    if isinstance(value, (str, bytes, Mapping)) or not isinstance(value, (Sequence, np.ndarray, range)):
-        raise TypeError(f"{name} must be a sequence of non-negative ints")
-    out = []
-    for item in value:
-        if isinstance(item, bool) or not isinstance(item, numbers.Integral) or item < 0:
-            raise TypeError(f"{name} must contain non-negative ints, got {item!r}")
-        out.append(int(item))
+    out = _distinct_ints(value, name=name)
     if len(out) != length:
-        raise ValueError(f"{name} names {len(out)} sample ids for {length} columns")
-    if len(set(out)) != len(out):
-        raise ValueError(f"{name} must not repeat a sample id")
-    return tuple(out)
+        raise ValueError(f"{name} names {len(out)} values for {length} rows or columns")
+    return out
 
 
 def _paired_sample_ids(table: Mapping[str, np.ndarray], sample_ids: Any) -> Optional[Tuple[int, ...]]:
@@ -547,7 +561,10 @@ def _error_table(errors: Any) -> Dict[str, np.ndarray]:
         arr = np.asarray(value)
         if arr.dtype == np.bool_ or np.iscomplexobj(arr) or not np.issubdtype(arr.dtype, np.number):
             raise TypeError(f"errors[{name!r}] must be a real numeric array")
-        arr = np.asarray(arr, dtype=np.float64)
+        # C order: numpy's mean along a row sums pairwise only over contiguous
+        # memory, so a Fortran-ordered or index-permuted view of the same values
+        # rounded the point estimate differently (found 2026-10-21, HEX-P1-01 fix).
+        arr = np.ascontiguousarray(arr, dtype=np.float64)
         if arr.ndim != 2 or arr.shape[0] == 0 or arr.shape[1] == 0:
             raise ValueError(f"errors[{name!r}] must be a non-empty [seeds, samples] matrix, got {arr.shape}")
         if not np.all(np.isfinite(arr)):
@@ -634,11 +651,14 @@ class RuleVerdict:
 
 @dataclass(frozen=True)
 class DecisionSummary:
-    """Verdict of both rules for one test set and lattice, with the statistic it rests on.
+    """DIAGNOSTIC verdict of both rules on a caller-supplied summary (``decide_test_set``).
 
     ``gino`` is the bootstrap summary the rules used; ``to_dict`` carries it so
     the confidence level, the resample count and the trimming proportion stay
-    visible next to the verdict.
+    visible next to the verdict, and marks the record ``"grade": "diagnostic"``:
+    nothing ties the summary to measured errors, so this is never a
+    preregistered decision (HEX-P1-01). The decision-grade record is
+    ``PreregisteredDecision`` from ``decide_preregistered``.
     """
 
     test_set: str
@@ -648,7 +668,7 @@ class DecisionSummary:
     gino: BootstrapSummary
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"test_set": self.test_set, "n": self.n, "verdict": self.verdict,
+        return {"grade": "diagnostic", "test_set": self.test_set, "n": self.n, "verdict": self.verdict,
                 "rules": [r.to_dict() for r in self.rules], "gino": self.gino.to_dict()}
 
 
@@ -660,6 +680,18 @@ class DecisionInputError(ValueError):
     preregistered values, or when the summary is not a finite, non-negative,
     ordered interval (``0 <= low <= point <= high``). A rule
     evaluated on another statistic would be a different, unregistered test.
+    ``decide_preregistered`` raises it too for raw data outside the registered
+    seeds, test sets, sample ids or lattices.
+    """
+
+
+class DecisionProvenanceError(ValueError):
+    """A decision record or run manifest does not follow from the data it names.
+
+    Raised when a ``PreregisteredDecision`` changed after it was computed, when
+    a serialised record's self-digest does not match its body, when the record
+    differs from the one recomputed from the raw errors, or when the run
+    manifest was edited after its digest was taken (HEX-P1-01).
     """
 
 
@@ -703,12 +735,21 @@ def decide_test_set(
     baseline_times_s: Any,
     baseline_errors: Any,
 ) -> DecisionSummary:
-    """Both preregistered rules for one test set and lattice (spec section 5).
+    """DIAGNOSTIC low-level helper: both rules on a caller-supplied summary (spec section 5).
 
-    ``gino`` must be the preregistered statistic (confidence
+    Not a preregistered decision (HEX-P1-01, GPT-6 2026-10-21): ``gino`` is a
+    public frozen dataclass, and its labels are checked, not its origin. A
+    ``dataclasses.replace(summary, low=..., point=..., high=...)`` with intact
+    labels passes and can turn ``H0`` into ``advantage``. The result is marked
+    ``"grade": "diagnostic"``; the decision-grade entry is
+    ``decide_preregistered``, which takes the raw errors and computes the
+    summary itself.
+
+    ``gino`` must carry the preregistered labels (confidence
     ``PREREGISTERED_CONFIDENCE``, ``PREREGISTERED_BOOTSTRAP_RESAMPLES`` resamples,
-    trimming ``PREREGISTERED_IQM_PROPORTION``) with a finite ordered interval;
-    anything else raises ``DecisionInputError`` before a rule is evaluated.
+    trimming ``PREREGISTERED_IQM_PROPORTION``, 5 seeds, 500 samples) with a finite
+    ordered interval; anything else raises ``DecisionInputError`` before a rule
+    is evaluated.
     """
     if not isinstance(test_set, str) or not test_set:
         raise TypeError("test_set must be a non-empty string")
@@ -720,6 +761,14 @@ def decide_test_set(
     _, _, high = _preregistered_summary(gino)
     upper = _positive_float(high, name="gino.high")
     latency = _positive_float(gino_latency_s, name="gino_latency_s")
+    runtime, accuracy, verdict = _rules(upper, latency, baseline_times_s, baseline_errors)
+    return DecisionSummary(test_set=test_set, n=n, verdict=verdict, rules=(runtime, accuracy), gino=gino)
+
+
+def _rules(
+    upper: float, latency: float, baseline_times_s: Any, baseline_errors: Any,
+) -> Tuple[RuleVerdict, RuleVerdict, str]:
+    """Equal runtime, equal accuracy and the verdict on a validated upper bound and latency."""
     _, ft, fe = _frontier_arrays(baseline_times_s, baseline_errors)
     # "Measured range" of preregistration section 6 is read as the range of the
     # Pareto-efficient part (the interpolation never leaves it). A dominated
@@ -770,7 +819,243 @@ def decide_test_set(
             upper, latency, t_base)
 
     verdict = "advantage" if (runtime.claim or accuracy.claim) else "H0"
-    return DecisionSummary(test_set=test_set, n=n, verdict=verdict, rules=(runtime, accuracy), gino=gino)
+    return runtime, accuracy, verdict
+
+
+# ------------------------------------------------------------------
+# Section 5a: the decision-grade entry (HEX-P1-01)
+# ------------------------------------------------------------------
+
+
+def _canonical_json(body: Any) -> bytes:
+    return json.dumps(body, allow_nan=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _array_sha256(arr: np.ndarray) -> str:
+    """SHA-256 of a float array's canonical bytes: little-endian float64, C order, -0.0 as 0.0, shape header."""
+    canon = np.ascontiguousarray((np.asarray(arr, dtype=np.float64) + 0.0).astype("<f8"))
+    header = _canonical_json({"dtype": "<f8", "order": "C", "shape": list(canon.shape)})
+    return hashlib.sha256(header + b"\n" + canon.tobytes()).hexdigest()
+
+
+def _distinct_ints(value: Any, *, name: str) -> Tuple[int, ...]:
+    if isinstance(value, (str, bytes, Mapping)) or not isinstance(value, (Sequence, np.ndarray, range)):
+        raise TypeError(f"{name} must be a sequence of non-negative ints")
+    out = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, numbers.Integral) or item < 0:
+            raise TypeError(f"{name} must contain non-negative ints, got {item!r}")
+        out.append(int(item))
+    if len(set(out)) != len(out):
+        raise ValueError(f"{name} must not repeat a value")
+    return tuple(out)
+
+
+def _verified_run_manifest(run_manifest: Any) -> Dict[str, Any]:
+    """The manifest rebuilt from its own fields; ``DecisionProvenanceError`` if it was edited after digesting."""
+    if not isinstance(run_manifest, Mapping):
+        raise DecisionProvenanceError("run_manifest must be the mapping returned by build_run_manifest")
+    fields = {k: v for k, v in run_manifest.items() if k not in ("schema", "protocol", "manifest_sha256")}
+    try:
+        rebuilt = build_run_manifest(fields)
+    except RunManifestError as exc:
+        raise DecisionProvenanceError(f"run_manifest is not a valid run manifest: {exc}") from exc
+    if (run_manifest.get("schema") != _MANIFEST_SCHEMA or run_manifest.get("protocol") != PROTOCOL_ID
+            or run_manifest.get("manifest_sha256") != rebuilt["manifest_sha256"]):
+        raise DecisionProvenanceError(
+            "run_manifest does not match its manifest_sha256 (edited after build_run_manifest, "
+            "or not built by it)")
+    return rebuilt
+
+
+def _latency_times(value: Any) -> np.ndarray:
+    arr = np.asarray(value)
+    if arr.dtype == np.bool_ or np.iscomplexobj(arr) or not np.issubdtype(arr.dtype, np.number):
+        raise TypeError("gino_latency_times_s must be a real numeric array of timed calls")
+    arr = np.asarray(arr, dtype=np.float64)
+    if arr.ndim not in (1, 2) or arr.size == 0:
+        raise ValueError(f"gino_latency_times_s must be a non-empty 1-D or 2-D array, got shape {arr.shape}")
+    if not np.all(np.isfinite(arr)) or np.any(arr <= 0.0):
+        raise ValueError("gino_latency_times_s must be finite and > 0")
+    return arr
+
+
+@dataclass(frozen=True)
+class PreregisteredDecision:
+    """Decision-grade verdict for one test set and lattice, computed from raw errors.
+
+    Produced only by ``decide_preregistered``. ``record_sha256`` is the digest of
+    the canonical record; ``to_dict`` recomputes it and raises
+    ``DecisionProvenanceError`` if any field was replaced afterwards
+    (``dataclasses.replace`` included). The digest protects against drift, not
+    against a deliberate forger who also fabricates the raw bytes: that needs a
+    signature or a pipeline attestation (``provenance["authenticity"]``).
+    """
+
+    test_set: str
+    n: int
+    verdict: str
+    rules: Tuple[RuleVerdict, ...]
+    gino: BootstrapSummary
+    gino_latency_s: float
+    provenance_json: str
+    record_sha256: str
+
+    @property
+    def provenance(self) -> Dict[str, Any]:
+        return json.loads(self.provenance_json)
+
+    def _body(self) -> Dict[str, Any]:
+        return {
+            "schema": _DECISION_SCHEMA,
+            "protocol": PROTOCOL_ID,
+            "grade": "preregistered",
+            "test_set": self.test_set,
+            "domain": PREREGISTERED_TEST_SETS.get(self.test_set, (None,))[0],
+            "n": self.n,
+            "verdict": self.verdict,
+            "rules": [r.to_dict() for r in self.rules],
+            "gino": self.gino.to_dict(),
+            "gino_latency_s": self.gino_latency_s,
+            "provenance": self.provenance,
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        body = self._body()
+        digest = hashlib.sha256(_canonical_json(body)).hexdigest()
+        if digest != self.record_sha256:
+            raise DecisionProvenanceError(
+                "the decision changed after decide_preregistered computed it (record_sha256 mismatch)")
+        return {**body, "record_sha256": digest}
+
+
+def decide_preregistered(
+    *,
+    test_set: str,
+    n: int,
+    errors: Any,
+    sample_ids: Any,
+    seeds: Any,
+    run_manifest: Mapping[str, Any],
+    gino_latency_times_s: Any,
+    baseline_times_s: Any,
+    baseline_errors: Any,
+) -> PreregisteredDecision:
+    """Both preregistered rules from GINO's raw per-sample errors (spec section 5a, HEX-P1-01).
+
+    - ``errors``: the ``[5, 500]`` ``rel_l2`` table of one test set and lattice,
+      row ``i`` = training seed ``seeds[i]``, column ``j`` = ``sample_ids[j]``;
+    - ``seeds`` must be the registered training seeds, ``sample_ids`` the
+      registered ids of ``test_set``, ``n`` one of its registered lattices;
+    - ``run_manifest`` is the output of ``build_run_manifest`` (git SHA,
+      dataset digests, split ids, backend, hardware, seed set) and must still
+      match its digest; its seed set must equal ``seeds``;
+    - ``gino_latency_times_s``: the timed calls (1-D, or samples x repeats);
+      the latency is their median, as for the baseline curve.
+
+    Rows and columns are put into ascending seed and sample-id order, so the
+    result does not depend on the caller's order, and the bootstrap and the
+    IQM are computed here with the preregistered settings. No parameter
+    accepts a summary. The record binds SHA-256 digests of the canonical raw
+    bytes, the sample ids, the latency calls and the run manifest, the baseline
+    curve values and the seed list; ``verify_preregistered_decision`` recomputes
+    it from the raw data.
+    """
+    if not isinstance(test_set, str) or test_set not in PREREGISTERED_TEST_SETS:
+        raise DecisionInputError(
+            f"test_set must be one of the registered test sets {sorted(PREREGISTERED_TEST_SETS)}, got {test_set!r}")
+    _, lattices, registered_ids = PREREGISTERED_TEST_SETS[test_set]
+    n = _int_at_least(n, name="n", minimum=1)
+    if n not in lattices:
+        raise DecisionInputError(f"test set {test_set!r} is registered on N in {list(lattices)}, got N = {n}")
+    if isinstance(errors, Mapping):
+        raise TypeError("errors must be the single [seeds, samples] table of this test set and lattice")
+    raw = _error_table(errors)[""]
+    if raw.shape != (PREREGISTERED_SEEDS, PREREGISTERED_TEST_SAMPLES):
+        raise DecisionInputError(
+            f"errors must have the registered shape ({PREREGISTERED_SEEDS}, {PREREGISTERED_TEST_SAMPLES}) "
+            f"(seeds x sample ids), got {raw.shape}")
+    if np.any(raw < 0.0):
+        raise DecisionInputError("errors must be >= 0 (rel_l2 is non-negative)")
+    seed_list = _distinct_ints(seeds, name="seeds")
+    if sorted(seed_list) != list(PREREGISTERED_TRAINING_SEEDS) or len(seed_list) != raw.shape[0]:
+        raise DecisionInputError(
+            f"seeds must be the registered training seeds {list(PREREGISTERED_TRAINING_SEEDS)} "
+            f"in row order, got {list(seed_list)}")
+    ids = _sample_id_list(sample_ids, name="sample_ids", length=raw.shape[1])
+    if sorted(ids) != list(registered_ids):
+        raise DecisionInputError(
+            f"sample_ids must be the registered ids {registered_ids.start}..{registered_ids.stop - 1} "
+            f"of test set {test_set!r}")
+    manifest = _verified_run_manifest(run_manifest)
+    if sorted(manifest["seeds"]) != sorted(seed_list):
+        raise DecisionProvenanceError(
+            f"run_manifest seeds {manifest['seeds']} differ from the error table's seeds {list(seed_list)}")
+    latency_calls = _latency_times(gino_latency_times_s)
+    times = _positive_vector(baseline_times_s, name="baseline_times_s")
+    curve_errors = _positive_vector(baseline_errors, name="baseline_errors")
+
+    rows = np.argsort(np.asarray(seed_list), kind="stable")
+    cols = np.argsort(np.asarray(ids), kind="stable")
+    canonical = np.ascontiguousarray(raw[rows][:, cols])
+    canonical_ids = tuple(sorted(ids))
+    summary = paired_bootstrap_iqm({test_set: canonical}, sample_ids={test_set: canonical_ids})[test_set]
+    _, _, high = _preregistered_summary(summary)
+    upper = _positive_float(high, name="gino.high")
+    latency = float(np.median(latency_calls))
+    runtime, accuracy, verdict = _rules(upper, latency, times, curve_errors)
+
+    provenance = {
+        "raw_errors_sha256": _array_sha256(canonical),
+        "raw_errors_layout": "rel_l2 [seed, sample], rows by ascending seed, columns by ascending sample_id",
+        "seeds": sorted(seed_list),
+        "sample_ids_sha256": hashlib.sha256(_canonical_json(list(canonical_ids))).hexdigest(),
+        "sample_id_range": [canonical_ids[0], canonical_ids[-1]],
+        "gino_latency_times_sha256": _array_sha256(latency_calls),
+        "gino_latency_times_shape": list(latency_calls.shape),
+        "baseline_times_s": [float(t) for t in times],
+        "baseline_errors": [float(e) for e in curve_errors],
+        "run_manifest_sha256": manifest["manifest_sha256"],
+        "git_sha": manifest["git_sha"],
+        "preregistration": manifest["preregistration"],
+        "datasets": manifest["datasets"],
+        "backend": manifest["backend"],
+        "hardware": manifest["hardware"],
+        "authenticity": _AUTHENTICITY,
+    }
+    provenance_json = _canonical_json(provenance).decode("utf-8")
+    draft = PreregisteredDecision(
+        test_set=test_set, n=n, verdict=verdict, rules=(runtime, accuracy), gino=summary,
+        gino_latency_s=latency, provenance_json=provenance_json, record_sha256="")
+    digest = hashlib.sha256(_canonical_json(draft._body())).hexdigest()
+    return dataclasses.replace(draft, record_sha256=digest)
+
+
+def verify_preregistered_decision(record: Any, **raw: Any) -> PreregisteredDecision:
+    """Recompute a serialised decision record from its raw data; ``DecisionProvenanceError`` on any difference.
+
+    ``record`` is ``PreregisteredDecision.to_dict()`` (also after a JSON round
+    trip); ``raw`` are the keyword arguments of ``decide_preregistered``. First
+    the self-digest is checked (drift), then the whole record is compared with
+    the one recomputed from the raw data (a summary, verdict or digest that does
+    not follow from them). A forger who also fabricates the raw bytes is not
+    caught here (``provenance["authenticity"]``).
+    """
+    if not isinstance(record, Mapping) or not isinstance(record.get("record_sha256"), str):
+        raise DecisionProvenanceError("record must be a mapping with a record_sha256")
+    body = {k: v for k, v in record.items() if k != "record_sha256"}
+    try:
+        payload = _canonical_json(body)
+    except (TypeError, ValueError) as exc:
+        raise DecisionProvenanceError(f"record is not canonical JSON: {exc}") from exc
+    if hashlib.sha256(payload).hexdigest() != record["record_sha256"]:
+        raise DecisionProvenanceError("record_sha256 does not match the record body (edited after it was computed)")
+    recomputed = decide_preregistered(**raw)
+    expected = recomputed.to_dict()
+    if _canonical_json(expected) != _canonical_json(dict(record)):
+        differing = sorted(k for k in set(expected) | set(record) if expected.get(k) != record.get(k))
+        raise DecisionProvenanceError(f"record does not follow from the raw data; differing fields: {differing}")
+    return recomputed
 
 
 # ------------------------------------------------------------------

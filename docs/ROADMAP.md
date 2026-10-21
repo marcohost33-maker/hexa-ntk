@@ -49,6 +49,14 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   `n_samples == 500`; NEP-50-Vergleich, `low >= 0` und einmaliges Lesen von `high` (TOCTOU) gehaertet.
   Latent 48 / 2.75 flippt unter 248 von 864 emulierten Summationsreihenfolgen -> 8 Kandidaten empfohlen.
   Rest in #82.
+  _Cross-Family 2026-10-21 (GPT-6 HEX-P1-01, R2-Paarung):_ ein per `dataclasses.replace` gefaelschtes
+  Summary mit intakten Labels kippte H0 in "advantage" (@3b041db nachgestellt). **API-Bruch:**
+  `decide_test_set` ist nur noch Diagnose (`"grade": "diagnostic"`); entscheidungsfaehig ist
+  `decide_preregistered` (Rohfehler 5x500, registrierte Seeds/IDs/Gitter, Manifest-Digest, Bootstrap
+  intern, Record mit SHA-256 der Rohbytes) + `verify_preregistered_decision`. Signatur/Attestierung
+  (Schritt 4) offen. `paired_bootstrap_iqm` paart nur noch bei gleichen `sample_ids` (`PairingError`;
+  Dreieck 100000.. vs Torus 200000..) und rechnet in C-Ordnung (Punktschaetzer hing @3b041db um 1 ulp am
+  Speicherlayout).
 
 - [x] **CI rot auf #61 (`tests (cpu)`, Head 6d219d9): CG-V2-Tests hingen am BLAS-Kernel
   (2026-10-14).** `test_at_rounding_floor_where_v1_stagnates` und

@@ -114,6 +114,10 @@ with equal ids the result is bit-identical to the unchecked computation.
 **API change:** a mapping of two or more matrices without `sample_ids`, accepted
 before, is now refused.
 
+Every matrix is copied to C order first (amendment 2026-10-21): numpy sums a
+row pairwise only over contiguous memory, and at 3b041db a Fortran-ordered or
+column-indexed copy of the same values moved the point estimate by one ulp.
+
 The index sets depend only on `(seed, n_resamples, S, M)`; the evaluation is
 chunked for memory and the chunk size does not change the result. Resampling
 seeds first and sample ids second is the two-stage bootstrap of Davison and
@@ -151,8 +155,14 @@ not a second read. Anything else raises `DecisionInputError` (a `ValueError`)
 before a rule is evaluated. **Amendment 2026-10-20 (second review, Equalita
 R2):** with honest labels, a summary over 3 of 5 seeds or 20 of 40 samples had
 turned `H0` into `advantage`; the seed and sample counts are now bound. Not
-bound: provenance — a summary computed at another level and relabelled is
-still accepted (issue #82). A percentile interval is not guaranteed to contain
+bound by `decide_test_set`: provenance — a summary computed at another level and
+relabelled is still accepted (issue #82). **Amendment 2026-10-21 (GPT-6
+HEX-P1-01):** validated labels do not replace measured provenance:
+`dataclasses.replace(summary, low=0.001, point=0.001, high=0.001)` keeps every
+label and turned `H0` into `advantage` at 3b041db. `decide_test_set` is
+therefore a **diagnostic low-level helper**; its `to_dict()` carries
+`"grade": "diagnostic"` and is never a preregistered decision. The
+decision-grade entry is `decide_preregistered` (section 5a). A percentile interval is not guaranteed to contain
 the point estimate; a run where it does not is refused rather than decided
 (fail-closed; the review searched 6 800 designs and found no case). Before
 this amendment a summary at confidence 0.5 or with one
@@ -179,6 +189,61 @@ the frontier range and, next to it, the range of all measured points.
 The verdict is `advantage` if at least one rule claims, otherwise `H0` (no
 advantage). Each rule's verdict, reason and the numbers it used are returned.
 A verdict names its test set and its `N` and extends to nothing else.
+
+## 5a. Decision-grade entry from raw errors (amendment 2026-10-21, GPT-6 HEX-P1-01)
+
+`decide_preregistered(test_set, n, errors, sample_ids, seeds, run_manifest,
+gino_latency_times_s, baseline_times_s, baseline_errors)` is the only entry
+whose result is a preregistered decision. No parameter accepts a summary.
+
+- `test_set` is one of the registered sets of preregistration section 2
+  (`PREREGISTERED_TEST_SETS`): `id` (triangle, `N = 32`, ids
+  `100000..100499`), `resolution_ood` (triangle, `N = 16, 64, 128`, same ids),
+  `composite_ood` (torus, `N = 32`, ids `200000..200499`); `n` must be one of
+  its lattices.
+- `errors` is GINO's raw `rel_l2` table `[5, 500]` of that set and lattice,
+  finite and `>= 0`; row `i` belongs to `seeds[i]`, column `j` to
+  `sample_ids[j]`. `seeds` must be the registered training seeds `0..4`, the
+  ids exactly the registered ids of the set.
+- `run_manifest` is the output of `build_run_manifest` (section 7); it is
+  rebuilt from its own fields and must match its `manifest_sha256`, and its
+  seed set must equal `seeds`.
+- `gino_latency_times_s` are the timed calls (1-D, or samples x repeats); the
+  latency is their median, as for `median_wall_time_s` of the baseline.
+
+Rows and columns are sorted by seed and sample id (C order), the bootstrap and
+the IQM are computed with the preregistered settings of section 4, and both
+rules of section 5 are applied. Any violation raises `DecisionInputError`
+(registration) or `DecisionProvenanceError` (manifest) before a rule runs.
+
+The result `PreregisteredDecision` serialises (`to_dict`) to a record with
+`"grade": "preregistered"`, the verdict, both rules, the summary, and
+`provenance`: SHA-256 of the canonical raw bytes (little-endian float64, C
+order, `-0.0` as `0.0`, shape header), of the sample ids and of the latency
+calls; the baseline curve values; the seed list; the run manifest digest with
+the git SHA, preregistration, dataset digests, backend and hardware. The
+record carries `record_sha256` over its canonical JSON; `to_dict` recomputes it
+and refuses a decision whose fields were replaced afterwards.
+`verify_preregistered_decision(record, **raw)` checks the self-digest, then
+recomputes the record from the raw data and refuses any difference.
+
+**Claim boundary.** The self-digest protects against drift and against an
+edited summary, verdict or digest. It does not protect against a forger who
+fabricates the raw table itself: such a record is consistent with the
+fabricated bytes and only its `raw_errors_sha256` differs. `provenance`
+therefore states `"authenticity": "unattested: ..."`. An independent review
+needs, in addition, a signature over the raw bytes or an authentic pipeline
+attestation (GPT-6 fix step 4; not implemented, owner decision). The same
+holds for the baseline curve: `baseline_times_s` and `baseline_errors` enter
+as values and are bound in the record, but `verify_preregistered_decision`
+does not rerun `baseline_cost_accuracy_curve`; a reviewer reproduces the
+errors from the datasets named in the manifest (the solver is deterministic)
+and the times only on the recorded machine.
+
+**API change (2026-10-21):** callers that took `decide_test_set(...).to_dict()`
+as the decision must call `decide_preregistered` with the raw table instead;
+`decide_test_set` keeps its signature and verdicts, and its record gains
+`"grade": "diagnostic"`.
 
 ## 6. Break-even (preregistration section 4)
 

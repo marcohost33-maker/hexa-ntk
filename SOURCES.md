@@ -772,3 +772,6 @@
 | 06F964CF13846ACF | 2026-10-21 10:10 | src/toolkit | GPT-6 R2 pairing: paired_bootstrap_iqm pairs matrices only by equal sample ids (sample_ids, PairingError): phase1_protocol_hex_v3.py |
 | 118E2C34FFA85A17 | 2026-10-21 10:10 | src/toolkit | pairing tests: shape-only, disjoint (triangle/torus), reordered and asserted ids refused; positive control bit-identical: test_phase1_protocol_hex_v3.py |
 | 551410BA7A6495D3 | 2026-10-21 10:10 | spec | section 4 amendment: pairing by sample id, not by shape (API change): PHASE1_PROTOCOL_v1.md |
+| 3E2AB0E0E7A66D67 | 2026-10-21 10:20 | src/toolkit | GPT-6 HEX-P1-01: decide_preregistered from raw 5x500 errors (registered seeds/ids/lattices, manifest digest, bootstrap inside, record SHA-256), verify_preregistered_decision; decide_test_set diagnostic; error matrices in C order: phase1_protocol_hex_v3.py |
+| 1041F8991DB1A202 | 2026-10-21 10:20 | src/toolkit | HEX-P1-01 forger tests (dataclasses.replace on summary, object and serialised record, resealed digest), canonical order, registration refusals, claim boundary; memory-layout test: test_phase1_protocol_hex_v3.py |
+| A6AE29206BE48805 | 2026-10-21 10:20 | spec | section 5 diagnostic helper, new section 5a decision-grade entry with claim boundary (unattested), C-order note (API change): PHASE1_PROTOCOL_v1.md |

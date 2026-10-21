@@ -12,7 +12,9 @@ order in dt). Synthetic numbers only; no model and no T1 fit.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
+import inspect
 import itertools
 import json
 import math
@@ -207,6 +209,15 @@ class TestPairedBootstrap(unittest.TestCase):
         self.assertEqual(one, two)
         three = pp.paired_bootstrap_iqm(self.a, n_resamples=300, seed=12)[""]
         self.assertTrue(three.low != one.low or three.high != one.high)
+
+    def test_memory_layout_does_not_change_the_result(self):
+        # numpy sums a row pairwise only over contiguous memory: at 3b041db a
+        # Fortran-ordered copy of the same values moved the point estimate by an ulp.
+        c_order = pp.paired_bootstrap_iqm(_raw_errors(), n_resamples=50)[""]
+        for view in (np.asfortranarray(_raw_errors()), _raw_errors()[:, np.arange(500)]):
+            with self.subTest(c_contiguous=view.flags["C_CONTIGUOUS"]):
+                self.assertFalse(view.flags["C_CONTIGUOUS"])
+                self.assertEqual(pp.paired_bootstrap_iqm(view, n_resamples=50)[""], c_order)
 
     def test_an_outlying_seed_widens_the_interval(self):
         base = pp.paired_bootstrap_iqm(self.a, n_resamples=500, seed=1)[""]
@@ -520,6 +531,194 @@ class TestDecisionRules(unittest.TestCase):
                     "baseline_times_s": self.TIMES, "baseline_errors": self.ERRORS, **kwargs}
             with self.subTest(kwargs=kwargs), self.assertRaises((TypeError, ValueError)):
                 pp.decide_test_set(**full)
+
+
+# ------------------------------------------------------------------
+# Section 5a: the decision-grade entry from raw errors (HEX-P1-01)
+# ------------------------------------------------------------------
+
+
+_IDS = list(range(100000, 100500))
+
+
+def _raw_errors(seed: int = 7) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    return 0.12 + 0.03 * rng.standard_normal((pp.PREREGISTERED_SEEDS, pp.PREREGISTERED_TEST_SAMPLES)) ** 2
+
+
+class TestPreregisteredDecision(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.errors = _raw_errors()
+        honest = pp.paired_bootstrap_iqm(cls.errors, sample_ids=_IDS)[""]
+        # Frontier e(t) = 4 e0 / t with e0 between the forged bound 0.001 and the
+        # honest bound: at 4 s the baseline error e0 lies below the honest upper
+        # bound (no equal-runtime claim) and the honest bound needs about 2 s (no
+        # equal-accuracy claim at 4 s), so the honest verdict is H0, while a forged
+        # bound of 0.001 claims at equal runtime.
+        cls.e0 = 0.5 * (honest.high + 0.001)
+        cls.times = [1.0, 2.0, 4.0, 8.0]
+        cls.curve = [4 * cls.e0, 2 * cls.e0, cls.e0, cls.e0 / 2]
+
+    def kwargs(self, **change):
+        full = {"test_set": "id", "n": 32, "errors": self.errors, "sample_ids": _IDS,
+                "seeds": list(pp.PREREGISTERED_TRAINING_SEEDS),
+                "run_manifest": pp.build_run_manifest(_manifest_fields()),
+                "gino_latency_times_s": [4.0] * 10, "baseline_times_s": self.times, "baseline_errors": self.curve}
+        full.update(change)
+        return full
+
+    def test_a_relabelled_summary_cannot_reach_a_preregistered_decision(self):
+        # GPT-6 HEX-P1-01 (2026-10-21): dataclasses.replace(summary, low=0.001, point=0.001,
+        # high=0.001) keeps every preregistered label and switches H0 to advantage.
+        honest = pp.decide_preregistered(**self.kwargs())
+        self.assertEqual(honest.verdict, "H0")
+        self.assertTrue(honest.rules[0].evaluable and honest.rules[1].evaluable)
+        forged = dataclasses.replace(honest.gino, low=0.001, point=0.001, high=0.001)
+        # Positive control of the forger: on the diagnostic helper it does flip the verdict.
+        diagnostic = pp.decide_test_set(test_set="id", n=32, gino=forged, gino_latency_s=4.0,
+                                        baseline_times_s=self.times, baseline_errors=self.curve)
+        self.assertEqual(diagnostic.verdict, "advantage")
+        self.assertEqual(diagnostic.to_dict()["grade"], "diagnostic")
+        # (1) The decision-grade entry has no slot for a summary.
+        self.assertNotIn("gino", inspect.signature(pp.decide_preregistered).parameters)
+        with self.assertRaises(TypeError):
+            pp.decide_preregistered(**self.kwargs(), gino=forged)
+        # (2) Replacing the summary in the decision object is refused on serialisation.
+        tampered = dataclasses.replace(honest, gino=forged, verdict="advantage", rules=diagnostic.rules)
+        with self.assertRaises(pp.DecisionProvenanceError):
+            tampered.to_dict()
+        # (2') The self-digest is drift protection only: a forger who recomputes it gets a
+        # serialisable object, which the recomputation from the raw data then refuses.
+        resealed = dataclasses.replace(tampered, record_sha256=hashlib.sha256(
+            json.dumps(tampered._body(), allow_nan=False, sort_keys=True, separators=(",", ":"))
+            .encode("utf-8")).hexdigest())
+        self.assertEqual(resealed.to_dict()["verdict"], "advantage")
+        with self.assertRaisesRegex(pp.DecisionProvenanceError, "does not follow from the raw data"):
+            pp.verify_preregistered_decision(resealed.to_dict(), **self.kwargs())
+        # (3) Strongest forger: edits the serialised record and recomputes its self-digest.
+        record = json.loads(json.dumps(honest.to_dict()))
+        record["gino"].update(low=0.001, point=0.001, high=0.001)
+        record["verdict"] = "advantage"
+        record["rules"] = [r.to_dict() for r in diagnostic.rules]
+        body = {k: v for k, v in record.items() if k != "record_sha256"}
+        record["record_sha256"] = hashlib.sha256(
+            json.dumps(body, allow_nan=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        with self.assertRaisesRegex(pp.DecisionProvenanceError, "does not follow from the raw data"):
+            pp.verify_preregistered_decision(record, **self.kwargs())
+        # (3') Without recomputing the digest the edit is drift.
+        drifted = json.loads(json.dumps(honest.to_dict()))
+        drifted["gino"]["high"] = 0.001
+        with self.assertRaisesRegex(pp.DecisionProvenanceError, "record_sha256 does not match"):
+            pp.verify_preregistered_decision(drifted, **self.kwargs())
+        # Positive control: the honest record verifies after a JSON round trip.
+        again = pp.verify_preregistered_decision(json.loads(json.dumps(honest.to_dict())), **self.kwargs())
+        self.assertEqual(again.to_dict(), honest.to_dict())
+
+    def test_the_summary_is_computed_from_the_raw_table(self):
+        d = pp.decide_preregistered(**self.kwargs())
+        self.assertEqual(d.gino, pp.paired_bootstrap_iqm(self.errors, sample_ids=_IDS)[""])
+        self.assertEqual((d.gino.confidence, d.gino.n_resamples, d.gino.proportion, d.gino.n_seeds,
+                          d.gino.n_samples), (0.95, 10_000, 0.25, 5, 500))
+        self.assertEqual(d.gino_latency_s, 4.0)
+        record = d.to_dict()
+        self.assertEqual((record["grade"], record["domain"], record["schema"]),
+                         ("preregistered", "triangle", "hexantk_phase1_decision_record_v1"))
+        prov = record["provenance"]
+        self.assertEqual(prov["run_manifest_sha256"], self.kwargs()["run_manifest"]["manifest_sha256"])
+        self.assertEqual(prov["git_sha"], "a" * 40)
+        self.assertEqual(prov["seeds"], [0, 1, 2, 3, 4])
+        self.assertEqual(prov["sample_id_range"], [100000, 100499])
+        self.assertTrue(prov["authenticity"].startswith("unattested"))
+        canon = np.ascontiguousarray(self.errors.astype("<f8"))
+        header = json.dumps({"dtype": "<f8", "order": "C", "shape": [5, 500]}, sort_keys=True,
+                            separators=(",", ":")).encode("utf-8")
+        self.assertEqual(prov["raw_errors_sha256"], hashlib.sha256(header + b"\n" + canon.tobytes()).hexdigest())
+        json.dumps(record, allow_nan=False)
+
+    def test_row_and_column_order_is_canonical_and_bound(self):
+        base = pp.decide_preregistered(**self.kwargs()).to_dict()
+        rng = np.random.default_rng(3)
+        rows, cols = rng.permutation(5), rng.permutation(500)
+        shuffled = self.kwargs(errors=self.errors[rows][:, cols], seeds=[int(s) for s in rows],
+                               sample_ids=[_IDS[c] for c in cols])
+        self.assertEqual(pp.decide_preregistered(**shuffled).to_dict(), base)
+        # -0.0 and 0.0 are the same measurement and the same bytes.
+        zero = self.errors.copy()
+        zero[0, 0] = 0.0
+        neg = zero.copy()
+        neg[0, 0] = -0.0
+        self.assertEqual(pp.decide_preregistered(**self.kwargs(errors=zero)).to_dict(),
+                         pp.decide_preregistered(**self.kwargs(errors=neg)).to_dict())
+        # Moving the columns without their ids is another table: the record no longer verifies.
+        moved = self.kwargs(errors=self.errors[:, cols])
+        with self.assertRaises(pp.DecisionProvenanceError):
+            pp.verify_preregistered_decision(base, **moved)
+        # One ulp in one cell, another latency call, another manifest: each breaks verification.
+        bumped = self.errors.copy()
+        bumped[2, 17] = np.nextafter(bumped[2, 17], 1.0)
+        other_manifest = pp.build_run_manifest({**_manifest_fields(), "git_sha": "c" * 40})
+        for change in ({"errors": bumped}, {"gino_latency_times_s": [4.0] * 9 + [4.5]},
+                       {"run_manifest": other_manifest}, {"baseline_errors": [*self.curve[:3], self.curve[3] * 0.99]}):
+            with self.subTest(change=sorted(change)), self.assertRaises(pp.DecisionProvenanceError):
+                pp.verify_preregistered_decision(base, **self.kwargs(**change))
+
+    def test_the_resolution_axis_stays_paired(self):
+        # The per-lattice summary equals the joint, id-paired bootstrap of the N axis.
+        coarse = 1.5 * _raw_errors(8)
+        joint = pp.paired_bootstrap_iqm({"n16": coarse, "n32": self.errors}, sample_ids={"n16": _IDS, "n32": _IDS})
+        d16 = pp.decide_preregistered(**self.kwargs(test_set="resolution_ood", n=16, errors=coarse))
+        self.assertEqual(d16.gino, joint["n16"])
+        self.assertEqual(pp.decide_preregistered(**self.kwargs()).gino, joint["n32"])
+
+    def test_registered_sets_seeds_ids_and_lattices_only(self):
+        torus_ids = list(range(200000, 200500))
+        self.assertEqual(pp.decide_preregistered(**self.kwargs(test_set="composite_ood", sample_ids=torus_ids))
+                         .to_dict()["domain"], "torus")
+        refused = [
+            {"test_set": "torus"}, {"test_set": ""}, {"n": 64}, {"test_set": "resolution_ood", "n": 32},
+            {"test_set": "composite_ood"},                                     # triangle ids on the torus set
+            {"sample_ids": torus_ids},                                         # torus ids on the ID set
+            {"sample_ids": [*_IDS[:-1], 100500]}, {"seeds": [0, 1, 2, 3, 5]},
+            {"errors": self.errors[:, :499], "sample_ids": _IDS[:499]}, {"errors": self.errors[:3]},
+            {"errors": np.vstack([self.errors, self.errors[:1]])},
+            {"errors": np.where(np.arange(500) == 3, -1e-3, self.errors)},
+        ]
+        for change in refused:
+            with self.subTest(change=sorted(change)), self.assertRaises(pp.DecisionInputError):
+                pp.decide_preregistered(**self.kwargs(**change))
+        manifest = pp.build_run_manifest(_manifest_fields())
+        edited = {**manifest, "git_sha": "c" * 40}                             # edited after digesting
+        for change in ({"run_manifest": edited}, {"run_manifest": {**manifest, "schema": "x"}},
+                       {"run_manifest": pp.build_run_manifest({**_manifest_fields(), "seeds": [0, 1, 2, 3]})},
+                       {"run_manifest": _manifest_fields()}, {"run_manifest": [1]}):
+            with self.subTest(manifest=change), self.assertRaises(pp.DecisionProvenanceError):
+                pp.decide_preregistered(**self.kwargs(**change))
+        for change in ({"errors": {"id": self.errors}}, {"errors": np.full((5, 500), np.nan)},
+                       {"sample_ids": [100000] * 500}, {"sample_ids": "x"}, {"seeds": [0, 0, 1, 2, 3]},
+                       {"gino_latency_times_s": []}, {"gino_latency_times_s": [0.0]},
+                       {"gino_latency_times_s": [float("nan")]}, {"gino_latency_times_s": [[[1.0]]]},
+                       {"gino_latency_times_s": [True]}, {"baseline_errors": [8, 4, 2]}, {"n": 0}):
+            with self.subTest(bad=sorted(change)), self.assertRaises((TypeError, ValueError)):
+                pp.decide_preregistered(**self.kwargs(**change))
+        for bad in (None, {}, {"record_sha256": 1}, {"record_sha256": "x", "v": float("nan")}):
+            with self.subTest(record=bad), self.assertRaises(pp.DecisionProvenanceError):
+                pp.verify_preregistered_decision(bad, **self.kwargs())
+
+    def test_a_self_consistent_fabrication_is_out_of_reach(self):
+        # Claim boundary: a forger who fabricates the raw table gets a record that is
+        # consistent with the fabricated bytes. Only the raw digest differs from the honest
+        # one; authenticity needs a signature or a pipeline attestation (not implemented).
+        fabricated = 0.001 * (1.0 + 0.01 * np.random.default_rng(9).random((5, 500)))
+        fake = pp.decide_preregistered(**self.kwargs(errors=fabricated))
+        self.assertEqual(fake.verdict, "advantage")
+        self.assertEqual(pp.verify_preregistered_decision(fake.to_dict(), **self.kwargs(errors=fabricated)).verdict,
+                         "advantage")
+        honest = pp.decide_preregistered(**self.kwargs())
+        self.assertNotEqual(fake.provenance["raw_errors_sha256"], honest.provenance["raw_errors_sha256"])
+        self.assertTrue(fake.provenance["authenticity"].startswith("unattested"))
+        with self.assertRaises(pp.DecisionProvenanceError):
+            pp.verify_preregistered_decision(fake.to_dict(), **self.kwargs())
 
 
 # ------------------------------------------------------------------
