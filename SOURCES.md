@@ -780,3 +780,6 @@
 | F7B392170B94C6C0 | 2026-10-21 10:30 | src/toolkit | diskriminierung DK-20261021T082910: grade check asserts instead of crashing with KeyError when the field is missing: test_phase1_protocol_hex_v3.py |
 | A147F2A1B522E7D7 | 2026-10-21 10:26 | spec | new section 11: D4 float-order stability instruments (no threshold changed): PHASE1_PROTOCOL_v1.md |
 | 08863B0165DEA61F | 2026-10-21 10:26 | spec | amendment 2026-10-21: float budget criterion; no tie-free candidate clears the order-independent bound; tie band and prereg unchanged: GINO_ADAPTER_PHASE1_v2.md |
+| 9FC024E59280694C | 2026-10-21 12:12 | src/toolkit | GPT-6 HEXA-TIM-01: decide_preregistered requires exactly TimingProtocol().repeats (10) timed calls per sample, shape (10,) or (samples, 10), else DecisionInputError: phase1_protocol_hex_v3.py |
+| 72878AD3048FBE56 | 2026-10-21 12:20 | src/toolkit | HEXA-TIM-01 tests: 1/9/11/20 flat and (5,9)/(5,11)/(10,1) refused, positive control (10,)/(1,10)/(5,10)/(10,10) unchanged and a refusal fails by assertion; bad-latency fixtures carry 10 calls: test_phase1_protocol_hex_v3.py |
+| 954C50E9B4819382 | 2026-10-21 12:12 | spec | section 5a decision input: exactly 10 measured repeats per sample (HEXA-TIM-01); warm-ups not checkable from the numbers (open, attestation): PHASE1_PROTOCOL_v1.md |

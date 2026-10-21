@@ -696,14 +696,59 @@ class TestPreregisteredDecision(unittest.TestCase):
                 pp.decide_preregistered(**self.kwargs(**change))
         for change in ({"errors": {"id": self.errors}}, {"errors": np.full((5, 500), np.nan)},
                        {"sample_ids": [100000] * 500}, {"sample_ids": "x"}, {"seeds": [0, 0, 1, 2, 3]},
-                       {"gino_latency_times_s": []}, {"gino_latency_times_s": [0.0]},
-                       {"gino_latency_times_s": [float("nan")]}, {"gino_latency_times_s": [[[1.0]]]},
-                       {"gino_latency_times_s": [True]}, {"baseline_errors": [8, 4, 2]}, {"n": 0}):
+                       # 10 calls each, so the repeats rule (HEXA-TIM-01) cannot mask the check under test
+                       {"gino_latency_times_s": []}, {"gino_latency_times_s": [4.0] * 9 + [0.0]},
+                       {"gino_latency_times_s": [4.0] * 9 + [float("nan")]}, {"gino_latency_times_s": [[[1.0]]]},
+                       {"gino_latency_times_s": [True] * 10}, {"baseline_errors": [8, 4, 2]}, {"n": 0}):
             with self.subTest(bad=sorted(change)), self.assertRaises((TypeError, ValueError)):
                 pp.decide_preregistered(**self.kwargs(**change))
         for bad in (None, {}, {"record_sha256": 1}, {"record_sha256": "x", "v": float("nan")}):
             with self.subTest(record=bad), self.assertRaises(pp.DecisionProvenanceError):
                 pp.verify_preregistered_decision(bad, **self.kwargs())
+
+    def test_latency_without_the_registered_repeats_is_refused(self):
+        # GPT-6 HEXA-TIM-01 (2026-10-21): gino_latency_times_s=[0.001], a single timed call,
+        # reached a decision-grade verdict although the preregistration measures 10 repeats
+        # (TimingProtocol.repeats). 1-D is one sample of `repeats` calls, 2-D is samples x repeats;
+        # a flat 1-D of 2 x 10 calls is refused too (its per-sample repeat count is not visible).
+        repeats = pp.TimingProtocol().repeats
+        self.assertEqual(repeats, 10)
+        honest = pp.decide_preregistered(**self.kwargs()).to_dict()
+        for bad in ([0.001], [4.0] * (repeats - 1), [4.0] * (repeats + 1), [4.0] * (2 * repeats),
+                    np.full((5, repeats - 1), 4.0), np.full((5, repeats + 1), 4.0),
+                    np.full((repeats, 1), 4.0)):                               # transposed: 10 samples x 1 call
+            with self.subTest(shape=np.shape(bad)):
+                with self.assertRaises(pp.DecisionInputError) as caught:
+                    pp.decide_preregistered(**self.kwargs(gino_latency_times_s=bad))
+                self.assertIs(type(caught.exception), pp.DecisionInputError)
+                message = str(caught.exception)
+                self.assertIn(f"({repeats},)", message)                       # expected form
+                self.assertIn(f"got shape {np.shape(bad)}", message)            # received form
+                with self.assertRaises(pp.DecisionInputError):
+                    pp.verify_preregistered_decision(honest, **self.kwargs(gino_latency_times_s=bad))
+
+    def test_the_registered_repeats_stay_valid(self):
+        # Positive control for HEXA-TIM-01: exactly `repeats` calls, 1-D or samples x repeats,
+        # give the same verdict, rules, summary and latency as before the repeats rule.
+        repeats = pp.TimingProtocol().repeats
+        self.assertEqual(repeats, 10)
+        # The class default is the registered 1-D form; the 2-D forms must reproduce its record.
+        self.assertEqual(self.kwargs()["gino_latency_times_s"], [4.0] * repeats)
+
+        def decide(latency):
+            try:
+                return pp.decide_preregistered(**self.kwargs(gino_latency_times_s=latency)).to_dict()
+            except pp.DecisionInputError as exc:                              # refusal = test verdict
+                self.fail(f"registered latency shape {np.shape(latency)} refused: {exc}")
+
+        honest = decide([4.0] * repeats)
+        self.assertEqual(honest["verdict"], "H0")
+        for good in (np.full((1, repeats), 4.0), np.full((5, repeats), 4.0), np.full((repeats, repeats), 4.0)):
+            with self.subTest(shape=np.shape(good)):
+                d = decide(good)
+                for key in ("verdict", "rules", "gino", "gino_latency_s"):
+                    self.assertEqual(d[key], honest[key], key)
+                self.assertEqual(d["provenance"]["gino_latency_times_shape"], list(np.shape(good)))
 
     def test_a_self_consistent_fabrication_is_out_of_reach(self):
         # Claim boundary: a forger who fabricates the raw table gets a record that is

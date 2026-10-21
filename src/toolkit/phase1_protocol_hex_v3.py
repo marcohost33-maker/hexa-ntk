@@ -882,6 +882,13 @@ def _latency_times(value: Any) -> np.ndarray:
         raise ValueError(f"gino_latency_times_s must be a non-empty 1-D or 2-D array, got shape {arr.shape}")
     if not np.all(np.isfinite(arr)) or np.any(arr <= 0.0):
         raise ValueError("gino_latency_times_s must be finite and > 0")
+    # HEXA-TIM-01: the preregistration measures `repeats` timed calls per sample (spec section 1);
+    # 1-D is one sample, 2-D is samples x repeats. Checked last, so it masks no check above.
+    repeats = TimingProtocol().repeats
+    if arr.shape[-1] != repeats:
+        raise DecisionInputError(
+            f"gino_latency_times_s must hold the {repeats} preregistered timed repeats per sample, "
+            f"shape ({repeats},) or (samples, {repeats}), got shape {arr.shape}")
     return arr
 
 
@@ -955,8 +962,10 @@ def decide_preregistered(
     - ``run_manifest`` is the output of ``build_run_manifest`` (git SHA,
       dataset digests, split ids, backend, hardware, seed set) and must still
       match its digest; its seed set must equal ``seeds``;
-    - ``gino_latency_times_s``: the timed calls (1-D, or samples x repeats);
-      the latency is their median, as for the baseline curve.
+    - ``gino_latency_times_s``: the timed calls, exactly ``TimingProtocol().repeats``
+      (10) per sample: shape (10,) for one sample or (samples, 10); any other count
+      raises ``DecisionInputError``. The latency is their median, as for the
+      baseline curve. Warm-ups are not visible in these numbers.
 
     Rows and columns are put into ascending seed and sample-id order, so the
     result does not depend on the caller's order, and the bootstrap and the

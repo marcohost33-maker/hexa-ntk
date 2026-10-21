@@ -208,8 +208,14 @@ whose result is a preregistered decision. No parameter accepts a summary.
 - `run_manifest` is the output of `build_run_manifest` (section 7); it is
   rebuilt from its own fields and must match its `manifest_sha256`, and its
   seed set must equal `seeds`.
-- `gino_latency_times_s` are the timed calls (1-D, or samples x repeats); the
+- `gino_latency_times_s` are the timed calls, exactly the preregistered 10
+  measured repeats per sample (`TimingProtocol().repeats`, section 1): shape
+  `(10,)` for one sample or `(samples, 10)`; any other count, including a flat
+  1-D vector of several samples, raises `DecisionInputError` (HEXA-TIM-01). The
   latency is their median, as for `median_wall_time_s` of the baseline.
+  Limit: the 3 warm-up runs are untimed and leave no trace in these numbers, so
+  they are not checked here; binding them needs a pipeline attestation of the
+  timing run (open, see `provenance["authenticity"]`).
 
 Rows and columns are sorted by seed and sample id (C order), the bootstrap and
 the IQM are computed with the preregistered settings of section 4, and both
