@@ -539,6 +539,8 @@ class TestDecisionRules(unittest.TestCase):
 
 
 _IDS = list(range(100000, 100500))
+# spec/PREREGISTRATION_PHASE1_v1.md section 4: the baseline runs with these steps.
+_REGISTERED_STEPS = (1, 2, 4, 8, 16, 32, 64)
 
 
 def _raw_errors(seed: int = 7) -> np.ndarray:
@@ -557,8 +559,9 @@ class TestPreregisteredDecision(unittest.TestCase):
         # equal-accuracy claim at 4 s), so the honest verdict is H0, while a forged
         # bound of 0.001 claims at equal runtime.
         cls.e0 = 0.5 * (honest.high + 0.001)
-        cls.times = [1.0, 2.0, 4.0, 8.0]
-        cls.curve = [4 * cls.e0, 2 * cls.e0, cls.e0, cls.e0 / 2]
+        # One point per registered steps value 1, 2, 4, ..., 64 (preregistration section 4).
+        cls.times = [float(s) for s in (1, 2, 4, 8, 16, 32, 64)]
+        cls.curve = [4 * cls.e0 / t for t in cls.times]
 
     def kwargs(self, **change):
         full = {"test_set": "id", "n": 32, "errors": self.errors, "sample_ids": _IDS,
@@ -659,7 +662,7 @@ class TestPreregisteredDecision(unittest.TestCase):
         bumped[2, 17] = np.nextafter(bumped[2, 17], 1.0)
         other_manifest = pp.build_run_manifest({**_manifest_fields(), "git_sha": "c" * 40})
         for change in ({"errors": bumped}, {"gino_latency_times_s": [4.0] * 9 + [4.5]},
-                       {"run_manifest": other_manifest}, {"baseline_errors": [*self.curve[:3], self.curve[3] * 0.99]}):
+                       {"run_manifest": other_manifest}, {"baseline_errors": [*self.curve[:6], self.curve[6] * 0.99]}):
             with self.subTest(change=sorted(change)), self.assertRaises(pp.DecisionProvenanceError):
                 pp.verify_preregistered_decision(base, **self.kwargs(**change))
 
@@ -765,6 +768,132 @@ class TestPreregisteredDecision(unittest.TestCase):
         with self.assertRaises(pp.DecisionProvenanceError):
             pp.verify_preregistered_decision(fake.to_dict(), **self.kwargs())
 
+    def _convex_case(self):
+        """Equalita R3 F1 setting: a convex 7-point curve and GINO errors whose honest upper bound is 0.0475."""
+        steps = np.array(_REGISTERED_STEPS, dtype=np.float64)
+        times, curve = list(0.01 * steps), list(0.2 / steps + 0.003)
+        raw = 1.0 + 0.3 * np.random.default_rng(7).random((5, 500))
+        errors = 0.0475 * raw / pp.paired_bootstrap_iqm(raw, sample_ids=_IDS)[""].high
+        latency = [0.05] * 10
+        return times, curve, errors, latency
+
+    def test_a_baseline_curve_off_the_registered_steps_grid_is_refused(self):
+        # Equalita R3 F1 (2026-10-21): the GENUINE baseline points for steps {1, 64}, {1, 32} or
+        # {2, 64} alone reached grade "preregistered" and verdict "advantage": the chord between
+        # two points of a convex curve lies above it. Preregistration section 4 runs the baseline
+        # with steps 1, 2, 4, 8, 16, 32, 64; any other number of points is another curve.
+        times, curve, errors, latency = self._convex_case()
+        summary = pp.paired_bootstrap_iqm(errors, sample_ids=_IDS)[""]
+        # Positive control of the forger (diagnostic helper, no grid binding): the subset flips H0.
+        self.assertEqual(pp.decide_test_set(test_set="id", n=32, gino=summary, gino_latency_s=0.05,
+                                            baseline_times_s=times, baseline_errors=curve).verdict, "H0")
+        self.assertEqual(pp.decide_test_set(test_set="id", n=32, gino=summary, gino_latency_s=0.05,
+                                            baseline_times_s=[times[0], times[6]],
+                                            baseline_errors=[curve[0], curve[6]]).verdict, "advantage")
+        subsets = ([0, 6], [0, 5], [1, 6], [0, 3, 6], [0], [0, 1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6])
+        honest = pp.decide_preregistered(**self.kwargs(errors=errors, gino_latency_times_s=latency,
+                                                       baseline_times_s=times, baseline_errors=curve))
+        self.assertEqual(honest.verdict, "H0")
+        for keep in subsets:
+            change = {"errors": errors, "gino_latency_times_s": latency,
+                      "baseline_times_s": [times[i] for i in keep], "baseline_errors": [curve[i] for i in keep]}
+            with self.subTest(steps=[_REGISTERED_STEPS[i] for i in keep]):
+                with self.assertRaisesRegex(pp.DecisionInputError, "steps"):
+                    pp.decide_preregistered(**self.kwargs(**change))
+                with self.assertRaisesRegex(pp.DecisionInputError, "steps"):
+                    pp.verify_preregistered_decision(honest.to_dict(), **self.kwargs(**change))
+        # An eighth point (steps 128) is not registered either.
+        with self.assertRaisesRegex(pp.DecisionInputError, "steps"):
+            pp.decide_preregistered(**self.kwargs(baseline_times_s=[*self.times, 128.0],
+                                                  baseline_errors=[*self.curve, self.curve[-1] / 2]))
+
+    def test_the_registered_steps_grid_is_accepted_and_recorded(self):
+        # Positive control for F1: the full 7-point curve keeps its verdict, and the record names
+        # the steps and the lattice of every baseline point, so a reviewer can rerun them
+        # (spec/PHASE1_PROTOCOL_v1.md section 5a, claim boundary).
+        self.assertEqual(tuple(pp._DEFAULT_STEPS_GRID), _REGISTERED_STEPS)
+        times, curve, errors, latency = self._convex_case()
+        legit = pp.decide_preregistered(**self.kwargs(errors=errors, gino_latency_times_s=latency,
+                                                      baseline_times_s=times, baseline_errors=curve))
+        self.assertEqual(legit.verdict, "H0")
+        for test_set, n in (("id", 32), ("resolution_ood", 16)):
+            with self.subTest(test_set=test_set, n=n):
+                prov = pp.decide_preregistered(**self.kwargs(test_set=test_set, n=n)).to_dict()["provenance"]
+                self.assertEqual(prov.get("baseline_steps"), list(_REGISTERED_STEPS))
+                self.assertEqual(prov.get("baseline_n"), n)
+
+    def test_the_run_manifest_content_is_bound_to_the_preregistration(self):
+        # Equalita R3 F2 (2026-10-21): form and self-digest were checked, the content not; a
+        # manifest with test ids in the training split, a zero preregistration digest, CUDA and
+        # float16-amp hardware or neuraloperator 9.9 reached a decision-grade "advantage".
+        def manifest(**change):
+            return pp.build_run_manifest({**_manifest_fields(), **change})
+
+        hardware = _manifest_fields()["hardware"]
+        backend = _manifest_fields()["backend"]
+        forged = (
+            ("split_ids", {"split_ids": {"train": list(_IDS), "val": [3]}}),         # train = test ids
+            ("split_ids", {"split_ids": {"train": [0, 1, 100000], "val": [3]}}),
+            ("split_ids", {"split_ids": {"train": [0, 1, 2], "val": [200000]}}),
+            ("split_ids", {"split_ids": {"train": [0, 1, 2000], "val": [3]}}),       # outside the pool
+            ("datasets", {"datasets": {"train_pool": "c" * 64, "resolution_ood": "d" * 64}}),
+            ("preregistration", {"preregistration": {"version": "PREREGISTRATION_PHASE1_v1 DRAFT",
+                                                     "sha256": "0" * 64}}),
+            ("cuda", {"hardware": {**hardware, "cuda": "12.4"}}),
+            ("cuda", {"hardware": {**hardware, "cuda": True}}),
+            ("cuda", {"hardware": {**hardware, "cuda": None}}),
+            ("dtype", {"hardware": {**hardware, "dtype": "float16-amp"}}),
+            ("neuraloperator", {"backend": {**backend, "neuraloperator": "9.9"}}),
+            ("neuraloperator", {"backend": {k: v for k, v in backend.items() if k != "neuraloperator"}}),
+        )
+        for rule, change in forged:
+            with self.subTest(rule=rule, change=change):
+                with self.assertRaisesRegex(pp.DecisionProvenanceError, rule):
+                    pp.decide_preregistered(**self.kwargs(run_manifest=manifest(**change)))
+        # The dataset digest of the decided set itself must be named.
+        torus_ids = list(range(200000, 200500))
+        no_torus = manifest(datasets={"train_pool": "c" * 64, "id": "d" * 64})
+        with self.assertRaisesRegex(pp.DecisionProvenanceError, "datasets"):
+            pp.decide_preregistered(**self.kwargs(test_set="composite_ood", sample_ids=torus_ids,
+                                                  run_manifest=no_torus))
+        # An unreadable preregistration file fails closed.
+        original = getattr(pp, "_PREREGISTRATION_FILE", None)
+        try:
+            pp._PREREGISTRATION_FILE = _ROOT / "spec" / "does-not-exist.md"
+            with self.assertRaisesRegex(pp.DecisionProvenanceError, "preregistration"):
+                pp.decide_preregistered(**self.kwargs())
+        finally:
+            pp._PREREGISTRATION_FILE = original
+        # Positive control: the registered manifest (pool ids, the set's digest, the file's digest,
+        # CPU without CUDA, float32, neuraloperator 2.0.0) is accepted with the same verdict.
+        self.assertEqual(pp.decide_preregistered(**self.kwargs()).verdict, "H0")
+        self.assertEqual(pp.decide_preregistered(**self.kwargs(
+            run_manifest=manifest(split_ids={"train": list(range(1800)), "val": list(range(1800, 2000))}))).verdict,
+            "H0")
+
+    def test_the_latency_is_the_median_of_the_timed_calls(self):
+        # Equalita R3 F8: every latency test used ten equal calls, so median -> mean survived.
+        # Spec section 5a: "The latency is their median". One slow call moves the mean, not the median.
+        honest = pp.decide_preregistered(**self.kwargs()).to_dict()
+        for calls in ([4.0] * 9 + [40.0], [[4.0] * 9 + [40.0], [4.0] * 10, [1.0] * 4 + [4.0] * 6]):
+            with self.subTest(calls=calls):
+                d = pp.decide_preregistered(**self.kwargs(gino_latency_times_s=calls)).to_dict()
+                self.assertEqual(d["gino_latency_s"], 4.0)
+                self.assertNotEqual(float(np.mean(calls)), 4.0)               # the mutant would differ
+                self.assertEqual(d["rules"], honest["rules"])
+
+    def test_the_baseline_curve_values_are_bound_in_the_record(self):
+        # Equalita R3 F9: removing baseline_times_s from the record survived every test. Spec
+        # section 5a: the baseline curve values are bound in the record. A changed time far from
+        # GINO's latency leaves both rules unchanged, so only the record can notice it.
+        base = pp.decide_preregistered(**self.kwargs()).to_dict()
+        self.assertEqual(base["provenance"]["baseline_times_s"], self.times)
+        self.assertEqual(base["provenance"]["baseline_errors"], self.curve)
+        moved = self.kwargs(baseline_times_s=[*self.times[:6], 65.0])
+        self.assertEqual(pp.decide_preregistered(**moved).to_dict()["rules"], base["rules"])
+        with self.assertRaisesRegex(pp.DecisionProvenanceError, "provenance"):
+            pp.verify_preregistered_decision(base, **moved)
+
 
 # ------------------------------------------------------------------
 # Section 6: break-even
@@ -794,8 +923,12 @@ class TestBreakEven(unittest.TestCase):
 def _manifest_fields():
     return {
         "git_sha": "a" * 40,
-        "preregistration": {"version": "PREREGISTRATION_PHASE1_v1 DRAFT", "sha256": "b" * 64},
-        "datasets": {"train_pool": "c" * 64, "id_test": "d" * 64},
+        # The registered file's digest and one dataset digest per registered set: the
+        # decision-grade entry checks both (Equalita R3 F2).
+        "preregistration": {"version": "PREREGISTRATION_PHASE1_v1 DRAFT",
+                            "sha256": pp.file_sha256(_ROOT / "spec" / "PREREGISTRATION_PHASE1_v1.md")},
+        "datasets": {"train_pool": "c" * 64, "id": "d" * 64, "resolution_ood": "d" * 64,
+                     "composite_ood": "9" * 64},
         "split_ids": {"train": [0, 1, 2], "val": [3]},
         "backend": {"python": "3.12.10", "torch": "2.6.0", "numpy": "2.5.3", "neuraloperator": "2.0.0"},
         "config_digest": "e" * 64,
@@ -1083,7 +1216,12 @@ class TestRadiusFloatStability(unittest.TestCase):
         self.assertIn("pin", frozen.reason)
         self.assertEqual(pp.radius_graph_stability(5e-5, budget_relative=1e-4, frozen_order_flips=3).status,
                          "refused")
-        self.assertEqual(pp.radius_graph_stability(2e-4, budget_relative=1e-4, frozen_order_flips=3).status,
+        # Equalita R3 F4: flips measured on the frozen order contradict a budget the margin
+        # clears; that was "stable" (fail-open). A measurement against the budget is refused.
+        contradicted = pp.radius_graph_stability(2e-4, budget_relative=1e-4, frozen_order_flips=3)
+        self.assertEqual(contradicted.status, "refused")
+        self.assertIn("contradict", contradicted.reason)
+        self.assertEqual(pp.radius_graph_stability(2e-4, budget_relative=1e-4, frozen_order_flips=0).status,
                          "stable")
         verdict = pp.radius_graph_stability(3e-4, budget_relative=1e-4)
         self.assertEqual(verdict.to_dict()["margin_over_budget"], 3e-4 / 1e-4)
