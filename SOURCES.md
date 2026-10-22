@@ -740,3 +740,10 @@
 | A6B181F77BC0934E | 2026-10-22 10:30 | src/toolkit | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): test_gino_adapter_hex_v3.py |
 | 8263DCD792F2F5F9 | 2026-10-22 10:30 | spec | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): NTK_TRAJECTORY_v1.md |
 | 414905177898909A | 2026-10-22 10:30 | scripts | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): mutation_probe.py |
+
+## HNT-R25-01: repeated checkpoint states measured and marked (append-only, 2026-10-23)
+
+> Cross-family GPT-6 R25 finding HNT-R25-01 (P2). Pins for the bytes of this block. Prior rows remain lineage.
+
+| 93310C19D0AF6591 | 2026-10-23 00:54 | src/toolkit | HNT-R25-01, identical checkpoint bytes measured and marked, record check: ntk_trajectory_hex_v3.py |
+| D2FDC9DF4288EEE0 | 2026-10-23 00:54 | src/toolkit | HNT-R25-01, identical checkpoint bytes measured and marked, record check: test_ntk_trajectory_hex_v3.py |

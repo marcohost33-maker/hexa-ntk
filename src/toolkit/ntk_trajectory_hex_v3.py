@@ -23,8 +23,20 @@ that the checkpoints came from a real training run ("authenticity": "unattested"
 
 Fail-closed: the checkpoint steps must equal the declared steps (no post-hoc
 subset), every checkpoint must match the model's state-dict keys, shapes and
-dtypes exactly, two checkpoints with identical bytes are refused (a mislabelled
-copy would fake a frozen kernel), and a forward that mutates its input is refused.
+dtypes exactly, and a forward that mutates its input is refused.
+
+Repeated states (HNT-R25-01): two checkpoints with identical bytes are measured,
+not refused. Equal bytes prove neither a mislabelled copy nor a genuinely
+stationary run (lr = 0, frozen parameters, a plateau); a copy saved under a wrong
+step number is a provenance defect that only an authenticated checkpoint history
+can expose, not a hash. Each entry therefore says, machine-readably, whether its
+state equals the previous one (``state_unchanged_since_previous``) and which
+earlier step first had the same bytes (``repeated_state_digest_of``). The kernel
+of a repeated state is measured again, under the full PARAM_NTK_v1 oracle; the
+drift since the previous checkpoint is a measured zero (``stationary_drift =
+"measured_zero"``) only if that re-measurement is bitwise equal to the previous
+kernel, otherwise ``"not_measured"``. ``check_trajectory_record`` refuses a record
+whose markers disagree with its own digests.
 
 Not claimed: an empirical kernel at one input says nothing about generalisation,
 is not the infinite-width NTK, and is no causal statement about learning.
@@ -58,6 +70,7 @@ __all__ = [
     "NTKTrajectoryError",
     "POLICY",
     "TrajectoryEntry",
+    "check_trajectory_record",
     "kernel_distance",
     "ntk_trajectory",
     "state_dict_sha256",
@@ -87,6 +100,10 @@ class TrajectoryEntry:
     distance_from_previous: float | None    # None for the first checkpoint or a zero kernel
     velocity: float | None                  # distance_from_previous / step difference
     target_alignment: float | None          # None without target or for the zero kernel
+    # HNT-R25-01: identical checkpoint bytes are allowed and marked, never refused.
+    state_unchanged_since_previous: bool    # state_sha256 equals the previous entry's
+    repeated_state_digest_of: int | None    # earliest earlier step with the same state_sha256
+    stationary_drift: str | None            # "measured_zero" | "not_measured"; None if the state changed
 
 
 @dataclass(frozen=True)
@@ -137,6 +154,9 @@ class NTKTrajectory:
                     "distance_from_previous": e.distance_from_previous,
                     "velocity": e.velocity,
                     "target_alignment": e.target_alignment,
+                    "state_unchanged_since_previous": e.state_unchanged_since_previous,
+                    "repeated_state_digest_of": e.repeated_state_digest_of,
+                    "stationary_drift": e.stationary_drift,
                 }
                 for e in self.entries
             ],
@@ -371,6 +391,85 @@ def _target(target_coefficients: Any, n_modes: int) -> np.ndarray | None:
     return c / scale
 
 
+def _stationarity(previous: TrajectoryEntry | None, state_digest: str,
+                  kernel_digest: str) -> tuple[bool, str | None]:
+    """(state unchanged since the previous checkpoint, stationary-drift status).
+
+    The kernel of a repeated state has just been re-measured under the full
+    PARAM_NTK_v1 oracle (a failing oracle raises, so no entry exists then). The drift
+    is a measured zero only if that re-measurement equals the previous kernel bit for
+    bit; a different kernel from identical bytes means the backend did not reproduce,
+    and the zero is "not_measured" (the numeric fields still report what was measured).
+    """
+    if previous is None or previous.state_sha256 != state_digest:
+        return False, None
+    return True, "measured_zero" if previous.kernel_sha256 == kernel_digest else "not_measured"
+
+
+def _record_marker_error(record: Any) -> str | None:
+    if not isinstance(record, Mapping):
+        return "record must be a mapping"
+    if record.get("policy") != POLICY:
+        return f"policy must be {POLICY!r}"
+    if record.get("authenticity") != "unattested":
+        return "authenticity must be 'unattested' (no checkpoint provenance is attested)"
+    try:
+        if record.get("record_sha256") != trajectory_record_sha256(record):
+            return "record_sha256 does not match the record"
+    except (TypeError, ValueError) as exc:  # NaN/inf or non-JSON content: no canonical form
+        return f"record has no canonical JSON form: {exc}"
+    try:
+        declared = _declared(record.get("declared_steps"))
+    except NTKTrajectoryError as exc:
+        return str(exc)
+    entries = record.get("entries")
+    if not isinstance(entries, list) or not all(isinstance(e, Mapping) for e in entries):
+        return "entries must be a list of mappings"
+    if [e.get("step") for e in entries] != list(declared) or any(type(e["step"]) is not int for e in entries):
+        return "entry steps differ from the declared steps"
+    seen: dict[str, int] = {}
+    for i, e in enumerate(entries):
+        step, state, kernel = e["step"], e.get("state_sha256"), e.get("kernel_sha256")
+        if not (isinstance(state, str) and isinstance(kernel, str)):
+            return f"entry at step {step}: state_sha256 and kernel_sha256 must be strings"
+        for key in ("state_unchanged_since_previous", "repeated_state_digest_of", "stationary_drift"):
+            if key not in e:
+                return f"entry at step {step}: marker {key!r} is missing"
+        # Recomputed from the record's own digests, independently of the producer.
+        unchanged = i > 0 and entries[i - 1].get("state_sha256") == state
+        if unchanged:
+            status = "measured_zero" if entries[i - 1].get("kernel_sha256") == kernel else "not_measured"
+        else:
+            status = None
+        first = seen.setdefault(state, step)
+        expected = {
+            "state_unchanged_since_previous": unchanged,
+            "repeated_state_digest_of": None if first == step else first,
+            "stationary_drift": status,
+        }
+        for key, value in expected.items():
+            # type() as well: True == 1 and 0 == False must not pass as a marker.
+            if e[key] != value or type(e[key]) is not type(value):
+                return f"entry at step {step}: {key} is {e[key]!r}, its digests give {value!r}"
+        if status == "measured_zero" and e.get("distance_from_previous") not in (0.0, None):
+            return f"entry at step {step}: a measured zero drift with distance_from_previous != 0"
+    return None
+
+
+def check_trajectory_record(record: Any) -> None:
+    """Refuse a record whose stationarity markers disagree with its own digests.
+
+    Recomputes ``state_unchanged_since_previous``, ``repeated_state_digest_of`` and
+    ``stationary_drift`` from the record's ``state_sha256`` / ``kernel_sha256`` sequence
+    and requires the declared steps, ``authenticity == "unattested"`` and a matching
+    ``record_sha256``. Internal consistency only: ``record_sha256`` is no signature, and
+    nothing here attests that the checkpoints came from a real training run.
+    """
+    error = _record_marker_error(record)
+    if error is not None:
+        raise NTKTrajectoryError(f"invalid {POLICY} record: {error}")
+
+
 def ntk_trajectory(
     model: torch.nn.Module,
     apply: Callable[[torch.nn.Module, torch.Tensor], torch.Tensor],
@@ -429,11 +528,8 @@ def ntk_trajectory(
     for step, state in pairs:
         _check_state(state, reference, step)
         digests.append(state_dict_sha256(state))
-    if len(set(digests)) != len(digests):
-        dup = [s for s, d in zip(steps, digests) if digests.count(d) > 1]
-        raise NTKTrajectoryError(
-            f"checkpoints at steps {dup} have identical bytes: a mislabelled copy would fake a frozen kernel"
-        )
+    # HNT-R25-01: identical bytes are NOT refused. They prove neither a mislabelled copy
+    # nor a genuinely stationary run; each repeat is measured again and marked below.
 
     modes64 = np.asarray(modes, dtype=np.float64)
     weights64 = np.asarray(weights, dtype=np.float64)
@@ -441,6 +537,7 @@ def ntk_trajectory(
     signature = _signature_sha256(model)
 
     entries: list[TrajectoryEntry] = []
+    first_step_of: dict[str, int] = {}
     n_real = None
     for step, (_, state), state_digest in zip(steps, pairs, digests):
         twin = copy.deepcopy(model)
@@ -460,10 +557,13 @@ def ntk_trajectory(
         effective_rank, offdiag, alignment = _shape_metrics(kernel, target)
         previous = entries[-1] if entries else None
         dist_prev = kernel_distance(previous.kernel, kernel) if previous is not None else None
+        kernel_digest = _array_sha256(kernel)
+        unchanged, stationary = _stationarity(previous, state_digest, kernel_digest)
+        repeated_of = first_step_of.setdefault(state_digest, step)
         entries.append(TrajectoryEntry(
             step=step,
             state_sha256=state_digest,
-            kernel_sha256=_array_sha256(kernel),
+            kernel_sha256=kernel_digest,
             kernel=kernel,
             eigenvalues=result.eigenvalues,
             fd_relative_error=result.fd_relative_error,
@@ -476,6 +576,9 @@ def ntk_trajectory(
             distance_from_previous=dist_prev,
             velocity=None if dist_prev is None else dist_prev / (step - previous.step),
             target_alignment=alignment,
+            state_unchanged_since_previous=unchanged,
+            repeated_state_digest_of=None if repeated_of == step else repeated_of,
+            stationary_drift=stationary,
         ))
 
     return NTKTrajectory(

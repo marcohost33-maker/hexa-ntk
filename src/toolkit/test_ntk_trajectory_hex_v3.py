@@ -3,6 +3,8 @@ metamorphic invariances (output scale, basis rotation), self-computed digests an
 fail-closed guard of the declared checkpoint sequence."""
 from __future__ import annotations
 
+import copy
+import dataclasses
 import json
 import math
 import unittest
@@ -392,6 +394,247 @@ class TestConstructorMetadata(unittest.TestCase):
         self.assertIn("cannot be bound", str(ctx.exception))
 
 
+def _sgd_step(lr: float) -> tuple[Product, dict, dict]:
+    """One genuine torch.optim.SGD step on Product with the trajectory's loss input."""
+    model = Product()
+    before = copy.deepcopy(model.state_dict())
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+    optimizer.zero_grad(set_to_none=True)
+    apply(model, _f64(U)).square().sum().backward()
+    self_check = [p.grad is not None and float(p.grad.abs()) > 0.0 for p in model.parameters()]
+    assert all(self_check), "the step must see nonzero gradients, else lr = 0 proves nothing"
+    optimizer.step()
+    return model, before, copy.deepcopy(model.state_dict())
+
+
+def _reseal(record: dict) -> dict:
+    """Recompute record_sha256 after an edit: the digest is no signature, anyone can do this."""
+    record = copy.deepcopy(record)
+    record["record_sha256"] = nt.trajectory_record_sha256(record)
+    return record
+
+
+class TestRepeatedStates(unittest.TestCase):
+    """HNT-R25-01 (cross-family GPT-6 R25, P2): identical checkpoint bytes are measured and
+    marked, not refused. Equal bytes prove neither a mislabelled copy nor real stationarity;
+    a copy under a wrong step number is a provenance defect, not a hash defect.
+
+    Replaces TestFailClosed.test_identical_checkpoint_bytes_are_refused (same input
+    a = [1, 2, 1]), which pinned the refusal this finding retracted; that case is now
+    test_return_to_an_earlier_state_is_measured_and_marked."""
+
+    def test_real_sgd_step_with_zero_lr_is_a_measured_stationary_checkpoint(self) -> None:
+        # Positive control: a genuine optimizer step with lr = 0 leaves the bytes unchanged.
+        model, before, after = _sgd_step(0.0)
+        self.assertEqual(nt.state_dict_sha256(before), nt.state_dict_sha256(after))
+        traj = _run(model.eval(), [(0, before), (1, after)])
+        first, second = traj.entries
+        self.assertFalse(first.state_unchanged_since_previous)
+        self.assertIsNone(first.repeated_state_digest_of)
+        self.assertIsNone(first.stationary_drift)
+        self.assertTrue(second.state_unchanged_since_previous)
+        self.assertEqual(second.repeated_state_digest_of, 0)
+        self.assertEqual(second.stationary_drift, "measured_zero")
+        # Measured again under the FD oracle, not copied from the first entry.
+        self.assertLessEqual(second.fd_relative_error, nt.pn.FD_REL_TOL)
+        self.assertEqual(second.kernel_sha256, first.kernel_sha256)
+        self.assertGreater(second.trace, 0.0)
+        self.assertEqual(second.relative_drift, 0.0)
+        self.assertEqual(second.distance_from_initial, 0.0)
+        self.assertEqual(second.distance_from_previous, 0.0)
+        self.assertEqual(second.velocity, 0.0)
+        record = traj.to_dict()
+        self.assertEqual(record["authenticity"], "unattested")
+        self.assertIs(record["entries"][1]["state_unchanged_since_previous"], True)
+        self.assertEqual(record["entries"][1]["repeated_state_digest_of"], 0)
+        self.assertEqual(record["entries"][1]["stationary_drift"], "measured_zero")
+        nt.check_trajectory_record(record)
+        nt.check_trajectory_record(json.loads(json.dumps(record, allow_nan=False)))
+
+    def test_real_sgd_step_with_positive_lr_drifts_and_is_not_marked(self) -> None:
+        # Control: the same step with lr > 0 changes the bytes and moves the kernel by the
+        # closed form drift |(a1^2 + b1^2) / (a0^2 + b0^2) - 1| (Product, Theta = (a^2+b^2) c c^T).
+        model, before, after = _sgd_step(0.05)
+        self.assertNotEqual(nt.state_dict_sha256(before), nt.state_dict_sha256(after))
+        second = _run(model.eval(), [(0, before), (1, after)]).entries[1]
+        self.assertFalse(second.state_unchanged_since_previous)
+        self.assertIsNone(second.repeated_state_digest_of)
+        self.assertIsNone(second.stationary_drift)
+        s0 = float(before["a"]) ** 2 + float(before["b"]) ** 2
+        s1 = float(after["a"]) ** 2 + float(after["b"]) ** 2
+        self.assertGreater(second.relative_drift, 0.0)
+        self.assertAlmostEqual(second.relative_drift, abs(s1 / s0 - 1.0), places=12)
+
+    def test_cross_family_proposal_linear_zero_lr(self) -> None:
+        # The R25 proposal (proposed_repo_tests/test_hexa_ntk_r84_stationary_checkpoint.py),
+        # run in the repo for the first time and extended by the markers.
+        model = torch.nn.Linear(2, 2, bias=False, dtype=torch.float64).eval()
+        before = copy.deepcopy(model.state_dict())
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.0)
+        optimizer.zero_grad(set_to_none=True)
+        x = torch.tensor([[0.4, -0.2]], dtype=torch.float64)
+        model(x).sum().backward()
+        optimizer.step()
+        after = copy.deepcopy(model.state_dict())
+        self.assertTrue(all(torch.equal(before[k], after[k]) for k in before))
+        traj = nt.ntk_trajectory(
+            model, lambda m, inp: m(inp).reshape(-1), x, np.eye(2, dtype=np.float64), np.ones(2, dtype=np.float64),
+            [(0, before), (1, after)], declared_steps=(0, 1), run_id="stationary-positive-control",
+            model_dtype="float64", float32_crosscheck=False,
+        )
+        self.assertEqual(traj.entries[1].relative_drift, 0.0)
+        self.assertEqual(traj.entries[1].distance_from_initial, 0.0)
+        self.assertEqual(traj.entries[1].stationary_drift, "measured_zero")
+        self.assertEqual(traj.to_dict()["authenticity"], "unattested")
+
+    def test_markers_name_the_previous_and_the_earliest_repeat(self) -> None:
+        # A, B, B: step 20 repeats its predecessor (not the first checkpoint).
+        traj = _run(Product(), _states(a=[1.0, 2.0, 2.0], b=[0.5, 0.5, 0.5]))
+        self.assertEqual([e.state_unchanged_since_previous for e in traj.entries], [False, False, True])
+        self.assertEqual([e.repeated_state_digest_of for e in traj.entries], [None, None, 10])
+        self.assertEqual([e.stationary_drift for e in traj.entries], [None, None, "measured_zero"])
+        self.assertGreater(traj.entries[2].relative_drift, 0.0)  # still drifted from step 0
+        # A, A, A: every repeat names the earliest step, every one is a measured zero.
+        traj = _run(Product(), _states(a=[1.0, 1.0, 1.0], b=[0.5, 0.5, 0.5]))
+        self.assertEqual([e.repeated_state_digest_of for e in traj.entries], [None, 0, 0])
+        self.assertEqual([e.stationary_drift for e in traj.entries], [None, "measured_zero", "measured_zero"])
+        nt.check_trajectory_record(traj.to_dict())
+
+    def test_return_to_an_earlier_state_is_measured_and_marked(self) -> None:
+        # A, B, A (the input of the retracted refusal test): measured, not unchanged since
+        # the previous checkpoint, but a repeat of step 0 with the identical kernel.
+        traj = _run(Product(), _states(a=[1.0, 2.0, 1.0], b=[0.5, 0.5, 0.5]))
+        last = traj.entries[2]
+        self.assertFalse(last.state_unchanged_since_previous)
+        self.assertEqual(last.repeated_state_digest_of, 0)
+        self.assertIsNone(last.stationary_drift)
+        self.assertEqual(last.kernel_sha256, traj.entries[0].kernel_sha256)
+        self.assertEqual(last.relative_drift, 0.0)
+        self.assertGreater(traj.entries[1].relative_drift, 0.0)
+        nt.check_trajectory_record(traj.to_dict())
+
+    def test_zero_kernel_repeat_is_a_measured_zero_with_undefined_distance(self) -> None:
+        traj = _run(Ignores(), _states(theta=[0.0, 0.0]))
+        second = traj.entries[1]
+        self.assertEqual(second.stationary_drift, "measured_zero")
+        self.assertIsNone(second.distance_from_previous)  # S undefined for the zero kernel
+        nt.check_trajectory_record(traj.to_dict())
+
+    def test_irreproducible_remeasurement_is_not_a_measured_zero(self) -> None:
+        # Identical bytes, but the backend returns a kernel differing in the last bit.
+        real = nt.pn.param_ntk
+        calls = []
+
+        def jittered(*args, **kwargs):
+            result = real(*args, **kwargs)
+            calls.append(result)
+            if len(calls) == 2:
+                return dataclasses.replace(result, kernel=result.kernel * (1.0 + 2.0 ** -50))
+            return result
+
+        with mock.patch.object(nt.pn, "param_ntk", side_effect=jittered):
+            traj = _run(Product(), _states(a=[1.0, 1.0], b=[0.5, 0.5]))
+        second = traj.entries[1]
+        self.assertTrue(second.state_unchanged_since_previous)
+        self.assertEqual(second.stationary_drift, "not_measured")
+        self.assertNotEqual(second.kernel_sha256, traj.entries[0].kernel_sha256)
+        self.assertGreater(second.relative_drift, 0.0)  # the measured number is still reported
+        nt.check_trajectory_record(traj.to_dict())
+
+    def test_a_failing_oracle_at_a_repeated_state_yields_no_record(self) -> None:
+        # The drift of a repeat is only a measured zero if PARAM_NTK_v1 ran correctly there:
+        # an oracle failure at the repeat aborts the trajectory instead of reusing the kernel.
+        real = nt.pn.param_ntk
+        calls = []
+
+        def fails_second(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 2:
+                raise nt.pn.ParamNTKError("autograd and finite differences disagree (injected)")
+            return real(*args, **kwargs)
+
+        with mock.patch.object(nt.pn, "param_ntk", side_effect=fails_second):
+            with self.assertRaises(nt.pn.ParamNTKError):
+                _run(Product(), _states(a=[1.0, 1.0], b=[0.5, 0.5]))
+        self.assertEqual(len(calls), 2)  # the repeat was measured, not skipped
+
+    def test_step_guards_still_hold_for_identical_states(self) -> None:
+        state = {"a": _f64(1.0), "b": _f64(0.5)}
+        for ckpts, declared in (([(0, state), (0, dict(state))], [0, 0]),          # repeated step number
+                                ([(10, state), (0, dict(state))], [10, 0]),         # decreasing
+                                ([(0, state), (10, dict(state))], [0, 20])):        # not the declared steps
+            with self.subTest(steps=[s for s, _ in ckpts], declared=declared):
+                with self.assertRaises(nt.NTKTrajectoryError):
+                    _run(Product(), ckpts, declared_steps=declared)
+
+
+class TestRecordCheck(unittest.TestCase):
+    """check_trajectory_record: the markers must follow from the record's own digests."""
+
+    def setUp(self) -> None:
+        self.record = _run(Product(), _states(a=[1.0, 1.0, 2.0], b=[0.5, 0.5, 0.5])).to_dict()
+
+    def _refused(self, record, fragment: str) -> None:
+        with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+            nt.check_trajectory_record(record)
+        self.assertIn(fragment, str(ctx.exception))
+
+    def test_a_consistent_record_passes(self) -> None:
+        self.assertIsNone(nt.check_trajectory_record(self.record))
+        self.assertEqual(self.record["entries"][1]["stationary_drift"], "measured_zero")
+
+    def test_unmarked_repeat_is_refused_even_when_resealed(self) -> None:
+        for key, value in (("state_unchanged_since_previous", False), ("repeated_state_digest_of", None),
+                           ("stationary_drift", None), ("stationary_drift", "not_measured"),
+                           ("repeated_state_digest_of", 10), ("state_unchanged_since_previous", 1),
+                           ("repeated_state_digest_of", False)):
+            with self.subTest(key=key, value=value):
+                bad = copy.deepcopy(self.record)
+                bad["entries"][1][key] = value
+                self._refused(_reseal(bad), key)
+        bad = copy.deepcopy(self.record)
+        del bad["entries"][1]["stationary_drift"]
+        self._refused(_reseal(bad), "missing")
+
+    def test_a_marker_on_a_changed_state_is_refused(self) -> None:
+        for key, value in (("state_unchanged_since_previous", True), ("repeated_state_digest_of", 0),
+                           ("stationary_drift", "measured_zero")):
+            with self.subTest(key=key):
+                bad = copy.deepcopy(self.record)
+                bad["entries"][2][key] = value
+                self._refused(_reseal(bad), key)
+
+    def test_measured_zero_needs_equal_kernels_and_zero_distance(self) -> None:
+        bad = copy.deepcopy(self.record)
+        bad["entries"][1]["kernel_sha256"] = "0" * 64
+        self._refused(_reseal(bad), "stationary_drift")
+        bad = copy.deepcopy(self.record)
+        bad["entries"][1]["distance_from_previous"] = 1e-3
+        self._refused(_reseal(bad), "distance_from_previous")
+
+    def test_envelope_is_checked(self) -> None:
+        cases = {
+            "record_sha256": dict(self.record, run_id="other"),             # edited, not resealed
+            "authenticity": _reseal(dict(self.record, authenticity="attested")),
+            "policy": _reseal(dict(self.record, policy="NTK_TRAJECTORY_v0")),
+            "strictly increasing": _reseal(dict(self.record, declared_steps=[0, 0, 20])),
+            "declared steps": _reseal(dict(self.record, declared_steps=[0, 10, 30])),
+            "entries must be": _reseal(dict(self.record, entries="none")),
+            "canonical JSON": dict(self.record, trace=math.nan),
+        }
+        for fragment, record in cases.items():
+            with self.subTest(fragment=fragment):
+                self._refused(record, fragment)
+        self._refused([self.record], "mapping")
+        bad = copy.deepcopy(self.record)
+        bad["entries"][0]["state_sha256"] = None
+        self._refused(_reseal(bad), "must be strings")
+        bad = copy.deepcopy(self.record)
+        bad["entries"][1]["step"] = True
+        bad["declared_steps"] = [0, 1, 20]
+        self._refused(_reseal(bad), "declared steps")
+
+
 class TestFailClosed(unittest.TestCase):
     def _ok(self):
         return _states(a=[1.0, 2.0, 3.0], b=[0.5, 0.5, 0.5])
@@ -422,10 +665,6 @@ class TestFailClosed(unittest.TestCase):
         traj = _run(Product(), ckpts, declared_steps=[np.int32(0), 10, 20])
         self.assertEqual(traj.declared_steps, (0, 10, 20))
         self.assertIs(type(traj.entries[1].step), int)
-
-    def test_identical_checkpoint_bytes_are_refused(self) -> None:
-        ckpts = _states(a=[1.0, 2.0, 1.0], b=[0.5, 0.5, 0.5])
-        self.assertIn("identical bytes", self._refused(Product(), ckpts))
 
     def test_state_must_match_the_model_exactly(self) -> None:
         good = self._ok()
