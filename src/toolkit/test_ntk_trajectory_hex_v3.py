@@ -451,6 +451,17 @@ class TestRepeatedStates(unittest.TestCase):
         nt.check_trajectory_record(record)
         nt.check_trajectory_record(json.loads(json.dumps(record, allow_nan=False)))
 
+    def test_identical_bytes_are_not_refused(self) -> None:
+        # The retracted contract as an explicit assertion (a refusal is a test failure here,
+        # not an error), for the A-A, A-B-A and A-A-A sequences.
+        for a in ([1.0, 1.0], [1.0, 2.0, 1.0], [1.0, 1.0, 1.0]):
+            with self.subTest(a=a):
+                try:
+                    traj = _run(Product(), _states(a=a, b=[0.5] * len(a)))
+                except nt.NTKTrajectoryError as exc:
+                    self.fail(f"identical checkpoint bytes were refused: {exc}")
+                self.assertEqual(len(traj.entries), len(a))
+
     def test_real_sgd_step_with_positive_lr_drifts_and_is_not_marked(self) -> None:
         # Control: the same step with lr > 0 changes the bytes and moves the kernel by the
         # closed form drift |(a1^2 + b1^2) / (a0^2 + b0^2) - 1| (Product, Theta = (a^2+b^2) c c^T).

@@ -749,3 +749,4 @@
 | D2FDC9DF4288EEE0 | 2026-10-23 00:54 | src/toolkit | HNT-R25-01, identical checkpoint bytes measured and marked, record check: test_ntk_trajectory_hex_v3.py |
 | D4F5115AFD45AB00 | 2026-10-23 01:05 | spec | HNT-R25-01, section 2.1 repeated states (v1 amended in draft): NTK_TRAJECTORY_v1.md |
 | 0182F73BFE09A25A | 2026-10-23 01:05 | scripts | HNT-R25-01, duplicate-refusal mutant replaced by six marker/record-check mutants: mutation_probe.py |
+| A6C32149CFED1484 | 2026-10-23 01:15 | src/toolkit | HNT-R25-01, explicit no-refusal assertion for identical bytes: test_ntk_trajectory_hex_v3.py |
