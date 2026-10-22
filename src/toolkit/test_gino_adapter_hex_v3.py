@@ -1,6 +1,7 @@
 """Contract and optional-backend smoke tests for gino_adapter_hex_v3."""
 from __future__ import annotations
 
+import copy
 import importlib.util
 import importlib.metadata
 import hashlib
@@ -355,6 +356,46 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         self.assertLessEqual(result.fd_relative_error, pn.FD_REL_TOL_FLOAT32)
         self.assertLess(result.float32_relative_deviation, 1e-2)
         self.assertEqual(next(model.parameters()).dtype, torch.float32)  # caller's model untouched
+
+    @unittest.skipUnless(importlib.util.find_spec("neuralop"), "optional neuraloperator backend not installed")
+    def test_parameter_ntk_trajectory_of_the_real_gino(self) -> None:
+        # NTK_TRAJECTORY_v1 on the actual GINO: the initial weights and the weights after one
+        # synthetic Adam step (no T1 data) are two declared checkpoints of one run.
+        import ntk_trajectory_hex_v3 as nt
+        lattice = triangle_hex_lattice(32)
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3, hidden_channels=8, n_layers=1,
+                               radius_factor=2.5)
+        torch.manual_seed(0)
+        model = build_gino(cfg, lattice)
+        m = lattice.num_nodes
+        rng = np.random.default_rng(3)
+        weights = np.full(m, 1.0 / m)
+        q, _ = np.linalg.qr(np.sqrt(weights)[:, None] * rng.standard_normal((m, 4)))
+        modes = q / np.sqrt(weights)[:, None]
+        u0 = torch.as_tensor(np.sin(np.pi * lattice.coords[:, 0])[None, :])
+        # state_dict() carries neuraloperator's "_metadata" (constructor kwargs) next to the tensors.
+        initial = copy.deepcopy(model.state_dict())
+        self.assertIn("_metadata", initial)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+        loss = predict_gino(model, lattice, torch.ones((1, m)), cfg).square().mean()
+        loss.backward()
+        optimizer.step()
+        stepped = copy.deepcopy(model.state_dict())
+        model.eval()
+        traj = nt.ntk_trajectory(model, lambda mm, x: predict_gino(mm, lattice, x, cfg)[0], u0, modes, weights,
+                                 [(0, initial), (1, stepped)], declared_steps=[0, 1], run_id="gino-smoke",
+                                 model_dtype="float32")
+        first, second = traj.entries
+        self.assertNotEqual(first.state_sha256, second.state_sha256)
+        self.assertGreater(second.relative_drift, 0.0)
+        self.assertGreater(second.distance_from_initial, 0.0)
+        self.assertLessEqual(second.distance_from_initial, 1.0)
+        for e in traj.entries:
+            self.assertLessEqual(e.fd_relative_error, nt.pn.FD_REL_TOL_FLOAT32)
+            self.assertGreaterEqual(e.effective_rank, 1.0 - 1e-12)
+            self.assertLessEqual(e.effective_rank, 4.0 + 1e-12)
+        self.assertEqual(traj.to_dict()["record_sha256"], nt.trajectory_record_sha256(traj.to_dict()))
+        self.assertIn("_metadata", initial)  # neuraloperator's loader pops it; the caller's dict is kept
 
     def test_complex_weight_dtype_must_match_real_dtype(self) -> None:
         # model.double() leaves complex64 spectral weights next to float64 tensors.

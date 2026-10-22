@@ -22,6 +22,26 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **NTK-Trajektorie (#60 Punkt 2, 2026-10-22).** `PARAM_NTK_v1` (seit #71) misst die
+  Parameter-NTK an einem Parameterpunkt; der Statuskommentar auf #60 vom 2026-10-20 nannte
+  Punkt 2 deshalb noch offen. Neu: `spec/NTK_TRAJECTORY_v1.md` (PROPOSED),
+  `src/toolkit/ntk_trajectory_hex_v3.py`: dieselbe Messung an einer vorab deklarierten
+  Checkpoint-Folge eines Laufs (GPT-6-Roadmap 2026-10-19, Schritt G2). Relative Drift,
+  Kernel-Distanz/-Geschwindigkeit (Fort et al. 2020), Modenkopplung in der Basis, effektiver
+  Rang, optional Kernel-Target-Alignment; Null-Kerne ergeben `null`, nie `inf`. Bindung: die
+  Digests rechnet das Modul selbst aus den gemessenen Bytes (State-Dicts, Eingabe, Basis,
+  Parametersignatur, Kerne, Record); fremde Hash-Strings werden nicht angenommen (Kritikpunkt
+  am GPT-6-Parallelmodul vom 2026-10-19). Befund am echten Backend: neuraloperator 2.0.0 legt
+  Konstruktor-Metadaten (`_metadata`, mit `F.gelu` und der Klasse `SpectralConv`) in den
+  State-Dict und entfernt sie in `load_state_dict` per `pop` aus dem uebergebenen dict. Der
+  Vertrag bindet sie kanonisch (Callables per qualifiziertem Namen, Lambdas/gebundene Methoden
+  verweigert), verlangt Gleichheit mit dem Modell (sonst andere Architektur) und laedt aus
+  einer Kopie. Mutationsprobe: der Mutant "Schluesselnamen nicht gehasht" ueberlebte zuerst
+  (der Split-Test deckte ihn nicht) -> Test fuer umbenannte Schluessel ergaenzt.
+  _Evidenz:_ `results/2026-10-22_ntk-trajectory_local-gate.log`.
+  Offen: welche Laeufe/Checkpoints/Eingaben in Phase 1 gemessen werden (Owner, Vorregistrierung);
+  Laufzeitbudget fuer GINO-Groesse ungemessen.
+
 - [x] **CI rot auf #61 (`tests (cpu)`, Head 6d219d9): CG-V2-Tests hingen am BLAS-Kernel
   (2026-10-14).** `test_at_rounding_floor_where_v1_stagnates` und
   `test_acceptance_hangs_on_true_comparisons` setzten voraus, dass V1 `rtol=1e-16` auf

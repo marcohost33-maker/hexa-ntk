@@ -730,3 +730,13 @@
 | DEE4F9877D3084B6 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): spectral_audit_hex_v3.py |
 | 2B2B46B400902638 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): test_linear_baseline_hex_v3.py |
 | 0E250206AC0EF5E9 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): test_spectral_audit_hex_v3.py |
+
+## NTK trajectory (append-only, 2026-10-22)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| E896604E9132568D | 2026-10-22 10:30 | src/toolkit | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): ntk_trajectory_hex_v3.py |
+| 8B563C31C72825C8 | 2026-10-22 10:30 | src/toolkit | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): test_ntk_trajectory_hex_v3.py |
+| A6B181F77BC0934E | 2026-10-22 10:30 | src/toolkit | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): test_gino_adapter_hex_v3.py |
+| 8263DCD792F2F5F9 | 2026-10-22 10:30 | spec | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): NTK_TRAJECTORY_v1.md |
+| 414905177898909A | 2026-10-22 10:30 | scripts | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): mutation_probe.py |

@@ -50,6 +50,7 @@ DCP = "scripts/oracles/distributed_checkpoint_bundle_v1.py"
 RC = "reference_case_hex_v3.py"
 FV = "hex_fv_solver_hex_v3.py"
 T1 = "heat_operator_task_hex_v3.py"
+NT = "ntk_trajectory_hex_v3.py"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -211,6 +212,33 @@ MUTANTS = (
     Mutant(T1, "    tolerance = 64.0 * np.finfo(np.float64).eps * np.maximum(1.0, np.abs(values))\n",
            "    tolerance = 64.0 * np.finfo(np.float64).eps * max(1.0, float(np.max(np.abs(values))))\n",
            "test_heat_operator_task_hex_v3.TestMetrics"),
+    # 2026-10-22 NTK_TRAJECTORY_v1: each guard and each closed-form metric of the trajectory.
+    Mutant(NT, "    if given != steps:\n", "    if False:\n", "test_ntk_trajectory_hex_v3.TestFailClosed"),
+    Mutant(NT, "    if len(set(digests)) != len(digests):\n", "    if False:\n",
+           "test_ntk_trajectory_hex_v3.TestFailClosed"),
+    Mutant(NT, "        if value.dtype != ref.dtype or value.shape != ref.shape:\n",
+           "        if value.shape != ref.shape:\n", "test_ntk_trajectory_hex_v3.TestFailClosed"),
+    Mutant(NT, "        if tensor_sha256(inputs) != inputs_digest:\n", "        if False:\n",
+           "test_ntk_trajectory_hex_v3.TestFailClosed"),
+    Mutant(NT, "    if any(m.training for m in model.modules()):\n", "    if False:\n",
+           "test_ntk_trajectory_hex_v3.TestFailClosed"),
+    Mutant(NT, "    return min(1.0, max(0.0, 1.0 - cosine))\n", "    return min(1.0, max(0.0, 1.0 - cosine ** 2))\n",
+           "test_ntk_trajectory_hex_v3.TestClosedForms"),
+    Mutant(NT, "    if np.array_equal(sa, sb):\n", "    if False:\n", "test_ntk_trajectory_hex_v3.TestBinding"),
+    Mutant(NT, "        k0 = entries[0].kernel if entries else kernel\n",
+           "        k0 = entries[-1].kernel if entries else kernel\n", "test_ntk_trajectory_hex_v3.TestClosedForms"),
+    Mutant(NT, "dist_prev / (step - previous.step)", "dist_prev", "test_ntk_trajectory_hex_v3.TestClosedForms"),
+    Mutant(NT, "    effective_rank = float(np.sum(diag)) ** 2 / fro2\n",
+           "    effective_rank = float(np.sum(diag)) / math.sqrt(fro2)\n",
+           "test_ntk_trajectory_hex_v3.TestClosedForms"),
+    Mutant(NT, "(math.sqrt(fro2) * float(target @ target))", "float(target @ target)",
+           "test_ntk_trajectory_hex_v3.TestClosedForms"),
+    Mutant(NT, "        h.update(encoded)\n", "", "test_ntk_trajectory_hex_v3.TestBinding"),
+    Mutant(NT, "    h.update(_tensor_header(t))\n", "", "test_ntk_trajectory_hex_v3.TestBinding"),
+    Mutant(NT, "        twin.load_state_dict(dict(state), strict=True)\n",
+           "        twin.load_state_dict(state, strict=True)\n", "test_ntk_trajectory_hex_v3.TestConstructorMetadata"),
+    Mutant(NT, " or _metadata_bytes(key, value) != _metadata_bytes(key, ref):\n", ":\n",
+           "test_ntk_trajectory_hex_v3.TestConstructorMetadata"),
 )
 
 
