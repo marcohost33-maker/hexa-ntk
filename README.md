@@ -201,7 +201,9 @@ Vor jedem Training festgelegt, ohne Modell und ohne Lern-Claim:
   Checkpoints eines Laufs auf fester Eingabe. Berichtet relative Drift, Kernel-Distanz und
   -Geschwindigkeit (Fort et al. 2020), Modenkopplung in der Laplace-Basis, effektiven Rang und
   optional Kernel-Target-Alignment. Fail-closed: Checkpoint-Folge = deklarierte Folge,
-  Schluessel/Dtype/Shape exakt, byte-gleiche Checkpoints verweigert, Eingabe-Mutation erkannt;
+  Schluessel/Dtype/Shape exakt, Eingabe-Mutation erkannt; byte-gleiche Checkpoints werden
+  gemessen und je Eintrag markiert, nicht verweigert (HNT-R25-01: gleiche Bytes beweisen weder
+  eine Kopie noch echte Stationaritaet);
   SHA-256 ueber die tatsaechlich gemessenen Bytes (inkl. neuraloperator-`_metadata`), Herkunft
   `unattested`. Orakel: geschlossene Formen, Skalen-/Basis-Invarianz, Lazy-Regime (breites Netz
   driftet weniger, Jacot 2018 / Lee 2019), echter GINO (2 Checkpoints, synthetischer Schritt).

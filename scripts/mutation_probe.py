@@ -214,8 +214,22 @@ MUTANTS = (
            "test_heat_operator_task_hex_v3.TestMetrics"),
     # 2026-10-22 NTK_TRAJECTORY_v1: each guard and each closed-form metric of the trajectory.
     Mutant(NT, "    if given != steps:\n", "    if False:\n", "test_ntk_trajectory_hex_v3.TestFailClosed"),
-    Mutant(NT, "    if len(set(digests)) != len(digests):\n", "    if False:\n",
-           "test_ntk_trajectory_hex_v3.TestFailClosed"),
+    # 2026-10-23 HNT-R25-01 (cross-family GPT-6 R25): the duplicate-bytes refusal was
+    # retracted (equal bytes prove neither a copy nor stationarity), so its mutant is gone;
+    # these pin the markers that replace it and the record check that enforces them.
+    Mutant(NT, "        unchanged, stationary = _stationarity(previous, state_digest, kernel_digest)\n",
+           "        unchanged, stationary = False, None\n", "test_ntk_trajectory_hex_v3.TestRepeatedStates"),
+    Mutant(NT, "        unchanged, stationary = _stationarity(previous, state_digest, kernel_digest)\n",
+           "        unchanged, stationary = _stationarity(entries[0] if entries else None, "
+           "state_digest, kernel_digest)\n",
+           "test_ntk_trajectory_hex_v3.TestRepeatedStates"),
+    Mutant(NT, "    return True, \"measured_zero\" if previous.kernel_sha256 == kernel_digest else \"not_measured\"\n",
+           "    return True, \"measured_zero\"\n", "test_ntk_trajectory_hex_v3.TestRepeatedStates"),
+    Mutant(NT, "            repeated_state_digest_of=None if repeated_of == step else repeated_of,\n",
+           "            repeated_state_digest_of=None,\n", "test_ntk_trajectory_hex_v3.TestRepeatedStates"),
+    Mutant(NT, "            if e[key] != value or type(e[key]) is not type(value):\n", "            if False:\n",
+           "test_ntk_trajectory_hex_v3.TestRecordCheck"),
+    Mutant(NT, " or type(e[key]) is not type(value):\n", ":\n", "test_ntk_trajectory_hex_v3.TestRecordCheck"),
     Mutant(NT, "        if value.dtype != ref.dtype or value.shape != ref.shape:\n",
            "        if value.shape != ref.shape:\n", "test_ntk_trajectory_hex_v3.TestFailClosed"),
     Mutant(NT, "        if tensor_sha256(inputs) != inputs_digest:\n", "        if False:\n",

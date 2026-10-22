@@ -41,6 +41,20 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   _Evidenz:_ `results/2026-10-22_ntk-trajectory_local-gate.log`.
   Offen: welche Laeufe/Checkpoints/Eingaben in Phase 1 gemessen werden (Owner, Vorregistrierung);
   Laufzeitbudget fuer GINO-Groesse ungemessen.
+  - [x] **HNT-R25-01 (Cross-Family GPT-6 R25, P2, 2026-10-23): byte-gleiche Checkpoints werden
+    gemessen und markiert statt verweigert.** Der erste Entwurf verweigerte gleiche State-Digests
+    als "falsch nummerierte Kopie". Gleiche Bytes beweisen aber weder eine Kopie noch echte
+    Stationaritaet (lr = 0, eingefrorene Parameter, Plateau); die Sperre schloss gueltige
+    Null-Drift-Trajektorien aus. Jetzt: jeder Checkpoint wird unter dem vollen PARAM_NTK_v1-Orakel
+    neu gemessen und je Eintrag markiert (`state_unchanged_since_previous`,
+    `repeated_state_digest_of`, `stationary_drift` = `measured_zero` nur bei bitgleichem
+    Nachmess-Kern, sonst `not_measured`); `check_trajectory_record` verweigert Records, deren
+    Markierungen den eigenen Digests widersprechen. `authenticity` bleibt `unattested`; eine
+    falsch nummerierte Kopie ist auf Herkunftsebene abzulehnen (authentisierte
+    Checkpoint-Provenienz, offen), nicht per Hash. Spec v1 im Draft geaendert (Abschnitt 2.1),
+    weil #83 ungemergt ist und kein Record unter dem alten Vertrag existiert. Der Test der alten
+    Sperre ist ersetzt (gleicher Input A-B-A, jetzt gemessen + markiert), der zugehoerige Mutant
+    durch sechs neue ersetzt. _Evidenz:_ `results/2026-10-23_hnt-r25-01_local-gate.log`.
 
 - [x] **CI rot auf #61 (`tests (cpu)`, Head 6d219d9): CG-V2-Tests hingen am BLAS-Kernel
   (2026-10-14).** `test_at_rounding_floor_where_v1_stagnates` und
