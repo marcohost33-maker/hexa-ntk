@@ -68,9 +68,9 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
 | Provenance | `python scripts/verify_sources.py` | 46 Toolkit- + 15 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 847 Tests, Ergebnis und Exit-Code im Gate-Log `results/2026-10-22_ntk-trajectory_local-gate.log` (Linux-Container; NTK-Trajektorie, #60 Punkt 2); Vorlaeufer `results/2026-10-17_issue76-codex-followup_local-gate.log` (819 Tests, Windows; Codex-Folgebefunde #76, jeder neue Test gegen den alten Code rot), `results/2026-10-17_pr71-fd-kernel-rows_local-gate.log` (809 Tests, FD-Pruefung auf den Kernel-Zeilen), `results/2026-10-16_pr71-codex-round_local-gate.log` (808 Tests, @59693d8; #61-Stapel + Spektral-Audit + Haertungen 2026-10-15, mit Negativ-zuerst- und Mutanten-Beleg), `results/2026-10-13_spectral-audit_local-gate.log` (@80a91d3) und 701 Tests im Gate-Log `results/2026-10-12_pr61-i1-v2_local-gate.log` (I1 nach V2; das V1-Rot ist ein erwarteter Befund im Test `TestMmsI1V1Historical`, kein roter Test); Skips je Plattform: Gate-Log |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 861 Tests, Ergebnis und Exit-Code im Gate-Log `results/2026-10-23_hnt-r25-01_local-gate.log` (Windows; HNT-R25-01, byte-gleiche Checkpoints gemessen und markiert); Vorlaeufer `results/2026-10-22_ntk-trajectory_local-gate.log` (847 Tests, Linux-Container; NTK-Trajektorie, #60 Punkt 2), `results/2026-10-17_issue76-codex-followup_local-gate.log` (819 Tests, Windows; Codex-Folgebefunde #76, jeder neue Test gegen den alten Code rot), `results/2026-10-17_pr71-fd-kernel-rows_local-gate.log` (809 Tests, FD-Pruefung auf den Kernel-Zeilen), `results/2026-10-16_pr71-codex-round_local-gate.log` (808 Tests, @59693d8; #61-Stapel + Spektral-Audit + Haertungen 2026-10-15, mit Negativ-zuerst- und Mutanten-Beleg), `results/2026-10-13_spectral-audit_local-gate.log` (@80a91d3) und 701 Tests im Gate-Log `results/2026-10-12_pr61-i1-v2_local-gate.log` (I1 nach V2; das V1-Rot ist ein erwarteter Befund im Test `TestMmsI1V1Historical`, kein roter Test); Skips je Plattform: Gate-Log |
 | Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
-| Mutation | `python scripts/mutation_probe.py` | 66/66 Mutanten getoetet, volle Probe 2026-10-22 unter Linux (exit 0, inkl. M02 und 15 Mutanten der NTK-Trajektorie; Log `results/2026-10-22_ntk-trajectory_local-gate.log`). Vorlauf: 50/51, volle Probe @9db9cbc unter Windows, Baseline gruen, exit 1: einzig M02 ueberlebt, und das ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped; so schon 2026-09-28). Der I1-Mutant (Iterationsfehler-Verhaeltnis entfernt) zielt seit 2026-10-12 auf `_i1_level_holds`. Letzter voller Lauf unter Linux: 49/49, exit 0, 2026-10-07 (alte Zaehlung) |
+| Mutation | `python scripts/mutation_probe.py` | 70/71 Mutanten getoetet, volle Probe 2026-10-23 @49310d4 unter Windows (exit 1: einzig M02 ueberlebt, Testklasse POSIX-only, unter Windows nicht messbar; alle 20 Mutanten der NTK-Trajektorie getoetet, davon 6 neue fuer HNT-R25-01; Log `results/2026-10-23_hnt-r25-01_local-gate.log`). Zuvor 66/66 unter Linux, 2026-10-22, exit 0 (vor HNT-R25-01; Log `results/2026-10-22_ntk-trajectory_local-gate.log`). Vorlauf: 50/51, volle Probe @9db9cbc unter Windows, Baseline gruen, exit 1: einzig M02 ueberlebt, und das ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped; so schon 2026-09-28). Der I1-Mutant (Iterationsfehler-Verhaeltnis entfernt) zielt seit 2026-10-12 auf `_i1_level_holds`. Letzter voller Lauf unter Linux: 49/49, exit 0, 2026-10-07 (alte Zaehlung) |
 
 Lokale Umgebung des Laufs 2026-10-15: Windows 11, Python 3.12.10, `torch` 2.6.0+cpu, `numpy`
 2.5.3, coverage 7.16.2, ruff 0.16.9, GINO-Gate mit `neuraloperator` 2.0.0, OpenBLAS-Kernel-Schleife;
@@ -221,8 +221,8 @@ python scripts/verify_sources.py                               # Provenance-Gate
 # python -m pip install -r requirements-operator.txt
 # python -m unittest discover -s src/toolkit -t src/toolkit -p "test_gino_adapter_hex_v3.py" -v
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 847 Unit-Tests (2026-10-22; NTK-Trajektorie) + Coverage-Gate
-python scripts/mutation_probe.py                               # optional: 66 Mutanten der Review-Fixes
+python -m coverage report                                      # 861 Unit-Tests (2026-10-23; HNT-R25-01) + Coverage-Gate
+python scripts/mutation_probe.py                               # optional: 71 Mutanten der Review-Fixes
 python scripts/oracles/hex_phase0_reference_oracle.py         # Phase-0-Referenzfaelle (exit 0 = alle Gates gruen)
 ```
 
@@ -238,7 +238,7 @@ nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
   synthetischem Optimizerschritt (kein T1-Training). Fehlendes Backend => FAIL.
   Achtung: Abweichung von der noch nicht genehmigten D7-Preregistrierung, die
   `CI stays torch-only` vorsieht: siehe `docs/ADR/ADR-002-Phase1-GINO-required-gate-proposal.md`.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (847, Stand 2026-10-22; NTK-Trajektorie) unter Branch-Coverage;
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (861, Stand 2026-10-23; HNT-R25-01) unter Branch-Coverage;
   danach die torch-freien FV-/Reference-Suites unter jedem portablen OpenBLAS-Kernel
   (`OPENBLAS_CORETYPE` Prescott/Sandybridge/Haswell/Zen, SkylakeX bei AVX-512), weil die
   CG-Stoppregel-Tests an der Rundung von BLAS-`ddot` haengen (2026-10-14). Das Spektral-Orakel (torch) bleibt ausserhalb: unter erzwungenem OPENBLAS_CORETYPE stuerzt es auf dem Runner ab (Exit 139, Haswell, 2026-10-16); seine CN-Toleranz ist stattdessen aus dem CG-Abbruch hergeleitet und lokal unter vier Kerneln gruen.
