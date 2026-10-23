@@ -361,8 +361,16 @@ def _relative_drift(k: np.ndarray, k0: np.ndarray) -> float | None:
     # where both norms lie in [1, n].
     d = k * 0.5 - k0 * 0.5
     m = float(np.abs(d).max())
-    with np.errstate(over="ignore"):
-        drift = (m / scale) * (2.0 * float(np.linalg.norm(d / m)) / float(np.linalg.norm(k0 / scale)))
+    factor = 2.0 * float(np.linalg.norm(d / m)) / float(np.linalg.norm(k0 / scale))  # in [2/n, 2n]
+    # Codex #83 (8761e55): m / scale alone can overflow although the product with factor
+    # (< 1 possible) is representable; combine mantissas and exponents instead.
+    fm, em = math.frexp(m)
+    fs, es = math.frexp(scale)
+    ff, ef = math.frexp(factor)
+    try:
+        drift = math.ldexp(fm / fs * ff, em - es + ef)
+    except OverflowError:
+        drift = math.inf
     if not math.isfinite(drift):
         raise NTKTrajectoryError("relative drift exceeds the binary64 range (finite kernels, ratio > ~1.8e308)")
     return drift
@@ -375,7 +383,9 @@ def _shape_metrics(k: np.ndarray, target: np.ndarray | None) -> tuple[float | No
     fro2 = float(np.sum(s * s))
     diag = np.diag(s)
     effective_rank = float(np.sum(diag)) ** 2 / fro2
-    offdiag = max(0.0, (fro2 - float(np.sum(diag * diag))) / fro2)
+    off = s - np.diag(diag)
+    # Codex #83 (8761e55): summed directly; fro2 - sum(diag^2) cancels weak coupling to 0.
+    offdiag = float(np.sum(off * off)) / fro2
     alignment = None
     if target is not None:
         alignment = float(target @ s @ target) / (math.sqrt(fro2) * float(target @ target))
@@ -560,11 +570,20 @@ def ntk_trajectory(
         raise NTKTrajectoryError("inputs must be finite")
     steps = _declared(declared_steps)
 
-    projector = pn._projector(modes, weights)  # validates shapes and W-orthonormality (PARAM_NTK_v1)
+    # Codex #83 (8761e55): private, read-only copies of the basis. np.asarray would keep the
+    # caller's float64 storage, which apply() could change between checkpoints while
+    # basis_sha256 hashed only its final contents.
+    modes64 = np.array(modes, dtype=np.float64, copy=True)
+    weights64 = np.array(weights, dtype=np.float64, copy=True)
+    modes64.setflags(write=False)
+    weights64.setflags(write=False)
+    projector = pn._projector(modes64, weights64)  # validates shapes and W-orthonormality (PARAM_NTK_v1)
     n_modes = projector.shape[0]
     if n_modes > MAX_MODES:
         raise NTKTrajectoryError(f"at most {MAX_MODES} modes (got {n_modes})")
-    target = _target(target_coefficients, n_modes)
+    # Same class as the basis: target_sha256 must bind the coefficients that were measured.
+    target_raw = None if target_coefficients is None else np.array(target_coefficients, dtype=np.float64, copy=True)
+    target = _target(target_raw, n_modes)
 
     if isinstance(checkpoints, (str, bytes, Mapping)) or not isinstance(checkpoints, Sequence):
         raise NTKTrajectoryError("checkpoints must be a sequence of (step, state_dict) pairs")
@@ -585,8 +604,6 @@ def ntk_trajectory(
     # HNT-R25-01: identical bytes are NOT refused. They prove neither a mislabelled copy
     # nor a genuinely stationary run; each repeat is measured again and marked below.
 
-    modes64 = np.asarray(modes, dtype=np.float64)
-    weights64 = np.asarray(weights, dtype=np.float64)
     inputs_digest = tensor_sha256(inputs)
     signature = _signature_sha256(model)
 
@@ -607,6 +624,10 @@ def ntk_trajectory(
                     for key, value in dict(state).items()}
         if state_dict_sha256(snapshot) != state_digest:
             raise NTKTrajectoryError(f"checkpoint at step {step}: state changed since the preflight digest")
+        # Codex #83 (8761e55): a Mapping can change between the preflight check and the
+        # preflight digest, so the digest may bind values that were never checked. The
+        # snapshot is exactly what gets loaded: check it too.
+        _check_state(snapshot, reference, step)
         twin = copy.deepcopy(model)
         twin.load_state_dict(snapshot, strict=True)
         twin.eval()
@@ -656,6 +677,5 @@ def ntk_trajectory(
         inputs_sha256=inputs_digest,
         basis_sha256=_array_sha256(modes64, weights64),
         parameter_signature_sha256=signature,
-        target_sha256=None if target_coefficients is None else _array_sha256(np.asarray(target_coefficients,
-                                                                                         dtype=np.float64)),
+        target_sha256=None if target_raw is None else _array_sha256(target_raw),
     )

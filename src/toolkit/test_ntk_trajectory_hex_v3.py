@@ -897,6 +897,90 @@ class TestDriftRange(unittest.TestCase):
                         self.assertEqual(nt._relative_drift(k, k0), _v1_drift(k, k0))
         self.assertIsNone(nt._relative_drift(np.eye(2), np.zeros((2, 2))))
 
+    def test_intermediate_overflow_of_the_factored_ratio(self) -> None:
+        # Codex #83 (8761e55): m / scale = 2 / 1e-308 overflows, the product with the norm
+        # factor 0.5 does not. True drift ||k - k0|| / ||k0|| = 4 / 4e-308 = 1e308.
+        k0, k = 1e-308 * np.eye(16), np.diag([4.0] + [0.0] * 15)
+        drift = nt._relative_drift(k, k0)
+        self.assertLess(abs(drift / 1e308 - 1.0), 1e-12)
+
+
+class TestCodexRound8761e55(unittest.TestCase):
+    """Codex review of #83 at 8761e55: the basis and target arrays, the checked snapshot
+    and the off-diagonal energy."""
+
+    def test_basis_changed_by_apply_is_not_used(self) -> None:
+        modes = np.array(MODES, dtype=np.float64)  # float64: np.asarray would alias it
+        calls = []
+
+        def swapping(model, x):
+            calls.append(1)
+            if len(calls) == 1:
+                modes[:, [0, 1]] = modes[:, [1, 0]]  # still W-orthonormal, other basis
+            return apply(model, x)
+
+        same = _states(a=[1.0, 1.0], b=[0.5, 0.5])
+        traj = _run(Product(), same, modes=modes, apply=swapping)
+        reference = _run(Product(), _states(a=[1.0, 1.0], b=[0.5, 0.5]))
+        self.assertFalse(np.array_equal(modes, MODES))  # the poisoning happened
+        self.assertEqual(traj.basis_sha256, reference.basis_sha256)
+        self.assertEqual([e.kernel_sha256 for e in traj.entries], [e.kernel_sha256 for e in reference.entries])
+        self.assertEqual(traj.entries[1].distance_from_initial, 0.0)
+
+    def test_target_changed_by_apply_is_not_bound(self) -> None:
+        target = np.array([1.0, 0.5, 0.25])
+        calls = []
+
+        def mutating(model, x):
+            calls.append(1)
+            if len(calls) == 1:
+                target[:] = [0.0, 0.0, 9.0]
+            return apply(model, x)
+
+        traj = _run(Product(), _states(a=[1.0, 2.0], b=[0.5, 0.5]), target_coefficients=target, apply=mutating)
+        reference = _run(Product(), _states(a=[1.0, 2.0], b=[0.5, 0.5]),
+                         target_coefficients=np.array([1.0, 0.5, 0.25]))
+        self.assertEqual(target.tolist(), [0.0, 0.0, 9.0])
+        self.assertEqual(traj.target_sha256, reference.target_sha256)
+        self.assertEqual([e.target_alignment for e in traj.entries], [e.target_alignment for e in reference.entries])
+
+    def test_mapping_that_changes_before_the_preflight_digest_is_checked_again(self) -> None:
+        from collections.abc import Mapping
+
+        class Switching(Mapping):
+            """Valid values for the first `after` reads (the preflight check), then others."""
+
+            def __init__(self, early, late, after):
+                self._early, self._late, self._after, self._reads = early, late, after, 0
+
+            def __getitem__(self, key):
+                self._reads += 1
+                return (self._early if self._reads <= self._after else self._late)[key]
+
+            def __iter__(self):
+                return iter(self._early)
+
+            def __len__(self):
+                return len(self._early)
+
+        early = {"a": _f64(2.0), "b": _f64(0.5)}
+        late = {"a": torch.tensor(2.0, dtype=torch.float32), "b": _f64(0.5)}  # load_state_dict would cast
+        first = (0, {"a": _f64(1.0), "b": _f64(0.5)})
+        with self.assertRaises(nt.NTKTrajectoryError):
+            _run(Product(), [first, (10, Switching(early, late, after=2))])
+        # Positive control: the same switch AFTER the preflight digest is caught as before,
+        # and a stable Mapping is measured.
+        with self.assertRaises(nt.NTKTrajectoryError):
+            _run(Product(), [first, (10, Switching(early, late, after=4))])
+        traj = _run(Product(), [first, (10, Switching(early, early, after=2))])
+        self.assertEqual(traj.entries[1].state_sha256, nt.state_dict_sha256(early))
+
+    def test_weak_mode_coupling_is_not_cancelled(self) -> None:
+        k = np.array([[1.0, 1e-9], [1e-9, 1.0]])
+        offdiag = nt._shape_metrics(k, None)[1]
+        self.assertLess(abs(offdiag / (2e-18 / (2.0 + 2e-18)) - 1.0), 1e-12)
+        self.assertEqual(nt._shape_metrics(np.eye(3), None)[1], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
