@@ -1545,6 +1545,15 @@ def build_run_manifest(fields: Mapping[str, Any]) -> Dict[str, Any]:
     hardware = fields["hardware"]
     if not isinstance(hardware, Mapping) or any(k not in hardware for k in _REQUIRED_HARDWARE_KEYS):
         raise RunManifestError(f"hardware must contain {list(_REQUIRED_HARDWARE_KEYS)}")
+    # Codex #80 (1aefb18): the required values must carry substance, not only exist
+    # (section 7); "" and null would leave the latency comparison without its machine.
+    _non_empty_str(hardware["machine"], name="hardware['machine']")
+    _non_empty_str(hardware["dtype"], name="hardware['dtype']")
+    threads = hardware["threads"]
+    if isinstance(threads, (bool, np.bool_)) or not isinstance(threads, numbers.Integral) or threads < 1:
+        raise RunManifestError(f"hardware['threads'] must be an int >= 1, got {threads!r}")
+    if not isinstance(hardware["cuda"], bool):
+        raise RunManifestError(f"hardware['cuda'] must be a bool, got {hardware['cuda']!r}")
     ids = fields["reference_spec_ids"]
     if isinstance(ids, (str, bytes)) or not isinstance(ids, Sequence) or len(ids) == 0:
         raise RunManifestError("reference_spec_ids must be a non-empty list of strings")

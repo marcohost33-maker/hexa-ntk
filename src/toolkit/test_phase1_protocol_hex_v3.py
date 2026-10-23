@@ -1406,6 +1406,20 @@ class TestRunManifest(unittest.TestCase):
             fields["result_digests"] = good
             self.assertEqual(pp.build_run_manifest(fields)["result_digests"], good)
 
+    def test_required_hardware_values_carry_substance(self):
+        # Codex #80 (1aefb18): keys present but "" / null / wrong type passed before.
+        base = _manifest_fields()["hardware"]
+        for change in ({"machine": ""}, {"machine": "  "}, {"machine": None}, {"threads": None},
+                       {"threads": 0}, {"threads": True}, {"threads": 2.0}, {"dtype": ""},
+                       {"cuda": None}, {"cuda": 0}):
+            fields = _manifest_fields()
+            fields["hardware"] = {**base, **change}
+            with self.subTest(change=change), self.assertRaises(pp.RunManifestError):
+                pp.build_run_manifest(fields)
+        fields = _manifest_fields()
+        fields["hardware"] = {**base, "threads": np.int64(8)}
+        self.assertEqual(pp.build_run_manifest(fields)["hardware"]["threads"], 8)  # control
+
     def test_every_required_key_is_required(self):
         for key in pp._REQUIRED_MANIFEST_KEYS:
             fields = _manifest_fields()
