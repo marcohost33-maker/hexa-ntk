@@ -836,3 +836,6 @@
 | EDF2231E17D59E5D | 2026-10-23 21:21 | src/toolkit | Codex #80 @1aefb18: required hardware values carry substance (machine/dtype non-empty, threads int >= 1, cuda bool or non-empty version string): phase1_protocol_hex_v3.py |
 | 793189AE84A1FFA9 | 2026-10-23 21:21 | src/toolkit | Codex #80 @1aefb18 test test_required_hardware_values_carry_substance (11/11 red on 1aefb18, control and 69 other tests green): test_phase1_protocol_hex_v3.py |
 | 974D5C3F17FDAC2A | 2026-10-23 21:21 | scripts | merge of main (#83 NTK trajectory mutants) with the phase1 mutants of #80: union of both mutant lists: mutation_probe.py |
+| 4992193EADF7E772 | 2026-10-23 22:06 | src/toolkit | R87-P2 (cross-family GPT-6 R87): metadata byte budget, canonical JSON <= 1 MiB exact, node (100 000) and str-character bounds refuse before encoding; valid entries keep their bytes: ntk_trajectory_hex_v3.py |
+| 01088351D92A389B | 2026-10-23 22:06 | src/toolkit | R87-P2 tests TestMetadataBudget (without the pre-walk budget 4/4 red, without the exact byte bound 2/2 red, positive controls green): test_ntk_trajectory_hex_v3.py |
+| 4559E24101585C53 | 2026-10-23 22:06 | spec | R87-P2: section 3 state_sha256 states the metadata size bounds: NTK_TRAJECTORY_v1.md |

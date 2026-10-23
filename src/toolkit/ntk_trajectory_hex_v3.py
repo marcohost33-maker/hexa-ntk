@@ -230,9 +230,24 @@ def _metadata_default(obj: Any) -> Any:
 
 _QUALIFIED_NAME = "__qualified_name__"
 _METADATA_MAX_DEPTH = 64
+# R87-P2: depth alone left the size open; one long string or list was copied, encoded
+# and hashed in full. Every node and every str character adds at least one byte to the
+# canonical JSON, so both running counts are lower bounds of its length and refuse no
+# entry the exact byte bound would accept; they stop the walk before the encoding.
+_METADATA_MAX_BYTES = 1 << 20
+_METADATA_MAX_NODES = 100_000
 
 
-def _metadata_value(value: Any, depth: int = 0) -> Any:
+def _metadata_budget(budget: list, chars: int) -> None:
+    budget[0] += 1
+    budget[1] += chars
+    if budget[0] > _METADATA_MAX_NODES:
+        raise TypeError(f"more than {_METADATA_MAX_NODES} values")
+    if budget[1] > _METADATA_MAX_BYTES:
+        raise TypeError(f"strings longer than {_METADATA_MAX_BYTES} characters in total")
+
+
+def _metadata_value(value: Any, depth: int = 0, budget: list | None = None) -> Any:
     """The JSON value that NTK_TRAJECTORY_v1 hashes for a non-tensor state entry.
 
     HNT-R86-01: plain JSON erases types. A data dict ``{"__qualified_name__": name}``
@@ -245,6 +260,9 @@ def _metadata_value(value: Any, depth: int = 0) -> Any:
     """
     if depth > _METADATA_MAX_DEPTH:
         raise TypeError(f"nested deeper than {_METADATA_MAX_DEPTH} levels (or cyclic)")
+    if budget is None:
+        budget = [0, 0]
+    _metadata_budget(budget, len(value) if isinstance(value, str) else 0)
     if value is None or isinstance(value, (str, int, float)):  # bool is an int
         return value
     if isinstance(value, dict):
@@ -254,20 +272,25 @@ def _metadata_value(value: Any, depth: int = 0) -> Any:
                 raise TypeError(f"key {k!r} is not a str (JSON would turn it into one)")
             if k == _QUALIFIED_NAME:
                 raise TypeError(f"key {_QUALIFIED_NAME!r} is reserved for callables")
-            out[k] = _metadata_value(v, depth + 1)
+            _metadata_budget(budget, len(k))
+            out[k] = _metadata_value(v, depth + 1, budget)
         return out
     if isinstance(value, (list, tuple)):
-        return [_metadata_value(v, depth + 1) for v in value]
+        return [_metadata_value(v, depth + 1, budget) for v in value]
     return _metadata_default(value)
 
 
 def _metadata_bytes(key: str, value: Any) -> bytes:
     """Canonical JSON of a non-tensor state entry (e.g. neuraloperator's ``_metadata``)."""
     try:
-        return json.dumps(_metadata_value(value), sort_keys=True, separators=(",", ":"),
+        data = json.dumps(_metadata_value(value), sort_keys=True, separators=(",", ":"),
                           allow_nan=False).encode("utf-8")
     except (TypeError, ValueError, RecursionError) as exc:
         raise NTKTrajectoryError(f"state entry {key!r} cannot be bound to bytes: {exc}") from exc
+    if len(data) > _METADATA_MAX_BYTES:
+        raise NTKTrajectoryError(f"state entry {key!r} cannot be bound to bytes: "
+                                 f"{len(data)} bytes of canonical JSON exceed {_METADATA_MAX_BYTES}")
+    return data
 
 
 def state_dict_sha256(state: Mapping[str, Any]) -> str:
