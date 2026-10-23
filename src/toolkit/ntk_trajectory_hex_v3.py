@@ -23,7 +23,12 @@ that the checkpoints came from a real training run ("authenticity": "unattested"
 
 Fail-closed: the checkpoint steps must equal the declared steps (no post-hoc
 subset), every checkpoint must match the model's state-dict keys, shapes and
-dtypes exactly, and a forward that mutates its input is refused.
+dtypes exactly, and a forward that mutates its input is refused. Each state is
+loaded from a private snapshot whose digest must equal the preflight digest
+(HNT-R85-01; closes a change between preflight and load, not a concurrent writer
+racing the copy). Metadata that JSON would encode like another subject (a data dict
+posing as a callable, non-str keys) is refused (HNT-R86-01); a drift beyond binary64
+is an error, never inf (HNT-R86-02).
 
 Repeated states (HNT-R25-01): two checkpoints with identical bytes are measured,
 not refused. Equal bytes prove neither a mislabelled copy nor a genuinely
@@ -223,12 +228,45 @@ def _metadata_default(obj: Any) -> Any:
     raise TypeError(f"{type(obj).__name__} has no stable qualified name")
 
 
+_QUALIFIED_NAME = "__qualified_name__"
+_METADATA_MAX_DEPTH = 64
+
+
+def _metadata_value(value: Any, depth: int = 0) -> Any:
+    """The JSON value that NTK_TRAJECTORY_v1 hashes for a non-tensor state entry.
+
+    HNT-R86-01: plain JSON erases types. A data dict ``{"__qualified_name__": name}``
+    encoded exactly like the callable of that name, and a dict key ``1`` (or ``True``,
+    ``None``, ``2.5``) exactly like the string key ``"1"``, so the digest and the
+    architecture check could bind a different subject than the one present. Both
+    are refused here instead of re-encoded: every entry that was bindable before
+    keeps its bytes, so digests already written stay valid. Not covered: a qualified
+    name does not attest the callable's implementation.
+    """
+    if depth > _METADATA_MAX_DEPTH:
+        raise TypeError(f"nested deeper than {_METADATA_MAX_DEPTH} levels (or cyclic)")
+    if value is None or isinstance(value, (str, int, float)):  # bool is an int
+        return value
+    if isinstance(value, dict):
+        out = {}
+        for k, v in dict.items(value):
+            if type(k) is not str:
+                raise TypeError(f"key {k!r} is not a str (JSON would turn it into one)")
+            if k == _QUALIFIED_NAME:
+                raise TypeError(f"key {_QUALIFIED_NAME!r} is reserved for callables")
+            out[k] = _metadata_value(v, depth + 1)
+        return out
+    if isinstance(value, (list, tuple)):
+        return [_metadata_value(v, depth + 1) for v in value]
+    return _metadata_default(value)
+
+
 def _metadata_bytes(key: str, value: Any) -> bytes:
     """Canonical JSON of a non-tensor state entry (e.g. neuraloperator's ``_metadata``)."""
     try:
-        return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False,
-                          default=_metadata_default).encode("utf-8")
-    except (TypeError, ValueError) as exc:
+        return json.dumps(_metadata_value(value), sort_keys=True, separators=(",", ":"),
+                          allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError, RecursionError) as exc:
         raise NTKTrajectoryError(f"state entry {key!r} cannot be bound to bytes: {exc}") from exc
 
 
@@ -308,10 +346,26 @@ def kernel_distance(a: Any, b: Any) -> float | None:
 
 
 def _relative_drift(k: np.ndarray, k0: np.ndarray) -> float | None:
+    if not (np.all(np.isfinite(k)) and np.all(np.isfinite(k0))):
+        raise NTKTrajectoryError("relative drift of a non-finite kernel")
     scale = float(np.abs(k0).max())
     if scale == 0.0:
         return None
-    return float(np.linalg.norm((k - k0) / scale)) / float(np.linalg.norm(k0 / scale))
+    with np.errstate(over="ignore", invalid="ignore"):
+        drift = float(np.linalg.norm((k - k0) / scale)) / float(np.linalg.norm(k0 / scale))
+    if math.isfinite(drift):
+        return drift  # the v1 formula, unchanged wherever it was finite
+    # HNT-R86-02: finite kernels, yet k - k0, its division by a tiny anchor scale or the
+    # squares inside the norm overflowed. Factor the magnitude out: with d = k/2 - k0/2
+    # (cannot overflow) and m = max|d|, ||k - k0|| / ||k0|| = (m / scale) * 2 ||d/m|| / ||k0/scale||,
+    # where both norms lie in [1, n].
+    d = k * 0.5 - k0 * 0.5
+    m = float(np.abs(d).max())
+    with np.errstate(over="ignore"):
+        drift = (m / scale) * (2.0 * float(np.linalg.norm(d / m)) / float(np.linalg.norm(k0 / scale)))
+    if not math.isfinite(drift):
+        raise NTKTrajectoryError("relative drift exceeds the binary64 range (finite kernels, ratio > ~1.8e308)")
+    return drift
 
 
 def _shape_metrics(k: np.ndarray, target: np.ndarray | None) -> tuple[float | None, float | None, float | None]:
@@ -540,10 +594,21 @@ def ntk_trajectory(
     first_step_of: dict[str, int] = {}
     n_real = None
     for step, (_, state), state_digest in zip(steps, pairs, digests):
+        # HNT-R85-01: the digest above was taken in the preflight loop; apply() of an
+        # earlier step (or a Mapping whose reads differ) can change this state since.
+        # Read it once into a private snapshot and load only that snapshot, after its
+        # digest matched the preflight one. This closes a change BETWEEN preflight and
+        # load. It does not make the copy atomic: a writer running concurrently with
+        # this call can still race the copy itself, so exclusive ownership of the
+        # checkpoints for the duration of the call stays the caller's duty.
+        # The snapshot is also what neuraloperator's load_state_dict pops "_metadata"
+        # from, so the caller's checkpoint is not changed. One state copy at a time.
+        snapshot = {key: value.detach().clone() if isinstance(value, torch.Tensor) else copy.deepcopy(value)
+                    for key, value in dict(state).items()}
+        if state_dict_sha256(snapshot) != state_digest:
+            raise NTKTrajectoryError(f"checkpoint at step {step}: state changed since the preflight digest")
         twin = copy.deepcopy(model)
-        # A shallow copy: neuraloperator's load_state_dict pops "_metadata" from the dict
-        # it is given, which would change the caller's checkpoint.
-        twin.load_state_dict(dict(state), strict=True)
+        twin.load_state_dict(snapshot, strict=True)
         twin.eval()
         result = pn.param_ntk(
             twin, lambda m: apply(m, inputs), modes64, weights64,

@@ -249,8 +249,22 @@ MUTANTS = (
            "test_ntk_trajectory_hex_v3.TestClosedForms"),
     Mutant(NT, "        h.update(encoded)\n", "", "test_ntk_trajectory_hex_v3.TestBinding"),
     Mutant(NT, "    h.update(_tensor_header(t))\n", "", "test_ntk_trajectory_hex_v3.TestBinding"),
-    Mutant(NT, "        twin.load_state_dict(dict(state), strict=True)\n",
+    # 2026-10-23 HNT-R85-01: the loader gets the private snapshot; loading the caller's
+    # dict would let neuraloperator's loader pop "_metadata" from it.
+    Mutant(NT, "        twin.load_state_dict(snapshot, strict=True)\n",
            "        twin.load_state_dict(state, strict=True)\n", "test_ntk_trajectory_hex_v3.TestConstructorMetadata"),
+    Mutant(NT, "        if state_dict_sha256(snapshot) != state_digest:\n", "        if False:\n",
+           "test_ntk_trajectory_hex_v3.TestPreflightBinding"),
+    # 2026-10-23 HNT-R86-01/-02 (cross-family GPT-6 R86): metadata aliasing, drift range.
+    Mutant(NT, "            if k == _QUALIFIED_NAME:\n", "            if False:\n",
+           "test_ntk_trajectory_hex_v3.TestMetadataAliasing"),
+    Mutant(NT, "            if type(k) is not str:\n", "            if False:\n",
+           "test_ntk_trajectory_hex_v3.TestMetadataAliasing"),
+    Mutant(NT, "    if math.isfinite(drift):\n        return drift  # the v1 formula",
+           "    if True:\n        return drift  # the v1 formula", "test_ntk_trajectory_hex_v3.TestDriftRange"),
+    Mutant(NT, "    if not math.isfinite(drift):\n        raise NTKTrajectoryError(\"relative drift exceeds",
+           "    if False:\n        raise NTKTrajectoryError(\"relative drift exceeds",
+           "test_ntk_trajectory_hex_v3.TestDriftRange"),
     Mutant(NT, " or _metadata_bytes(key, value) != _metadata_bytes(key, ref):\n", ":\n",
            "test_ntk_trajectory_hex_v3.TestConstructorMetadata"),
 )

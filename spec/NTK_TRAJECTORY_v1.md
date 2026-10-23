@@ -55,6 +55,13 @@ Properties the tests pin:
 - `target_alignment` lies in `[0, 1]` (`c^T Theta c <= lambda_max ||c||^2 <= ||Theta||_F ||c||^2`).
 - Every norm is taken after dividing by `max|Theta|` (underflow/overflow of valid
   tiny or huge kernels, as in PARAM_NTK_v1).
+- `relative_drift` (HNT-R86-02, cross-family GPT-6 R86): where the formula above
+  overflows on finite kernels (`Theta_t - Theta_0`, its division by a tiny anchor
+  scale, or the squares inside the norm), the magnitude is factored out
+  (`d = Theta_t/2 - Theta_0/2`, `m = max|d|`, drift `= (m / max|Theta_0|) * 2 ||d/m||_F
+  / ||Theta_0 / max|Theta_0| ||_F`). A drift beyond the binary64 range is refused with
+  `NTKTrajectoryError`, never written as `inf`. Wherever the formula above was finite
+  its value is unchanged, bit for bit.
 
 ## 2. Declared checkpoints
 
@@ -72,9 +79,17 @@ Properties the tests pin:
   model's own entry in canonical form (section 3); otherwise the checkpoint is of
   another architecture and is refused.
 - Two checkpoints with identical bytes are measured, not refused (section 2.1).
-- Each checkpoint is loaded into a copy of the model, from a shallow copy of the
-  state dict (neuraloperator's `load_state_dict` pops `_metadata` from the dict it
+- Each checkpoint is loaded into a copy of the model, from a private snapshot of
+  the state dict (neuraloperator's `load_state_dict` pops `_metadata` from the dict it
   is given). The caller's model and checkpoints are never changed.
+- Preflight binding (HNT-R85-01, cross-family GPT-6 R85-R87): all digests are taken
+  before the first measurement. Each state is then read once into a snapshot
+  (tensors detached and cloned, other entries deep-copied), the snapshot's digest must
+  equal the preflight digest, and only the snapshot is loaded. A checkpoint changed in
+  between (by `apply` at an earlier step, or a `Mapping` whose reads differ) is
+  refused. This closes a change between preflight and load; it does not make the copy
+  atomic against a writer running concurrently with the call, so exclusive ownership
+  of the checkpoints during the call is the caller's duty.
 - The model must be in eval mode (as in PARAM_NTK_v1); `apply(model, x)` must
   not write into `x` (its digest is recomputed after every checkpoint).
 
@@ -124,7 +139,7 @@ is refused).
 
 | Field | Covers |
 |---|---|
-| `state_sha256` (per entry) | every state entry in sorted key order: key (length-prefixed UTF-8), then for a tensor `tensor|dtype|shape|` and the raw element bytes (complex as interleaved real/imag), for other entries `json|` and canonical JSON (sorted keys, no NaN, callables as `{"__qualified_name__": module.qualname}`) |
+| `state_sha256` (per entry) | every state entry in sorted key order: key (length-prefixed UTF-8), then for a tensor `tensor|dtype|shape|` and the raw element bytes (complex as interleaved real/imag), for other entries `json|` and canonical JSON (sorted keys, no NaN, callables as `{"__qualified_name__": module.qualname}`; a data dict carrying the key `__qualified_name__`, a non-`str` dict key and nesting deeper than 64 levels are refused, HNT-R86-01) |
 | `kernel_sha256` (per entry) | the float64 kernel |
 | `inputs_sha256` | dtype, shape and bytes of `x` |
 | `basis_sha256` | `phi` and `w` as float64 |
@@ -134,7 +149,14 @@ is refused).
 
 A non-tensor entry without a canonical form is refused: lambdas, local
 functions, bound methods (their instance is not covered by a name), arbitrary
-objects, NaN.
+objects, NaN. Refused as well since HNT-R86-01 (cross-family GPT-6 R86): entries
+JSON would encode like a different subject, namely a data dict
+`{"__qualified_name__": name}` (the bytes of the callable `name`) and dict keys that
+are not `str` (`1`, `True`, `None`, `2.5` encode like the strings `"1"`, `"true"`,
+`"null"`, `"2.5"`). Every entry that was bindable before keeps its bytes, so v1
+digests already written stay valid. Not distinguished, deliberately: a list and a
+tuple are the same JSON array (they configure the same constructor). A qualified
+name does not attest the callable's implementation.
 
 **Claim boundary.** The digests show WHICH bytes were measured and make the
 record tamper-evident. They do not show that the checkpoints came from a real

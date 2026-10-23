@@ -735,5 +735,168 @@ class TestFailClosed(unittest.TestCase):
             _run(Detached(), self._ok())
 
 
+class TestPreflightBinding(unittest.TestCase):
+    """HNT-R85-01 (cross-family GPT-6 R85/R86/R87): every digest is taken in a preflight
+    loop, every state is loaded in a later one. What is loaded must be the bytes the digest
+    names, also when the caller's checkpoint objects change in between."""
+
+    def _future_mutating_apply(self, future: dict, mutate: bool):
+        calls = []
+
+        def hooked(model, x):
+            calls.append(1)
+            if mutate and len(calls) == 1:
+                future["a"].fill_(3.0)  # during step 0, after every digest exists
+            return apply(model, x)
+        return hooked
+
+    def test_checkpoint_changed_after_preflight_is_refused(self) -> None:
+        ckpts = _states(a=[1.0, 2.0], b=[0.5, 0.5])
+        preflight = nt.state_dict_sha256(ckpts[1][1])
+        with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+            _run(Product(), ckpts, apply=self._future_mutating_apply(ckpts[1][1], True))
+        self.assertIn("changed since the preflight digest", str(ctx.exception))
+        # The poisoning really happened: the caller's later checkpoint has other bytes now.
+        self.assertNotEqual(nt.state_dict_sha256(ckpts[1][1]), preflight)
+
+    def test_same_hook_without_mutation_is_measured(self) -> None:
+        # Positive control: the hook itself is harmless; only the mutation is refused.
+        ckpts = _states(a=[1.0, 2.0], b=[0.5, 0.5])
+        traj = _run(Product(), ckpts, apply=self._future_mutating_apply(ckpts[1][1], False))
+        reference = _run(Product(), _states(a=[1.0, 2.0], b=[0.5, 0.5]))
+        for (_, state), e, r in zip(ckpts, traj.entries, reference.entries):
+            self.assertEqual(e.state_sha256, nt.state_dict_sha256(state))
+            self.assertEqual(e.kernel_sha256, r.kernel_sha256)
+
+    def test_mapping_whose_reads_differ_is_refused(self) -> None:
+        # A Mapping that serves other bytes once read often enough: what was digested is
+        # not what would be loaded. The state is read exactly once for the load.
+        from collections.abc import Mapping
+
+        class Drifting(Mapping):
+            def __init__(self, early, late, after):
+                self._early, self._late, self._after, self._reads = early, late, after, 0
+
+            def __getitem__(self, key):
+                self._reads += 1
+                return (self._early if self._reads <= self._after else self._late)[key]
+
+            def __iter__(self):
+                return iter(self._early)
+
+            def __len__(self):
+                return len(self._early)
+
+        early = {"a": _f64(2.0), "b": _f64(0.5)}
+        late = {"a": _f64(5.0), "b": _f64(0.5)}
+        # Two keys: _check_state reads 2, the preflight digest reads 2 more.
+        drifting = Drifting(early, late, after=4)
+        with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+            _run(Product(), [(0, {"a": _f64(1.0), "b": _f64(0.5)}), (10, drifting)])
+        self.assertIn("changed since the preflight digest", str(ctx.exception))
+        # Positive control: a Mapping with stable reads is measured.
+        steady = Drifting(early, early, after=4)
+        traj = _run(Product(), [(0, {"a": _f64(1.0), "b": _f64(0.5)}), (10, steady)])
+        self.assertEqual(traj.entries[1].state_sha256, nt.state_dict_sha256(early))
+
+
+def _v1_metadata_json(value) -> bytes:
+    """Independent oracle: the NTK_TRAJECTORY_v1 metadata encoding as first specified
+    (canonical JSON, callables as {"__qualified_name__": module.qualname})."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False,
+                      default=lambda o: {"__qualified_name__": f"{o.__module__}.{o.__qualname__}"}).encode("utf-8")
+
+
+class TestMetadataAliasing(unittest.TestCase):
+    """HNT-R86-01 (cross-family GPT-6 R86/R87): JSON erased the type of what it encoded.
+    A data dict {"__qualified_name__": name} and a str key "1" produced the bytes of the
+    callable and of the int key 1, so the digest and the architecture check bound a
+    different subject. Such entries are now refused; every other entry keeps its bytes."""
+
+    def test_a_data_dict_cannot_pose_as_a_callable(self) -> None:
+        name = f"{torch.tanh.__module__}.{torch.tanh.__qualname__}"
+        genuine = {"w": _f64(1.0), "_metadata": {"act": torch.tanh}}
+        for alias in ({"act": {"__qualified_name__": name}}, {"act": [{"__qualified_name__": name}]}):
+            with self.subTest(alias=alias):
+                with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+                    nt.state_dict_sha256({"w": _f64(1.0), "_metadata": alias})
+                self.assertIn("reserved", str(ctx.exception))
+        nt.state_dict_sha256(genuine)  # the callable itself still binds
+
+    def test_the_alias_is_refused_as_a_checkpoint(self) -> None:
+        name = f"{torch.tanh.__module__}.{torch.tanh.__qualname__}"
+        meta = dict(WithMetadata.META, act={"__qualified_name__": name})
+        ckpts = [(s, dict(st, _metadata=meta)) for s, st in _states(a=[1.0, 2.0], b=[0.5, 0.5])]
+        with self.assertRaises(nt.NTKTrajectoryError):
+            _run(WithMetadata(), ckpts)
+
+    def test_non_string_keys_are_refused(self) -> None:
+        for meta in ({1: "x"}, {True: "x"}, {None: "x"}, {"outer": {2.5: "x"}}):
+            with self.subTest(meta=meta):
+                with self.assertRaises(nt.NTKTrajectoryError):
+                    nt.state_dict_sha256({"_metadata": meta})
+
+    def test_deep_or_cyclic_metadata_is_a_contract_error(self) -> None:
+        deep: list = []
+        node = deep
+        for _ in range(5000):
+            node.append([])
+            node = node[0]
+        cyclic: dict = {"width": 3}
+        cyclic["self"] = cyclic
+        for meta in (deep, cyclic):
+            with self.subTest(kind=type(meta).__name__):
+                with self.assertRaises(nt.NTKTrajectoryError):
+                    nt.state_dict_sha256({"_metadata": meta})
+
+    def test_bytes_of_valid_metadata_are_unchanged(self) -> None:
+        # Positive control: digests already written under v1 stay valid (no migration).
+        cases = (WithMetadata.META,
+                 {"n_modes": (16, 16), "fno": {"act": torch.tanh, "skip": "linear", "rank": 1.0},
+                  "flags": [True, False, None], "eps": 1e-12, "name": "gino", "seed": -3},
+                 {}, [], 7, "plain", None, 0.5)
+        for meta in cases:
+            with self.subTest(meta=repr(meta)[:40]):
+                self.assertEqual(nt._metadata_bytes("_metadata", meta), _v1_metadata_json(meta))
+
+
+def _v1_drift(k: np.ndarray, k0: np.ndarray) -> float:
+    scale = float(np.abs(k0).max())
+    return float(np.linalg.norm((k - k0) / scale)) / float(np.linalg.norm(k0 / scale))
+
+
+class TestDriftRange(unittest.TestCase):
+    """HNT-R86-02 (cross-family GPT-6 R86/R87): finite PSD kernels made the v1 formula
+    return inf (subtract, then divide by a tiny anchor scale, then square in the norm),
+    which the JSON record then could not hold. A representable drift is now computed, an
+    unrepresentable one is a contract error; the value is unchanged wherever v1 was finite."""
+
+    def test_unrepresentable_drift_is_a_contract_error(self) -> None:
+        with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+            nt._relative_drift(np.diag([1e100, 0.0]), np.diag([1e-300, 0.0]))
+        self.assertIn("binary64", str(ctx.exception))
+
+    def test_representable_huge_drift_is_computed(self) -> None:
+        # True drift (1e-100 - 1e-300) / 1e-300 = 1e200 - 1: representable, v1 gave inf.
+        drift = nt._relative_drift(np.diag([1e-100, 0.0]), np.diag([1e-300, 0.0]))
+        self.assertTrue(math.isfinite(drift))
+        self.assertLess(abs(drift / 1e200 - 1.0), 1e-15)
+        # Huge entries of opposite sign: k - k0 itself overflows; ||[[0,-2],[-2,0]]|| / ||ones|| = sqrt(2).
+        k = np.array([[1e308, -1e308], [-1e308, 1e308]])
+        k0 = np.array([[1e308, 1e308], [1e308, 1e308]])
+        self.assertLess(abs(nt._relative_drift(k, k0) - math.sqrt(2.0)), 4e-16)
+
+    def test_drift_where_v1_was_finite_is_bit_identical(self) -> None:
+        rng = np.random.default_rng(86)
+        for n in (1, 2, 3, 8):
+            for log_scale in (-150, -20, 0, 20, 150):
+                for _ in range(10):
+                    a, b = rng.standard_normal((2, n, n))
+                    k0, k = (a @ a.T) * 10.0 ** log_scale, (b @ b.T) * 10.0 ** (log_scale + rng.integers(-3, 4))
+                    with self.subTest(n=n, log_scale=log_scale):
+                        self.assertEqual(nt._relative_drift(k, k0), _v1_drift(k, k0))
+        self.assertIsNone(nt._relative_drift(np.eye(2), np.zeros((2, 2))))
+
+
 if __name__ == "__main__":
     unittest.main()
