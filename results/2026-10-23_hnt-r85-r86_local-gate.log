@@ -1,0 +1,60 @@
+==================================================================
+HexaNTK Gate-Run -- NTK-Trajektorie: Cross-Family-Befunde GPT-6 R85/R86/R87
+  (HNT-R85-01 Preflight-TOCTOU, HNT-R86-01 Metadaten-Alias, HNT-R86-02 Driftbereich)
+Datum:    2026-10-23 (Endlauf ci.yml-Spiegel 20:44:27 - 20:45:38 +02:00; Grundlinie, Rot/Gruen und Mutationsprobe davor)
+Geprueft: Code = Commit b970cab4bd88e647c9ed3a9fa86fdd6b7ce08558 auf PR #83-Head d8a3317
+          (gemessen als 09d0407 mit identischem Tree; nur die Commit-Botschaft wurde vor dem Push praezisiert).
+          Dieser Log-Commit aendert nur README.md (Zaehler) und fuegt diese Datei hinzu.
+          Modul-Blob vor dem Fix 62a5eabf (= der im R87-Bundle rekonstruierte Blob, per
+          `git hash-object` gegen die Bundle-Fixtures verglichen), nach dem Fix 4650715.
+Umgebung: Windows 11 (10.0.26200) | Python 3.12.10 (venv) | numpy 2.5.3 | torch 2.6.0+cpu
+          | ruff 0.17.0 | coverage 7.16.2 | neuraloperator NICHT installiert
+Exit-Codes je Kommando direkt gemessen (rc nach jedem Kommando, ci.yml-Spiegel).
+==================================================================
+
+Grundlinie @d8a3317 (gleiche Umgebung):
+  ruff rc=0 | compileall rc=0 | verify_sources PASS 46+15+10 | engine_gate rc=0 (49/49)
+  | unittest+coverage rc=0, Ran 861, OK (skipped=13) | TOTAL 94 % | OpenBLAS-Schleife 4x OK
+
+Diskriminierung (Quelldatei einmal auf d8a3317 zurueckgesetzt, neue Tests behalten):
+  TestPreflightBinding + TestMetadataAliasing + TestDriftRange: Ran 11
+  rot: 8 Tests (failures=11 Subtests, errors=1)
+    test_checkpoint_changed_after_preflight_is_refused, test_mapping_whose_reads_differ_is_refused,
+    test_a_data_dict_cannot_pose_as_a_callable (2 Subtests), test_the_alias_is_refused_as_a_checkpoint,
+    test_non_string_keys_are_refused (4 Subtests), test_deep_or_cyclic_metadata_is_a_contract_error
+    (ERROR: rohe RecursionError), test_representable_huge_drift_is_computed,
+    test_unrepresentable_drift_is_a_contract_error
+  gruen (Positivkontrollen): test_same_hook_without_mutation_is_measured,
+    test_bytes_of_valid_metadata_are_unchanged, test_drift_where_v1_was_finite_is_bit_identical
+  Nach Wiederherstellung: Ran 11, OK.
+
+$ ruff check src scripts                         rc=0 -- All checks passed!
+$ python -m compileall src                       rc=0
+$ python scripts/verify_sources.py               rc=0 -- 46 Toolkit + 15 Spec + 10 Script | git (71 Dateien) | PASS
+$ (GINO-Smoke des Jobs `gate`)                   NICHT GELAUFEN -- neuraloperator lokal nicht installiert;
+                                                 CI-only. Die Aenderung beruehrt gino_adapter_hex_v3.py nicht.
+$ python scripts/engine_gate.py                  rc=0 -- doctests 49/49 | selftests_ok=True | PASS
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+                                                 rc=0 -- Ran 872 tests, OK (skipped=13)
+  (Lauf @b970cab ohne README-Nachfuehrung: Ran 872, FAILED (failures=4) -- nur die vier
+   README-Zaehler-Vertraege in test_hex_timestep_contract; mit diesem Commit gruen.)
+$ python -m coverage report                      rc=0 -- TOTAL 94 %
+$ OPENBLAS_CORETYPE in Prescott Sandybridge Haswell Zen:
+    unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3   4x OK
+  (SkylakeX: CI-Zweig nur bei AVX-512 laut /proc/cpuinfo; unter Windows nicht gespiegelt.)
+$ python scripts/mutation_probe.py               rc=1 -- baseline green | 75/76 killed (9 min 32 s)
+  einzig M02 ueberlebt (TestDurabilityErrorAfterReplace, POSIX-only, unter Windows nicht messbar).
+  Alle 25 Mutanten der NTK-Trajektorie getoetet, davon 5 neu (Snapshot-Digestvergleich,
+  reservierter Schluessel, Nicht-str-Schluessel, v1-Pfad ohne Fallback, Bereichsfehler) und
+  der Lade-Mutant neu auf den Snapshot gerichtet.
+
+Zusaetzlich (Python 3.14.4, torch 2.12.1+cpu, numpy 2.4.6): test_ntk_trajectory_hex_v3 Ran 52, OK.
+
+Grenzen (nicht behauptet):
+  - HNT-R85-01 schliesst eine Aenderung ZWISCHEN Preflight-Digest und Laden bei exklusivem
+    Besitz der Checkpoints. Ein gleichzeitig laufender Schreiber kann die Kopie selbst noch
+    stoeren; das bleibt Pflicht des Aufrufers (Spec Abschnitt 2).
+  - Digests sind keine Signatur; "authenticity": "unattested" bleibt.
+  - Echte GINO-Metadaten (neuraloperator 2.0.0) hier nicht gefahren; die Bytes aller bisher
+    bindbaren Eintraege sind unveraendert (Orakel-Test gegen das v1-json.dumps-Rezept).
+  - CI-Lauf auf GitHub steht aus (Linux, SkylakeX-Zweig, GINO-Smoke).
