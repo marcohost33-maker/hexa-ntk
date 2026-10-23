@@ -808,3 +808,31 @@
 | FA47B57A9149B922 | 2026-10-23 21:09 | src/toolkit | Codex #80 @426c97f: preregistered and diagnostic decisions accept gino.high == 0 (raw errors >= 0, section 5a; runtime rule compares, accuracy rule reports the baseline floor); result_digests values validated as 64-hex SHA-256: phase1_protocol_hex_v3.py |
 | 90AF0387E26D66FA | 2026-10-23 21:09 | src/toolkit | Codex #80 @426c97f red-green tests (zero upper bound, all-zero error table, result digest values; 3/3 red on 426c97f, control green): test_phase1_protocol_hex_v3.py |
 | 5E1B282AA3F4A50A | 2026-10-23 21:09 | spec | section 7 table: result_digests values are 64-hex SHA-256, each checked (Codex #80): PHASE1_PROTOCOL_v1.md |
+## NTK trajectory (append-only, 2026-10-22)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| E896604E9132568D | 2026-10-22 10:30 | src/toolkit | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): ntk_trajectory_hex_v3.py |
+| 8B563C31C72825C8 | 2026-10-22 10:30 | src/toolkit | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): test_ntk_trajectory_hex_v3.py |
+| A6B181F77BC0934E | 2026-10-22 10:30 | src/toolkit | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): test_gino_adapter_hex_v3.py |
+| 8263DCD792F2F5F9 | 2026-10-22 10:30 | spec | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): NTK_TRAJECTORY_v1.md |
+| 414905177898909A | 2026-10-22 10:30 | scripts | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): mutation_probe.py |
+
+## HNT-R25-01: repeated checkpoint states measured and marked (append-only, 2026-10-23)
+
+> Cross-family GPT-6 R25 finding HNT-R25-01 (P2). Pins for the bytes of this block. Prior rows remain lineage.
+
+| 93310C19D0AF6591 | 2026-10-23 00:54 | src/toolkit | HNT-R25-01, identical checkpoint bytes measured and marked, record check: ntk_trajectory_hex_v3.py |
+| D2FDC9DF4288EEE0 | 2026-10-23 00:54 | src/toolkit | HNT-R25-01, identical checkpoint bytes measured and marked, record check: test_ntk_trajectory_hex_v3.py |
+| D4F5115AFD45AB00 | 2026-10-23 01:05 | spec | HNT-R25-01, section 2.1 repeated states (v1 amended in draft): NTK_TRAJECTORY_v1.md |
+| 0182F73BFE09A25A | 2026-10-23 01:05 | scripts | HNT-R25-01, duplicate-refusal mutant replaced by six marker/record-check mutants: mutation_probe.py |
+| A6C32149CFED1484 | 2026-10-23 01:15 | src/toolkit | HNT-R25-01, explicit no-refusal assertion for identical bytes: test_ntk_trajectory_hex_v3.py |
+| CF62A18BC40AECC3 | 2026-10-23 21:00 | src/toolkit | HNT-R85-01 load a private snapshot whose digest equals the preflight digest (closes a change between preflight and load, not a concurrent writer); HNT-R86-01 metadata that JSON would encode like another subject refused (data dict with __qualified_name__, non-str keys, depth > 64), bytes of bindable entries unchanged; HNT-R86-02 drift beyond binary64 is an error, representable overflow cases factored (cross-family GPT-6 R85-R87): ntk_trajectory_hex_v3.py |
+| 627CF4807C1B598A | 2026-10-23 21:00 | src/toolkit | HNT-R85-01/R86-01/R86-02 red-green tests with positive controls (TestPreflightBinding, TestMetadataAliasing, TestDriftRange): test_ntk_trajectory_hex_v3.py |
+| 71E6B0771978BF1D | 2026-10-23 21:00 | spec | sections 1, 2, 3: drift range, preflight snapshot binding with its concurrency limit, refused metadata aliases (HNT-R85-01, HNT-R86-01, HNT-R86-02): NTK_TRAJECTORY_v1.md |
+| F233676EB66FE68E | 2026-10-23 21:00 | scripts | loader mutant retargeted to the snapshot; five mutants for HNT-R85-01, HNT-R86-01, HNT-R86-02: mutation_probe.py |
+| 124ACF830D926C15 | 2026-10-23 21:01 | src/toolkit | Codex #83 @8761e55: drift combines mantissas and exponents (no intermediate overflow of m/scale), off-diagonal energy summed directly (no cancellation of weak coupling), private read-only basis and target copies (apply cannot rebind basis_sha256/target_sha256), _check_state also on the loaded snapshot: ntk_trajectory_hex_v3.py |
+| 0C9886A887FD63A3 | 2026-10-23 21:01 | src/toolkit | Codex #83 @8761e55 red-green tests (TestCodexRound8761e55, TestDriftRange intermediate overflow; 5/5 red on 8761e55, positive controls green): test_ntk_trajectory_hex_v3.py |
+| EDF2231E17D59E5D | 2026-10-23 21:21 | src/toolkit | Codex #80 @1aefb18: required hardware values carry substance (machine/dtype non-empty, threads int >= 1, cuda bool or non-empty version string): phase1_protocol_hex_v3.py |
+| 793189AE84A1FFA9 | 2026-10-23 21:21 | src/toolkit | Codex #80 @1aefb18 test test_required_hardware_values_carry_substance (11/11 red on 1aefb18, control and 69 other tests green): test_phase1_protocol_hex_v3.py |
+| 974D5C3F17FDAC2A | 2026-10-23 21:21 | scripts | merge of main (#83 NTK trajectory mutants) with the phase1 mutants of #80: union of both mutant lists: mutation_probe.py |

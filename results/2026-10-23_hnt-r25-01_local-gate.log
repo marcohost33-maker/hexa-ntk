@@ -1,0 +1,84 @@
+==================================================================
+HexaNTK Gate-Run -- HNT-R25-01 (Cross-Family GPT-6 R25, P2), Stand e822b78
+Datum:    2026-10-23
+Geprueft: Zweig claude/hexa-ntk-roadmap-dev-zrzx7r (PR #83, Draft), Basis f6aa51e,
+          Commits a24dd94 (Code+Tests), e917e3e (Spec/Probe/README/ROADMAP),
+          49310d4 (Test), e822b78 (README-Zaehler); dieser Log-Commit aendert keinen Code.
+Umgebung: Windows 11 (10.0.26200) | Python 3.14.4 | torch 2.12.1+cpu | numpy 2.4.6 |
+          ruff 0.17.0 | coverage 7.14.0 | pytest 9.1.1 (nur fuer die Diskriminierungs-Probe)
+          neuraloperator NICHT installiert: die GINO-Tests sind uebersprungen.
+          CI faehrt Python 3.12 mit torch==2.6.0 (CPU-Wheel), numpy 2.5.3, coverage 7.16.2;
+          diese Kombination und der GINO-Gate-Job sind hier NICHT gelaufen.
+Exit-Codes je Kommando direkt gemessen (cmd > datei 2>&1; rc=$?), keine Pipe.
+==================================================================
+
+Befund (Cross-Family GPT-6 R25, HNT-R25-01): ntk_trajectory verweigerte byte-gleiche
+Checkpoints ("a mislabelled copy would fake a frozen kernel"). Gleiche Bytes beweisen weder
+eine Kopie noch echte Stationaritaet (lr = 0, eingefrorene Parameter, Plateau).
+Neuer Vertrag: spec/NTK_TRAJECTORY_v1.md Abschnitt 2.1.
+
+Grundlinie vor der Aenderung (f6aa51e, gleiche Umgebung):
+  test_ntk_trajectory_hex_v3      exit 0 -- Ran 27 tests OK
+  unittest discover (volle Suite) exit 0 -- Ran 847 tests OK (skipped=13)
+  verify_sources                  exit 0 -- PASS
+  engine_gate                     exit 0 -- doctests 49/49, overall=PASS
+
+Rot vor Gruen: die neuen 41 Tests gegen das Modul von f6aa51e (Kopie im Scratchpad,
+param_ntk und Tests vom neuen Stand):
+  exit 1 -- Ran 41 tests FAILED (failures=3, errors=13)
+  Der R25-Vorschlagstest (test_cross_family_proposal_linear_zero_lr, echter SGD-Schritt mit
+  lr = 0) scheitert dort an genau der alten Sperre: NTKTrajectoryError "checkpoints at steps
+  ... have identical bytes". Die 3 failures sind die drei subTests von
+  test_identical_bytes_are_not_refused; die uebrigen errors fehlende Marker/Funktion.
+
+$ ruff check src scripts
+  exit 0 -- All checks passed!
+
+$ python -m compileall -q src
+  exit 0
+
+$ python scripts/verify_sources.py
+  exit 0 -- [VERIFY-SOURCES] 46 Toolkit-Eintraege + 15 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (71 Dateien) | PASS
+
+$ python scripts/engine_gate.py
+  exit 0 -- [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" -v
+  exit 0 -- Ran 861 tests OK (skipped=13)
+  (+14 gegenueber 847: TestRepeatedStates 10, TestRecordCheck 5, minus der ersetzte
+  TestFailClosed.test_identical_checkpoint_bytes_are_refused. Skips: GINO/neuraloperator,
+  CUDA, POSIX-only.)
+
+$ python -m coverage report
+  exit 0 -- TOTAL 4353 statements, 1632 branches, 94 %
+  ntk_trajectory_hex_v3.py 307 statements, 124 branches, 100 %
+
+$ OPENBLAS_CORETYPE=<k> python -m unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3 test_ntk_trajectory_hex_v3
+  Prescott, Sandybridge, Haswell, Zen, SkylakeX: je exit 0, Ran 158 tests OK
+  (ob der SkylakeX-Kern auf dieser CPU wirklich aktiv war, ist nicht geprueft.)
+
+$ python scripts/mutation_probe.py   (@49310d4, Code identisch mit e822b78)
+  exit 1 -- [MUTATION-PROBE] baseline green | 70/71 killed | FAIL
+  Einziger Ueberlebender: M02 (checkpoint_integration, TestDurabilityErrorAfterReplace,
+  POSIX-only, unter Windows alle skipped; so schon in frueheren Windows-Laeufen). Alle 20
+  Mutanten von ntk_trajectory_hex_v3.py getoetet. Der alte Mutant "Duplikat-Bytes-Sperre aus"
+  ist entfallen (die Sperre gibt es nicht mehr); sechs neue: Marker aus, falscher Vorgaenger
+  (erster statt vorheriger Eintrag), measured_zero ohne Kernvergleich, repeated_state_digest_of
+  immer null, Markerpruefung im Record-Check aus, Typpruefung (1 statt true) aus.
+
+Diskriminierungs-Probe (G:\Meine Ablage\Vero\Tools\diskriminierung.py, pytest-Knoten)
+  run_id DK-20261022T230524-b27a8d8a97e7, head 49310d4, provenienz_klasse VOLL, exit 0
+  M1 Markierung entfernen                                 DISKRIMINIERT
+  M2 Vergleich mit falschem Vorgaenger                    DISKRIMINIERT
+  M3 alte Ablehnung zurueck                               DISKRIMINIERT (3 subTests rot)
+  M4 Record-Check: Markerpruefung aus (Gegenprobe)        DISKRIMINIERT (7 subTests rot)
+
+Ehrlicher Befund aus diesem Lauf:
+  Die Iteration lief nur auf test_ntk_trajectory_hex_v3. Erst der volle Beleglauf zeigte
+  4 rote Tests in TestDocsContract (README nannte 847 Tests und 66 Mutanten); README
+  nachgezogen (e822b78), danach exit 0.
+
+Nicht gelaufen / nicht behauptet:
+  Python 3.12 + torch 2.6.0, Linux-CI, der GINO-Gate-Job (neuraloperator 2.0.0), CUDA.
+  Keine Checkpoint-Provenienz: eine falsch nummerierte Kopie wird weiterhin NICHT erkannt;
+  das verlangt eine authentisierte Checkpoint-Historie (offen). Kein Lern-Claim.

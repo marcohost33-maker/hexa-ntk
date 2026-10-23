@@ -1,0 +1,81 @@
+==================================================================
+HexaNTK Gate-Run -- NTK_TRAJECTORY_v1 (#60 Punkt 2), Commit 94a495e
+Datum:    2026-10-22
+Geprueft: Commit 94a495e auf origin/main af92102 (Zweig claude/hexa-ntk-roadmap-dev-zrzx7r);
+          dieser Log-Commit aendert keinen Code.
+Umgebung: Linux 6.18.44 (Cloud-Container, 4 CPUs, AVX-512) | Python 3.13.16 |
+          torch 2.6.0+cu124 (PyPI-Wheel, CPU-Ausfuehrung ohne CUDA-Geraet; download.pytorch.org
+          war aus dem Container gesperrt) | numpy 2.5.3 | neuraloperator 2.0.0 |
+          ruff 0.17.0 | coverage 7.16.2
+          CI faehrt Python 3.12 mit torch==2.6.0 (CPU-Wheel); 3.12 und Windows hier NICHT gelaufen.
+Exit-Codes je Kommando direkt gemessen (cmd > tmp 2>&1; rc=$?), keine Pipe.
+==================================================================
+
+Baseline vor der Aenderung (origin/main af92102, gleiche Umgebung, ohne neuraloperator):
+  unittest  exit 0 -- Ran 819 tests OK (skipped=6)
+  coverage  TOTAL 94 %
+  verify_sources exit 0 -- 44 Toolkit + 14 Spec + 10 Script
+
+$ ruff check src scripts
+  exit 0 -- All checks passed!
+
+$ python -m compileall -q src scripts
+  exit 0
+
+$ python scripts/verify_sources.py
+  exit 0 -- [VERIFY-SOURCES] 46 Toolkit-Eintraege + 15 Spec-Eintraege + 10 Script-Eintraege | Dateiliste: git (71 Dateien) | PASS
+
+$ python scripts/engine_gate.py
+  exit 0 -- [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+  exit 0 -- Ran 847 tests in 20.148s OK (skipped=1)
+  (+28 gegenueber 819: 27 in test_ntk_trajectory_hex_v3.py, 1 GINO-Trajektorie in
+  test_gino_adapter_hex_v3.py. Einziger Skip: test_cuda_callable "needs CUDA". Die GINO-Tests
+  liefen mit, weil neuraloperator installiert war.)
+
+$ python -m coverage report
+  exit 0 -- TOTAL 4300 statements, 1602 branches, 94 %
+  ntk_trajectory_hex_v3.py 254 statements, 94 branches, 100 %
+
+$ GINO gate: unittest discover -p "test_gino_adapter_hex_v3.py" (neuraloperator 2.0.0)
+  exit 0 -- Ran 26 tests OK
+  inkl. test_parameter_ntk_trajectory_of_the_real_gino (float32-Modus, Checkpoints 0 und 1 =
+  Initialgewichte und nach einem synthetischen Adam-Schritt, keine T1-Daten)
+
+$ OPENBLAS_CORETYPE=<k> python -m unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3 test_ntk_trajectory_hex_v3
+  Prescott exit 0 OK | Sandybridge exit 0 OK | Haswell exit 0 OK | Zen exit 0 OK | SkylakeX exit 0 OK
+
+$ python scripts/mutation_probe.py   (am Arbeitsbaum mit dem Inhalt von 94a495e, vor dem Commit)
+  exit 0 -- [MUTATION-PROBE] baseline green | 66/66 killed | PASS
+  M52-M66 = neue Mutanten von ntk_trajectory_hex_v3.py (Schrittvergleich, Duplikat-Bytes, Dtype,
+  Eingabe-Mutation, Eval-Modus, Distanzformel, exakte 0 fuer gleiche Kerne, Drift-Anker,
+  Geschwindigkeit, effektiver Rang, Alignment-Normierung, Schluesselnamen im Digest,
+  Tensor-Header, Kopie beim Laden, Metadaten-Vergleich). M02 (POSIX-only) unter Linux getoetet.
+
+Ehrlicher Befund aus der Probe:
+  Im ersten Lauf UEBERLEBTE der Mutant "Schluesselnamen nicht gehasht" (h.update(encoded)
+  entfernt). Der Split-Test {"ab","c"} vs {"a","bc"} faellt auch ohne Schluesselbytes, weil
+  der Laengenpraefix der Schluessel verschieden ist. Neuer Test: gleiche Werte unter
+  umbenannten Schluesseln ({"x","y"} vs {"u","w"}) -> danach KILLED.
+
+Ehrlicher Befund am echten Backend:
+  Der erste Entwurf verweigerte jeden Nicht-Tensor-Eintrag im State-Dict. neuraloperator 2.0.0
+  legt aber "_metadata" (Konstruktor-kwargs inkl. F.gelu und der Klasse SpectralConv) in
+  state_dict() und entfernt es in load_state_dict() per pop aus dem uebergebenen dict
+  (gemessen; neuralop/models/base_model.py). Folge: Vertrag erweitert (kanonische Bindung,
+  Gleichheit mit dem Modell, Laden aus einer Kopie). Der GINO-Test und
+  TestConstructorMetadata pinnen beides.
+
+Theorie-Orakel Lazy-Regime (TestLazyRegime, float64, 200 SGD-Schritte, lr 1.0):
+  Explorationslauf (Skript im Session-Scratchpad, nicht im Repo; die Testinstanz ist im Repo):
+    Breite   16: Drift 0.1095, Distanz 5.88e-3
+    Breite   64: Drift 0.0360, Distanz 6.45e-4
+    Breite  256: Drift 0.0137, Distanz 6.34e-5
+    Breite 1024: Drift 0.0103, Distanz 3.21e-5
+    Breite 4096: Drift 0.0009, Distanz 4.20e-7
+  Test: Breite 1024 vs 16 mit Marge (Drift < 1/4, Distanz < 1/10).
+
+Nicht gelaufen / nicht behauptet:
+  Python 3.12, Windows, CUDA. Kein Training auf T1-Daten, kein Lern-Claim. Das Laufzeitbudget
+  der Trajektorie fuer ein Phase-1-grosses GINO ist nicht gemessen.

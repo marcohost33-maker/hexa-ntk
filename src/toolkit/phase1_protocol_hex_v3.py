@@ -1552,8 +1552,11 @@ def build_run_manifest(fields: Mapping[str, Any]) -> Dict[str, Any]:
     threads = hardware["threads"]
     if isinstance(threads, (bool, np.bool_)) or not isinstance(threads, numbers.Integral) or threads < 1:
         raise RunManifestError(f"hardware['threads'] must be an int >= 1, got {threads!r}")
-    if not isinstance(hardware["cuda"], bool):
-        raise RunManifestError(f"hardware['cuda'] must be a bool, got {hardware['cuda']!r}")
+    # cuda: False/True or a version string such as "12.4" (a preregistered decision then
+    # requires False, section 5a); null or "" records nothing.
+    cuda = hardware["cuda"]
+    if not (isinstance(cuda, bool) or (isinstance(cuda, str) and cuda.strip())):
+        raise RunManifestError(f"hardware['cuda'] must be a bool or a non-empty version string, got {cuda!r}")
     ids = fields["reference_spec_ids"]
     if isinstance(ids, (str, bytes)) or not isinstance(ids, Sequence) or len(ids) == 0:
         raise RunManifestError("reference_spec_ids must be a non-empty list of strings")

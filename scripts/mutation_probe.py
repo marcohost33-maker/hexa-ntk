@@ -51,6 +51,7 @@ RC = "reference_case_hex_v3.py"
 FV = "hex_fv_solver_hex_v3.py"
 T1 = "heat_operator_task_hex_v3.py"
 P1 = "phase1_protocol_hex_v3.py"
+NT = "ntk_trajectory_hex_v3.py"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -220,6 +221,61 @@ MUTANTS = (
            "test_phase1_protocol_hex_v3.TestDigestStringsAreWholeStrings"),
     Mutant(P1, "    if math.isfinite(quotient):\n", "    if True:\n",
            "test_phase1_protocol_hex_v3.TestBreakEvenRange"),
+    # 2026-10-22 NTK_TRAJECTORY_v1: each guard and each closed-form metric of the trajectory.
+    Mutant(NT, "    if given != steps:\n", "    if False:\n", "test_ntk_trajectory_hex_v3.TestFailClosed"),
+    # 2026-10-23 HNT-R25-01 (cross-family GPT-6 R25): the duplicate-bytes refusal was
+    # retracted (equal bytes prove neither a copy nor stationarity), so its mutant is gone;
+    # these pin the markers that replace it and the record check that enforces them.
+    Mutant(NT, "        unchanged, stationary = _stationarity(previous, state_digest, kernel_digest)\n",
+           "        unchanged, stationary = False, None\n", "test_ntk_trajectory_hex_v3.TestRepeatedStates"),
+    Mutant(NT, "        unchanged, stationary = _stationarity(previous, state_digest, kernel_digest)\n",
+           "        unchanged, stationary = _stationarity(entries[0] if entries else None, "
+           "state_digest, kernel_digest)\n",
+           "test_ntk_trajectory_hex_v3.TestRepeatedStates"),
+    Mutant(NT, "    return True, \"measured_zero\" if previous.kernel_sha256 == kernel_digest else \"not_measured\"\n",
+           "    return True, \"measured_zero\"\n", "test_ntk_trajectory_hex_v3.TestRepeatedStates"),
+    Mutant(NT, "            repeated_state_digest_of=None if repeated_of == step else repeated_of,\n",
+           "            repeated_state_digest_of=None,\n", "test_ntk_trajectory_hex_v3.TestRepeatedStates"),
+    Mutant(NT, "            if e[key] != value or type(e[key]) is not type(value):\n", "            if False:\n",
+           "test_ntk_trajectory_hex_v3.TestRecordCheck"),
+    Mutant(NT, " or type(e[key]) is not type(value):\n", ":\n", "test_ntk_trajectory_hex_v3.TestRecordCheck"),
+    Mutant(NT, "        if value.dtype != ref.dtype or value.shape != ref.shape:\n",
+           "        if value.shape != ref.shape:\n", "test_ntk_trajectory_hex_v3.TestFailClosed"),
+    Mutant(NT, "        if tensor_sha256(inputs) != inputs_digest:\n", "        if False:\n",
+           "test_ntk_trajectory_hex_v3.TestFailClosed"),
+    Mutant(NT, "    if any(m.training for m in model.modules()):\n", "    if False:\n",
+           "test_ntk_trajectory_hex_v3.TestFailClosed"),
+    Mutant(NT, "    return min(1.0, max(0.0, 1.0 - cosine))\n", "    return min(1.0, max(0.0, 1.0 - cosine ** 2))\n",
+           "test_ntk_trajectory_hex_v3.TestClosedForms"),
+    Mutant(NT, "    if np.array_equal(sa, sb):\n", "    if False:\n", "test_ntk_trajectory_hex_v3.TestBinding"),
+    Mutant(NT, "        k0 = entries[0].kernel if entries else kernel\n",
+           "        k0 = entries[-1].kernel if entries else kernel\n", "test_ntk_trajectory_hex_v3.TestClosedForms"),
+    Mutant(NT, "dist_prev / (step - previous.step)", "dist_prev", "test_ntk_trajectory_hex_v3.TestClosedForms"),
+    Mutant(NT, "    effective_rank = float(np.sum(diag)) ** 2 / fro2\n",
+           "    effective_rank = float(np.sum(diag)) / math.sqrt(fro2)\n",
+           "test_ntk_trajectory_hex_v3.TestClosedForms"),
+    Mutant(NT, "(math.sqrt(fro2) * float(target @ target))", "float(target @ target)",
+           "test_ntk_trajectory_hex_v3.TestClosedForms"),
+    Mutant(NT, "        h.update(encoded)\n", "", "test_ntk_trajectory_hex_v3.TestBinding"),
+    Mutant(NT, "    h.update(_tensor_header(t))\n", "", "test_ntk_trajectory_hex_v3.TestBinding"),
+    # 2026-10-23 HNT-R85-01: the loader gets the private snapshot; loading the caller's
+    # dict would let neuraloperator's loader pop "_metadata" from it.
+    Mutant(NT, "        twin.load_state_dict(snapshot, strict=True)\n",
+           "        twin.load_state_dict(state, strict=True)\n", "test_ntk_trajectory_hex_v3.TestConstructorMetadata"),
+    Mutant(NT, "        if state_dict_sha256(snapshot) != state_digest:\n", "        if False:\n",
+           "test_ntk_trajectory_hex_v3.TestPreflightBinding"),
+    # 2026-10-23 HNT-R86-01/-02 (cross-family GPT-6 R86): metadata aliasing, drift range.
+    Mutant(NT, "            if k == _QUALIFIED_NAME:\n", "            if False:\n",
+           "test_ntk_trajectory_hex_v3.TestMetadataAliasing"),
+    Mutant(NT, "            if type(k) is not str:\n", "            if False:\n",
+           "test_ntk_trajectory_hex_v3.TestMetadataAliasing"),
+    Mutant(NT, "    if math.isfinite(drift):\n        return drift  # the v1 formula",
+           "    if True:\n        return drift  # the v1 formula", "test_ntk_trajectory_hex_v3.TestDriftRange"),
+    Mutant(NT, "    if not math.isfinite(drift):\n        raise NTKTrajectoryError(\"relative drift exceeds",
+           "    if False:\n        raise NTKTrajectoryError(\"relative drift exceeds",
+           "test_ntk_trajectory_hex_v3.TestDriftRange"),
+    Mutant(NT, " or _metadata_bytes(key, value) != _metadata_bytes(key, ref):\n", ":\n",
+           "test_ntk_trajectory_hex_v3.TestConstructorMetadata"),
 )
 
 
