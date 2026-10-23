@@ -1,0 +1,37 @@
+==================================================================
+HexaNTK Gate-Run -- R87-P2 Metadaten-Bytebudget (cross-family GPT-6 R87)
+Basis: main 48d0ebde4084971c850e51c17acb26a4aa9304ef | Datum: 2026-10-23 22:08 +0200
+Umgebung: Windows 11 | Python 3.12.10 | numpy 2.5.3 | torch 2.6.0+cpu
+==================================================================
+$ python -m compileall -q src
+    rc=0
+$ python scripts/verify_sources.py
+    rc=0
+    [ OK ] scripts/oracles/stateful_loader_resume_oracle.py: 120C32D0DC287451
+    
+    [VERIFY-SOURCES] 48 Toolkit-Eintraege + 16 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (75 Dateien) | PASS
+$ python -m ruff check src scripts
+    rc=0
+    All checks passed!
+$ python scripts/engine_gate.py
+    rc=0
+    ======================================================================
+    
+    [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p test_*.py
+    rc=0
+    Ran 961 tests in 43.685s
+    
+    OK (skipped=13)
+$ python -m coverage report
+    rc=0
+    src\toolkit\warmstart_utils_hex_v3.py            129      7     50      2    95%
+    --------------------------------------------------------------------------------
+    TOTAL                                           5239    213   1994    157    95%
+
+Diskriminierung (TestMetadataBudget + TestMetadataAliasing, Tests unveraendert):
+    B: Vorab-Budget entfernt (exakte Grenze bleibt): test_oversized_metadata_is_refused_before_encoding 4/4 Subtests rot
+       (long list, long string, many keys, long key: json.dumps lief vor der Groessenpruefung); uebrige gruen.
+    C: exakte Bytegrenze entfernt (Vorab-Budget bleibt): test_the_byte_bound_is_exact + test_escaped_characters_count_as_encoded_bytes rot (2/2); uebrige gruen.
+    A: Originalquelle 48d0ebd: Testklasse bricht beim Lesen von _METADATA_MAX_BYTES ab (AttributeError) -- kein Rot-Beleg, nur B/C zaehlen.
+    Positivkontrollen gruen in B und C: test_the_budget_is_per_entry_and_starts_fresh, test_bytes_of_valid_metadata_are_unchanged.

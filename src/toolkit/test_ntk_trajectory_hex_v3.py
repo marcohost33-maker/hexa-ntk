@@ -860,6 +860,50 @@ class TestMetadataAliasing(unittest.TestCase):
                 self.assertEqual(nt._metadata_bytes("_metadata", meta), _v1_metadata_json(meta))
 
 
+class TestMetadataBudget(unittest.TestCase):
+    """R87-P2 (cross-family GPT-6 R87): the depth bound left the size open, so one long
+    string or list was copied, encoded and hashed in full. The canonical JSON is bounded
+    to _METADATA_MAX_BYTES; node and character counts refuse before the encoding."""
+
+    MAX = nt._METADATA_MAX_BYTES
+
+    def test_the_byte_bound_is_exact(self) -> None:
+        # A str encodes as len + 2 quote bytes: MAX bytes bind, MAX + 1 are refused.
+        self.assertEqual(len(nt._metadata_bytes("_metadata", "a" * (self.MAX - 2))), self.MAX)
+        with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+            nt.state_dict_sha256({"_metadata": "a" * (self.MAX - 1)})
+        self.assertIn("exceed", str(ctx.exception))
+
+    def test_escaped_characters_count_as_encoded_bytes(self) -> None:
+        # "é" is 6 JSON bytes for 1 character: the character count passes, the exact
+        # byte bound must still refuse (strongest forger of the pre-walk bound).
+        n = self.MAX // 6
+        self.assertEqual(len(nt._metadata_bytes("_metadata", "é" * n)), 6 * n + 2)
+        with self.assertRaises(nt.NTKTrajectoryError):
+            nt._metadata_bytes("_metadata", "é" * (n + 1))
+
+    def test_oversized_metadata_is_refused_before_encoding(self) -> None:
+        cases = {"long list": [0] * (nt._METADATA_MAX_NODES + 1),
+                 "long string": "a" * (self.MAX + 1),
+                 "many keys": {f"k{i}": 0 for i in range(nt._METADATA_MAX_NODES)},
+                 "long key": {"k" * (self.MAX + 1): 0}}
+
+        def never(*_a, **_k):
+            raise AssertionError("encoded before the size was bounded")
+        for name, meta in cases.items():
+            with self.subTest(case=name), mock.patch.object(nt.json, "dumps", never):
+                with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+                    nt.state_dict_sha256({"_metadata": meta})
+                self.assertNotIn("encoded before", str(ctx.exception))
+
+    def test_the_budget_is_per_entry_and_starts_fresh(self) -> None:
+        # Positive control: two entries near the bound each bind; the count is not shared.
+        near = "a" * (self.MAX - 2)
+        nt.state_dict_sha256({"_metadata": near, "_other": near})
+        # The list itself is one node: MAX_NODES - 1 items reach the node bound exactly.
+        nt.state_dict_sha256({"_metadata": [0] * (nt._METADATA_MAX_NODES - 1)})
+
+
 def _v1_drift(k: np.ndarray, k0: np.ndarray) -> float:
     scale = float(np.abs(k0).max())
     return float(np.linalg.norm((k - k0) / scale)) / float(np.linalg.norm(k0 / scale))

@@ -139,7 +139,7 @@ is refused).
 
 | Field | Covers |
 |---|---|
-| `state_sha256` (per entry) | every state entry in sorted key order: key (length-prefixed UTF-8), then for a tensor `tensor|dtype|shape|` and the raw element bytes (complex as interleaved real/imag), for other entries `json|` and canonical JSON (sorted keys, no NaN, callables as `{"__qualified_name__": module.qualname}`; a data dict carrying the key `__qualified_name__`, a non-`str` dict key and nesting deeper than 64 levels are refused, HNT-R86-01) |
+| `state_sha256` (per entry) | every state entry in sorted key order: key (length-prefixed UTF-8), then for a tensor `tensor|dtype|shape|` and the raw element bytes (complex as interleaved real/imag), for other entries `json|` and canonical JSON (sorted keys, no NaN, callables as `{"__qualified_name__": module.qualname}`; a data dict carrying the key `__qualified_name__`, a non-`str` dict key and nesting deeper than 64 levels are refused, HNT-R86-01; an entry whose canonical JSON exceeds 1 MiB (1 048 576 bytes), that holds more than 100 000 values (dict keys count) or whose str characters exceed 1 MiB in total is refused, the last two before encoding, R87-P2) |
 | `kernel_sha256` (per entry) | the float64 kernel |
 | `inputs_sha256` | dtype, shape and bytes of `x` |
 | `basis_sha256` | `phi` and `w` as float64 |
