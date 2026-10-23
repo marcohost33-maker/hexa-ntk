@@ -805,3 +805,6 @@
 | 866DA6A9D59D8C5C | 2026-10-23 21:30 | src/toolkit | HNT-R86-03/-04 red-green tests with positive controls (TestDigestStringsAreWholeStrings, TestBreakEvenRange): test_phase1_protocol_hex_v3.py |
 | CAB63FB4AD176CE4 | 2026-10-23 21:30 | spec | sections 6 and 7: break-even beyond the float range, whole-string hex digests (HNT-R86-03, HNT-R86-04): PHASE1_PROTOCOL_v1.md |
 | 7D11588CFADF2F08 | 2026-10-23 21:30 | scripts | three phase1 mutants for HNT-R86-03, HNT-R86-04: mutation_probe.py |
+| FA47B57A9149B922 | 2026-10-23 21:09 | src/toolkit | Codex #80 @426c97f: preregistered and diagnostic decisions accept gino.high == 0 (raw errors >= 0, section 5a; runtime rule compares, accuracy rule reports the baseline floor); result_digests values validated as 64-hex SHA-256: phase1_protocol_hex_v3.py |
+| 90AF0387E26D66FA | 2026-10-23 21:09 | src/toolkit | Codex #80 @426c97f red-green tests (zero upper bound, all-zero error table, result digest values; 3/3 red on 426c97f, control green): test_phase1_protocol_hex_v3.py |
+| 5E1B282AA3F4A50A | 2026-10-23 21:09 | spec | section 7 table: result_digests values are 64-hex SHA-256, each checked (Codex #80): PHASE1_PROTOCOL_v1.md |

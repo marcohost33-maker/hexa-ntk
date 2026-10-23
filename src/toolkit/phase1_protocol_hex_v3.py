@@ -825,7 +825,9 @@ def decide_test_set(
     # The rule uses the validated value, not a second read of gino.high (TOCTOU,
     # Equalita R2 P3).
     _, _, high = _preregistered_summary(gino)
-    upper = _positive_float(high, name="gino.high")
+    # Codex #80 (426c97f): raw errors are >= 0 (section 5a), so an all-zero table gives
+    # high == 0; both rules are defined for it (runtime compares, accuracy hits the floor).
+    upper = _non_negative_float(high, name="gino.high")
     latency = _positive_float(gino_latency_s, name="gino_latency_s")
     runtime, accuracy, verdict = _rules(upper, latency, baseline_times_s, baseline_errors)
     return DecisionSummary(test_set=test_set, n=n, verdict=verdict, rules=(runtime, accuracy), gino=gino)
@@ -1334,7 +1336,9 @@ def decide_preregistered(
     canonical_ids = tuple(sorted(ids))
     summary = paired_bootstrap_iqm({test_set: canonical}, sample_ids={test_set: canonical_ids})[test_set]
     _, _, high = _preregistered_summary(summary)
-    upper = _positive_float(high, name="gino.high")
+    # Codex #80 (426c97f): raw errors are >= 0 (section 5a), so an all-zero table gives
+    # high == 0; both rules are defined for it (runtime compares, accuracy hits the floor).
+    upper = _non_negative_float(high, name="gino.high")
     latency = float(np.median(latency_calls))
     runtime, accuracy, verdict = _rules(upper, latency, times, curve_errors)
 
@@ -1562,7 +1566,11 @@ def build_run_manifest(fields: Mapping[str, Any]) -> Dict[str, Any]:
         "hardware": _json_safe(hardware, name="hardware"),
         "reference_spec_ids": [_non_empty_str(i, name="reference_spec_ids item") for i in ids],
         "metric_spec_sha256": _hex(fields["metric_spec_sha256"], name="metric_spec_sha256", pattern=_HEX64),
-        "result_digests": _str_mapping(fields["result_digests"], name="result_digests", allow_empty=True),
+        # Codex #80 (426c97f): each value is a digest, not just a string (an empty mapping
+        # stays valid before results exist).
+        "result_digests": {k: _hex(v, name=f"result_digests[{k!r}]", pattern=_HEX64)
+                           for k, v in _str_mapping(fields["result_digests"], name="result_digests",
+                                                    allow_empty=True).items()},
     }
     if "extra" in fields:
         extra = fields["extra"]

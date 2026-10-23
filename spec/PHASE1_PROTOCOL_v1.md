@@ -418,7 +418,7 @@ Required, each non-empty and typed:
 | `hardware` | at least `machine`, `threads`, `dtype`, `cuda` |
 | `reference_spec_ids` | the Phase 0 ReferenceSpec ids |
 | `metric_spec_sha256` | `file_sha256` of `spec/HEAT_OPERATOR_TASK_v1.md` |
-| `result_digests` | name -> digest of every result file (may be empty before results exist) |
+| `result_digests` | name -> SHA-256 (64 lowercase hex) of every result file (may be empty before results exist; each value is checked, Codex #80 2026-10-23) |
 | `extra` (optional) | free-form mapping |
 
 Any other key, a missing key, a wrong type, a NaN or an empty required value

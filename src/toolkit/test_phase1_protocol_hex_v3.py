@@ -365,6 +365,17 @@ class TestDecisionRules(unittest.TestCase):
         return pp.decide_test_set(test_set="id", n=32, gino=_summary(high), gino_latency_s=latency,
                                   baseline_times_s=self.TIMES, baseline_errors=self.ERRORS)
 
+    def test_zero_upper_bound_is_evaluated(self):
+        # Codex #80 (426c97f): raw errors are >= 0 (section 5a); an exact predictor has high == 0.
+        d = self._decide(high=0.0, latency=2.0)
+        runtime, accuracy = d.rules
+        self.assertTrue(runtime.evaluable and runtime.claim)
+        self.assertFalse(accuracy.evaluable)
+        self.assertIn("baseline floor", accuracy.reason)
+        self.assertEqual(d.verdict, "advantage")
+        with self.assertRaises(ValueError):  # negative bounds stay refused
+            self._decide(high=-1e-12, latency=2.0)
+
     def test_advantage_under_both_rules(self):
         d = self._decide(high=1.5, latency=2.0)
         runtime, accuracy = d.rules
@@ -620,6 +631,16 @@ class TestPreregisteredDecision(unittest.TestCase):
                                                    self.curve if curve is None else curve,
                                                    n=full["n"], domain=domain)
         return full
+
+    def test_an_all_zero_error_table_reaches_a_decision(self):
+        # Codex #80 (426c97f): low == point == high == 0 used to abort with ValueError.
+        zero = np.zeros_like(self.errors)
+        d = pp.decide_preregistered(**self.kwargs(errors=zero))
+        self.assertEqual(d.gino.high, 0.0)
+        self.assertTrue(d.rules[0].evaluable and d.rules[0].claim)
+        self.assertFalse(d.rules[1].evaluable)
+        pp.verify_preregistered_decision(d.to_dict(), **self.kwargs(errors=zero))
+        self.assertEqual(pp.decide_preregistered(**self.kwargs()).verdict, "H0")  # control
 
     def test_a_relabelled_summary_cannot_reach_a_preregistered_decision(self):
         # GPT-6 HEX-P1-01 (2026-10-21): dataclasses.replace(summary, low=0.001, point=0.001,
@@ -1372,6 +1393,18 @@ class TestRunManifest(unittest.TestCase):
         self.assertEqual(with_extra["extra"], {"note": "x", "amp": False, "value": 1.5, "count": 3})
         self.assertNotEqual(with_extra["manifest_sha256"], manifest["manifest_sha256"])
         json.dumps(with_extra, allow_nan=False)
+
+    def test_result_digest_values_are_digests(self):
+        # Codex #80 (426c97f): values bypassed _hex; any string was bound into the manifest.
+        for bad in ({"result.json": "not-a-digest\n"}, {"r": "a" * 63}, {"r": "A" * 64}, {"r": "a" * 64 + "\n"}):
+            fields = _manifest_fields()
+            fields["result_digests"] = bad
+            with self.subTest(bad=bad), self.assertRaises(pp.RunManifestError):
+                pp.build_run_manifest(fields)
+        for good in ({}, {"result.json": "a" * 64, "metrics.json": "0" * 64}):
+            fields = _manifest_fields()
+            fields["result_digests"] = good
+            self.assertEqual(pp.build_run_manifest(fields)["result_digests"], good)
 
     def test_every_required_key_is_required(self):
         for key in pp._REQUIRED_MANIFEST_KEYS:
