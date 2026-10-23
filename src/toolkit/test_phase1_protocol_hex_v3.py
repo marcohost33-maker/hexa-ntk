@@ -1665,5 +1665,71 @@ class TestRadiusFloatStability(unittest.TestCase):
                 pp.cdist_rounding_margin(full.pop("radius"), **full)
 
 
+class TestDigestStringsAreWholeStrings(unittest.TestCase):
+    """HNT-R86-03 (issue #82, independently reproduced by cross-family GPT-6 R86/R87):
+    `$` also matches before a final newline, so `"a" * 40 + "\\n"` passed as a git sha
+    and a digest with a trailing newline entered the manifest."""
+
+    def test_trailing_newline_is_refused_in_every_digest_field(self):
+        for key, value in (("git_sha", "a" * 40 + "\n"), ("config_digest", "e" * 64 + "\n"),
+                           ("metric_spec_sha256", "f" * 64 + "\n"),
+                           ("datasets", {**_manifest_fields()["datasets"], "id": "d" * 64 + "\n"}),
+                           ("preregistration", {**_manifest_fields()["preregistration"],
+                                                "sha256": _manifest_fields()["preregistration"]["sha256"] + "\n"})):
+            fields = _manifest_fields()
+            fields[key] = value
+            with self.subTest(key=key), self.assertRaises(pp.RunManifestError):
+                pp.build_run_manifest(fields)
+        # source_revision() checks git's answer with the same pattern.
+        self.assertIsNone(pp._HEX40.match("a" * 40 + "\n"))
+
+    def test_valid_digests_still_pass(self):
+        # Positive control: the same fields without the newline build a manifest.
+        manifest = pp.build_run_manifest(_manifest_fields())
+        self.assertEqual(manifest["git_sha"], "a" * 40)
+        self.assertIsNotNone(pp._HEX64.match("0123456789abcdef" * 4))
+
+
+def _v1_break_even(training, data, gino, baseline):
+    """Independent oracle: the float evaluation of PHASE1_PROTOCOL_v1 section 6."""
+    return int(math.ceil((training + data) / (baseline - gino)))
+
+
+def _exact_break_even(training, data, gino, baseline):
+    """Independent oracle: ceil of the exact quotient of the given binary64 values (decimal, 1500 digits)."""
+    import decimal
+    with decimal.localcontext() as ctx:
+        ctx.prec = 1500
+        q = (decimal.Decimal(training) + decimal.Decimal(data)) / (decimal.Decimal(baseline) - decimal.Decimal(gino))
+        return int(q.to_integral_value(rounding=decimal.ROUND_CEILING))
+
+
+class TestBreakEvenRange(unittest.TestCase):
+    """HNT-R86-04 (issue #82, constructive oracle by cross-family GPT-6 R86/R87): finite
+    inputs overflowed the float evaluation (sum or quotient -> inf), and ceil(inf) raised a
+    raw OverflowError. Where the float evaluation is finite its result is unchanged."""
+
+    def test_finite_inputs_whose_float_evaluation_overflows(self):
+        for args in ((1e308, 1e308, 1.0, 2.0),          # training + data overflows
+                     (1e300, 0.0, 5e-324, 1e-323),      # quotient overflows (subnormal saving)
+                     (1.7e308, 0.0, 0.25, 0.5)):        # quotient just above the float range
+            with self.subTest(args=args):
+                q = pp.break_even_queries(*args)
+                self.assertIsInstance(q, int)
+                self.assertEqual(q, _exact_break_even(*args))
+
+    def test_result_unchanged_where_the_float_evaluation_is_finite(self):
+        rng = np.random.default_rng(80)
+        for _ in range(2000):
+            training, data = (float(v) for v in rng.uniform(0.0, 1e4, 2))
+            gino = float(rng.uniform(1e-6, 1.0))
+            baseline = gino + float(rng.uniform(1e-9, 1.0))
+            if baseline <= gino:
+                continue
+            args = (training, data, gino, baseline)
+            self.assertEqual(pp.break_even_queries(*args), _v1_break_even(*args), args)
+        self.assertEqual(pp.break_even_queries(555.4, 71.0, 0.4, 1.0), 1044)  # float semantics kept
+
+
 if __name__ == "__main__":
     unittest.main()

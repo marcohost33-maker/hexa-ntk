@@ -392,7 +392,12 @@ against the new code. `decide_test_set` is unchanged.
 baseline_latency_s)` is the smallest integer `q` with
 `q * (baseline_latency_s - gino_latency_s) >= training + data`, i.e.
 `ceil((training + data) / (baseline - gino))`; `None` when GINO is not faster
-per query (the fixed cost is never amortised). The baseline latency is the
+per query (the fixed cost is never amortised). The quotient is evaluated in
+binary64 as written; only where that evaluation overflows on finite inputs (sum
+or quotient beyond the float range; `ceil(inf)` raised a raw `OverflowError`)
+is the count computed exactly on the given binary64 values, as an unbounded int
+(HNT-R86-04, issue #82, cross-family GPT-6 R86). Wherever the float evaluation
+is finite its result is unchanged. The baseline latency is the
 `time_at_error` of the equal-accuracy rule, so a break-even count exists only
 where that rule is evaluable.
 
@@ -417,7 +422,9 @@ Required, each non-empty and typed:
 | `extra` (optional) | free-form mapping |
 
 Any other key, a missing key, a wrong type, a NaN or an empty required value
-raises `RunManifestError`. The manifest carries `schema`
+raises `RunManifestError`. Every hex digest must be the whole string: the
+patterns end in `\Z`, not `$`, which also matched before a final newline
+(HNT-R86-03, issue #82). The manifest carries `schema`
 `hexantk_phase1_run_manifest_v1`, `protocol` `PHASE1_PROTOCOL_v1` and
 `manifest_sha256` over the canonical JSON (sorted keys, no NaN) of
 everything else. `source_revision()` reads the git HEAD and whether the work

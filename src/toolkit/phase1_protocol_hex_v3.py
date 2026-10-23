@@ -74,6 +74,7 @@ import re
 import subprocess
 import time
 from dataclasses import asdict, dataclass
+from fractions import Fraction
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -127,8 +128,9 @@ _LATTICE_DOMAIN: Mapping[str, str] = MappingProxyType({"triangle": "triangle_dir
 _DECISION_SCHEMA = "hexantk_phase1_decision_record_v1"
 _AUTHENTICITY = ("unattested: the record_sha256 is a self-digest; it shows that the record follows from "
                  "the named raw bytes, not who produced those bytes (no signature, no pipeline attestation)")
-_HEX40 = re.compile(r"^[0-9a-f]{40}$")
-_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+# \Z, not $: `$` also matches before a final "\n", so "a" * 40 + "\n" passed (HNT-R86-03, #82).
+_HEX40 = re.compile(r"^[0-9a-f]{40}\Z")
+_HEX64 = re.compile(r"^[0-9a-f]{64}\Z")
 _ROOT = Path(__file__).resolve().parents[2]
 # Run-manifest content fixed by spec/PREREGISTRATION_PHASE1_v1.md (Equalita R3 F2): the
 # file itself (:222), the train pool 0..1999 of the [D3] table (:66) and D7 (:94).
@@ -1405,13 +1407,21 @@ def break_even_queries(
     baseline_latency_s: Any,
 ) -> Optional[int]:
     """Smallest q with q * (baseline - gino) >= training + data; None if GINO is not faster."""
-    fixed = (_non_negative_float(training_time_s, name="training_time_s")
-             + _non_negative_float(data_generation_time_s, name="data_generation_time_s"))
+    training = _non_negative_float(training_time_s, name="training_time_s")
+    data = _non_negative_float(data_generation_time_s, name="data_generation_time_s")
     gino = _positive_float(gino_latency_s, name="gino_latency_s")
     baseline = _positive_float(baseline_latency_s, name="baseline_latency_s")
     if baseline <= gino:
         return None
-    return int(math.ceil(fixed / (baseline - gino)))
+    quotient = (training + data) / (baseline - gino)
+    if math.isfinite(quotient):
+        return int(math.ceil(quotient))  # the v1 float evaluation, unchanged wherever it is finite
+    # HNT-R86-04: finite inputs, yet the sum or the quotient overflowed and ceil(inf) raised a
+    # raw OverflowError. Evaluate exactly on the given binary64 values instead (Python ints
+    # are unbounded); the count is then astronomically large, never a practical budget.
+    fixed = Fraction(training) + Fraction(data)
+    saving = Fraction(baseline) - Fraction(gino)
+    return -((-fixed) // saving)
 
 
 # ------------------------------------------------------------------

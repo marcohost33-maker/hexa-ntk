@@ -801,3 +801,7 @@
 | 04B0E4D58E477B39 | 2026-10-21 16:27 | spec | section 2 eight new point fields; 5a read-once, plausibility, settings checks; claim boundary corrected (R5-F2) and machine/threads named; API/format change R5: PHASE1_PROTOCOL_v1.md |
 | 3B2A811310E79A8C | 2026-10-21 16:35 | src/toolkit | ruff E501: one line of the read-once test wrapped (no test change): test_phase1_protocol_hex_v3.py |
 | CD131B6A2788D847 | 2026-10-21 17:05 | spec | section 5a: horizon and timing protocol checked since R5-F1 (R6-F1 under-claim fixed); claim boundary names timed_samples (R6-F2): PHASE1_PROTOCOL_v1.md |
+| 84025D8C33DB1A0D | 2026-10-23 21:30 | src/toolkit | HNT-R86-03 digest patterns end in \Z ($ matched before a final newline); HNT-R86-04 break_even_queries exact on the given binary64 values only where the float evaluation overflows, unchanged wherever it is finite (issue #82, cross-family GPT-6 R86/R87): phase1_protocol_hex_v3.py |
+| 866DA6A9D59D8C5C | 2026-10-23 21:30 | src/toolkit | HNT-R86-03/-04 red-green tests with positive controls (TestDigestStringsAreWholeStrings, TestBreakEvenRange): test_phase1_protocol_hex_v3.py |
+| CAB63FB4AD176CE4 | 2026-10-23 21:30 | spec | sections 6 and 7: break-even beyond the float range, whole-string hex digests (HNT-R86-03, HNT-R86-04): PHASE1_PROTOCOL_v1.md |
+| 7D11588CFADF2F08 | 2026-10-23 21:30 | scripts | three phase1 mutants for HNT-R86-03, HNT-R86-04: mutation_probe.py |
