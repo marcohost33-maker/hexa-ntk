@@ -1,0 +1,63 @@
+==================================================================
+HexaNTK Gate-Run -- Phase-1-Protokoll: Equalita R5 @d6cfdec (R5-F1 Einstellungen der Baseline-
+Punkte an die Vorregistrierung gebunden, R5-F3 einmaliges Lesen, R5-F4 Plausibilitaet, R5-F2 Spec)
+Datum:    2026-10-21 (Lauf 16:35:15 - 16:36:25 +02:00)
+Geprueft: Arbeitsbaum = Commit ffb2b306703e3e1bb50bddaf981413ae6fef445b (sauber vor und nach dem
+          Lauf; `git status --porcelain` leer). Basis: d6cfdec (PR #80). Dieser Log-Commit fuegt nur
+          diese Datei hinzu; der Code ist der von ffb2b30.
+Umgebung: Windows 11 (10.0.26200) | Python 3.12.10 (venv) | numpy 2.5.3 | torch 2.6.0+cpu
+          | ruff 0.17.0 | neuraloperator NICHT installiert
+Exit-Codes je Kommando direkt gemessen (cmd > datei 2>&1; echo rc=$?).
+==================================================================
+
+Grundlinie @d6cfdec (Equalita-Lauf, gleiche Maschine und venv, 15:50:05 +02:00, ci_d6cfdec.log):
+  ruff rc=0 | verify_sources PASS 46+15+11 | engine_gate rc=0 (49/49) | unittest+coverage rc=0,
+  Ran 888, OK (skipped=12) | TOTAL 4793 211 1802 156 94 %, phase1_protocol_hex_v3.py 747 8 294 6 99 %
+  | FV+Referenz rc=0 Ran 117 OK
+
+$ ruff check src scripts
+  rc=0 -- All checks passed!
+$ python -m compileall src
+  rc=0
+$ python scripts/verify_sources.py
+  rc=0 -- [VERIFY-SOURCES] 46 Toolkit-Eintraege + 15 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (72 Dateien) | PASS
+$ (GINO-Smoke des Jobs `gate`)
+  NICHT GELAUFEN -- neuraloperator lokal nicht installiert; CI-only. Diese Aenderung beruehrt
+  gino_adapter_hex_v3.py nicht.
+$ python scripts/engine_gate.py
+  rc=0 -- [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" -v
+  rc=0 -- Ran 891 tests, OK (skipped=12)
+$ python -m coverage report
+  rc=0 -- TOTAL 4856 212 1834 157 94% | phase1_protocol_hex_v3.py 810 9 326 7 99%
+$ python -m unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3   (in src/toolkit)
+  rc=0 Ran 117 OK -- nur nativer Kernel; die OPENBLAS_CORETYPE-Schleife des CI ist Linux-only
+  und lief hier NICHT (CI-only).
+
+Zwischenstand @393d3f3 (16:33:28 - 16:34:44): ruff rc=1 (E501, eine Testzeile 122 > 120), alles
+andere gruen (891 OK). Behoben in ffb2b30 (Zeile umbrochen, SOURCES-Zeile).
+
+Rot an der Basis, abgelehnt am Fix (Equalitas Probe r5_real.py, echte baseline_cost_accuracy_curve,
+S=500, ids 100000..100499, n=32, timed_samples=3; Entscheid 1: GINO L = t(steps 4), H = 1.25 e(steps 4);
+Entscheid 2: L = t(steps 8), H = 0.8 e(steps 2)):
+  @d6cfdec (Equalita, r5_real.out):
+    Solver T=0.02 gegen Wahrheit T=0.01      ACCEPTED advantage (beide Entscheide)
+    Solver kappa=2 gegen Wahrheit kappa=1    ACCEPTED advantage (beide Entscheide)
+  @cc4fed9 (Code = ffb2b30, Lauf allein ohne Parallel-Last, 16:27:30 - 16:31:56):
+    T=0.02 konsistent und T-Mismatch          REFUSED "steps=1 was solved with t_final = 0.02"
+    kappa-Mismatch                            REFUSED "steps=1 was solved with kappa = 2.0"
+    Timing warmup=0 repeats=1                 REFUSED "steps=1 was timed with warmup = 0"
+    registrierte Kurve                        ACCEPTED H0 (beide Entscheide)
+    Eingaben train ids 0..499                 ACCEPTED H0 (beide Entscheide) -- benannte Grenze R4-F4
+  Positivkontrollen unveraendert (d6cfdec und cc4fed9): q2b H0 high 0.0475 e_base 0.04315825253106189
+    t_base 0.04505552618376947; q2 advantage high 0.0231447 t_base 0.10000744130713331.
+
+Diskriminierung (diskriminierung.py, VOLL, head cc4fed9): DK-20261021T141519-2e75f59ad6a7
+  29 Mutanten (9 Trios aus / invertiert / verschoben fuer kappa+T, dt, Task-Digest, rtol,
+  warmup+repeats, Timing-Digest, Untergrenzen, CI-Ordnung, clock; 1 Paar fuer einmaliges Lesen),
+  46 Faelle (Mutant x Ziel-Test-Node), alle rot: 32 DISKRIMINIERT, 14 ROT ART-UNBESTIMMT. Die 14
+  sind invertierte Vergleiche, verschobene Referenzen und das Doppel-Lesen: sie lehnen eine
+  Eingabe ab, die der Test als gueltig fuehrt (ehrliche Kurve, Positivkontrolle oder Faelscher mit
+  erwarteter Gleichheit), der Test stirbt an einem DecisionInputError ausserhalb der Zusicherung
+  (daher auch die Nenner-Abweichung bei Subtests).
+==================================================================

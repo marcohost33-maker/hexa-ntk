@@ -1,0 +1,18 @@
+==================================================================
+HexaNTK Gate-Run -- Codex-Runde PR #80 @426c97f (2x P2)
+Basis-Kopf: 426c97fbc80aca2e9481ddece8de445270082fb9 | Datum: 2026-10-23 21:09 +0200
+Umgebung: Windows 11 | Python 3.12.10 | numpy 2.5.3 | torch 2.6.0+cpu
+==================================================================
+$ python -m compileall -q src   rc=0 -- 
+$ python scripts/verify_sources.py   rc=0 -- [VERIFY-SOURCES] 46 Toolkit-Eintraege + 15 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (72 Dateien) | PASS
+$ python -m ruff check src scripts   rc=0 -- All checks passed!
+$ python scripts/engine_gate.py   rc=0 -- [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"   rc=0
+    Ran 898 tests in 42.795s
+    
+    OK (skipped=12)
+$ python -m coverage report   -- TOTAL                                           4863    212   1836    157    94%
+
+Diskriminierung (phase1_protocol_hex_v3.py auf 426c97f zurueckgesetzt, Tests unveraendert):
+    test_zero_upper_bound_is_evaluated ERROR, test_an_all_zero_error_table_reaches_a_decision ERROR,
+    test_result_digest_values_are_digests FAIL (4/4 subtests): 3/3 rot; Kontrolle test_fail_closed_on_malformed_fields gruen.

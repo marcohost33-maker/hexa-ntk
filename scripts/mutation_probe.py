@@ -50,6 +50,7 @@ DCP = "scripts/oracles/distributed_checkpoint_bundle_v1.py"
 RC = "reference_case_hex_v3.py"
 FV = "hex_fv_solver_hex_v3.py"
 T1 = "heat_operator_task_hex_v3.py"
+P1 = "phase1_protocol_hex_v3.py"
 NT = "ntk_trajectory_hex_v3.py"
 
 MUTANTS = (
@@ -212,6 +213,14 @@ MUTANTS = (
     Mutant(T1, "    tolerance = 64.0 * np.finfo(np.float64).eps * np.maximum(1.0, np.abs(values))\n",
            "    tolerance = 64.0 * np.finfo(np.float64).eps * max(1.0, float(np.max(np.abs(values))))\n",
            "test_heat_operator_task_hex_v3.TestMetrics"),
+    # 2026-10-23 HNT-R86-03/-04 (issue #82, cross-family GPT-6 R86): whole-string digests,
+    # break-even beyond the float range.
+    Mutant(P1, '_HEX40 = re.compile(r"^[0-9a-f]{40}\\Z")\n', '_HEX40 = re.compile(r"^[0-9a-f]{40}$")\n',
+           "test_phase1_protocol_hex_v3.TestDigestStringsAreWholeStrings"),
+    Mutant(P1, '_HEX64 = re.compile(r"^[0-9a-f]{64}\\Z")\n', '_HEX64 = re.compile(r"^[0-9a-f]{64}$")\n',
+           "test_phase1_protocol_hex_v3.TestDigestStringsAreWholeStrings"),
+    Mutant(P1, "    if math.isfinite(quotient):\n", "    if True:\n",
+           "test_phase1_protocol_hex_v3.TestBreakEvenRange"),
     # 2026-10-22 NTK_TRAJECTORY_v1: each guard and each closed-form metric of the trajectory.
     Mutant(NT, "    if given != steps:\n", "    if False:\n", "test_ntk_trajectory_hex_v3.TestFailClosed"),
     # 2026-10-23 HNT-R25-01 (cross-family GPT-6 R25): the duplicate-bytes refusal was

@@ -1,0 +1,83 @@
+==================================================================
+HexaNTK Gate-Run -- Phase-1-Protokoll: Equalita R3 @6aadb63 (F1 steps-Gitter, F2 Manifest-Inhalt,
+F4 Float-Budget-Widerspruch, F7 Doku, F8/F9 Testluecken)
+Datum:    2026-10-21 (Lauf 13:47:32 - 13:49:23 +02:00)
+Geprueft: Arbeitsbaum = Commit cf2779894b11daafd650680cac1160439206e611 (sauber vor dem Lauf;
+          `git status --porcelain` leer). Basis: 6aadb63 (PR #80). Dieser Log-Commit fuegt nur
+          diese Datei hinzu; der Code ist der von cf27798.
+Umgebung: Windows 11 (10.0.26200) | Python 3.12.10 (venv) | numpy 2.5.3 | torch 2.6.0+cpu
+          | ruff 0.17.0 (CI-Pin) | coverage 7.16.2 | neuraloperator NICHT installiert
+Exit-Codes je Kommando direkt gemessen (cmd > datei 2>&1; echo rc=$?).
+==================================================================
+
+Grundlinie @6aadb63 (gleiche Umgebung, 13:29:09 - 13:32:54 +02:00):
+  ruff rc=0 | compileall rc=0 | verify_sources PASS 46+15+11 | engine_gate rc=0 (49/49)
+  | unittest+coverage rc=0, Ran 877, OK (skipped=12) | TOTAL 4720 211 1756 156 94 %,
+  phase1_protocol_hex_v3.py 98 % | FV+Referenz rc=0 Ran 117 OK
+
+$ ruff check src scripts
+  rc=0 -- All checks passed!
+$ python -m compileall src
+  rc=0
+$ python scripts/verify_sources.py
+  rc=0 -- [VERIFY-SOURCES] 46 Toolkit-Eintraege + 15 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (72 Dateien) | PASS
+$ (GINO-Smoke des Jobs `gate`)
+  NICHT GELAUFEN -- neuraloperator lokal nicht installiert; CI-only. Diese Aenderung beruehrt
+  gino_adapter_hex_v3.py nicht.
+$ python scripts/engine_gate.py
+  rc=0 -- [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" -v
+  rc=0 -- Ran 882 tests, OK (skipped=12: 5 neuraloperator fehlt, 3 directory fsync POSIX-only,
+          3 Symlink-Recht Windows, 1 CUDA)
+$ python -m coverage report
+  rc=0 -- TOTAL 4750 211 1774 156 94% | phase1_protocol_hex_v3.py 704 8 266 6 99%
+$ python -m unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3   (in src/toolkit)
+  rc=0 Ran 117 OK -- nur nativer Kernel; die OPENBLAS_CORETYPE-Schleife des CI ist Linux-only
+  und lief hier NICHT (CI-only).
+
+Red zuerst (Commit 4c40c29 = neue Tests auf dem Modul von 6aadb63, pytest, Ausschnitt -k):
+  24 rot: 8x "AssertionError: DecisionInputError not raised" (steps-Teilmengen {1,64}, {1,32},
+  {2,64}, {1,8,64}, {1}, 6 Punkte, 8 Punkte), 13x "AssertionError: DecisionProvenanceError not
+  raised" (Split, datasets, Prereg-SHA, cuda 12.4/True/None, dtype, neuraloperator 9.9/fehlt,
+  torus-Digest), 2x "None != [1, 2, 4, 8, 16, 32, 64]" (baseline_steps), 1x "'stable' !=
+  'refused'" (F4). F8/F9-Tests gruen auf altem Code (Luecken gegen Mutanten, nicht gegen den
+  Code; Beleg unten).
+
+Diskriminierung (G:\Meine Ablage\Vero\Tools\diskriminierung.py, Ziel je pytest-Node):
+  DK-20261021T112713-400d4e5f9994 @d0e5727, VOLL: 11/13, 2 ROT DURCH ABSTURZ (F9 KeyError,
+  F2h FileNotFoundError) -> Tests auf Zusicherungen umgestellt (1f7eb61).
+  DK-20261021T113932-0551a60846d7 @1f7eb61, VOLL: 13/13 DISKRIMINIERT, 0 blind --
+    F1a Raster-Pruefung weg, F1b baseline_steps nicht im Record,
+    F2a Split, F2b datasets[test_set], F2c Prereg-SHA, F2d cuda nur True, F2e dtype,
+    F2f neuraloperator, F2g Inhaltspruefung ganz weg, F2h Lesefehler nicht abgefangen,
+    F4 Widerspruch wieder "stable", F8 Latenz median->mean, F9 baseline_times_s aus dem Record.
+  Modulbytes 1f7eb61 == cf27798 (git diff leer fuer phase1_protocol_hex_v3.py).
+
+Faelscher-Proben Equalita (probes/q2_probe.py, q2b_probe.py, q2c_probe.py) @d0e5727
+(Modul == cf27798): Positivkontrollen unveraendert (q2b: ACCEPTED H0 high 0.0475; q2: ACCEPTED
+advantage high 0.0231447, wie @6aadb63). Jetzt REFUSED: steps-Teilmengen {1,64}, {1,32}, {2,64},
+{1,8,64}, 1-Punkt-Kurve; Manifest train = Test-IDs, ohne Testset-Digest, Prereg-SHA 0*64,
+cuda "12.4"/float16-amp, neuraloperator 9.9. Weiter ACCEPTED (bewusst, nicht registriert bzw.
+ausserhalb dieses Fixes): metric_spec_sha256 != Datei (welche Datei, ist offen),
+Manifest-Seeds in anderer Reihenfolge (Menge gleich), Latenz 1e-300 s und q2c-Latenzformen
+(Authentizitaet bzw. F10, Owner).
+
+Nicht gebunden / offen: Datei hinter metric_spec_sha256 (Prereg:230 "instrument spec" vs.
+PROTOCOL Abschnitt 7 HEAT_OPERATOR_TASK_v1.md), Maschinenname (D5 offen), exakter 1800/200-Split,
+Schreibweise von cuda/dtype im Manifest (hier cuda = False, dtype = "float32"); F10
+(Latenzzeilen an sample_ids, batch_size) Owner-Entscheid; Linux/CI-Lauf folgt im PR.
+
+------------------------------------------------------------------
+Nachtrag 13:55 - 13:57 +02:00: F1-Klasse gegen den eigenen F1-Waechter (Commit 457405d)
+------------------------------------------------------------------
+Befund @ef4e797 (pad_probe, Modul == cf27798): die echten Punkte {1,64} bzw. {2,64}, durch
+Wiederholung auf 7 Eintraege aufgefuellt, bestehen die Anzahlpruefung -> ACCEPTED grade
+"preregistered" verdict "advantage" (3/3 Varianten). Fix 457405d: keine Zeit und kein Fehler
+der Kurve darf sich wiederholen (DecisionInputError); danach 3/3 REFUSED, PK weiter H0.
+Diskriminierung DK-20261021T115450-b221d25f1db0 @457405d, VOLL: 2/2 (F1a Raster-Pruefung weg,
+F1c Wiederholungs-Pruefung weg).
+Arbeitsbaum = Commit 457405d4aa720add13dc06f9e51e385b4e18ab95 (sauber), gleiche Umgebung:
+  ruff rc=0 | compileall rc=0 | verify_sources rc=0 PASS 46+15+11 | engine_gate rc=0 49/49
+  | unittest+coverage rc=0, Ran 882, OK (skipped=12) | TOTAL 4752 211 1776 156 94%,
+  phase1_protocol_hex_v3.py 706 8 268 6 99% | FV+Referenz rc=0 Ran 117 OK (nur nativer Kernel)
+Equalita-Proben q2/q2b/q2c @457405d: Verdikte identisch zu @d0e5727.

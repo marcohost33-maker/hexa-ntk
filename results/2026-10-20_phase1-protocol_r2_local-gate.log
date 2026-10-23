@@ -1,0 +1,45 @@
+==================================================================
+HexaNTK Gate-Run -- Phase-1-Protokoll: zweite Review-Runde (Equalita R2 @35a5a45), Fix c924a4c
+Datum:    2026-10-20 (Lauf endete 12:06:33 +02:00)
+Geprueft: Arbeitsbaum = Commit c924a4c3ab9a2e26e9c946c2b5ae93a25a985875 (sauber vor und nach dem Lauf;
+          Zweig claude/hexa-ntk-neural-operator-sh43u7). Anlass: R2-P2-1 (Teilmengen-Summary mit
+          ehrlichen Labels kippt H0 -> advantage) + P3 NEP 50, low >= 0, TOCTOU. Dieser Log-Commit
+          fuegt nur diese Datei hinzu; der Code ist der von c924a4c.
+Umgebung: Windows 11 (10.0.26200) | Python 3.12.10 (venv) | numpy 2.5.3 | torch 2.6.0+cpu | neuraloperator 2.0.0
+          | ruff 0.16.10 | coverage 7.16.2 (Pins wie .github/workflows/ci.yml und requirements-dev.txt)
+Exit-Codes je Kommando direkt gemessen (cmd > datei 2>&1; rc=$?), keine Pipe; dieselbe Kette wie
+results/2026-10-20_phase1-protocol_fix_local-gate.log.
+==================================================================
+
+$ ruff check src scripts
+  rc=0 -- All checks passed!
+$ python -m compileall src
+  rc=0
+$ python scripts/verify_sources.py
+  rc=0 -- [VERIFY-SOURCES] 46 Toolkit-Eintraege + 15 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (72 Dateien) | PASS
+$ python -c "import importlib.metadata; assert importlib.metadata.version('neuraloperator') == '2.0.0'"
+  rc=0
+$ python -c "import neuralop.models; assert hasattr(neuralop.models, 'GINO')"
+  rc=0
+$ python -m unittest discover -s src/toolkit -t src/toolkit -p "test_gino_adapter_hex_v3.py" -v
+  rc=0 -- Ran 25 tests OK
+$ python scripts/engine_gate.py
+  rc=0 -- [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" -v
+  rc=0 -- Ran 863 tests, OK (skipped=7)
+$ python -m coverage report
+  rc=0 -- TOTAL 4524 208 1684 155 94%
+$ OPENBLAS_CORETYPE=<k> python -m unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3   (in src/toolkit)
+  Prescott rc=0 Ran 117 OK | Sandybridge rc=0 Ran 117 OK | Haswell rc=0 Ran 117 OK | Zen rc=0 Ran 117 OK
+
+Diskriminierung (G:\Meine Ablage\Vero\Tools\diskriminierung.py, Ziel je pytest-Node):
+  DK-20261020T100422-7e3dd7e63445 @c924a4c, provenienz VOLL: 5/5 diskriminieren
+  - n_seeds-Bindung entfernt          -> test_malformed_summaries_fail_closed rot (5 subTests)
+  - n_samples-Bindung entfernt        -> test_malformed_summaries_fail_closed rot (3 subTests)
+  - NEP-50-Vergleich wieder direkt    -> test_malformed_summaries_fail_closed rot (2 subTests)
+  - low >= 0 entfernt                 -> test_malformed_summaries_fail_closed rot (1 subTest)
+  - zweites Lesen von gino.high       -> test_the_rule_reads_the_validated_bound_once rot
+  Restore je Fall per Hash geprueft.
+
+Nicht gebunden (offen in #82): Herkunft der Summary (umetikettierte Summary eines anderen Niveaus),
+seed-Feld, JSON-Serialisierbarkeit numpy-typisierter Felder.

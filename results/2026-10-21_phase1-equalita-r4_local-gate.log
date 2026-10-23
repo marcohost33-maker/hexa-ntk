@@ -1,0 +1,58 @@
+==================================================================
+HexaNTK Gate-Run -- Phase-1-Protokoll: Equalita R4 @646254d (R4-F1 Baseline-Punkte an ihre eigenen
+Mess-Koordinaten gebunden, R4-F3 AMP, R4-F6 Test-Pins)
+Datum:    2026-10-21 (Lauf 15:27:46 - 15:29:06 +02:00)
+Geprueft: Arbeitsbaum = Commit 43b1652dafea9fc72769709adfb6d27194e7883f (sauber vor und nach dem
+          Lauf; `git status --porcelain` leer). Basis: 646254d (PR #80). Dieser Log-Commit fuegt nur
+          diese Datei hinzu; der Code ist der von 43b1652 (src/ identisch mit 8230f1c).
+Umgebung: Windows 11 (10.0.26200) | Python 3.12.10 (venv) | numpy 2.5.3 | torch 2.6.0+cpu
+          | ruff (CI-Pin aus requirements-dev.txt) | neuraloperator NICHT installiert
+Exit-Codes je Kommando direkt gemessen (cmd > datei 2>&1; echo rc=$?).
+==================================================================
+
+Grundlinie @646254d (gleiche Umgebung, 14:48:46 - 14:51:18 +02:00):
+  ruff rc=0 | compileall rc=0 | verify_sources PASS 46+15+11 | engine_gate rc=0 (49/49)
+  | unittest+coverage rc=0, Ran 882, OK (skipped=12) | TOTAL 4752 211 1776 156 94 %,
+  phase1_protocol_hex_v3.py 706 8 268 6 99 % | FV+Referenz rc=0 Ran 117 OK
+
+$ ruff check src scripts
+  rc=0 -- All checks passed!
+$ python -m compileall src
+  rc=0
+$ python scripts/verify_sources.py
+  rc=0 -- [VERIFY-SOURCES] 46 Toolkit-Eintraege + 15 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (72 Dateien) | PASS
+$ (GINO-Smoke des Jobs `gate`)
+  NICHT GELAUFEN -- neuraloperator lokal nicht installiert; CI-only. Diese Aenderung beruehrt
+  gino_adapter_hex_v3.py nicht.
+$ python scripts/engine_gate.py
+  rc=0 -- [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" -v
+  rc=0 -- Ran 888 tests, OK (skipped=12)
+$ python -m coverage report
+  rc=0 -- TOTAL 4793 211 1802 156 94% | phase1_protocol_hex_v3.py 747 8 294 6 99%
+$ python -m unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3   (in src/toolkit)
+  rc=0 Ran 117 OK -- nur nativer Kernel; die OPENBLAS_CORETYPE-Schleife des CI ist Linux-only
+  und lief hier NICHT (CI-only).
+
+Zwischenstand @8230f1c (15:22:04 - 15:24:09): verify_sources rc=1 (zwei SOURCES-Zeilen fehlten
+nach dem Snapshot-Commit) und unittest rc=1, 3 Fehler, alle test_readme_unit_test_count_current
+(README 882 statt 888). Behoben in c3e31a3 und 43b1652 (nur README/SOURCES).
+
+Rot an der Basis, abgelehnt am Fix (Equalitas echte Kurven, probes/f1_real_grid.json und
+real_curve_n{16,32,64}_S50.json; GINO-Grenze 1.25 e(steps 4), Latenz t(steps 4)):
+  @646254d (alte API, zwei Float-Listen):
+    Gitter (1, 8, 16, 24, 32, 48, 64), n=32   ACCEPTED advantage, Record steps [1..64] n 32
+    Lattice n=64 unter n=32                   ACCEPTED advantage, Record n 32
+    Lattice n=16 unter n=32                   ACCEPTED H0, Record n 32
+  @cde5c50 (baseline_curve, Punkte mit den gemessenen Koordinaten):
+    Gitter (1, 8, 16, 24, 32, 48, 64)         REFUSED "steps [1, 8, 16, 24, 32, 48, 64] are not the registered steps"
+    Lattice n=64 / n=16 unter n=32            REFUSED "measured on lattice n = 64 / 16, the decision is for n = 32"
+    registrierte Kurve n=32                   ACCEPTED H0 (beide Datensaetze)
+  Positivkontrollen unveraendert: q2b H0 high 0.0475 e_base 0.04315825253106189;
+    q2 advantage high 0.0231447 t_base 0.10000744130713331 (an 646254d und am Fix gleich).
+
+Diskriminierung (diskriminierung.py, VOLL, head 8230f1c): DK-20261021T131453-b571430c0155
+  17 Mutanten, alle rot: 15 DISKRIMINIERT, 2 ROT ART-UNBESTIMMT, von Hand nachgefahren:
+  sample_count-Check aus -> 3x "DecisionInputError not raised" + 1x TypeError (Fall
+  sample_count="500"); ohne Snapshot -> switch_after=3 "advantage != H0", switch_after=1/2
+  DecisionInputError (n = 64) statt Gleichheit. Q7b (F4 ab 2 Flips) rot mit 'stable' != 'refused'.

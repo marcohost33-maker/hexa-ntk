@@ -67,10 +67,10 @@ nichtnegative Zustaende nicht als Positivitaetsgarantie zu verwenden.
 |---|---|---|
 | Lint | `ruff check src scripts` | 0 Befunde, exit 0 |
 | Engine | `python scripts/engine_gate.py` | 49/49 Doctests + 26/26 Selftests, exit 0 |
-| Provenance | `python scripts/verify_sources.py` | 46 Toolkit- + 15 Spec-Eintraege + 10 Script-Eintraege, exit 0 |
-| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 877 Tests, Ergebnis und Exit-Code im Gate-Log `results/2026-10-23_codex83-8761e55_local-gate.log` (Windows; Codex-Runde #83 @8761e55: Drift ohne Zwischen-Ueberlauf, Off-Diagonal-Energie direkt, Basis/Ziel als private Kopie, Snapshot geprueft; jeder neue Befund-Test gegen 8761e55 rot); Vorlaeufer `results/2026-10-23_hnt-r85-r86_local-gate.log` (872 Tests, Windows; HNT-R85-01, HNT-R86-01, HNT-R86-02, Cross-Family GPT-6 R85-R87), `results/2026-10-23_hnt-r25-01_local-gate.log` (861 Tests, Windows; HNT-R25-01), `results/2026-10-22_ntk-trajectory_local-gate.log` (847 Tests, Linux-Container; NTK-Trajektorie, #60 Punkt 2), `results/2026-10-17_issue76-codex-followup_local-gate.log` (819 Tests, Windows; Codex-Folgebefunde #76, jeder neue Test gegen den alten Code rot), `results/2026-10-17_pr71-fd-kernel-rows_local-gate.log` (809 Tests, FD-Pruefung auf den Kernel-Zeilen), `results/2026-10-16_pr71-codex-round_local-gate.log` (808 Tests, @59693d8; #61-Stapel + Spektral-Audit + Haertungen 2026-10-15, mit Negativ-zuerst- und Mutanten-Beleg), `results/2026-10-13_spectral-audit_local-gate.log` (@80a91d3) und 701 Tests im Gate-Log `results/2026-10-12_pr61-i1-v2_local-gate.log` (I1 nach V2; das V1-Rot ist ein erwarteter Befund im Test `TestMmsI1V1Historical`, kein roter Test); Skips je Plattform: Gate-Log |
+| Provenance | `python scripts/verify_sources.py` | 48 Toolkit- + 16 Spec-Eintraege + 11 Script-Eintraege, exit 0 |
+| Toolkit-Tests | `python -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"` | 957 Tests, Ergebnis und Exit-Code im Gate-Log `results/2026-10-23_codex80-merge-main_local-gate.log` (Codex-Runde #80 @426c97f: obere Fehlerschranke 0 wird entschieden, result_digests-Werte als SHA-256 geprueft; jeder neue Befund-Test gegen 426c97f rot); Vorlaeufer `results/2026-10-23_phase1-r86_local-gate.log` (895 Tests, HNT-R86-03 ganze Digest-Strings, HNT-R86-04 Break-even jenseits des Float-Bereichs, Issue #82, Cross-Family GPT-6 R86/R87; jeder neue Befund-Test gegen den alten Code rot); Vorlaeufer `results/2026-10-21_phase1-equalita-r5_local-gate.log` (891 Tests; Equalita R5-F1: jeder Baseline-Punkt traegt auch seine Einstellungen kappa/t_final/Task-Konfig-Digest/rtol/warmup/repeats/Timing-Digest/clock und wird daran geprueft, R5-F3 einmaliges Lesen, R5-F4 Plausibilitaet; 46/46 Mutanten rot); Vorlaeufer `results/2026-10-21_phase1-equalita-r4_local-gate.log` (888 Tests; Equalita R4-F1: jeder Baseline-Punkt traegt seine Mess-Koordinaten steps/n/domain/sample_count und wird daran geprueft, Record aus den Punkten, API-Bruch `baseline_curve`; R4-F3 AMP; 17 Mutanten rot); Vorlaeufer `results/2026-10-21_phase1-equalita-r3_local-gate.log` (882 Tests; Windows, Python 3.12, torch 2.6.0+cpu, ohne neuraloperator; Equalita R3: Baseline-Kurve an das vorregistrierte `steps`-Gitter gebunden, Manifest-Inhalt an die Vorregistrierung, Float-Budget-Widerspruch abgelehnt, 13/13 Mutanten rot); Vorlaeufer `results/2026-10-21_phase1-hexa-tim-01_local-gate.log` (877 Tests; GPT-6 HEXA-TIM-01: Latenz nur mit den vorregistrierten 10 Wiederholungen je Sample, 4/4 Mutanten rot), `results/2026-10-21_phase1-protocol_crossfamily_local-gate.log` (875 Tests; GPT-6 HEX-P1-01 Entscheidung aus Rohfehlern, HEX-P2-02 Float-Budget-Werkzeug, Paarung per `sample_id`, 12/12 Mutanten rot), `results/2026-10-20_phase1-protocol_r2_local-gate.log` (863 Tests; zweite Review-Runde: Seed-/Sample-Bindung, NEP 50, `low >= 0`, TOCTOU, 5/5 Mutanten rot), `results/2026-10-20_phase1-protocol_fix_local-gate.log` (862 Tests; Review-Fixes F-E1, D4/D5/D10, F-S4, E3, Mutanten per `diskriminierung.py` rot), `results/2026-10-19_phase1-protocol_local-gate.log` (856 Tests, Linux-Container; Phase-1-Protokoll-Instrumente, 12/12 Mutanten des neuen Moduls rot), `results/2026-10-17_issue76-codex-followup_local-gate.log` (819 Tests, Windows; Codex-Folgebefunde #76, jeder neue Test gegen den alten Code rot), `results/2026-10-17_pr71-fd-kernel-rows_local-gate.log` (809 Tests, FD-Pruefung auf den Kernel-Zeilen), `results/2026-10-16_pr71-codex-round_local-gate.log` (808 Tests, @59693d8; #61-Stapel + Spektral-Audit + Haertungen 2026-10-15, mit Negativ-zuerst- und Mutanten-Beleg), `results/2026-10-13_spectral-audit_local-gate.log` (@80a91d3) und 701 Tests im Gate-Log `results/2026-10-12_pr61-i1-v2_local-gate.log` (I1 nach V2; das V1-Rot ist ein erwarteter Befund im Test `TestMmsI1V1Historical`, kein roter Test); Skips je Plattform: Gate-Log |
 | Coverage | `python -m coverage run ... && python -m coverage report` | Branch-Coverage ueber `fail_under = 87`, exit 0; Ist-Wert nur im Gate-Log (O2: eine ungepinnte Prozentzahl im README veraltet mit jedem Merge) |
-| Mutation | `python scripts/mutation_probe.py` | 75/76 Mutanten getoetet, volle Probe 2026-10-23 @b970cab unter Windows (exit 1: einzig M02 ueberlebt, Testklasse POSIX-only, unter Windows nicht messbar; alle 25 Mutanten der NTK-Trajektorie getoetet, davon 5 neue fuer HNT-R85-01/R86-01/R86-02; Log `results/2026-10-23_hnt-r85-r86_local-gate.log`). Davor 70/71 @49310d4 (HNT-R25-01; Log `results/2026-10-23_hnt-r25-01_local-gate.log`). Zuvor 66/66 unter Linux, 2026-10-22, exit 0 (vor HNT-R25-01; Log `results/2026-10-22_ntk-trajectory_local-gate.log`). Vorlauf: 50/51, volle Probe @9db9cbc unter Windows, Baseline gruen, exit 1: einzig M02 ueberlebt, und das ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped; so schon 2026-09-28). Der I1-Mutant (Iterationsfehler-Verhaeltnis entfernt) zielt seit 2026-10-12 auf `_i1_level_holds`. Letzter voller Lauf unter Linux: 49/49, exit 0, 2026-10-07 (alte Zaehlung) |
+| Mutation | `python scripts/mutation_probe.py` | 78/79 Mutanten getoetet, volle Probe 2026-10-23 nach Merge von main (#83) unter Windows, Baseline gruen, exit 1: einzig M02 ueberlebt (Testklasse POSIX-only, unter Windows nicht messbar); 3 neue Phase-1-Mutanten fuer HNT-R86-03/-04 getoetet; Log `results/2026-10-23_phase1-r86_local-gate.log`. Vorlauf: 50/51, volle Probe @9db9cbc unter Windows, Baseline gruen, exit 1: einzig M02 ueberlebt, und das ist unter Windows nicht messbar (Testklasse POSIX-only, alle skipped; so schon 2026-09-28). Der I1-Mutant (Iterationsfehler-Verhaeltnis entfernt) zielt seit 2026-10-12 auf `_i1_level_holds`. Letzter voller Lauf unter Linux: 49/49, exit 0, 2026-10-07 (alte Zaehlung) |
 
 Lokale Umgebung des Laufs 2026-10-15: Windows 11, Python 3.12.10, `torch` 2.6.0+cpu, `numpy`
 2.5.3, coverage 7.16.2, ruff 0.16.9, GINO-Gate mit `neuraloperator` 2.0.0, OpenBLAS-Kernel-Schleife;
@@ -129,10 +129,10 @@ in `spec/`, offene Lint-/Test-Schuld in `docs/ROADMAP.md`.
 
 - **Engine:** `src/hexantk_v3.py` (1773 Zeilen; Checkpoints, EMA-Policy, OOM-sicherer
   Train-Step, Operator-Vertraege, 26 Selftests inline)
-- **Toolkit:** `src/toolkit/` — 20 Module + 26 Testmodule (Parameter-NTK, NTK-Trajektorie, Benchmark, Checkpoint-Integration,
+- **Toolkit:** `src/toolkit/` — 21 Module + 27 Testmodule (Parameter-NTK, NTK-Trajektorie, Benchmark, Checkpoint-Integration,
   Dataloader-Utils, Dataset-Split, EMA, Failure-Signature, Hex-FV-Loeser, Lineare POD-Ridge-Baseline,
   Operator-Adapter,
-  Phase-0-Referenzfaelle, Phase-1-Aufgabe T1, ReferenceSpec, Resume-Utils, Runner,
+  Phase-0-Referenzfaelle, Phase-1-Aufgabe T1, Phase-1-Protokoll, ReferenceSpec, Resume-Utils, Runner,
   Spektral-Audit, Stress, Warmstart-Utils; dazu die Tests des Provenance-Gates, des DCP-Bundle-Protokolls und des
   Zeitschritt-Vertrags)
 
@@ -196,6 +196,34 @@ Vor jedem Training festgelegt, ohne Modell und ohne Lern-Claim:
   `spec/PARAM_NTK_v1.md`). Dazu eine lineare POD-Ridge-Baseline
   (`src/toolkit/linear_baseline_hex_v3.py`) mit vorab fixierten Rang-/Regularisierungsregeln
   und Leckage-Waechter, nur auf synthetischen Daten getestet.
+- **Protokoll-Instrumente** (`spec/PHASE1_PROTOCOL_v1.md`, `src/toolkit/phase1_protocol_hex_v3.py`,
+  2026-10-19; numpy, kein Modell, kein T1-Fit): legen VOR jedem Lauf fest, wie die Zahlen der
+  Vorregistrierungs-Abschnitte 4-7 berechnet werden. Timing-Protokoll (3 Warm-ups, 10 Wiederholungen,
+  Median + Perzentil-Bootstrap), Kosten-Genauigkeits-Kurve der Crank-Nicolson-Baseline je `(N, steps)`,
+  Pareto-Front mit log-log-Interpolation ohne Extrapolation, IQM (getrimmtes Mittel, Agarwal et al. 2021)
+  mit zweistufigem gepaartem Bootstrap (Seeds, dann Sample-IDs; ein Indexsatz fuer alle Testsets, damit
+  die Aufloesungsachse gepaart bleibt), Entscheidungsregeln (gleiche Laufzeit / gleiche Genauigkeit /
+  Baseline-Floor / kein Claim ausserhalb des Messbereichs), Break-even-Zahl und Lauf-Manifest mit
+  SHA-256. Orakel: IQM-Closed-Forms, exakte Reproduktion eines Potenzgesetzes, Paarung unter Skalierung
+  bitgenau, Sweep der Baseline zweiter Ordnung in `dt` gegen die exakte semidiskrete Loesung; 12/12 Mutanten
+  (ohne Trimmen, Paarung gebrochen, lineare Interpolation, Extrapolation, `<=` statt `<`, ...) rot.
+- **D4-Entscheidungshilfe Radius-Ties** (`scripts/oracles/gino_radius_tie_survey.py`,
+  `results/2026-10-19_gino_radius_tie_survey.json`): mit der Adapter-Regel aus
+  `spec/GINO_ADAPTER_PHASE1_v2.md` gemessen, dass der Phase-1-Default (latent 32, `radius_factor` 2.5) auf
+  den Aufloesungs-Gittern N=64 und N=128 je 4 Ties hat (dort verweigert der Adapter), waehrend
+  `latent_resolution` 16, 24 oder 48 mit `radius_factor` 1.5 / 2.25 / 2.5 / 2.75 auf allen fuenf
+  vorregistrierten Gittern tie-frei sind (12 von 48 Kandidaten). Die Wahl ist Owner-Entscheid D4; der Default
+  bleibt unveraendert. **Korrektur 2026-10-20 (Review-Befund F-S4):** tie-frei heisst nicht "float32 und
+  float64 bauen denselben Graphen". Die Survey vergleicht jetzt beide GNO-Nachbargraphen, wie das gepinnte
+  Backend sie baut (neuraloperator 2.0.0, native Suche; 960 Graphen gegen die Backend-Suche geprueft, 0
+  Abweichungen): latent 48 mit 1.5 / 2.25 / 2.5 flippt (8 / 8 / 3 Kanten), empfohlen werden nur noch die
+  9 tie- und flip-freien Kandidaten (latent 16 und 24 mit 1.5 / 2.25 / 2.5 / 2.75, latent 48 mit 2.75;
+  `results/2026-10-20_gino_radius_tie_survey_float32-graphs.json`). Nur 3 davon haben eine Marge von
+  mindestens dem Doppelten des gemessenen float32-Distanzfehlers; geforderte Marge und eine breitere
+  Tie-Toleranz im Adapter sind offene Owner-Fragen. **Nachtrag (zweite Review-Runde):** "flip-frei" gilt
+  fuer diese Maschine; unter 864 emulierten float32-Summationsreihenfolgen flippt latent 48 / 2.75 in 248,
+  die uebrigen acht in keiner. Empfohlen bleiben damit **8** Kandidaten (latent 16 und 24); Linux/CUDA
+  nicht gemessen.
 - **NTK-Trajektorie** (`spec/NTK_TRAJECTORY_v1.md`, `src/toolkit/ntk_trajectory_hex_v3.py`;
   PROPOSED, nicht Teil der Vorregistrierung): die Parameter-NTK an vorab deklarierten
   Checkpoints eines Laufs auf fester Eingabe. Berichtet relative Drift, Kernel-Distanz und
@@ -221,9 +249,10 @@ python scripts/verify_sources.py                               # Provenance-Gate
 # python -m pip install -r requirements-operator.txt
 # python -m unittest discover -s src/toolkit -t src/toolkit -p "test_gino_adapter_hex_v3.py" -v
 python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
-python -m coverage report                                      # 877 Unit-Tests (2026-10-23; Codex #83 @8761e55) + Coverage-Gate
-python scripts/mutation_probe.py                               # optional: 76 Mutanten der Review-Fixes
+python -m coverage report                                      # 957 Unit-Tests (2026-10-23; Merge main/#83, Phase-1-Protokoll, Codex #80 @426c97f, Cross-Family-Befunde GPT-6 bis R86, Equalita R3/R4/R5) + Coverage-Gate
+python scripts/mutation_probe.py                               # optional: 79 Mutanten der Review-Fixes
 python scripts/oracles/hex_phase0_reference_oracle.py         # Phase-0-Referenzfaelle (exit 0 = alle Gates gruen)
+python scripts/oracles/gino_radius_tie_survey.py              # D4-Entscheidungshilfe: Radius-Ties + float32/float64-Graphvergleich je (latent, radius_factor) x Gitter (braucht requirements-operator.txt)
 ```
 
 CI (`.github/workflows/ci.yml`), beide Jobs scheitern mit exit != 0 (ob `tests (cpu)` auch
@@ -238,7 +267,7 @@ nur `gate` Required Check; nur der Repo-Owner kann `tests (cpu)` hinzufuegen):
   synthetischem Optimizerschritt (kein T1-Training). Fehlendes Backend => FAIL.
   Achtung: Abweichung von der noch nicht genehmigten D7-Preregistrierung, die
   `CI stays torch-only` vorsieht: siehe `docs/ADR/ADR-002-Phase1-GINO-required-gate-proposal.md`.
-- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (877, Stand 2026-10-23; Codex #83 @8761e55) unter Branch-Coverage;
+- **tests (cpu)** — Engine-Gate + Toolkit-Unit-Tests (957, Stand 2026-10-23; Merge main/#83, Phase-1-Protokoll, Codex #80 @426c97f, Cross-Family-Befunde GPT-6 bis R86, Equalita R3/R4/R5) unter Branch-Coverage;
   danach die torch-freien FV-/Reference-Suites unter jedem portablen OpenBLAS-Kernel
   (`OPENBLAS_CORETYPE` Prescott/Sandybridge/Haswell/Zen, SkylakeX bei AVX-512), weil die
   CG-Stoppregel-Tests an der Rundung von BLAS-`ddot` haengen (2026-10-14). Das Spektral-Orakel (torch) bleibt ausserhalb: unter erzwungenem OPENBLAS_CORETYPE stuerzt es auf dem Runner ab (Exit 139, Haswell, 2026-10-16); seine CN-Toleranz ist stattdessen aus dem CG-Abbruch hergeleitet und lokal unter vier Kerneln gruen.

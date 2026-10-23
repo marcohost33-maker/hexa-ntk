@@ -1,0 +1,53 @@
+==================================================================
+HexaNTK Gate-Run -- Phase-1-Protokoll: Cross-Family-Befunde GPT-6 (HEX-P1-01, HEX-P2-02, R2-Paarung)
+Datum:    2026-10-21 (Lauf 10:34:08 - 10:35:23 +02:00)
+Geprueft: Arbeitsbaum = Commit 544ba49586f7fc6aed994e6e1db1b0634ea48616 (sauber vor dem Lauf;
+          `git status --porcelain` leer). Basis des Zweigs: 3b041db (PR #80), main af92102 (merge-base,
+          main nicht voraus). Dieser Log-Commit fuegt nur diese Datei hinzu; der Code ist der von 544ba49.
+Umgebung: Windows 11 (10.0.26200) | Python 3.12.10 (venv) | numpy 2.5.3 | torch 2.6.0+cpu
+          | ruff 0.17.0 (uvx, CI-Pin) | coverage 7.16.2 | neuraloperator NICHT installiert
+Exit-Codes je Kommando direkt gemessen (cmd > datei 2>&1; rc=$?), keine Pipe.
+==================================================================
+
+Grundlinie @3b041db (gleiche Umgebung, ruff 0.17.0, 10:05-10:06):
+  engine_gate rc=0 (49/49) | unittest+coverage rc=0, Ran 863, OK (skipped=12) | TOTAL 94 %
+  | verify_sources PASS 46+15+11 | ruff rc=0 | compileall rc=0
+
+$ ruff check src scripts
+  rc=0 -- All checks passed!
+$ python -m compileall src
+  rc=0
+$ python scripts/verify_sources.py
+  rc=0 -- [VERIFY-SOURCES] 46 Toolkit-Eintraege + 15 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (72 Dateien) | PASS
+$ (GINO-Smoke des Jobs `gate`)
+  NICHT GELAUFEN -- neuraloperator lokal nicht installiert; CI-only. Diese Aenderung beruehrt
+  gino_adapter_hex_v3.py nicht.
+$ python scripts/engine_gate.py
+  rc=0 -- [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" -v
+  rc=0 -- Ran 875 tests, OK (skipped=12: 5 neuraloperator fehlt, 3 directory fsync POSIX-only,
+          3 Symlink-Recht Windows, 1 CUDA)
+$ python -m coverage report
+  rc=0 -- TOTAL 4717 211 1754 156 94% | phase1_protocol_hex_v3.py 98%
+$ OPENBLAS_CORETYPE=<k> python -m unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3   (in src/toolkit)
+  Prescott rc=0 Ran 117 OK | Sandybridge rc=0 Ran 117 OK | Haswell rc=0 Ran 117 OK | Zen rc=0 Ran 117 OK
+
+Befunde am Code (Proben gegen das Modul von 3b041db):
+  HEX-P1-01  bestaetigt: honest H0; dataclasses.replace(summary, low=point=high=0.001) -> "advantage"
+             ueber decide_test_set (phase1_protocol_hex_v3.py:462-474, :602-709@3b041db).
+  R2-Paarung bestaetigt: paired_bootstrap_iqm({"triangle": a, "torus": 2a}) gepaart akzeptiert
+             (keine sample_id im Modul, :507-549@3b041db).
+  Eigenfund  Punktschaetzer haengt am Speicherlayout: Fortran-/Index-Kopie derselben Werte -> 1 ulp
+             (test_memory_layout_does_not_change_the_result gegen 3b041db: FAIL, AssertionError).
+
+Diskriminierung (G:\Meine Ablage\Vero\Tools\diskriminierung.py, Ziel je pytest-Node):
+  DK-20261021T082910-a1862b451ef2 @f90191b, provenienz VOLL: 11/12 diskriminieren, 1 ROT DURCH ABSTURZ
+    (KeyError statt Zusicherung im grade-Check) -> Test in a3045f2 auf Zusicherung umgestellt;
+  DK-20261021T083116-fa17b42d328a @a3045f2, provenienz VOLL: 1/1 diskriminiert (dieser Fall).
+  Faelle: Paarung (ungleiche IDs, fehlende IDs), P1 (verify ohne Neuberechnung, to_dict ohne
+  Drift-Pruefung, diagnostic-Grad, Rohbytes nicht im Digest, Manifest-Digest, registrierte IDs,
+  kanonische Reihenfolge), C-Ordnung, P2 (Faktor (2R)^2, Gleichheit stabil). Restore je Fall per Hash.
+
+Nicht gebunden / offen: Signatur oder Pipeline-Attestierung der Rohbytes (GPT-6 Schritt 4); die
+Baseline-Kurve geht als Werte ein (im Record gebunden, nicht neu gerechnet); D4-Budget und
+eingefrorene Reihenfolge sind Owner-Entscheide; Linux/CI-Lauf folgt im PR.

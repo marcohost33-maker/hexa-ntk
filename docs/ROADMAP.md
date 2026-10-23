@@ -22,6 +22,56 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Phase-1-Protokoll-Instrumente + D4-Entscheidungshilfe Radius-Ties (2026-10-19, Linux-Container).**
+  Vorregistrierungs-Abschnitte 4-7 hatten keinen Code: wie die Kosten-Genauigkeits-Kurve, die Latenz,
+  der IQM, sein Konfidenzintervall, die Entscheidungsregeln, der Break-even und das Lauf-Manifest
+  berechnet werden, stand nur als Prosa. Neu `spec/PHASE1_PROTOCOL_v1.md` + `phase1_protocol_hex_v3.py`
+  (numpy): Timing-Protokoll (Warm-up/Wiederholungen, Median, Perzentil-Bootstrap, injizierbare Uhr),
+  Baseline-Sweep je `(N, steps)` mit Cluster-Bootstrap der Latenz, Pareto-Front + log-log-Interpolation
+  (ausserhalb des Messbereichs `None`, nie Extrapolation), IQM als getrimmtes Mittel (`int(0.25 n)` je
+  Seite; fuer 5 Seeds die mittleren drei), zweistufiger gepaarter Bootstrap (Indexsaetze EINMAL gezogen,
+  fuer alle Testsets identisch, Chunking ohne Einfluss), `decide_test_set` (gleiche Laufzeit / gleiche
+  Genauigkeit / Baseline-Floor / kein Claim), `break_even_queries`, `build_run_manifest` (fail-closed
+  Schema, SHA-256 ueber kanonisches JSON). 37 Tests mit Closed-Form-Orakeln; 12/12 Mutanten rot
+  (`results/2026-10-19_phase1-protocol_local-gate.log`). Dazu `scripts/oracles/gino_radius_tie_survey.py`
+  (Adapter-Regel `_radius_ties`): Default latent 32 / 2.5 hat auf N=64 und N=128 je 4 Ties; tie-frei auf
+  allen fuenf vorregistrierten Gittern sind latent 16/24/48 mit `radius_factor` 1.5/2.25/2.5/2.75
+  (12/48). Keine Default-Aenderung, kein Modell, kein T1-Fit; D4/D5 bleiben Owner-Entscheid.
+  _Evidenz:_ `results/2026-10-19_phase1-protocol_local-gate.log`,
+  `results/2026-10-19_gino_radius_tie_survey.json` (quellgebunden, exit 0).
+  _Korrektur 2026-10-20 (Equalita-Review von f1b54bc):_ F-E1 `decide_test_set` an die vorregistrierte
+  Statistik gebunden (0.95 / 10 000 / 0.25, sonst `DecisionInputError`); Orakel-Tests gegen die
+  ueberlebenden Mutanten D4/D5/D10 (Konfidenzniveau, Seed-Achse); F-S4 Survey vergleicht float32- und
+  float64-Graphen des Backends: 9 statt 12 Kandidaten empfohlen
+  (`results/2026-10-20_gino_radius_tie_survey_float32-graphs.json`).
+  _Zweite Runde 2026-10-20 (Equalita R2 @35a5a45):_ Teilmengen-Faelscher (3 von 5 Seeds, 20 von 500
+  Samples) kippten H0 in "advantage" -> `decide_test_set` bindet jetzt auch `n_seeds == 5` und
+  `n_samples == 500`; NEP-50-Vergleich, `low >= 0` und einmaliges Lesen von `high` (TOCTOU) gehaertet.
+  Latent 48 / 2.75 flippt unter 248 von 864 emulierten Summationsreihenfolgen -> 8 Kandidaten empfohlen.
+  Rest in #82.
+  _Cross-Family 2026-10-21 (GPT-6 HEX-P1-01, R2-Paarung):_ ein per `dataclasses.replace` gefaelschtes
+  Summary mit intakten Labels kippte H0 in "advantage" (@3b041db nachgestellt). **API-Bruch:**
+  `decide_test_set` ist nur noch Diagnose (`"grade": "diagnostic"`); entscheidungsfaehig ist
+  `decide_preregistered` (Rohfehler 5x500, registrierte Seeds/IDs/Gitter, Manifest-Digest, Bootstrap
+  intern, Record mit SHA-256 der Rohbytes) + `verify_preregistered_decision`. Signatur/Attestierung
+  (Schritt 4) offen. `paired_bootstrap_iqm` paart nur noch bei gleichen `sample_ids` (`PairingError`;
+  Dreieck 100000.. vs Torus 200000..) und rechnet in C-Ordnung (Punktschaetzer hing @3b041db um 1 ulp am
+  Speicherlayout).
+  _Equalita R4-F1 2026-10-21 (@646254d):_ echte Baseline-Kurven auf fremdem steps-Gitter
+  (1,8,16,24,32,48,64) bzw. fremder Lattice (n=64 unter n=32) kippten H0 in "advantage", der Record
+  nannte trotzdem die registrierten steps/n. **API-Bruch:** `decide_preregistered` nimmt
+  `baseline_curve` (Tupel `CostAccuracyPoint`, neues Pflichtfeld `domain`); jeder Punkt wird an
+  steps/n/domain/sample_count geprueft, der Record aus den Punkten geschrieben; die zwei Float-Listen
+  werden abgelehnt (`TypeError`). Manifest braucht `hardware.amp = False` (R4-F3). Grenzen:
+  Eingabe-Identitaet (sample_ids/Dataset-Digest je (test_set, n), R4-F4), Fast-Kopien (R4-F2),
+  Handbau-Punkte (authenticity) -> spec/PHASE1_PROTOCOL_v1.md 5a.
+  _Equalita R5-F1 2026-10-21 (@d6cfdec):_ echte Kurven mit Solver kappa=2 bzw. T=0.02 gegen die
+  registrierte Wahrheit kippten H0 in "advantage" (Record bei kappa ununterscheidbar). **API-/Format-
+  Bruch:** `CostAccuracyPoint` traegt acht neue Pflichtfelder (kappa, t_final, task_config_sha256,
+  rtol, warmup, repeats, timing_protocol_sha256, clock), geprueft gegen [D1], dt == t_final/steps, rtol
+  1e-12, `TimingProtocol()` und `time.perf_counter`; Record-Eintraege der Punkte wachsen entsprechend (alte Records verifizieren
+  nicht mehr). R5-F3 einmaliges Lesen jedes Felds, R5-F4 Plausibilitaet (>= 0, CI geordnet). Grenze neu
+  benannt: Maschine/Threads (Prereg :141/:144, keine Seite traegt eine Maschinen-Identitaet; Owner).
 - [x] **NTK-Trajektorie (#60 Punkt 2, 2026-10-22).** `PARAM_NTK_v1` (seit #71) misst die
   Parameter-NTK an einem Parameterpunkt; der Statuskommentar auf #60 vom 2026-10-20 nannte
   Punkt 2 deshalb noch offen. Neu: `spec/NTK_TRAJECTORY_v1.md` (PROPOSED),
@@ -280,7 +330,10 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   optionale Abhaengigkeit `neuraloperator==2.0.0`, Lizenzanfrage GAOT/GINOT). Erst nach Freigabe:
   Datensaetze mit Manifest erzeugen, GINO-Raster auf Validierung, 5 Seeds, Testsets einmal,
   Kosten-Genauigkeits-Kurve der Baseline, Bericht mit IQM + Bootstrap-KI. Neumann-Achse braeuchte
-  ein Neumann-Gitter im Loeser (v2).
+  ein Neumann-Gitter im Loeser (v2). Nachtrag 2026-10-19: die Rechenvorschriften der Abschnitte 4-7
+  sind als Instrument festgelegt (`spec/PHASE1_PROTOCOL_v1.md`, oben unter Erledigt); offen bleiben
+  D4 (Raster, <= 8 Konfigurationen; Radius-Tie-Tabelle als Entscheidungshilfe in
+  `results/2026-10-19_gino_radius_tie_survey.json`) und die D5-Maschine.
 - [ ] **ReferenceSpec v1 (#33), Review-Befund.** `ConvergenceStudy.observed_order` wird nur auf
   endlich/positiv geprueft, nicht gegen die Werte der Levels nachgerechnet; ein Aufrufer kann eine
   Ordnung behaupten, die die Daten nicht tragen. Vorschlag: bei konstantem r und >= 3 Levels

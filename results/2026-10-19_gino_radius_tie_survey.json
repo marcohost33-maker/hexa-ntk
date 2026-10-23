@@ -1,0 +1,736 @@
+{
+  "environment": {
+    "numpy": "2.5.3",
+    "platform": "Linux-6.18.44-fc-v139-x86_64-with-glibc2.39",
+    "python": "3.13.16",
+    "torch": "2.6.0+cu124"
+  },
+  "source": {
+    "bound": true,
+    "git_sha": "0f3bca3cc27d12deb7ae660f505e918877a311e1",
+    "github_sha": null,
+    "worktree_dirty": false
+  },
+  "survey": {
+    "candidates": [
+      {
+        "latent_resolution": 8,
+        "radius": 0.046875,
+        "radius_factor": 1.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 8
+        }
+      },
+      {
+        "latent_resolution": 8,
+        "radius": 0.0625,
+        "radius_factor": 2.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 18,
+          "triangle_dirichlet/n=128": 6,
+          "triangle_dirichlet/n=16": 6,
+          "triangle_dirichlet/n=32": 6,
+          "triangle_dirichlet/n=64": 6
+        }
+      },
+      {
+        "latent_resolution": 8,
+        "radius": 0.0703125,
+        "radius_factor": 2.25,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 8,
+        "radius": 0.078125,
+        "radius_factor": 2.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 8
+        }
+      },
+      {
+        "latent_resolution": 8,
+        "radius": 0.0859375,
+        "radius_factor": 2.75,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 8,
+        "radius": 0.09375,
+        "radius_factor": 3.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 18,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 8,
+          "triangle_dirichlet/n=64": 8
+        }
+      },
+      {
+        "latent_resolution": 8,
+        "radius": 0.109375,
+        "radius_factor": 3.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 12,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 12
+        }
+      },
+      {
+        "latent_resolution": 8,
+        "radius": 0.125,
+        "radius_factor": 4.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 16,
+          "triangle_dirichlet/n=128": 2,
+          "triangle_dirichlet/n=16": 2,
+          "triangle_dirichlet/n=32": 2,
+          "triangle_dirichlet/n=64": 2
+        }
+      },
+      {
+        "latent_resolution": 16,
+        "radius": 0.046875,
+        "radius_factor": 1.5,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 16,
+        "radius": 0.0625,
+        "radius_factor": 2.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 16,
+        "radius": 0.0703125,
+        "radius_factor": 2.25,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 16,
+        "radius": 0.078125,
+        "radius_factor": 2.5,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 16,
+        "radius": 0.0859375,
+        "radius_factor": 2.75,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 16,
+        "radius": 0.09375,
+        "radius_factor": 3.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 16,
+        "radius": 0.109375,
+        "radius_factor": 3.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 4,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 4
+        }
+      },
+      {
+        "latent_resolution": 16,
+        "radius": 0.125,
+        "radius_factor": 4.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 24,
+        "radius": 0.046875,
+        "radius_factor": 1.5,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 24,
+        "radius": 0.0625,
+        "radius_factor": 2.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 24,
+        "radius": 0.0703125,
+        "radius_factor": 2.25,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 24,
+        "radius": 0.078125,
+        "radius_factor": 2.5,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 24,
+        "radius": 0.0859375,
+        "radius_factor": 2.75,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 24,
+        "radius": 0.09375,
+        "radius_factor": 3.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 24,
+        "radius": 0.109375,
+        "radius_factor": 3.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 4,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 4
+        }
+      },
+      {
+        "latent_resolution": 24,
+        "radius": 0.125,
+        "radius_factor": 4.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 32,
+        "radius": 0.046875,
+        "radius_factor": 1.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 4,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 4
+        }
+      },
+      {
+        "latent_resolution": 32,
+        "radius": 0.0625,
+        "radius_factor": 2.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 18,
+          "triangle_dirichlet/n=128": 6,
+          "triangle_dirichlet/n=16": 6,
+          "triangle_dirichlet/n=32": 6,
+          "triangle_dirichlet/n=64": 6
+        }
+      },
+      {
+        "latent_resolution": 32,
+        "radius": 0.0703125,
+        "radius_factor": 2.25,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 32,
+        "radius": 0.078125,
+        "radius_factor": 2.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 4,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 4
+        }
+      },
+      {
+        "latent_resolution": 32,
+        "radius": 0.0859375,
+        "radius_factor": 2.75,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 32,
+        "radius": 0.09375,
+        "radius_factor": 3.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 18,
+          "triangle_dirichlet/n=128": 4,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 4,
+          "triangle_dirichlet/n=64": 4
+        }
+      },
+      {
+        "latent_resolution": 32,
+        "radius": 0.109375,
+        "radius_factor": 3.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 20,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 20
+        }
+      },
+      {
+        "latent_resolution": 32,
+        "radius": 0.125,
+        "radius_factor": 4.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 16,
+          "triangle_dirichlet/n=128": 2,
+          "triangle_dirichlet/n=16": 2,
+          "triangle_dirichlet/n=32": 2,
+          "triangle_dirichlet/n=64": 2
+        }
+      },
+      {
+        "latent_resolution": 48,
+        "radius": 0.046875,
+        "radius_factor": 1.5,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 48,
+        "radius": 0.0625,
+        "radius_factor": 2.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 48,
+        "radius": 0.0703125,
+        "radius_factor": 2.25,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 48,
+        "radius": 0.078125,
+        "radius_factor": 2.5,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 48,
+        "radius": 0.0859375,
+        "radius_factor": 2.75,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 48,
+        "radius": 0.09375,
+        "radius_factor": 3.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 48,
+        "radius": 0.109375,
+        "radius_factor": 3.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 4,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 4
+        }
+      },
+      {
+        "latent_resolution": 48,
+        "radius": 0.125,
+        "radius_factor": 4.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 64,
+        "radius": 0.046875,
+        "radius_factor": 1.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 8
+        }
+      },
+      {
+        "latent_resolution": 64,
+        "radius": 0.0625,
+        "radius_factor": 2.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 18,
+          "triangle_dirichlet/n=128": 6,
+          "triangle_dirichlet/n=16": 6,
+          "triangle_dirichlet/n=32": 6,
+          "triangle_dirichlet/n=64": 6
+        }
+      },
+      {
+        "latent_resolution": 64,
+        "radius": 0.0703125,
+        "radius_factor": 2.25,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 64,
+        "radius": 0.078125,
+        "radius_factor": 2.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 8
+        }
+      },
+      {
+        "latent_resolution": 64,
+        "radius": 0.0859375,
+        "radius_factor": 2.75,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "latent_resolution": 64,
+        "radius": 0.09375,
+        "radius_factor": 3.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 18,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 8,
+          "triangle_dirichlet/n=64": 8
+        }
+      },
+      {
+        "latent_resolution": 64,
+        "radius": 0.109375,
+        "radius_factor": 3.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 12,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 12
+        }
+      },
+      {
+        "latent_resolution": 64,
+        "radius": 0.125,
+        "radius_factor": 4.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 16,
+          "triangle_dirichlet/n=128": 2,
+          "triangle_dirichlet/n=16": 2,
+          "triangle_dirichlet/n=32": 2,
+          "triangle_dirichlet/n=64": 2
+        }
+      }
+    ],
+    "default": {
+      "latent_resolution": 32,
+      "radius_factor": 2.5,
+      "ties": {
+        "torus_periodic/n=32": 0,
+        "triangle_dirichlet/n=128": 4,
+        "triangle_dirichlet/n=16": 0,
+        "triangle_dirichlet/n=32": 0,
+        "triangle_dirichlet/n=64": 4
+      }
+    },
+    "lattices": [
+      {
+        "domain": "triangle_dirichlet",
+        "n": 16,
+        "num_nodes": 105
+      },
+      {
+        "domain": "triangle_dirichlet",
+        "n": 32,
+        "num_nodes": 465
+      },
+      {
+        "domain": "triangle_dirichlet",
+        "n": 64,
+        "num_nodes": 1953
+      },
+      {
+        "domain": "triangle_dirichlet",
+        "n": 128,
+        "num_nodes": 8001
+      },
+      {
+        "domain": "torus_periodic",
+        "n": 32,
+        "num_nodes": 1024
+      }
+    ],
+    "passed": true,
+    "rule": {
+      "latent_grid": "linspace(0, 1, R) x linspace(0, sqrt(3)/2, R), as prepare_gino_batch",
+      "source": "gino_adapter_hex_v3._radius_ties (spec/GINO_ADAPTER_PHASE1_v2.md, amendment 2026-10-15)",
+      "tie": "|d - r| <= 1e-06 r in float64, r = radius_factor / 32"
+    },
+    "tie_free_candidates": [
+      {
+        "latent_resolution": 16,
+        "radius_factor": 1.5
+      },
+      {
+        "latent_resolution": 16,
+        "radius_factor": 2.25
+      },
+      {
+        "latent_resolution": 16,
+        "radius_factor": 2.5
+      },
+      {
+        "latent_resolution": 16,
+        "radius_factor": 2.75
+      },
+      {
+        "latent_resolution": 24,
+        "radius_factor": 1.5
+      },
+      {
+        "latent_resolution": 24,
+        "radius_factor": 2.25
+      },
+      {
+        "latent_resolution": 24,
+        "radius_factor": 2.5
+      },
+      {
+        "latent_resolution": 24,
+        "radius_factor": 2.75
+      },
+      {
+        "latent_resolution": 48,
+        "radius_factor": 1.5
+      },
+      {
+        "latent_resolution": 48,
+        "radius_factor": 2.25
+      },
+      {
+        "latent_resolution": 48,
+        "radius_factor": 2.5
+      },
+      {
+        "latent_resolution": 48,
+        "radius_factor": 2.75
+      }
+    ]
+  }
+}

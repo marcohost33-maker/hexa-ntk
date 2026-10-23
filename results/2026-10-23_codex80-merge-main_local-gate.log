@@ -1,0 +1,39 @@
+==================================================================
+HexaNTK Gate-Run -- PR #80: Codex @1aefb18 (1x P2 Hardware-Substanz) + Merge main (#83)
+Basis-Kopf: 65238dd4dac1433aa653ffa886aabbb2feee7e1b | MERGE_HEAD (origin/main): f85a98d1c7000c646d0026fa8f79f9e37a488a12 | Datum: 2026-10-23 21:34 +0200
+Umgebung: Windows 11 | Python 3.12.10 | numpy 2.5.3 | torch 2.6.0+cpu
+==================================================================
+$ python -m compileall -q src
+    rc=0
+$ python scripts/verify_sources.py
+    rc=0
+    [ OK ] scripts/oracles/hex_phase0_reference_oracle.py: 1C0CD9DC2F08626F
+    [ OK ] scripts/oracles/stateful_loader_resume_oracle.py: 120C32D0DC287451
+    
+    [VERIFY-SOURCES] 48 Toolkit-Eintraege + 16 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (75 Dateien) | PASS
+$ python -m ruff check src scripts
+    rc=0
+    All checks passed!
+$ python scripts/engine_gate.py
+    rc=0
+    ALL TESTS PASSED -- HexaNTK v3.0.1 manuscript-ready.
+    ======================================================================
+    
+    [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p test_*.py
+    rc=0
+    ----------------------------------------------------------------------
+    Ran 957 tests in 42.432s
+    
+    OK (skipped=13)
+$ python -m coverage report
+    rc=0
+    src\toolkit\stress_hex_v3.py                     207     25     92     23    84%
+    src\toolkit\warmstart_utils_hex_v3.py            129      7     50      2    95%
+    --------------------------------------------------------------------------------
+    TOTAL                                           5223    213   1986    157    95%
+
+Diskriminierung (phase1_protocol_hex_v3.py auf 1aefb18 zurueckgesetzt, Tests unveraendert):
+    test_required_hardware_values_carry_substance 11/11 Subtests rot (machine None/''/'  ', dtype '', threads 0/2.0/None/True, cuda None/0/''),
+    die uebrigen 69 Tests von test_phase1_protocol_hex_v3 gruen; nach Wiederherstellen 80/80 gruen, verify_sources PASS.
+Mutation (Merge-Stand, vor der cuda-Lockerung): 78/79 getoetet, einzig M02 ueberlebt (POSIX-only).

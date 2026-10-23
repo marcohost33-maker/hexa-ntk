@@ -1,0 +1,56 @@
+==================================================================
+HexaNTK Gate-Run -- Phase-1-Protokoll: Cross-Family-Befund GPT-6 HEXA-TIM-01 (Latenz-Wiederholungen)
+Datum:    2026-10-21 (Lauf 12:20:45 - 12:21:38 +02:00)
+Geprueft: Arbeitsbaum = Commit 8210d20ae252cde4965e7083b958e470ac2fa306 (sauber vor dem Lauf;
+          `git status --porcelain` leer). Basis: 9eeba43 (PR #80). Dieser Log-Commit fuegt nur
+          diese Datei hinzu; der Code ist der von 8210d20.
+Umgebung: Windows 11 (10.0.26200) | Python 3.12.10 (venv) | numpy 2.5.3 | torch 2.6.0+cpu
+          | ruff 0.17.0 (CI-Pin) | coverage 7.16.2 | neuraloperator NICHT installiert
+Exit-Codes je Kommando direkt gemessen (cmd > datei 2>&1; echo rc=$?).
+==================================================================
+
+Grundlinie @9eeba43 (gleiche Umgebung, 10:04-10:07 UTC):
+  engine_gate rc=0 (49/49) | unittest+coverage rc=0, Ran 875, OK (skipped=12) | TOTAL 94 %
+  | verify_sources PASS 46+15+11 | ruff rc=0 | compileall rc=0 | FV+Referenz rc=0 Ran 117 OK
+
+$ ruff check src scripts
+  rc=0 -- All checks passed!
+$ python -m compileall src
+  rc=0
+$ python scripts/verify_sources.py
+  rc=0 -- [VERIFY-SOURCES] 46 Toolkit-Eintraege + 15 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (72 Dateien) | PASS
+$ (GINO-Smoke des Jobs `gate`)
+  NICHT GELAUFEN -- neuraloperator lokal nicht installiert; CI-only. Diese Aenderung beruehrt
+  gino_adapter_hex_v3.py nicht.
+$ python scripts/engine_gate.py
+  rc=0 -- [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+$ python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" -v
+  rc=0 -- Ran 877 tests, OK (skipped=12: 5 neuraloperator fehlt, 3 directory fsync POSIX-only,
+          3 Symlink-Recht Windows, 1 CUDA)
+$ python -m coverage report
+  rc=0 -- TOTAL 4720 211 1756 156 94% | phase1_protocol_hex_v3.py 98%
+$ python -m unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3   (in src/toolkit)
+  rc=0 Ran 117 OK -- nur nativer Kernel; die OPENBLAS_CORETYPE-Schleife des CI ist Linux-only
+  und lief hier NICHT (CI-only).
+
+Befund am Code (Probe gegen das Modul von 9eeba43):
+  HEXA-TIM-01 bestaetigt und schaerfer: decide_preregistered(gino_latency_times_s=[0.001]) mit
+  sonst gueltigen Eingaben -> grade "preregistered", verdict "advantage" (ehrlich mit 10 x 4.0 s:
+  "H0"); provenance gino_latency_times_shape [1]. Die Vorregistrierung verlangt 10 gemessene
+  Wiederholungen (PREREGISTRATION_PHASE1_v1.md:145, TimingProtocol.repeats = 10).
+  Red zuerst: die neuen Negativtests gegen den alten Code (lokaler Commit 3847f41):
+  7 Untertests rot, je "AssertionError: DecisionInputError not raised"; Positivkontrolle gruen.
+
+Diskriminierung (G:\Meine Ablage\Vero\Tools\diskriminierung.py, Ziel je pytest-Node):
+  DK-20261021T101638-366402ac06b1 @82d79b2 (Code-Bytes = 8210d20, nur README verschieden),
+  provenienz VOLL: 4/4 Mutanten diskriminieren --
+    Fix zurueckgenommen         -> Negativtest 7/7 Untertests rot
+    Achse shape[0] statt [-1]   -> Negativtest 1/7 rot ((10,1)), Positivkontrolle 2/3 rot
+    Wiederholungszahl 9 statt 10 -> Positivkontrolle rot (Zusicherung via self.fail)
+  plus Kontrollfall: Positivkontrolle unter Fix-Revert BLIND = bleibt gruen (beabsichtigt).
+  Restore je Fall per Hash verifiziert.
+
+Nicht gebunden / offen: die 3 Warm-up-Laeufe sind ungetimt und aus den Zahlen nicht belegbar
+(Pipeline-Attestierung der Messung, Owner-Entscheid); dass die 10 Werte wirklich gemessen und
+nicht fabriziert sind, bleibt wie bisher unattestiert (provenance["authenticity"]);
+Linux/CI-Lauf folgt im PR.

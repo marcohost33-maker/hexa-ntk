@@ -21,6 +21,71 @@
   - float64 refusal: the check covers every submodule (`model.modules()`, which includes the model itself), so a caller-side wrapper outside `neuralop.*` around a float64 neuraloperator module is rejected too. Before, only `type(model).__module__` was checked; with the real 2.0.0 backend such a wrapper failed deep in the backend with a RuntimeError.
   - Radius ties: `build_gino` (training lattice) and `prepare_gino_batch` (every lattice it is given) count node-latent distances `d` with `|d - r| <= 1e-6 r` in float64, `r = radius_factor / 32`, and raise ValueError on any tie. Measured with this rule (latent grid as in `prepare_gino_batch`): N=32, latent 8 and latent 32: 8 ties at `radius_factor=5.0`, 0 at 2.5. **With the default configuration (latent 32, 2.5) the resolution-axis lattices N=64 and N=128 have 4 ties each** (N=16 has 0); those evaluations are refused until the owner fixes the radius or latent grid for them. This is an open owner decision, not a tolerance to widen.
 
+- **Amendment 2026-10-19 (radius-tie survey, decision support only).** `scripts/oracles/gino_radius_tie_survey.py`
+  applies the tie rule above to 6 latent resolutions x 8 radius factors on the five preregistered lattices
+  (triangle `N = 16, 32, 64, 128`, torus `N = 32`). Measured (`results/2026-10-19_gino_radius_tie_survey.json`):
+  the default (latent 32, 2.5) has 4 ties on `N = 64` and on `N = 128`; latent 8, 32 and 64 tie on at least one
+  lattice for every radius factor tried; latent 16, 24 and 48 with `radius_factor` 1.5, 2.25, 2.5 or 2.75 are
+  tie-free on all five lattices (12 of 48 candidates); `radius_factor` 2.0, 3.0 and 4.0 tie on the torus for
+  every latent resolution. The default stays as it is; choosing a pair is the owner's D4 decision.
+  *(As a recommendation superseded by the amendment of 2026-10-20: three of these twelve build different
+  float32 and float64 graphs.)*
+
+- **Amendment 2026-10-20 (float32 graph check, review finding F-S4; decision support only).** "Tie-free"
+  under the rule above is not "float32 and float64 build the same neighbour graph". The survey now rebuilds
+  both GNO graphs as the pinned backend builds them (neuraloperator 2.0.0 `native_neighbor_search`, used
+  because `build_gino` sets `gno_use_open3d=False`: `torch.cdist(queries, data)`, edge iff `<= radius`;
+  input GNO latent grid against nodes, output GNO nodes against latent grid; geometry of
+  `prepare_gino_batch`) in float32 and in float64, and checks every graph against the backend's own search
+  (960 graphs, 0 mismatches). Measured (`results/2026-10-20_gino_radius_tie_survey_float32-graphs.json`,
+  Windows, Python 3.12.10, torch 2.6.0+cpu, neuraloperator 2.0.0, source 69740d1):
+  - latent 48 with `radius_factor` 1.5, 2.25 and 2.5 is tie-free but its float32 and float64 graphs differ
+    by 8, 8 and 3 edges (both directions; on `N = 128`, for 2.25 also on `N = 64`; minimal margin
+    2.3e-6 to 6.3e-6 r). These three are **no longer recommended**. Positive control: the default
+    (32, 2.5) differs by 4 edges per direction on `N = 64` and on `N = 128`.
+  - Tie-free **and** flip-free on all five lattices here: latent 16 and 24 with `radius_factor` 1.5, 2.25,
+    2.5 or 2.75, and latent 48 with 2.75 (9 of 48 candidates).
+  - **Amendment 2026-10-20 (second review, Equalita R2 @35a5a45):** "flip-free here" is a statement about
+    this machine's summation order. Emulating the float32 path of `torch.cdist` under 864 summation orders,
+    (48, 2.75) flips under 248 of them (pairwise summation in natural order already flips 8 edges); the other
+    eight flip under none, the default (32, 2.5) under all 864 (positive control). Linux/CUDA/OpenBLAS
+    orders are not measured. **(48, 2.75) is therefore no longer recommended; only the remaining 8 (latent 16
+    and 24 with 1.5, 2.25, 2.5 or 2.75) may be named in the D4 grid.** The probe is a review artifact, not a
+    gate result; the owner questions below stay open.
+  - The float32 error of `torch.cdist` near the radius (largest `|d32 - d64| / r` over pairs with
+    `|d - r| <= 0.1 r`) is 1.7e-5 to 6.9e-5 r on these nine, 17 to 69 times the tie band of 1e-6 r.
+    Minimal margin over that error: (16, 1.5) 3.53, (16, 2.75) 2.20, (16, 2.25) 2.10, (24, 2.5) 1.32,
+    (24, 1.5) 1.14, (16, 2.5) 1.11, (24, 2.25) 0.82, (24, 2.75) 0.80, (48, 2.75) 0.32. Below 1 the
+    candidate is flip-free on this machine only through the rounding of this torch/BLAS; flips on Linux/CI
+    were not measured.
+  - **Open owner questions, not decided here:** which margin-over-error factor the D4 choice must meet, and
+    whether the adapter's tie band (1e-6 r) should be widened towards the measured float32 error so that the
+    adapter refuses every pair that can flip. The default and the adapter are unchanged.
+- **Amendment 2026-10-21 (GPT-6 HEX-P2-02, D4 criterion as a tool; decision support only).** The float32
+  summation order belongs to the D4 criterion: a fixed tie band of `1e-6 r` lies 17 to 69 times below the
+  measured float32 distance error, and "flip-free on this machine" is a property of one kernel order.
+  `spec/PHASE1_PROTOCOL_v1.md` section 11 adds two instruments, nothing else changes:
+  - `radius_graph_stability(min_relative_margin, budget_relative, frozen_order_flips)`: a candidate is
+    `stable` only if its margin strictly exceeds a float error budget that is fixed **before** the
+    candidates are compared; otherwise `frozen_order_required` (measured flip-free on one frozen
+    hardware/kernel order, which the run manifest must then pin) or `refused`. NaN/inf fail closed.
+  - `cdist_rounding_margin(radius, max_point_norm, unit_roundoff, input_abs_error)`: an order-independent
+    float32 budget for the matmul path of `torch.cdist` (Higham 2002, eq. 3.5 + lemma 3.3:
+    `|s_hat - s| <= gamma_6 (2R)^2` for every summation order, plus `sqrt` and the radius rounding).
+    Checked against two independent oracles in the tests: a numpy emulation of 24 sequential and 24
+    pairwise orders (40 000 pairs, 609 flipping pairs, none above the bound; the largest emulated error is
+    about 1/6 of the bound) and the committed survey (the measured float32 error near the radius lies
+    at 7 to 12 % of the bound on all 48 candidates; every flipping candidate's margin lies below it).
+  - Measured with that budget on the committed survey (`R = sqrt(7/4)`, input error `4 u R`):
+    **no tie-free candidate clears it.** Margin over budget: (16, 1.5) 0.32, (16, 2.25) 0.21,
+    (16, 2.75) 0.21, (24, 1.5) 0.14, (24, 2.5) 0.14, (16, 2.5) 0.11, (24, 2.25) 0.09, (24, 2.75) 0.09,
+    (48, 2.75) 0.03. Under an order-independent budget every candidate therefore needs a frozen
+    hardware/kernel order; a budget below the worst case (for instance a multiple of the measured error
+    over the machines that will run) is an owner choice and must be written down before the comparison.
+  - No post-hoc widening of the tie band: the adapter's `1e-6 r` refusal rule is unchanged and is not
+    the D4 criterion. Which budget D4 uses, and whether a frozen order is acceptable, stay open owner
+    questions; the preregistration is not changed.
+
 ## Testing and falsification
 
 - Construct a config with `(R=128, m=63, C=512, L=16)` without allocating neuraloperator; it MUST be rejected due to the combined budget even though every *individual* ceiling passes.

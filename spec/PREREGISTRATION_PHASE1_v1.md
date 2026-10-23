@@ -22,7 +22,12 @@ Reality Anchor, preregistration/OOD protocol, backend and baseline rules
 - `spec/HEAT_OPERATOR_TASK_v1.md`: data, truth, metrics, baseline;
 - `spec/HEX_FV_SOLVER_v1.md`: the mechanistic solver;
 - `spec/REFERENCE_CASE_HEX_HEAT_TRI_v1.md` and
-  `spec/REFERENCE_CASES_HEX_PHASE0B_v1.md`: Phase 0 verification, all green.
+  `spec/REFERENCE_CASES_HEX_PHASE0B_v1.md`: Phase 0 verification, all green;
+- `spec/PHASE1_PROTOCOL_v1.md` (added 2026-10-19): how the numbers of
+  sections 4-7 are computed (timing, cost-accuracy curve, Pareto log-log
+  interpolation without extrapolation, IQM with the two-stage paired
+  bootstrap, decision rules, break-even, run manifest). It fixes
+  computation only; the rules below are unchanged.
 
 ## 1. Question and hypotheses
 
@@ -193,7 +198,9 @@ prominence as positive ones (AGENTS.md: first-class).
 - `e_base(t_NO)` is the baseline error at `t_NO`, interpolated log-log on
   the **Pareto-efficient** part of its cost-accuracy curve. No extrapolation is
   allowed; if `t_NO` lies outside the measured range, no equal-runtime claim
-  is made.
+  is made. (Clarified 2026-10-20: "measured range" here and in the
+  equal-accuracy rule is the range of the Pareto-efficient part;
+  `spec/PHASE1_PROTOCOL_v1.md` section 5.)
 - GINO is "more accurate at equal runtime" only if the upper 95 % CI bound of
   its IQM `rel_l2` is below `e_base(t_NO)`.
 
@@ -255,6 +262,29 @@ need about 11 MB, `N = 32` has 465 nodes).
 - **D5, filled:** compute = CPU, no GPU.
 - **D5, still open:** the named machine. The source names no machine.
 - **D4, still open:** the source contains no grid and no epoch budget.
+
+2026-10-19 (decision support for D4, no decision): `scripts/oracles/gino_radius_tie_survey.py`
+measured with the adapter's tie rule (`spec/GINO_ADAPTER_PHASE1_v2.md`, amendment 2026-10-15)
+that the adapter default (`latent_resolution = 32`, `radius_factor = 2.5`) carries 4 radius
+ties on each of the resolution-axis lattices `N = 64` and `N = 128`, so those evaluations
+would be refused. Tie-free on all five lattices of section 2 are `latent_resolution` 16, 24
+or 48 with `radius_factor` 1.5, 2.25, 2.5 or 2.75 (12 of 48 candidates;
+`results/2026-10-19_gino_radius_tie_survey.json`). The D4 grid must name a tie-free pair for
+every evaluation lattice; the adapter default is unchanged until the owner decides.
+*(Candidate list superseded on 2026-10-20, next paragraph.)*
+
+2026-10-20 (review finding F-S4, decision support, no decision): tie-free is not enough. The same
+survey now compares the float32 and float64 neighbour graphs that the pinned backend
+(neuraloperator 2.0.0, native neighbour search) builds; latent 48 with `radius_factor` 1.5, 2.25 or
+2.5 is tie-free but builds different graphs on `N = 128` (2.25 also on `N = 64`). Tie-free and
+flip-free on all five lattices are latent 16 and 24 with `radius_factor` 1.5, 2.25, 2.5 or 2.75, and
+latent 48 with 2.75 (9 of 48; `results/2026-10-20_gino_radius_tie_survey_float32-graphs.json`,
+`spec/GINO_ADAPTER_PHASE1_v2.md` amendment 2026-10-20, which also lists each candidate's margin
+over the measured float32 distance error). Flip-free means flip-free on the measuring machine: a
+second review (Equalita R2, 2026-10-20) found that (48, 2.75) flips under 248 of 864 emulated float32
+summation orders, the other eight under none; it is therefore not recommended, leaving 8 candidates
+(latent 16 and 24). The D4 grid must name a tie-free and flip-free pair for every evaluation lattice. The required margin and a wider tie band in the adapter are open owner
+questions.
 
 The status line therefore stays DRAFT; nothing here allows a fit on T1 data.
 

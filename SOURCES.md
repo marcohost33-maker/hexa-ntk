@@ -731,6 +731,83 @@
 | 2B2B46B400902638 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): test_linear_baseline_hex_v3.py |
 | 0E250206AC0EF5E9 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): test_spectral_audit_hex_v3.py |
 
+## Phase 1 protocol instruments + D4 radius-tie survey (append-only, 2026-10-19, claude/hexa-ntk-neural-operator-sh43u7)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| 5C684F9C961FF410 | 2026-10-19 00:00 | src/toolkit | in-repo created, Phase 1 protocol instruments (spec/PHASE1_PROTOCOL_v1.md): phase1_protocol_hex_v3.py |
+| C05A442FA9716B6D | 2026-10-19 00:00 | src/toolkit | in-repo created, oracles/negative controls for the protocol instruments: test_phase1_protocol_hex_v3.py |
+| F54A49A15D157F5F | 2026-10-19 00:00 | spec | in-repo created, contract for preregistration sections 4-7: PHASE1_PROTOCOL_v1.md |
+| B63BAD75B28B4D96 | 2026-10-19 00:00 | spec | cross-reference to PHASE1_PROTOCOL_v1 + D4 radius-tie decision support (no decision, status DRAFT unchanged): PREREGISTRATION_PHASE1_v1.md |
+| 92C3031ECC5476D4 | 2026-10-19 00:00 | spec | amendment 2026-10-19 radius-tie survey (decision support only): GINO_ADAPTER_PHASE1_v2.md |
+| D4D36437B9A9B2B7 | 2026-10-19 00:00 | scripts/oracles | in-repo created, D4 decision support with the adapter tie rule: gino_radius_tie_survey.py |
+
+## Phase 1 protocol tests: asymmetric latency designs (append-only, 2026-10-19, claude/hexa-ntk-neural-operator-sh43u7)
+
+> Pin for the bytes of this block. Prior rows remain lineage.
+
+| 1ED5FF0D1DD2F535 | 2026-10-19 12:00 | src/toolkit | mutation probe in git clones (M09 median->mean survived a symmetric design): asymmetric latency designs: test_phase1_protocol_hex_v3.py |
+
+## Phase 1 protocol review fixes (append-only, 2026-10-20, claude/hexa-ntk-neural-operator-sh43u7)
+
+> Pins for the bytes of each fix block (Equalita review of f1b54bc). Prior rows remain lineage; the last row per file is authoritative.
+
+| 77321258A0FF2A58 | 2026-10-20 10:45 | src/toolkit | F-E1: decide_test_set bound to the preregistered statistic (0.95 / 10000 / 0.25, single-source constants), DecisionInputError, verdict carries the summary: phase1_protocol_hex_v3.py |
+| 67AA8F179A1AC793 | 2026-10-20 10:45 | src/toolkit | F-E1 tests: confidence-0.5 flip refused, malformed summaries fail closed: test_phase1_protocol_hex_v3.py |
+| 577A6CD39743FA8F | 2026-10-20 10:45 | spec | F-E1 amendment to section 5 (binding to the preregistered statistic): PHASE1_PROTOCOL_v1.md |
+| 69860D34BC97A56D | 2026-10-20 10:35 | src/toolkit | F-E1 test asserts the "gino" key before reading it (mutant to_dict-without-gino died by KeyError, not by assertion): test_phase1_protocol_hex_v3.py |
+| 0120C11C5BB2A1CE | 2026-10-20 10:50 | src/toolkit | review test gap D4/D5/D10: binomial closed-form 95 % oracle at default arguments, exact law of the seed-axis IQM, constants pinned to the preregistration text: test_phase1_protocol_hex_v3.py |
+| 51B0BD2F0CF1D8D1 | 2026-10-20 11:05 | scripts/oracles | F-S4: float32 vs float64 neighbour graphs of both GNO directions (torch.cdist as neuraloperator 2.0.0 native_neighbor_search, cross-checked against the backend), minimal relative margin, float32 distance error near the radius: gino_radius_tie_survey.py |
+| E8D9E5CDB1554287 | 2026-10-20 11:10 | spec | amendment 2026-10-20 float32 graph check (F-S4): 9 tie- and flip-free candidates, margin over float32 error, open owner questions; 2026-10-19 list marked superseded: GINO_ADAPTER_PHASE1_v2.md |
+| 20D080BA9E8B14FC | 2026-10-20 11:10 | spec | D4 decision support corrected 2026-10-20 (F-S4, tie-free and flip-free; status DRAFT unchanged): PREREGISTRATION_PHASE1_v1.md |
+| 101FC9F9B68FE738 | 2026-10-20 11:20 | src/toolkit | E3: decision reasons name the Pareto-frontier range next to the range of all measured points (behaviour unchanged): phase1_protocol_hex_v3.py |
+| 06519E807F079D32 | 2026-10-20 11:20 | src/toolkit | E3 test with dominated points outside the frontier range: test_phase1_protocol_hex_v3.py |
+| D87F420DA34BD810 | 2026-10-20 11:20 | spec | E3 amendment to section 5 (the frontier range counts, conservative reading): PHASE1_PROTOCOL_v1.md |
+| 6071A853C6E66A0D | 2026-10-20 11:20 | spec | section 6 clarified: "measured range" is the Pareto-efficient part (status DRAFT unchanged): PREREGISTRATION_PHASE1_v1.md |
+| 6DA63CDA3F9849A4 | 2026-10-20 12:10 | src/toolkit | Equalita R2: decide_test_set binds n_seeds == 5 and n_samples == 500, compares as Python numbers (NEP 50), requires low >= 0, reads the validated high once (TOCTOU): phase1_protocol_hex_v3.py |
+| 287AAE9833753B0F | 2026-10-20 12:10 | src/toolkit | Equalita R2 forgers (seed/sample subsets, float32 label, negative low) + TOCTOU test; binding test on the preregistered 5x500 shape: test_phase1_protocol_hex_v3.py |
+| 50C52B56667C09B5 | 2026-10-20 12:10 | spec | section 5 amendment: seed and sample counts bound, provenance not bound (#82), unverified "400 designs" replaced: PHASE1_PROTOCOL_v1.md |
+| 094E1326D5CDD3FF | 2026-10-20 12:10 | spec | section 8: flip-free is machine-specific; (48, 2.75) no longer recommended, 8 candidates (status DRAFT unchanged): PREREGISTRATION_PHASE1_v1.md |
+| 73874D088CF6EFFE | 2026-10-20 12:10 | spec | amendment: (48, 2.75) flips under 248 of 864 emulated float32 summation orders, only 8 candidates may be named: GINO_ADAPTER_PHASE1_v2.md |
+| 06F964CF13846ACF | 2026-10-21 10:10 | src/toolkit | GPT-6 R2 pairing: paired_bootstrap_iqm pairs matrices only by equal sample ids (sample_ids, PairingError): phase1_protocol_hex_v3.py |
+| 118E2C34FFA85A17 | 2026-10-21 10:10 | src/toolkit | pairing tests: shape-only, disjoint (triangle/torus), reordered and asserted ids refused; positive control bit-identical: test_phase1_protocol_hex_v3.py |
+| 551410BA7A6495D3 | 2026-10-21 10:10 | spec | section 4 amendment: pairing by sample id, not by shape (API change): PHASE1_PROTOCOL_v1.md |
+| 3E2AB0E0E7A66D67 | 2026-10-21 10:20 | src/toolkit | GPT-6 HEX-P1-01: decide_preregistered from raw 5x500 errors (registered seeds/ids/lattices, manifest digest, bootstrap inside, record SHA-256), verify_preregistered_decision; decide_test_set diagnostic; error matrices in C order: phase1_protocol_hex_v3.py |
+| 1041F8991DB1A202 | 2026-10-21 10:20 | src/toolkit | HEX-P1-01 forger tests (dataclasses.replace on summary, object and serialised record, resealed digest), canonical order, registration refusals, claim boundary; memory-layout test: test_phase1_protocol_hex_v3.py |
+| A6AE29206BE48805 | 2026-10-21 10:20 | spec | section 5 diagnostic helper, new section 5a decision-grade entry with claim boundary (unattested), C-order note (API change): PHASE1_PROTOCOL_v1.md |
+| 13F4ECD979D37BA9 | 2026-10-21 10:26 | src/toolkit | GPT-6 HEX-P2-02 D4 tools: cdist_rounding_margin (order-independent float32 bound, Higham gamma_6) and radius_graph_stability (budget fixed beforehand, frozen-order branch, NaN fail-closed): phase1_protocol_hex_v3.py |
+| 9A206F29217304F8 | 2026-10-21 10:26 | src/toolkit | HEX-P2-02 tests: closed forms, 48-order float32 emulation oracle (positive/negative control), committed survey oracle, verdict truth table: test_phase1_protocol_hex_v3.py |
+| F7B392170B94C6C0 | 2026-10-21 10:30 | src/toolkit | diskriminierung DK-20261021T082910: grade check asserts instead of crashing with KeyError when the field is missing: test_phase1_protocol_hex_v3.py |
+| A147F2A1B522E7D7 | 2026-10-21 10:26 | spec | new section 11: D4 float-order stability instruments (no threshold changed): PHASE1_PROTOCOL_v1.md |
+| 08863B0165DEA61F | 2026-10-21 10:26 | spec | amendment 2026-10-21: float budget criterion; no tie-free candidate clears the order-independent bound; tie band and prereg unchanged: GINO_ADAPTER_PHASE1_v2.md |
+| 9FC024E59280694C | 2026-10-21 12:12 | src/toolkit | GPT-6 HEXA-TIM-01: decide_preregistered requires exactly TimingProtocol().repeats (10) timed calls per sample, shape (10,) or (samples, 10), else DecisionInputError: phase1_protocol_hex_v3.py |
+| 72878AD3048FBE56 | 2026-10-21 12:20 | src/toolkit | HEXA-TIM-01 tests: 1/9/11/20 flat and (5,9)/(5,11)/(10,1) refused, positive control (10,)/(1,10)/(5,10)/(10,10) unchanged and a refusal fails by assertion; bad-latency fixtures carry 10 calls: test_phase1_protocol_hex_v3.py |
+| 954C50E9B4819382 | 2026-10-21 12:12 | spec | section 5a decision input: exactly 10 measured repeats per sample (HEXA-TIM-01); warm-ups not checkable from the numbers (open, attestation): PHASE1_PROTOCOL_v1.md |
+| BA6302C071C61737 | 2026-10-21 13:23 | src/toolkit | Equalita R3 F1/F2/F4: decide_preregistered binds the baseline curve to the registered steps grid (7 points, steps and n in the record) and the run-manifest content the preregistration fixes (split ids in the train pool, test-set dataset digest, preregistration file digest, cuda False, float32, neuraloperator 2.0.0); radius_graph_stability refuses flips that contradict a cleared budget: phase1_protocol_hex_v3.py |
+| BF40DC9C4A55ABCA | 2026-10-21 13:23 | src/toolkit | Equalita R3 F1/F2/F4/F8/F9 tests: steps-grid subsets refused (forger positive control on the diagnostic helper), manifest content forgeries refused with positive control, contradicted budget refused, latency median, baseline values bound in the record; fixture 7-point curve and real preregistration digest: test_phase1_protocol_hex_v3.py |
+| CFC877FC7E21409E | 2026-10-21 13:23 | spec | section 5a: steps-grid binding and manifest content checks with the unchecked fields named; "no parameter accepts a summary" and "any violation raises" made exact (Equalita R3 F7); section 11 flips contradict the budget: PHASE1_PROTOCOL_v1.md |
+| 8A51AEE6BFDDC84D | 2026-10-21 13:38 | src/toolkit | diskriminierung DK-20261021T112713: F9 record check and the unreadable-preregistration case assert instead of crashing (KeyError, FileNotFoundError): test_phase1_protocol_hex_v3.py |
+| BE2D86527B4CEF34 | 2026-10-21 13:53 | src/toolkit | F1 self-check (same class one level up): baseline curve of 7 points must not repeat a time or an error; padding the {1, 64} subset to 7 by repetition was accepted as advantage at ef4e797: phase1_protocol_hex_v3.py |
+| 07EF379B8F7A99F3 | 2026-10-21 13:53 | src/toolkit | F1 self-check tests: three padded subsets refused: test_phase1_protocol_hex_v3.py |
+| A20139D11AA81C7D | 2026-10-21 13:53 | spec | section 5a: no time and no error of the baseline curve may repeat: PHASE1_PROTOCOL_v1.md |
+| 9290C02717471FE6 | 2026-10-21 15:09 | src/toolkit | Equalita R4-F1: decide_preregistered takes baseline_curve (CostAccuracyPoint tuple, API break, float lists refused); each point checked by its own steps (registered order), n, domain, sample_count 500, timed_samples; record written from the points (baseline_points); CostAccuracyPoint gains domain; R4-F3 hardware amp False / autocast False; repeat-check comment narrowed to literal repetition (R4-F2): phase1_protocol_hex_v3.py |
+| 9ED8181814ED71CD | 2026-10-21 15:25 | src/toolkit | R4-F1 self-check (same class one level up): one snapshot tuple(baseline_curve) serves every check and the record; a sequence yielding other points on a later pass had one set checked and another decided and recorded: phase1_protocol_hex_v3.py |
+| B203D951C0A7C9E9 | 2026-10-21 15:25 | src/toolkit | R4-F1 self-check test: switching sequence (switch after pass 1, 2, 3) gives the registered record: test_phase1_protocol_hex_v3.py |
+| F151A8913A587FCB | 2026-10-21 15:09 | src/toolkit | R4-F1 tests: Equalita's genuine foreign-grid and n=64 curves refused, registered genuine curve H0, every coordinate, genuine producer output, old form refused, relabel boundary; R4-F3 amp/autocast; R4-F6 pins (times-only/errors-only repeat, flips=1, neuraloperator 2.0.1, file_sha256 reason): test_phase1_protocol_hex_v3.py |
+| 102B992AC5E4784D | 2026-10-21 15:09 | spec | section 2 domain/sample_count fields; section 5a baseline_curve coordinates, AMP, claim boundary (input identity, horizon, relabel, near-copies), API change R4-F1: PHASE1_PROTOCOL_v1.md |
+| B203D951C0A7C9E9 | 2026-10-21 15:28 | src/toolkit | same bytes as the B203D951 line above, repeated at the end: that line was inserted above the F151A891 line, and the last line per file wins: test_phase1_protocol_hex_v3.py |
+| 25404D5B9CBB99BD | 2026-10-21 16:27 | src/toolkit | Equalita R5-F1: CostAccuracyPoint carries kappa, t_final, task_config_sha256, rtol, warmup, repeats, timing_protocol_sha256, clock, checked against [D1], dt == t_final/steps, rtol 1e-12, TimingProtocol(), time.perf_counter; R5-F3 each field read once (_point_copy); R5-F4 plausibility; TimingProtocol.digest: phase1_protocol_hex_v3.py |
+| 2920094CE912830A | 2026-10-21 16:27 | src/toolkit | R5 tests: fixture with registered settings (was dt=1/s), renamed coordinate test, settings cases, genuine producer with kappa/T/config/rtol/protocol/clock refused, plausibility, read-once forgers: test_phase1_protocol_hex_v3.py |
+| 04B0E4D58E477B39 | 2026-10-21 16:27 | spec | section 2 eight new point fields; 5a read-once, plausibility, settings checks; claim boundary corrected (R5-F2) and machine/threads named; API/format change R5: PHASE1_PROTOCOL_v1.md |
+| 3B2A811310E79A8C | 2026-10-21 16:35 | src/toolkit | ruff E501: one line of the read-once test wrapped (no test change): test_phase1_protocol_hex_v3.py |
+| CD131B6A2788D847 | 2026-10-21 17:05 | spec | section 5a: horizon and timing protocol checked since R5-F1 (R6-F1 under-claim fixed); claim boundary names timed_samples (R6-F2): PHASE1_PROTOCOL_v1.md |
+| 84025D8C33DB1A0D | 2026-10-23 21:30 | src/toolkit | HNT-R86-03 digest patterns end in \Z ($ matched before a final newline); HNT-R86-04 break_even_queries exact on the given binary64 values only where the float evaluation overflows, unchanged wherever it is finite (issue #82, cross-family GPT-6 R86/R87): phase1_protocol_hex_v3.py |
+| 866DA6A9D59D8C5C | 2026-10-23 21:30 | src/toolkit | HNT-R86-03/-04 red-green tests with positive controls (TestDigestStringsAreWholeStrings, TestBreakEvenRange): test_phase1_protocol_hex_v3.py |
+| CAB63FB4AD176CE4 | 2026-10-23 21:30 | spec | sections 6 and 7: break-even beyond the float range, whole-string hex digests (HNT-R86-03, HNT-R86-04): PHASE1_PROTOCOL_v1.md |
+| 7D11588CFADF2F08 | 2026-10-23 21:30 | scripts | three phase1 mutants for HNT-R86-03, HNT-R86-04: mutation_probe.py |
+| FA47B57A9149B922 | 2026-10-23 21:09 | src/toolkit | Codex #80 @426c97f: preregistered and diagnostic decisions accept gino.high == 0 (raw errors >= 0, section 5a; runtime rule compares, accuracy rule reports the baseline floor); result_digests values validated as 64-hex SHA-256: phase1_protocol_hex_v3.py |
+| 90AF0387E26D66FA | 2026-10-23 21:09 | src/toolkit | Codex #80 @426c97f red-green tests (zero upper bound, all-zero error table, result digest values; 3/3 red on 426c97f, control green): test_phase1_protocol_hex_v3.py |
+| 5E1B282AA3F4A50A | 2026-10-23 21:09 | spec | section 7 table: result_digests values are 64-hex SHA-256, each checked (Codex #80): PHASE1_PROTOCOL_v1.md |
 ## NTK trajectory (append-only, 2026-10-22)
 
 > Pins for the bytes of this block. Prior rows remain lineage.
@@ -756,3 +833,6 @@
 | F233676EB66FE68E | 2026-10-23 21:00 | scripts | loader mutant retargeted to the snapshot; five mutants for HNT-R85-01, HNT-R86-01, HNT-R86-02: mutation_probe.py |
 | 124ACF830D926C15 | 2026-10-23 21:01 | src/toolkit | Codex #83 @8761e55: drift combines mantissas and exponents (no intermediate overflow of m/scale), off-diagonal energy summed directly (no cancellation of weak coupling), private read-only basis and target copies (apply cannot rebind basis_sha256/target_sha256), _check_state also on the loaded snapshot: ntk_trajectory_hex_v3.py |
 | 0C9886A887FD63A3 | 2026-10-23 21:01 | src/toolkit | Codex #83 @8761e55 red-green tests (TestCodexRound8761e55, TestDriftRange intermediate overflow; 5/5 red on 8761e55, positive controls green): test_ntk_trajectory_hex_v3.py |
+| EDF2231E17D59E5D | 2026-10-23 21:21 | src/toolkit | Codex #80 @1aefb18: required hardware values carry substance (machine/dtype non-empty, threads int >= 1, cuda bool or non-empty version string): phase1_protocol_hex_v3.py |
+| 793189AE84A1FFA9 | 2026-10-23 21:21 | src/toolkit | Codex #80 @1aefb18 test test_required_hardware_values_carry_substance (11/11 red on 1aefb18, control and 69 other tests green): test_phase1_protocol_hex_v3.py |
+| 974D5C3F17FDAC2A | 2026-10-23 21:21 | scripts | merge of main (#83 NTK trajectory mutants) with the phase1 mutants of #80: union of both mutant lists: mutation_probe.py |
