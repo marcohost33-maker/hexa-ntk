@@ -730,3 +730,29 @@
 | DEE4F9877D3084B6 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): spectral_audit_hex_v3.py |
 | 2B2B46B400902638 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): test_linear_baseline_hex_v3.py |
 | 0E250206AC0EF5E9 | 2026-10-17 13:00 | src/toolkit | Codex round on #77 (torch_device under auto, alpha underflow): test_spectral_audit_hex_v3.py |
+
+## NTK trajectory (append-only, 2026-10-22)
+
+> Pins for the bytes of this block. Prior rows remain lineage.
+
+| E896604E9132568D | 2026-10-22 10:30 | src/toolkit | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): ntk_trajectory_hex_v3.py |
+| 8B563C31C72825C8 | 2026-10-22 10:30 | src/toolkit | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): test_ntk_trajectory_hex_v3.py |
+| A6B181F77BC0934E | 2026-10-22 10:30 | src/toolkit | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): test_gino_adapter_hex_v3.py |
+| 8263DCD792F2F5F9 | 2026-10-22 10:30 | spec | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): NTK_TRAJECTORY_v1.md |
+| 414905177898909A | 2026-10-22 10:30 | scripts | NTK_TRAJECTORY_v1, parameter-NTK trajectory over declared checkpoints (#60 item 2): mutation_probe.py |
+
+## HNT-R25-01: repeated checkpoint states measured and marked (append-only, 2026-10-23)
+
+> Cross-family GPT-6 R25 finding HNT-R25-01 (P2). Pins for the bytes of this block. Prior rows remain lineage.
+
+| 93310C19D0AF6591 | 2026-10-23 00:54 | src/toolkit | HNT-R25-01, identical checkpoint bytes measured and marked, record check: ntk_trajectory_hex_v3.py |
+| D2FDC9DF4288EEE0 | 2026-10-23 00:54 | src/toolkit | HNT-R25-01, identical checkpoint bytes measured and marked, record check: test_ntk_trajectory_hex_v3.py |
+| D4F5115AFD45AB00 | 2026-10-23 01:05 | spec | HNT-R25-01, section 2.1 repeated states (v1 amended in draft): NTK_TRAJECTORY_v1.md |
+| 0182F73BFE09A25A | 2026-10-23 01:05 | scripts | HNT-R25-01, duplicate-refusal mutant replaced by six marker/record-check mutants: mutation_probe.py |
+| A6C32149CFED1484 | 2026-10-23 01:15 | src/toolkit | HNT-R25-01, explicit no-refusal assertion for identical bytes: test_ntk_trajectory_hex_v3.py |
+| CF62A18BC40AECC3 | 2026-10-23 21:00 | src/toolkit | HNT-R85-01 load a private snapshot whose digest equals the preflight digest (closes a change between preflight and load, not a concurrent writer); HNT-R86-01 metadata that JSON would encode like another subject refused (data dict with __qualified_name__, non-str keys, depth > 64), bytes of bindable entries unchanged; HNT-R86-02 drift beyond binary64 is an error, representable overflow cases factored (cross-family GPT-6 R85-R87): ntk_trajectory_hex_v3.py |
+| 627CF4807C1B598A | 2026-10-23 21:00 | src/toolkit | HNT-R85-01/R86-01/R86-02 red-green tests with positive controls (TestPreflightBinding, TestMetadataAliasing, TestDriftRange): test_ntk_trajectory_hex_v3.py |
+| 71E6B0771978BF1D | 2026-10-23 21:00 | spec | sections 1, 2, 3: drift range, preflight snapshot binding with its concurrency limit, refused metadata aliases (HNT-R85-01, HNT-R86-01, HNT-R86-02): NTK_TRAJECTORY_v1.md |
+| F233676EB66FE68E | 2026-10-23 21:00 | scripts | loader mutant retargeted to the snapshot; five mutants for HNT-R85-01, HNT-R86-01, HNT-R86-02: mutation_probe.py |
+| 124ACF830D926C15 | 2026-10-23 21:01 | src/toolkit | Codex #83 @8761e55: drift combines mantissas and exponents (no intermediate overflow of m/scale), off-diagonal energy summed directly (no cancellation of weak coupling), private read-only basis and target copies (apply cannot rebind basis_sha256/target_sha256), _check_state also on the loaded snapshot: ntk_trajectory_hex_v3.py |
+| 0C9886A887FD63A3 | 2026-10-23 21:01 | src/toolkit | Codex #83 @8761e55 red-green tests (TestCodexRound8761e55, TestDriftRange intermediate overflow; 5/5 red on 8761e55, positive controls green): test_ntk_trajectory_hex_v3.py |
