@@ -334,11 +334,13 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   sind als Instrument festgelegt (`spec/PHASE1_PROTOCOL_v1.md`, oben unter Erledigt); offen bleiben
   D4 (Raster, <= 8 Konfigurationen; Radius-Tie-Tabelle als Entscheidungshilfe in
   `results/2026-10-19_gino_radius_tie_survey.json`) und die D5-Maschine.
-- [ ] **ReferenceSpec v1 (#33), Review-Befund.** `ConvergenceStudy.observed_order` wird nur auf
-  endlich/positiv geprueft, nicht gegen die Werte der Levels nachgerechnet; ein Aufrufer kann eine
-  Ordnung behaupten, die die Daten nicht tragen. Vorschlag: bei konstantem r und >= 3 Levels
-  Konsistenz gegen die Celik-Ordnung verlangen (Vertragsaenderung -> Owner-Entscheid).
-  `reference_spec_hex_v3.py` hat 82 % Branch-Coverage (Gesamt-Gate 87 % gilt global).
+- [x] ~~**ReferenceSpec v1 (#33), Review-Befund.** `ConvergenceStudy.observed_order` wird nur auf
+  endlich/positiv geprueft, nicht gegen die Werte der Levels nachgerechnet.~~ Ueberholt (Hinweis
+  cross-family GPT-6 R88/R91-09, nachgemessen 2026-10-26): seit #61 (2c82d77) rechnet
+  `ConvergenceStudy.__post_init__` die Ordnung aus den drei feinsten Levels nach
+  (`_observed_order_from_finest_three`, `reference_spec_hex_v3.py`), verlangt konstantes
+  Verfeinerungsverhaeltnis und monotone Differenzen und weist eine abweichende Angabe ab
+  (`spec/REFERENCE_SPEC_v1.md`). Die Zeile war stehen geblieben.
 - [ ] **dt-Gruppierung als deklarierter Quantisierungsvertrag (#59).** `dt_round_ndigits=-1` wird
   akzeptiert; Vertrag fuer zulaessige Werte und Semantik fehlt.
 
