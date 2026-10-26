@@ -90,6 +90,10 @@ Properties the tests pin:
   refused. This closes a change between preflight and load; it does not make the copy
   atomic against a writer running concurrently with the call, so exclusive ownership
   of the checkpoints during the call is the caller's duty.
+- Post-load binding (XF-R34, cross-family GPT-6 R34): after `load_state_dict`, the
+  copy's own `state_dict()` must have the checkpoint's `state_sha256`. A
+  `load_state_dict` hook or override of the model that changes what lands in the copy
+  is refused, so the record never names bytes that were not measured.
 - The model must be in eval mode (as in PARAM_NTK_v1); `apply(model, x)` must
   not write into `x` (its digest is recomputed after every checkpoint).
 
@@ -158,6 +162,16 @@ digests already written stay valid. Not distinguished, deliberately: a list and 
 tuple are the same JSON array (they configure the same constructor). A qualified
 name does not attest the callable's implementation.
 
+A callable binds only under a name that leads back to it (XF-R88-M2, cross-family
+GPT-6 R88): `__module__` and `__qualname__` are writable, so a callable instance, a
+renamed function or class, or a builtin with a rewritten `__module__` encoded exactly
+like `math.sin` or `torch.nn.Linear`. The module must already be loaded
+(`sys.modules`, never imported for the check), and walking the qualname through it,
+read statically, must reach the object itself; a builtin exported under its own
+name (`torch.tanh`, qualname `_VariableFunctionsClass.tanh`) binds when the module
+attribute of that name is the object and the qualname ends in it. Every callable that
+binds keeps its v1 bytes; the real GINO's callables (`F.gelu`, `SpectralConv`) bind.
+
 **Claim boundary.** The digests show WHICH bytes were measured and make the
 record tamper-evident. They do not show that the checkpoints came from a real
 training run; the record says `"authenticity": "unattested"`. Equal digests show
@@ -189,6 +203,12 @@ bounds.
   split, dtype, shape and a one-ulp change alter `state_sha256`; tampering alters
   `record_sha256`.
 - **Fail-closed.** Every guard of sections 2 and 4 has a negative test.
+- **Cross-family R88..R98** (`TestCrossFamilyR88R98`). A callable instance, a
+  renamed function, a renamed class, a builtin with a rewritten `__module__` and a
+  function whose qualname differs from the name it is stored under are refused
+  (each shown to encode like the genuine name under the old rule); genuine callables
+  keep their v1 bytes. A load hook and a `load_state_dict` override that change the
+  loaded state are refused; a harmless hook is measured like the plain model.
 - **Repeated states (section 2.1).** Positive control: a real `torch.optim.SGD`
   step with `lr = 0` gives identical bytes, both checkpoints are measured, the
   second is marked and its drift, distances and velocity are exactly 0

@@ -28,7 +28,9 @@ loaded from a private snapshot whose digest must equal the preflight digest
 (HNT-R85-01; closes a change between preflight and load, not a concurrent writer
 racing the copy). Metadata that JSON would encode like another subject (a data dict
 posing as a callable, non-str keys) is refused (HNT-R86-01); a drift beyond binary64
-is an error, never inf (HNT-R86-02).
+is an error, never inf (HNT-R86-02). A callable binds only under a name that leads
+back to it (XF-R88-M2), and the loaded copy must give back the checkpoint's digest, so
+a load hook cannot change what is measured (XF-R34).
 
 Repeated states (HNT-R25-01): two checkpoints with identical bytes are measured,
 not refused. Equal bytes prove neither a mislabelled copy nor a genuinely
@@ -50,6 +52,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import inspect
 import json
 import math
 import sys
@@ -223,9 +226,42 @@ def _metadata_default(obj: Any) -> Any:
     module, qualname = getattr(obj, "__module__", None), getattr(obj, "__qualname__", None)
     owner = getattr(obj, "__self__", None)
     if (callable(obj) and isinstance(module, str) and isinstance(qualname, str) and "<" not in qualname
-            and (owner is None or isinstance(owner, types.ModuleType))):
+            and (owner is None or isinstance(owner, types.ModuleType)) and _names_itself(obj, module, qualname)):
         return {"__qualified_name__": f"{module}.{qualname}"}
     raise TypeError(f"{type(obj).__name__} has no stable qualified name")
+
+
+def _names_itself(obj: Any, module: str, qualname: str) -> bool:
+    """True if ``module.qualname`` reaches ``obj`` itself in this process.
+
+    XF-R88-M2 (cross-family GPT-6 R88, R87-P2 rest): ``__module__`` and ``__qualname__``
+    are writable (on instances, functions, classes, and ``__module__`` even on builtins),
+    so a callable instance or a renamed function encoded exactly like ``math.sin``. The
+    name binds only if it leads back to the object: through the qualname, or, for a
+    builtin exported under another path (``torch.tanh`` has the qualname
+    ``_VariableFunctionsClass.tanh``), as the module attribute of its own name. Only
+    loaded modules are consulted (``sys.modules``, never an import) and namespaces are
+    read statically, so no module or class ``__getattr__`` runs. A name that binds keeps
+    its bytes. Still not covered: a name does not attest the implementation, and a
+    module whose attribute was rebound in this process names the rebound object.
+    """
+    namespace = sys.modules.get(module)
+    if not isinstance(namespace, types.ModuleType):
+        return False
+    target: Any = namespace
+    for part in qualname.split("."):
+        try:
+            target = inspect.getattr_static(target, part)
+        except AttributeError:
+            target = None
+            break
+        if isinstance(target, staticmethod):
+            target = target.__func__
+    if target is obj:
+        return True
+    name = getattr(obj, "__name__", None)
+    return (isinstance(name, str) and qualname.rpartition(".")[2] == name
+            and vars(namespace).get(name) is obj)
 
 
 _QUALIFIED_NAME = "__qualified_name__"
@@ -653,6 +689,12 @@ def ntk_trajectory(
         _check_state(snapshot, reference, step)
         twin = copy.deepcopy(model)
         twin.load_state_dict(snapshot, strict=True)
+        # XF-R34 (cross-family GPT-6 R34, load path): a load_state_dict hook or override of
+        # the model can change what lands in the copy, and the record would name bytes that
+        # were not measured. The loaded copy must give back the digest of the snapshot.
+        if state_dict_sha256(twin.state_dict()) != state_digest:
+            raise NTKTrajectoryError(f"checkpoint at step {step}: the loaded model differs from the checkpoint "
+                                     "(a load_state_dict hook or override changed it)")
         twin.eval()
         result = pn.param_ntk(
             twin, lambda m: apply(m, inputs), modes64, weights64,
