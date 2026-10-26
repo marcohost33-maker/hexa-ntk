@@ -22,6 +22,20 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Cross-Family GPT-6 R88..R98 gegen main triagiert und eingebaut (2026-10-26, Windows).**
+  Die meisten Befunde R88..R98 betreffen ein externes Sidecar (DDP-/Trust-/Katalog-Module), das auf
+  main nicht existiert; eingebaut sind die zwei, die `ntk_trajectory_hex_v3.py` treffen.
+  XF-R88-M2: `__module__`/`__qualname__` sind schreibbar, eine Callable-Instanz oder umbenannte
+  Funktion kodierte exakt wie `math.sin`; ein Callable bindet jetzt nur unter einem Namen, der in
+  `sys.modules` (statisch, ohne Import) zu ihm fuehrt; gueltige Eintraege behalten ihre v1-Bytes.
+  XF-R34: ein `load_state_dict`-Hook oder -Override konnte das Geladene aendern, waehrend der
+  Record die Snapshot-Bytes nannte; die geladene Kopie wird ueber ihre Parameter/Buffer gelesen
+  (nicht ueber `state_dict()`, das ebenfalls Modellcode ist) und muss den Digest zurueckgeben.
+  Rot auf 30e7ba2 nachgewiesen, Diskriminierung 13/13 (DK-20261026T093104-d5ef26d6c9aa),
+  Mutationsprobe 84/85 (einzig M02, POSIX-only). Nicht eingebaut: list==tuple (Spec Abschnitt 3,
+  bewusst; echtes GINO traegt Tupel), natives `OrderedDict._metadata` (wird nicht geladen).
+  _Evidenz:_ `results/2026-10-26_xf-r88-r98_local-gate.log`.
+
 - [x] **Phase-1-Protokoll-Instrumente + D4-Entscheidungshilfe Radius-Ties (2026-10-19, Linux-Container).**
   Vorregistrierungs-Abschnitte 4-7 hatten keinen Code: wie die Kosten-Genauigkeits-Kurve, die Latenz,
   der IQM, sein Konfidenzintervall, die Entscheidungsregeln, der Break-even und das Lauf-Manifest
