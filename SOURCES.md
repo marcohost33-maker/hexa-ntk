@@ -844,3 +844,7 @@
 | 6EBCACB95FC44EE1 | 2026-10-26 10:11 | spec | XF-R88-M2 / XF-R34: section 2 post-load binding, section 3 callables bind only under a name that reaches them, section 5 evidence: NTK_TRAJECTORY_v1.md |
 | B876CCB31319F565 | 2026-10-26 10:11 | scripts | five mutants for XF-R88-M2 and XF-R34 (name resolution, qualname walk, name branch identity and qualname check, post-load digest): mutation_probe.py |
 | 7767113BA535263E | 2026-10-26 10:21 | src/toolkit | positive controls of TestCrossFamilyR88R98 fail by assertion (self.fail) instead of an escaping refusal, so a guard that over-fires is a red test, not a crash: test_ntk_trajectory_hex_v3.py |
+| 70F5C9EBBE232354 | 2026-10-26 10:28 | src/toolkit | XF-R34 applied to its own check: the loaded copy is read through its parameters and buffers (_loaded_digest), not through state_dict(), which model code can rewrite; a tensor key that is neither is refused: ntk_trajectory_hex_v3.py |
+| D37C940D6F7068DF | 2026-10-26 10:28 | src/toolkit | XF-R34 tests: a state_dict() that hides a load-time change, a tensor key without parameter or buffer: test_ntk_trajectory_hex_v3.py |
+| FC13DACF636BF129 | 2026-10-26 10:29 | spec | XF-R34: section 2 post-load binding reads parameters and buffers, states what it does not cover; section 5 evidence: NTK_TRAJECTORY_v1.md |
+| D62226D620FF9384 | 2026-10-26 10:29 | scripts | XF-R34 mutants retargeted to _loaded_digest, plus the state_dict()-readback mutant: mutation_probe.py |

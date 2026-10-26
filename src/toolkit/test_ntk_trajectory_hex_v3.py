@@ -1160,6 +1160,45 @@ class TestCrossFamilyR88R98(unittest.TestCase):
             _run(Shifting(), _states(a=[1.0, 2.0], b=[0.5, 0.5]))
         self.assertIn("loaded model differs from the checkpoint", str(ctx.exception))
 
+    def test_a_state_dict_that_hides_the_change_does_not_fool_the_check(self) -> None:
+        # The copy is read through its parameters, not through state_dict(), which is model
+        # code as well: here it undoes the shift on the way out, so the loaded copy would
+        # look like the checkpoint while the measurement runs at a + 1.
+        class Hiding(Product):
+            def load_state_dict(self, state_dict, strict=True, assign=False):
+                state_dict = dict(state_dict, a=state_dict["a"] + 1.0)
+                return super().load_state_dict(state_dict, strict=strict, assign=assign)
+
+            def state_dict(self, *args, **kwargs):
+                state = super().state_dict(*args, **kwargs)
+                state["a"] = state["a"] - 1.0
+                return state
+
+        ckpts = _states(a=[1.0, 2.0], b=[0.5, 0.5])
+        probe = Hiding()
+        probe.load_state_dict(ckpts[0][1])
+        self.assertEqual(nt.state_dict_sha256(probe.state_dict()), nt.state_dict_sha256(ckpts[0][1]))  # hidden
+        with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+            _run(Hiding(), ckpts)
+        self.assertIn("loaded model differs from the checkpoint", str(ctx.exception))
+
+    def test_a_state_key_that_is_no_parameter_or_buffer_is_refused(self) -> None:
+        # A custom _save_to_state_dict can add tensor keys that no parameter or buffer
+        # holds: what was loaded into them cannot be read back, so it is refused.
+        class Extra(Product):
+            def _save_to_state_dict(self, destination, prefix, keep_vars):
+                super()._save_to_state_dict(destination, prefix, keep_vars)
+                destination[prefix + "derived"] = (self.a * self.b).detach()
+
+            def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+                state_dict = {k: v for k, v in state_dict.items() if k != prefix + "derived"}
+                super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
+        ckpts = [(s, dict(st, derived=st["a"] * st["b"])) for s, st in _states(a=[1.0, 2.0], b=[0.5, 0.5])]
+        with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+            _run(Extra(), ckpts)
+        self.assertIn("neither a parameter nor a buffer", str(ctx.exception))
+
     def test_a_harmless_load_hook_is_measured(self) -> None:
         # Positive control: the hook itself is allowed; only a change of the state is refused.
         ckpts = _states(a=[1.0, 2.0], b=[0.5, 0.5])

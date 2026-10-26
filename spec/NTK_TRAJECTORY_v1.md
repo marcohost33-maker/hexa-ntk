@@ -90,10 +90,16 @@ Properties the tests pin:
   refused. This closes a change between preflight and load; it does not make the copy
   atomic against a writer running concurrently with the call, so exclusive ownership
   of the checkpoints during the call is the caller's duty.
-- Post-load binding (XF-R34, cross-family GPT-6 R34): after `load_state_dict`, the
-  copy's own `state_dict()` must have the checkpoint's `state_sha256`. A
-  `load_state_dict` hook or override of the model that changes what lands in the copy
-  is refused, so the record never names bytes that were not measured.
+- Post-load binding (XF-R34, cross-family GPT-6 R34): after `load_state_dict`, what
+  the copy holds must have the checkpoint's `state_sha256`. Tensor keys are read from
+  the copy's parameters and buffers (the tensors the measurement uses), not from its
+  `state_dict()`, which is model code as well and could rewrite a change back;
+  non-tensor keys are the model's own entry, already found equal. A `load_state_dict`
+  hook or override that changes what lands in the copy is refused, and so is a tensor
+  key that is neither a parameter nor a buffer (its loaded value cannot be read back).
+  The record never names bytes that were not measured. Not covered: model code that
+  changes parameters later, during the measurement itself (like `apply`, the model is
+  the caller's code).
 - The model must be in eval mode (as in PARAM_NTK_v1); `apply(model, x)` must
   not write into `x` (its digest is recomputed after every checkpoint).
 
@@ -208,7 +214,9 @@ bounds.
   function whose qualname differs from the name it is stored under are refused
   (each shown to encode like the genuine name under the old rule); genuine callables
   keep their v1 bytes. A load hook and a `load_state_dict` override that change the
-  loaded state are refused; a harmless hook is measured like the plain model.
+  loaded state are refused, also when `state_dict()` hides the change, and so is a
+  tensor key that no parameter or buffer holds; a harmless hook is measured like the
+  plain model.
 - **Repeated states (section 2.1).** Positive control: a real `torch.optim.SGD`
   step with `lr = 0` gives identical bytes, both checkpoints are measured, the
   second is marked and its drift, distances and velocity are exactly 0

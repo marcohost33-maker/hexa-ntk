@@ -284,7 +284,10 @@ MUTANTS = (
     Mutant(NT, "qualname.rpartition(\".\")[2] == name", "True", "test_ntk_trajectory_hex_v3.TestCrossFamilyR88R98"),
     Mutant(NT, "vars(namespace).get(name) is obj", "vars(namespace).get(name) is not None",
            "test_ntk_trajectory_hex_v3.TestCrossFamilyR88R98"),
-    Mutant(NT, "        if state_dict_sha256(twin.state_dict()) != state_digest:\n", "        if False:\n",
+    Mutant(NT, "        if _loaded_digest(twin, reference) != state_digest:\n", "        if False:\n",
+           "test_ntk_trajectory_hex_v3.TestCrossFamilyR88R98"),
+    Mutant(NT, "        if _loaded_digest(twin, reference) != state_digest:\n",
+           "        if state_dict_sha256(twin.state_dict()) != state_digest:\n",
            "test_ntk_trajectory_hex_v3.TestCrossFamilyR88R98"),
 )
 

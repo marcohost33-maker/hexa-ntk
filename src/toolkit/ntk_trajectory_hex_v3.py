@@ -502,6 +502,28 @@ def _check_state(state: Any, reference: Mapping[str, torch.Tensor], step: int) -
             raise NTKTrajectoryError(f"checkpoint at step {step}: {key!r} is not finite")
 
 
+def _loaded_digest(model: torch.nn.Module, reference: Mapping[str, Any]) -> str:
+    """``state_dict_sha256`` of what a loaded copy holds (XF-R34).
+
+    Tensor keys are read from the model's own parameters and buffers, the tensors the
+    measurement uses: ``state_dict()`` is model code too, and an override or hook that
+    changed the load could rewrite it back. Non-tensor keys come from ``reference``,
+    which ``_check_state`` already found equal to the checkpoint's entry.
+    """
+    tensors = {**dict(model.named_parameters(remove_duplicate=False)),
+               **dict(model.named_buffers(remove_duplicate=False))}
+    loaded: dict[str, Any] = {}
+    for key, ref in reference.items():
+        if not isinstance(ref, torch.Tensor):
+            loaded[key] = ref
+        elif key in tensors:
+            loaded[key] = tensors[key]
+        else:
+            raise NTKTrajectoryError(f"state key {key!r} is neither a parameter nor a buffer of the model: "
+                                     "the loaded value cannot be read back")
+    return state_dict_sha256(loaded)
+
+
 def _target(target_coefficients: Any, n_modes: int) -> np.ndarray | None:
     if target_coefficients is None:
         return None
@@ -692,7 +714,7 @@ def ntk_trajectory(
         # XF-R34 (cross-family GPT-6 R34, load path): a load_state_dict hook or override of
         # the model can change what lands in the copy, and the record would name bytes that
         # were not measured. The loaded copy must give back the digest of the snapshot.
-        if state_dict_sha256(twin.state_dict()) != state_digest:
+        if _loaded_digest(twin, reference) != state_digest:
             raise NTKTrajectoryError(f"checkpoint at step {step}: the loaded model differs from the checkpoint "
                                      "(a load_state_dict hook or override changed it)")
         twin.eval()
