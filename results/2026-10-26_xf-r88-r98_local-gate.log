@@ -1,0 +1,82 @@
+# 2026-10-26 Cross-Family GPT-6 R88..R98 (XF-R88-M2, XF-R34) -- local gate
+# Windows 11, Python 3.12.10, torch 2.6.0+cpu, numpy 2.5.3 (C:\Users\marco\dev\.venv-hexa312); ruff 0.17.0 via uvx
+# Chain = .github/workflows/ci.yml jobs gate + tests (cpu), run from the repo root
+
+## Baseline @30e7ba2 (origin/main, before the change)
+HEAD 30e7ba278b040936d0a0587c2cf908bbc3554de8 dirty=0
+All checks passed!
+RC ruff=0
+RC compileall=0
+RC verify_sources=0
+
+[VERIFY-SOURCES] 48 Toolkit-Eintraege + 16 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (75 Dateien) | PASS
+RC engine_gate=0
+
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC unittest=0
+----------------------------------------------------------------------
+Ran 961 tests in 264.996s
+
+OK (skipped=13)
+RC coverage_report=0
+TOTAL                                           5239    213   1994    157    95%
+RC blas_Prescott=0
+OK
+RC blas_Sandybridge=0
+OK
+RC blas_Haswell=0
+OK
+RC blas_Zen=0
+OK
+ELAPSED 479s
+
+## Final @7e11cd6
+HEAD 7e11cd69367cbae127a76bf57de7755ac0a5b6b3 dirty=0
+All checks passed!
+RC ruff=0
+RC compileall=0
+RC verify_sources=0
+
+[VERIFY-SOURCES] 48 Toolkit-Eintraege + 16 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (75 Dateien) | PASS
+RC engine_gate=0
+
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC unittest=0
+----------------------------------------------------------------------
+Ran 971 tests in 112.352s
+
+OK (skipped=13)
+RC coverage_report=0
+TOTAL                                           5269    214   2010    158    95%
+RC blas_Prescott=0
+OK
+RC blas_Sandybridge=0
+OK
+RC blas_Haswell=0
+OK
+RC blas_Zen=0
+OK
+ELAPSED 180s
+
+## gate: GINO lane (neuraloperator 2.0.0 installed outside the repo, --no-deps, PYTHONPATH)
+python -m unittest discover -s src/toolkit -t src/toolkit -p test_gino_adapter_hex_v3.py -v
+Ran 26 tests in 13.821s
+
+OK
+RC gino_lane=0 (0 skipped)
+
+## Mutation probe (python scripts/mutation_probe.py), full
+@56f9cc7:
+M02 SURVIVED  checkpoint_integration_hex_v3.py -> TestDurabilityErrorAfterReplace
+M62 SURVIVED  ntk_trajectory_hex_v3.py -> TestFailClosed
+M76 SURVIVED  ntk_trajectory_hex_v3.py -> TestMetadataAliasing
+[MUTATION-PROBE] baseline green | 82/85 killed | FAIL
+EXIT 1
+@82b974a (after sharpening the tests for M62/M76):
+M02 SURVIVED  checkpoint_integration_hex_v3.py -> TestDurabilityErrorAfterReplace
+[MUTATION-PROBE] baseline green | 84/85 killed | FAIL
+EXIT 1
+
+## Discrimination (G:/Meine Ablage/Vero/Tools/diskriminierung.py, ledger diskriminierung_runs.jsonl)
+DK-20261026T092221-78519584ff0e 11/11 @5143738 VOLL
+DK-20261026T093104-d5ef26d6c9aa 13/13 @b8b05fe VOLL
