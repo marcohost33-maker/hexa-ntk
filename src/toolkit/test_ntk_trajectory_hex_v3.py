@@ -1109,7 +1109,11 @@ class TestCrossFamilyR88R98(unittest.TestCase):
         for value in (math.sin, torch.tanh, torch.relu, torch.nn.functional.gelu, torch.nn.Linear, np.sin, len,
                       _module_level_activation, _Holder.activation, WithMetadata.META):
             with self.subTest(value=repr(value)[:40]):
-                self.assertEqual(nt._metadata_bytes("_metadata", value), _v1_metadata_json(value))
+                try:
+                    data = nt._metadata_bytes("_metadata", value)
+                except nt.NTKTrajectoryError as exc:
+                    self.fail(f"a genuine callable was refused: {exc}")
+                self.assertEqual(data, _v1_metadata_json(value))
 
     def test_a_spoofed_callable_is_refused_as_a_checkpoint(self) -> None:
         spoof = self._spoofs()["instance"]
@@ -1159,7 +1163,10 @@ class TestCrossFamilyR88R98(unittest.TestCase):
     def test_a_harmless_load_hook_is_measured(self) -> None:
         # Positive control: the hook itself is allowed; only a change of the state is refused.
         ckpts = _states(a=[1.0, 2.0], b=[0.5, 0.5])
-        traj = _run(self._hooked(False), ckpts)
+        try:
+            traj = _run(self._hooked(False), ckpts)
+        except nt.NTKTrajectoryError as exc:
+            self.fail(f"a load hook that changes nothing was refused: {exc}")
         reference = _run(Product(), _states(a=[1.0, 2.0], b=[0.5, 0.5]))
         for e, r in zip(traj.entries, reference.entries):
             self.assertEqual((e.state_sha256, e.kernel_sha256), (r.state_sha256, r.kernel_sha256))

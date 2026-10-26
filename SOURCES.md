@@ -843,3 +843,4 @@
 | FF7A65AB490D4032 | 2026-10-26 10:09 | src/toolkit | XF-R88-M2 / XF-R34 tests TestCrossFamilyR88R98 (spoofed instance, renamed function/class/builtin, qualname/stored-name mismatch, load hook and override refused; genuine callables keep v1 bytes, harmless hook measured): test_ntk_trajectory_hex_v3.py |
 | 6EBCACB95FC44EE1 | 2026-10-26 10:11 | spec | XF-R88-M2 / XF-R34: section 2 post-load binding, section 3 callables bind only under a name that reaches them, section 5 evidence: NTK_TRAJECTORY_v1.md |
 | B876CCB31319F565 | 2026-10-26 10:11 | scripts | five mutants for XF-R88-M2 and XF-R34 (name resolution, qualname walk, name branch identity and qualname check, post-load digest): mutation_probe.py |
+| 7767113BA535263E | 2026-10-26 10:21 | src/toolkit | positive controls of TestCrossFamilyR88R98 fail by assertion (self.fail) instead of an escaping refusal, so a guard that over-fires is a red test, not a crash: test_ntk_trajectory_hex_v3.py |
