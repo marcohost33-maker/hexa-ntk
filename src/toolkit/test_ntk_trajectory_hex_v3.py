@@ -690,6 +690,9 @@ class TestFailClosed(unittest.TestCase):
         for name, state in cases.items():
             with self.subTest(case=name):
                 self._refused(Product(), [good[0], (10, state)])
+        # The dtype guard itself, by its message: since XF-R34 the post-load check refuses
+        # the cast checkpoint as well, which made this case blind to the guard (M62 survived).
+        self.assertIn("the model has", self._refused(Product(), [good[0], (10, cases["dtype"])]))
         self._refused(Product(), [good[0], (10, [("a", _f64(1.0))])])
 
     def test_checkpoints_must_be_step_state_pairs(self) -> None:
@@ -833,8 +836,11 @@ class TestMetadataAliasing(unittest.TestCase):
     def test_non_string_keys_are_refused(self) -> None:
         for meta in ({1: "x"}, {True: "x"}, {None: "x"}, {"outer": {2.5: "x"}}):
             with self.subTest(meta=meta):
-                with self.assertRaises(nt.NTKTrajectoryError):
+                with self.assertRaises(nt.NTKTrajectoryError) as ctx:
                     nt.state_dict_sha256({"_metadata": meta})
+                # By its own guard: since R87-P2 the budget's len(k) also raises on a
+                # non-str key, which left the key guard untested (M76 survived on 30e7ba2).
+                self.assertIn("is not a str", str(ctx.exception))
 
     def test_deep_or_cyclic_metadata_is_a_contract_error(self) -> None:
         deep: list = []

@@ -848,3 +848,4 @@
 | D37C940D6F7068DF | 2026-10-26 10:28 | src/toolkit | XF-R34 tests: a state_dict() that hides a load-time change, a tensor key without parameter or buffer: test_ntk_trajectory_hex_v3.py |
 | FC13DACF636BF129 | 2026-10-26 10:29 | spec | XF-R34: section 2 post-load binding reads parameters and buffers, states what it does not cover; section 5 evidence: NTK_TRAJECTORY_v1.md |
 | D62226D620FF9384 | 2026-10-26 10:29 | scripts | XF-R34 mutants retargeted to _loaded_digest, plus the state_dict()-readback mutant: mutation_probe.py |
+| F47264833DBB1EF0 | 2026-10-26 10:53 | src/toolkit | two blind tests sharpened to their guard's message (full mutation probe 2026-10-26: M62 dtype guard masked by the XF-R34 post-load check, M76 non-str key guard masked by the R87-P2 budget len(k) since 30e7ba2): test_ntk_trajectory_hex_v3.py |
