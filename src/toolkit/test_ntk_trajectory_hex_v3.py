@@ -690,6 +690,9 @@ class TestFailClosed(unittest.TestCase):
         for name, state in cases.items():
             with self.subTest(case=name):
                 self._refused(Product(), [good[0], (10, state)])
+        # The dtype guard itself, by its message: since XF-R34 the post-load check refuses
+        # the cast checkpoint as well, which made this case blind to the guard (M62 survived).
+        self.assertIn("the model has", self._refused(Product(), [good[0], (10, cases["dtype"])]))
         self._refused(Product(), [good[0], (10, [("a", _f64(1.0))])])
 
     def test_checkpoints_must_be_step_state_pairs(self) -> None:
@@ -833,8 +836,11 @@ class TestMetadataAliasing(unittest.TestCase):
     def test_non_string_keys_are_refused(self) -> None:
         for meta in ({1: "x"}, {True: "x"}, {None: "x"}, {"outer": {2.5: "x"}}):
             with self.subTest(meta=meta):
-                with self.assertRaises(nt.NTKTrajectoryError):
+                with self.assertRaises(nt.NTKTrajectoryError) as ctx:
                     nt.state_dict_sha256({"_metadata": meta})
+                # By its own guard: since R87-P2 the budget's len(k) also raises on a
+                # non-str key, which left the key guard untested (M76 survived on 30e7ba2).
+                self.assertIn("is not a str", str(ctx.exception))
 
     def test_deep_or_cyclic_metadata_is_a_contract_error(self) -> None:
         deep: list = []
@@ -1024,6 +1030,191 @@ class TestCodexRound8761e55(unittest.TestCase):
         offdiag = nt._shape_metrics(k, None)[1]
         self.assertLess(abs(offdiag / (2e-18 / (2.0 + 2e-18)) - 1.0), 1e-12)
         self.assertEqual(nt._shape_metrics(np.eye(3), None)[1], 0.0)
+
+
+def _module_level_activation(x):
+    """A real module-level function: its qualified name leads back to it."""
+    return x
+
+
+class _Holder:
+    @staticmethod
+    def activation(x):
+        return x
+
+
+def _renamed_in_place(x):
+    """Stays reachable under its own __name__; the test changes only its __qualname__."""
+    return x
+
+
+class TestCrossFamilyR88R98(unittest.TestCase):
+    """Cross-family GPT-6 R88..R98 (and SafeForge_HexaNTK R28..R34), the findings that hit
+    this module on main. XF-R88-M2: a callable's __module__/__qualname__ are writable, so
+    an instance or a renamed function encoded exactly like math.sin. XF-R34: a
+    load_state_dict hook could change what was loaded, while the record named the
+    snapshot's bytes as measured."""
+
+    @staticmethod
+    def _spoofs() -> dict:
+        class Instance:
+            def __call__(self, x):
+                return 42.0
+
+        instance = Instance()
+        instance.__module__, instance.__qualname__ = "math", "sin"
+
+        def renamed(x):
+            return 7.0
+
+        renamed.__module__, renamed.__qualname__, renamed.__name__ = "math", "sin", "sin"
+        # A module-level class claiming the place of torch.nn.Linear.
+        impostor = type("Impostor", (), {"__call__": lambda self, x: x})
+        impostor.__module__, impostor.__qualname__ = "torch.nn.modules.linear", "Linear"
+        return {"instance": instance, "renamed function": renamed, "renamed class": impostor}
+
+    def test_a_callable_must_be_reachable_by_its_name(self) -> None:
+        genuine = nt.state_dict_sha256({"_metadata": {"act": math.sin}})
+        for label, spoof in self._spoofs().items():
+            with self.subTest(spoof=label):
+                # Poisoning shown: the old encoding gave exactly the bytes of the genuine name.
+                self.assertIn(_v1_metadata_json({"act": spoof}),
+                              (_v1_metadata_json({"act": math.sin}), _v1_metadata_json({"act": torch.nn.Linear})))
+                with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+                    nt.state_dict_sha256({"_metadata": {"act": spoof}})
+                self.assertIn("no stable qualified name", str(ctx.exception))
+        self.assertEqual(nt.state_dict_sha256({"_metadata": {"act": math.sin}}), genuine)
+
+    def test_a_renamed_builtin_is_refused(self) -> None:
+        import cmath
+        original = cmath.sin.__module__
+        try:
+            cmath.sin.__module__ = "math"  # writable even on a builtin; the qualname is "sin"
+            self.assertEqual(_v1_metadata_json(cmath.sin), _v1_metadata_json(math.sin))
+            with self.assertRaises(nt.NTKTrajectoryError):
+                nt.state_dict_sha256({"_metadata": {"act": cmath.sin}})
+        finally:
+            cmath.sin.__module__ = original
+        nt.state_dict_sha256({"_metadata": {"act": cmath.sin}})  # restored: binds again
+
+    def test_a_qualname_that_differs_from_the_stored_name_is_refused(self) -> None:
+        # The module still holds the function under its __name__, but the encoded name
+        # would be a different one ("<module>.sin"): only the name it is reachable by binds.
+        original = _renamed_in_place.__qualname__
+        try:
+            _renamed_in_place.__qualname__ = "sin"
+            with self.assertRaises(nt.NTKTrajectoryError):
+                nt.state_dict_sha256({"_metadata": {"act": _renamed_in_place}})
+        finally:
+            _renamed_in_place.__qualname__ = original
+        self.assertEqual(nt._metadata_bytes("_metadata", _renamed_in_place), _v1_metadata_json(_renamed_in_place))
+
+    def test_genuine_callables_keep_their_v1_bytes(self) -> None:
+        # Positive control: torch.tanh reaches itself only as torch.tanh (its qualname is
+        # _VariableFunctionsClass.tanh), F.gelu and SpectralConv-like classes by qualname.
+        for value in (math.sin, torch.tanh, torch.relu, torch.nn.functional.gelu, torch.nn.Linear, np.sin, len,
+                      _module_level_activation, _Holder.activation, WithMetadata.META):
+            with self.subTest(value=repr(value)[:40]):
+                try:
+                    data = nt._metadata_bytes("_metadata", value)
+                except nt.NTKTrajectoryError as exc:
+                    self.fail(f"a genuine callable was refused: {exc}")
+                self.assertEqual(data, _v1_metadata_json(value))
+
+    def test_a_spoofed_callable_is_refused_as_a_checkpoint(self) -> None:
+        spoof = self._spoofs()["instance"]
+
+        class Spoofing(WithMetadata):
+            META = dict(WithMetadata.META, act=spoof)
+
+        ckpts = [(s, dict(st, _metadata=Spoofing.META)) for s, st in _states(a=[1.0, 2.0], b=[0.5, 0.5])]
+        with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+            _run(Spoofing(), ckpts)
+        self.assertIn("cannot be bound", str(ctx.exception))
+        # Positive control: the genuine metadata is measured.
+        ckpts = [(s, dict(st, _metadata=WithMetadata.META)) for s, st in _states(a=[1.0, 2.0], b=[0.5, 0.5])]
+        self.assertEqual(len(_run(WithMetadata(), ckpts).entries), 2)
+
+    def _hooked(self, mutate: bool) -> Product:
+        model = Product()
+
+        def post_hook(module, incompatible_keys):
+            if mutate:
+                with torch.no_grad():
+                    module.a.mul_(3.0)
+
+        model.register_load_state_dict_post_hook(post_hook)
+        return model
+
+    def test_a_load_hook_that_changes_the_state_is_refused(self) -> None:
+        ckpts = _states(a=[1.0, 2.0], b=[0.5, 0.5])
+        with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+            _run(self._hooked(True), ckpts)
+        self.assertIn("loaded model differs from the checkpoint", str(ctx.exception))
+        # Poisoning shown: the hook really changes what a plain load_state_dict leaves behind.
+        probe = self._hooked(True)
+        probe.load_state_dict(ckpts[1][1])
+        self.assertNotEqual(nt.state_dict_sha256(probe.state_dict()), nt.state_dict_sha256(ckpts[1][1]))
+
+    def test_a_load_override_that_changes_the_state_is_refused(self) -> None:
+        class Shifting(Product):
+            def load_state_dict(self, state_dict, strict=True, assign=False):
+                state_dict = dict(state_dict, a=state_dict["a"] + 1.0)
+                return super().load_state_dict(state_dict, strict=strict, assign=assign)
+
+        with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+            _run(Shifting(), _states(a=[1.0, 2.0], b=[0.5, 0.5]))
+        self.assertIn("loaded model differs from the checkpoint", str(ctx.exception))
+
+    def test_a_state_dict_that_hides_the_change_does_not_fool_the_check(self) -> None:
+        # The copy is read through its parameters, not through state_dict(), which is model
+        # code as well: here it undoes the shift on the way out, so the loaded copy would
+        # look like the checkpoint while the measurement runs at a + 1.
+        class Hiding(Product):
+            def load_state_dict(self, state_dict, strict=True, assign=False):
+                state_dict = dict(state_dict, a=state_dict["a"] + 1.0)
+                return super().load_state_dict(state_dict, strict=strict, assign=assign)
+
+            def state_dict(self, *args, **kwargs):
+                state = super().state_dict(*args, **kwargs)
+                state["a"] = state["a"] - 1.0
+                return state
+
+        ckpts = _states(a=[1.0, 2.0], b=[0.5, 0.5])
+        probe = Hiding()
+        probe.load_state_dict(ckpts[0][1])
+        self.assertEqual(nt.state_dict_sha256(probe.state_dict()), nt.state_dict_sha256(ckpts[0][1]))  # hidden
+        with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+            _run(Hiding(), ckpts)
+        self.assertIn("loaded model differs from the checkpoint", str(ctx.exception))
+
+    def test_a_state_key_that_is_no_parameter_or_buffer_is_refused(self) -> None:
+        # A custom _save_to_state_dict can add tensor keys that no parameter or buffer
+        # holds: what was loaded into them cannot be read back, so it is refused.
+        class Extra(Product):
+            def _save_to_state_dict(self, destination, prefix, keep_vars):
+                super()._save_to_state_dict(destination, prefix, keep_vars)
+                destination[prefix + "derived"] = (self.a * self.b).detach()
+
+            def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+                state_dict = {k: v for k, v in state_dict.items() if k != prefix + "derived"}
+                super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
+        ckpts = [(s, dict(st, derived=st["a"] * st["b"])) for s, st in _states(a=[1.0, 2.0], b=[0.5, 0.5])]
+        with self.assertRaises(nt.NTKTrajectoryError) as ctx:
+            _run(Extra(), ckpts)
+        self.assertIn("neither a parameter nor a buffer", str(ctx.exception))
+
+    def test_a_harmless_load_hook_is_measured(self) -> None:
+        # Positive control: the hook itself is allowed; only a change of the state is refused.
+        ckpts = _states(a=[1.0, 2.0], b=[0.5, 0.5])
+        try:
+            traj = _run(self._hooked(False), ckpts)
+        except nt.NTKTrajectoryError as exc:
+            self.fail(f"a load hook that changes nothing was refused: {exc}")
+        reference = _run(Product(), _states(a=[1.0, 2.0], b=[0.5, 0.5]))
+        for e, r in zip(traj.entries, reference.entries):
+            self.assertEqual((e.state_sha256, e.kernel_sha256), (r.state_sha256, r.kernel_sha256))
 
 
 if __name__ == "__main__":

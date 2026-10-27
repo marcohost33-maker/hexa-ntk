@@ -276,6 +276,19 @@ MUTANTS = (
            "test_ntk_trajectory_hex_v3.TestDriftRange"),
     Mutant(NT, " or _metadata_bytes(key, value) != _metadata_bytes(key, ref):\n", ":\n",
            "test_ntk_trajectory_hex_v3.TestConstructorMetadata"),
+    # 2026-10-26 XF-R88-M2 / XF-R34 (cross-family GPT-6 R88, R34): a callable binds only
+    # under a name that leads back to it; the loaded copy must give back the digest.
+    Mutant(NT, " and _names_itself(obj, module, qualname)):\n", "):\n",
+           "test_ntk_trajectory_hex_v3.TestCrossFamilyR88R98"),
+    Mutant(NT, "    if target is obj:\n", "    if True:\n", "test_ntk_trajectory_hex_v3.TestCrossFamilyR88R98"),
+    Mutant(NT, "qualname.rpartition(\".\")[2] == name", "True", "test_ntk_trajectory_hex_v3.TestCrossFamilyR88R98"),
+    Mutant(NT, "vars(namespace).get(name) is obj", "vars(namespace).get(name) is not None",
+           "test_ntk_trajectory_hex_v3.TestCrossFamilyR88R98"),
+    Mutant(NT, "        if _loaded_digest(twin, reference) != state_digest:\n", "        if False:\n",
+           "test_ntk_trajectory_hex_v3.TestCrossFamilyR88R98"),
+    Mutant(NT, "        if _loaded_digest(twin, reference) != state_digest:\n",
+           "        if state_dict_sha256(twin.state_dict()) != state_digest:\n",
+           "test_ntk_trajectory_hex_v3.TestCrossFamilyR88R98"),
 )
 
 
