@@ -37,9 +37,20 @@ _spec.loader.exec_module(engine)
 
 
 def _discovered_test_count(start_dir: Path) -> int:
-    """Number of test cases ``unittest discover`` finds under ``start_dir``."""
+    """Number of test cases ``unittest discover`` finds under ``start_dir``.
+
+    A module that fails to import is not a test case: discover counts it as one
+    placeholder and records the traceback in ``TestLoader.errors``. Comparing that
+    count with the README would report a stale README instead of the real cause
+    (e.g. torch missing: 336 instead of 971), so such modules fail here, named.
+    """
     loader = unittest.TestLoader()
     suite = loader.discover(start_dir=str(start_dir), pattern="test_*.py", top_level_dir=str(start_dir))
+    if loader.errors:
+        raise AssertionError(
+            f"{len(loader.errors)} test module(s) under {start_dir} did not import, so the count is not "
+            "the tree's count (install the test dependencies, e.g. torch, before comparing):\n"
+            + "\n".join(loader.errors))
     return suite.countTestCases()
 
 
