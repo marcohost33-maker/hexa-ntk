@@ -341,6 +341,11 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Offen
 
+- [ ] **Engine-Abdeckung als Gate? (Gesamtbericht 2026-10-27, HXB-09).** Gemessen, nicht gegated:
+  Branch-Coverage `src/hexantk_v3.py` 86 % (Engine-Gate allein) / 87 % (mit Toolkit-Tests),
+  `results/2026-10-27_gesamtbericht_local-gate.log`. Ob daraus ein eigener `fail_under` im CI wird
+  (eigene rcfile, die 95 %-Toolkit-Schwelle bleibt getrennt), entscheidet der Owner; jede CI-Aenderung
+  kostet Laeufe.
 - [ ] **Reality Anchor Phase 1 (#60): Owner-Freigabe der Vorregistrierung.**
   `spec/PREREGISTRATION_PHASE1_v1.md` ist ein DRAFT mit den Entscheidungen D1-D8 (Aufgaben-Konfig,
   Seeds, Stichprobengroessen, GINO-Raster/Budget, Hardware, BC-Achse nur periodisch in v1,

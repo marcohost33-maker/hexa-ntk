@@ -1,0 +1,73 @@
+# 2026-10-27 Gesamtbericht HexaNTK (Cross-Family, Coworker Research) -- local gate
+# Windows 11, Python 3.12.10, torch 2.6.0+cpu, numpy 2.5.3, coverage 7.16.2; ruff 0.17.0 via uvx
+# Chain = .github/workflows/ci.yml jobs gate + tests (cpu), from the repo root. NOT run: GINO lane (neuraloperator not installed locally; diff touches no GINO code).
+
+## Baseline @c5f5072 (origin/main, before the change)
+HEAD c5f5072b074dba44c519ba2f69696da52d33fed4 dirty=0
+All checks passed!
+RC ruff=0
+ruff file list contains engine: 0
+RC compileall=0
+[VERIFY-SOURCES] 48 Toolkit-Eintraege + 16 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (75 Dateien) | PASS
+RC verify_sources=0
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC engine_gate=0
+RC unittest=0
+Ran 971 tests in 163.679s
+OK (skipped=13)
+RC coverage_report=0
+TOTAL                                           5269    214   2010    158    95%
+RC blas_Prescott=0
+OK
+RC blas_Sandybridge=0
+OK
+RC blas_Haswell=0
+OK
+RC blas_Zen=0
+OK
+
+## Final
+HEAD 733961a3b97b489f801d2b9b982b9a6004033b77 dirty=0
+All checks passed!
+RC ruff=0
+ruff file list contains engine: 1
+RC compileall=0
+[VERIFY-SOURCES] 48 Toolkit-Eintraege + 16 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (75 Dateien) | PASS
+RC verify_sources=0
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC engine_gate=0
+RC unittest=0
+Ran 975 tests in 173.768s
+OK (skipped=13)
+RC coverage_report=0
+TOTAL                                           5269    214   2010    158    95%
+RC blas_Prescott=0
+OK
+RC blas_Sandybridge=0
+OK
+RC blas_Haswell=0
+OK
+RC blas_Zen=0
+OK
+
+## Engine coverage (separate measurement, not a gate; Gesamtbericht HXB-09)
+RC engine_gate_under_coverage=0
+engine_gate only: TOTAL                 708     80    150     29    86%
+RC unittest_under_engine_coverage=0
+engine_gate + toolkit tests: TOTAL                 708     71    150     27    87%
+ELAPSED 774s
+
+## Red first (new tests against the old behaviour, @364c6cf tests only, fixes not yet in)
+python -m unittest test_hex_timestep_contract.TestDocsContract  (from src/toolkit)
+FAIL test_engine_is_inside_the_lint_gate (pattern='src/hexantk_v3.py'): 'src/hexantk_v3.py' excludes src/hexantk_v3.py
+FAIL test_readme_phase0_table_matches_bound_record (case='hex-heat-torus'): '1.997' != '1.996'
+FAIL test_unimportable_test_module_is_named_not_counted: AssertionError not raised
+FAIL test_readme_unit_test_count_current x3 subtests: [971] != [975] (expected, README count follows the fix)
+positive control test_importable_tree_is_counted: ok
+Ran 13 tests, FAILED (failures=6)
+
+## Discrimination (G:/Meine Ablage/Vero/Tools/diskriminierung.py, ledger diskriminierung_runs.jsonl, pytest node targets)
+DK-20261027T212537-97709f89f9e6 6/7 @733961a VOLL: HXB-01 p 1.997, HXB-01b GCI_fine 4.5e-4, HXB-09 lint.exclude,
+  HXB-09b extend-exclude glob ./src/hexantk_*.py, HXB-09d per-file-ignores E/F/W, HXB-03 errors ignored -> DISKRIMINIERT;
+  HXB-09c ROT, ART-UNBESTIMMT: the forger itself was invalid TOML ("src\h" escape), red for the wrong reason
+DK-20261027T212829-77d6af27b23a 1/1 @733961a VOLL: HXB-09c2 extend-exclude ['src\hexantk_v3.py'] (TOML literal) -> DISKRIMINIERT
