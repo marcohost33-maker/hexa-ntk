@@ -332,12 +332,20 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   Platzhalter, `__main__` fail-closed via `sys.exit`) und byte-identisch hierher gesynct
   (git-Blob `3dd0b2af55bedd0b7385e9f6569ce84a0f89cc7c`, verifiziert `git hash-object` beide
   Repos). Ruff (E/F/W, line-length 120) auf der Engine jetzt clean (6→0). `src/hexantk_v3.py`
-  bleibt bewusst in `extend-exclude` (Pflege via coworker-dde, kein hiesiger Lint-Enforce —
-  verhindert, dass ein coworker-dde-Edit die HexaNTK-CI bricht); volle Lint-Enforcement wäre
-  optional und ist ein separater Entscheid. _Evidenz: coworker-dde-Fix-PR + Engine-Gate PASS._
+  blieb in `extend-exclude` (Pflege damals via coworker-dde, kein hiesiger Lint-Enforce —
+  verhinderte, dass ein coworker-dde-Edit die HexaNTK-CI bricht). **Nachtrag 2026-10-27
+  (Gesamtbericht HXB-09):** Issue #74 hat die Richtung umgekehrt (hexa-ntk kanonisch, Spiegel
+  nach coworker-dde), damit entfiel der Grund; die Engine ist jetzt im Lint-Gate (0 Befunde
+  @c5f5072, keine Engine-Bytes geaendert), festgehalten in
+  `TestDocsContract.test_engine_is_inside_the_lint_gate`. _Evidenz: coworker-dde-Fix-PR + Engine-Gate PASS._
 
 ## Offen
 
+- [ ] **Engine-Abdeckung als Gate? (Gesamtbericht 2026-10-27, HXB-09).** Gemessen, nicht gegated:
+  Branch-Coverage `src/hexantk_v3.py` 86 % (Engine-Gate allein) / 87 % (mit Toolkit-Tests),
+  `results/2026-10-27_gesamtbericht_local-gate.log`. Ob daraus ein eigener `fail_under` im CI wird
+  (eigene rcfile, die 95 %-Toolkit-Schwelle bleibt getrennt), entscheidet der Owner; jede CI-Aenderung
+  kostet Laeufe.
 - [ ] **Reality Anchor Phase 1 (#60): Owner-Freigabe der Vorregistrierung.**
   `spec/PREREGISTRATION_PHASE1_v1.md` ist ein DRAFT mit den Entscheidungen D1-D8 (Aufgaben-Konfig,
   Seeds, Stichprobengroessen, GINO-Raster/Budget, Hardware, BC-Achse nur periodisch in v1,
@@ -369,7 +377,10 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   externen Sitzung, die nie ins Repo kamen; sie sind **aus dem Repo nicht reproduzierbar** und
   gelten hier nur als Bericht, nicht als Evidenz. Neue Mutationsbehauptungen nur noch mit
   Skript im Repo (Beispiel: `scripts/mutation_probe.py`).
-- [ ] **`tests (cpu)` als Required Check.** Laut externem Bericht (2026-09-21) ist nur `gate`
+- [x] ~~**`tests (cpu)` als Required Check.**~~ Erledigt, gemessen 2026-10-27 (Gesamtbericht
+  NR-6): `gh api repos/marcohost33-maker/hexa-ntk/branches/main/protection/required_status_checks`
+  liefert `contexts = ["gate", "tests (cpu)"]`, `strict = true`. Nur ein Messpunkt: der
+  Branch-Schutz liegt ausserhalb des Repos. Historie: Laut externem Bericht (2026-09-21) war nur `gate`
   Required Check; ein roter Testjob blockiert den Merge also nicht. Nur der Repo-Owner kann das
   im Branch-Schutz aendern. Nachtrag 2026-10-07: ein Session-Handoff vom 2026-10-05 (Drive)
   meldet "Required gate + tests (cpu)" als gesetzt; aus dem Repo/der Agent-Sitzung nicht

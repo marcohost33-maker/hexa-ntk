@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import doctest
 import importlib.util
+import json
 import random
 import re
 import sys
@@ -33,6 +34,24 @@ engine = importlib.util.module_from_spec(_spec)
 # dataclasses resolve their module via sys.modules during class creation
 sys.modules[_spec.name] = engine
 _spec.loader.exec_module(engine)
+
+
+def _discovered_test_count(start_dir: Path) -> int:
+    """Number of test cases ``unittest discover`` finds under ``start_dir``.
+
+    A module that fails to import is not a test case: discover counts it as one
+    placeholder and records the traceback in ``TestLoader.errors``. Comparing that
+    count with the README would report a stale README instead of the real cause
+    (e.g. torch missing: 336 instead of 971), so such modules fail here, named.
+    """
+    loader = unittest.TestLoader()
+    suite = loader.discover(start_dir=str(start_dir), pattern="test_*.py", top_level_dir=str(start_dir))
+    if loader.errors:
+        raise AssertionError(
+            f"{len(loader.errors)} test module(s) under {start_dir} did not import, so the count is not "
+            "the tree's count (install the test dependencies, e.g. torch, before comparing):\n"
+            + "\n".join(loader.errors))
+    return suite.countTestCases()
 
 
 def _exact_l2(h: float, d: float, safety: float = 1.0) -> Fraction:
@@ -235,10 +254,7 @@ class TestDocsContract(unittest.TestCase):
         return [int(x) for x in (found[0] if isinstance(found[0], tuple) else (found[0],))]
 
     def test_readme_unit_test_count_current(self):
-        toolkit = _ROOT / "src" / "toolkit"
-        suite = unittest.defaultTestLoader.discover(
-            start_dir=str(toolkit), pattern="test_*.py", top_level_dir=str(toolkit))
-        n = suite.countTestCases()
+        n = _discovered_test_count(_ROOT / "src" / "toolkit")
         for pattern in (r"\| Toolkit-Tests \|[^\n]*\| (\d+) Tests, ",
                         r"# (\d+) Unit-Tests \(",
                         r"Toolkit-Unit-Tests \((\d+), Stand"):
@@ -272,6 +288,94 @@ class TestDocsContract(unittest.TestCase):
         self.assertIsNotNone(m)
         n = len(_ENGINE.read_text(encoding="utf-8").splitlines())
         self.assertEqual(int(m.group(1)), n)
+
+    # Gesamtbericht 2026-10-27 (HXB-01): the README Phase-0 table said p = 1.997 for
+    # hex-heat-torus while the bound PASS record holds 1.99648 (correctly rounded 1.996).
+    # Every p and GCI_fine cell of the table is pinned to that record, per case name.
+    _PHASE0_RECORD = "results/2026-10-12_phase0_reference_i1-v2.json"
+
+    def test_readme_phase0_table_matches_bound_record(self):
+        readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"`{self._PHASE0_RECORD}`", readme)
+        studies = json.loads((_ROOT / self._PHASE0_RECORD).read_text(encoding="utf-8"))["studies"]
+        cases = ("hex-heat-tri", "hex-heat-torus", "hex-mms-tri")
+        self.assertEqual(sorted(studies), sorted(cases))
+        for case in cases:
+            with self.subTest(case=case):
+                rows = re.findall(
+                    r"^\| `" + re.escape(case) + r"` \|[^\n]*?\| (\d\.\d{3}) / (\d\.\d{3}) \| "
+                    r"(\d\.\de-\d+) / [^|\n]+\|", readme, flags=re.MULTILINE)
+                self.assertEqual(len(rows), 1, f"README Phase-0 row for {case}: {len(rows)} found")
+                p_fine, p_coarse, gci_fine = rows[0]
+                study = studies[case]
+                self.assertEqual(p_fine, f"{study['celik_fine']['observed_order']:.3f}")
+                self.assertEqual(p_coarse, f"{study['celik_coarse']['observed_order']:.3f}")
+                self.assertEqual(gci_fine, f"{study['celik_fine']['gci_fine']:.1e}".replace("e-0", "e-"))
+
+    # Gesamtbericht 2026-10-27 (HXB-09): the engine was kept out of the lint gate while
+    # its canonical home was open (Issue #74). Issue #74 decided it: this repo is
+    # canonical, edits land here first, so `ruff check src` must see the engine. Every
+    # place ruff reads an exclusion from is checked, not only the one that held it.
+    def test_engine_is_inside_the_lint_gate(self):
+        import fnmatch
+        import tomllib
+        engine = "src/hexantk_v3.py"
+        for name in ("ruff.toml", ".ruff.toml", "src/ruff.toml", "src/.ruff.toml", "src/pyproject.toml"):
+            with self.subTest(config=name):
+                self.assertFalse((_ROOT / name).exists(), f"{name} would override pyproject.toml for ruff")
+        ruff = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8")).get("tool", {}).get("ruff", {})
+        lint = ruff.get("lint", {})
+        patterns = [*ruff.get("exclude", []), *ruff.get("extend-exclude", []),
+                    *lint.get("exclude", []), *lint.get("extend-exclude", [])]
+        for pattern in patterns:
+            norm = pattern.replace("\\", "/").removeprefix("./")
+            with self.subTest(pattern=pattern):
+                self.assertFalse(fnmatch.fnmatch(engine, norm) or fnmatch.fnmatch("hexantk_v3.py", norm)
+                                 or engine.startswith(norm.rstrip("/") + "/"), f"{pattern!r} excludes {engine}")
+        for key, codes in {**lint.get("per-file-ignores", {}), **lint.get("extend-per-file-ignores", {})}.items():
+            norm = key.replace("\\", "/").removeprefix("./")
+            if fnmatch.fnmatch(engine, norm) or fnmatch.fnmatch("hexantk_v3.py", norm):
+                with self.subTest(per_file_ignores=key):
+                    self.assertFalse({"E", "F", "W", "ALL"} & set(codes), f"{key!r} ignores {codes} on the engine")
+        ci = (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertRegex(ci, r"run: ruff check src scripts\b")
+
+    # Gesamtbericht 2026-10-27 (HXB-03): without torch, 16 test modules do not import and
+    # the README count check failed as "971 != 336" -- a count mismatch that reads like a
+    # stale README. Unimportable modules must be named as what they are.
+    def test_unimportable_test_module_is_named_not_counted(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "test_hxb03_probe_ok.py").write_text(
+                "import unittest\n\nclass T(unittest.TestCase):\n    def test_a(self):\n        pass\n",
+                encoding="utf-8")
+            Path(tmp, "test_hxb03_probe_broken.py").write_text(
+                "import hxb03_module_that_does_not_exist  # noqa: F401\n", encoding="utf-8")
+            try:
+                with self.assertRaises(AssertionError) as caught:
+                    _discovered_test_count(Path(tmp))
+            finally:
+                for name in ("test_hxb03_probe_ok", "test_hxb03_probe_broken"):
+                    sys.modules.pop(name, None)
+                while tmp in sys.path:
+                    sys.path.remove(tmp)
+        message = str(caught.exception)
+        self.assertIn("test_hxb03_probe_broken", message)
+        self.assertNotIn("test_hxb03_probe_ok", message)
+        self.assertIn("hxb03_module_that_does_not_exist", message)
+
+    def test_importable_tree_is_counted(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "test_hxb03_probe_two.py").write_text(
+                "import unittest\n\nclass T(unittest.TestCase):\n    def test_a(self):\n        pass\n\n"
+                "    def test_b(self):\n        pass\n", encoding="utf-8")
+            try:
+                self.assertEqual(_discovered_test_count(Path(tmp)), 2)
+            finally:
+                sys.modules.pop("test_hxb03_probe_two", None)
+                while tmp in sys.path:
+                    sys.path.remove(tmp)
 
 
 if __name__ == "__main__":

@@ -849,3 +849,4 @@
 | FC13DACF636BF129 | 2026-10-26 10:29 | spec | XF-R34: section 2 post-load binding reads parameters and buffers, states what it does not cover; section 5 evidence: NTK_TRAJECTORY_v1.md |
 | D62226D620FF9384 | 2026-10-26 10:29 | scripts | XF-R34 mutants retargeted to _loaded_digest, plus the state_dict()-readback mutant: mutation_probe.py |
 | F47264833DBB1EF0 | 2026-10-26 10:53 | src/toolkit | two blind tests sharpened to their guard's message (full mutation probe 2026-10-26: M62 dtype guard masked by the XF-R34 post-load check, M76 non-str key guard masked by the R87-P2 budget len(k) since 30e7ba2): test_ntk_trajectory_hex_v3.py |
+| 150567E3334A524F | 2026-10-27 22:40 | src/toolkit | Gesamtbericht 2026-10-27: README Phase-0 table pinned to the bound record (HXB-01), engine inside the lint gate (HXB-09), unimportable test modules named instead of counted (HXB-03): test_hex_timestep_contract.py |
