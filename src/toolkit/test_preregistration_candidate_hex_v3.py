@@ -118,6 +118,14 @@ class TestApprovalCandidate20261029(unittest.TestCase):
         self.assertLessEqual(_budget_hours(cost, int(epochs[0])), float(budget[0]))
         fixed = re.findall(r"batch size `(\d+)`, `(\d+)` training samples", paragraph)
         self.assertEqual(fixed, [(str(cost["data"]["batch_size"]), str(cost["data"]["n_train"]))])
+        # Self-check (same class one level up): the prose numbers that come from the JSON are bound too.
+        protocol = re.findall(r"median of (\d+) timed epochs after (\d+) untimed warm-up steps; validation "
+                              r"pass = (\d+) samples", paragraph)
+        self.assertEqual(protocol, [(str(cost["protocol"]["measured_epochs"]), str(cost["protocol"]["warmup_steps"]),
+                                     str(cost["data"]["n_val"]))])
+        modes = sorted({(c["latent_resolution"], c["n_modes"]) for c in cost["configs"]})
+        self.assertEqual(re.findall(r"\((\d+) and (\d+); the default 12 is refused", paragraph),
+                         [tuple(str(m) for _, m in modes)])
 
     def test_machine_table_matches_the_measurement(self):
         cost = _load(_COST)
