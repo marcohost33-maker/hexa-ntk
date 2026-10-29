@@ -1,0 +1,74 @@
+# 2026-10-29 Preregistration Phase 1: D4/D5 approval candidate (no decision) -- local gate
+# Windows 11, Python 3.12.10, torch 2.6.0+cpu, numpy 2.5.3, coverage 7.16.2; ruff 0.17.0 via uvx
+# Chain = .github/workflows/ci.yml jobs gate + tests (cpu), from the repo root, venv WITHOUT neuraloperator (as the CI tests job);
+# GINO lane (gino-smoke.yml test_gino_adapter_hex_v3.py) in a separate venv with neuraloperator 2.0.0.
+
+## Baseline @a19c992 (origin/main, before the change)
+HEAD a19c9922dc9716af65d8cbf50c2df63155bd6467 dirty=0
+python 3.12.10 torch 2.6.0+cpu numpy 2.5.3 coverage 7.16.2
+All checks passed!
+RC ruff=0
+RC compileall=0
+[VERIFY-SOURCES] 48 Toolkit-Eintraege + 16 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (75 Dateien) | PASS
+RC verify_sources=0
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC engine_gate=0
+RC unittest=0
+----------------------------------------------------------------------
+Ran 975 tests in 120.691s
+OK (skipped=13)
+TOTAL                                           5269    214   2010    158    95%
+RC coverage_report=0
+OK
+RC blas_Prescott=0
+OK
+RC blas_Sandybridge=0
+OK
+RC blas_Haswell=0
+OK
+RC blas_Zen=0
+ELAPSED 209s
+
+## Final
+HEAD 77066e640f50cbda03c4549f22f55583d071e6ff dirty=0
+python 3.12.10 torch 2.6.0+cpu numpy 2.5.3 coverage 7.16.2
+All checks passed!
+RC ruff=0
+RC compileall=0
+[VERIFY-SOURCES] 49 Toolkit-Eintraege + 16 Spec-Eintraege + 12 Script-Eintraege | Dateiliste: git (77 Dateien) | PASS
+RC verify_sources=0
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC engine_gate=0
+RC unittest=0
+----------------------------------------------------------------------
+Ran 984 tests in 56.270s
+OK (skipped=13)
+TOTAL                                           5269    214   2010    158    95%
+RC coverage_report=0
+OK
+RC blas_Prescott=0
+OK
+RC blas_Sandybridge=0
+OK
+RC blas_Haswell=0
+OK
+RC blas_Zen=0
+ELAPSED 103s
+## GINO lane @77066e6 (neuraloperator 2.0.0)
+RC gino_lane=0
+Ran 26 tests in 7.367s
+OK
+
+## Evidence measurement (synthetic tensors, no T1 data)
+python scripts/oracles/gino_epoch_cost_synthetic.py --threads 4 --output results/2026-10-29_gino_epoch_cost_synthetic.json
+@35f82dc, RC bench=0, source bound, 20:28:10 -> 21:46:42 local time
+
+## Discrimination (G:/Meine Ablage/Vero/Tools/diskriminierung.py, ledger diskriminierung_runs.jsonl, pytest node targets)
+DK-20261029T205317-8b13283d092a 15/15 @110409d VOLL: one number of the candidate paragraph changed per mutant (radius cell, grid s/epoch and
+  val pass, worst-case hours, E, D5 cpu, status line APPROVED, load, margin over budget, proposed radius, source sha, neighbours,
+  epoch range, measured-budget verdict, radius row removed) -> DISKRIMINIERT
+DK-20261029T205452-f53801c2b289 4/4 @77066e6 VOLL: prose numbers (warm-up steps, validation samples, n_modes, timed epochs) -> DISKRIMINIERT
+
+## NOT run
+- radius-tie survey re-run on this machine (scratchpad output only): stopped by the harness for low system memory, not by the script; the 2026-10-20 survey records no CPU model (open point in the paragraph).
+- Linux/CI: no push, CI not run (lokal gruen, CI offen).
