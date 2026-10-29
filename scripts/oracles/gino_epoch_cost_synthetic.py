@@ -14,8 +14,8 @@ tensors". This script stays on that side of the line:
   (``build_gino``, ``predict_gino``), loss relative L2, Adam, cosine schedule,
   as in preregistration section 3.
 
-For every grid configuration it times one warm-up epoch and ``--repeats``
-measured epochs of ``--n-train`` samples (1800 = the 90 % train split of D3)
+For every grid configuration it runs ``--warmup-steps`` untimed minibatches,
+then times ``--repeats`` measured epochs of ``--n-train`` samples (1800 = the 90 % train split of D3)
 at ``--batch-size``, plus a no-grad pass over ``--n-val`` samples, and reports
 the median. The numbers are wall-clock seconds on THIS machine at the given
 thread count; they are a cost estimate for budgeting the D4 epoch count, not
@@ -167,39 +167,48 @@ def _time_config(width: int, latent: int, lr: float, args, lattice, u0, target, 
     model.train()
     n_params = sum(p.numel() for p in model.parameters())
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    epochs = args.warmup + args.repeats
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.repeats)
     shuffle = torch.Generator().manual_seed(SHUFFLE_SEED)
+
+    def step(index: torch.Tensor) -> float:
+        optimizer.zero_grad(set_to_none=True)
+        loss = _relative_l2(predict_gino(model, lattice, u0[index], config), target[index])
+        loss.backward()
+        optimizer.step()
+        return float(loss.detach())
+
+    # Warm-up: the first --warmup-steps minibatches, untimed (allocator, kernel selection).
+    order = torch.randperm(args.n_train, generator=shuffle)
+    start = time.perf_counter()
+    for k in range(args.warmup_steps):
+        first = (k * args.batch_size) % args.n_train
+        step(order[first:first + args.batch_size])
+    warmup_seconds = time.perf_counter() - start
     epoch_seconds, losses = [], []
-    for _ in range(epochs):
+    for _ in range(args.repeats):
         order = torch.randperm(args.n_train, generator=shuffle)
         start = time.perf_counter()
         last = math.nan
         for first in range(0, args.n_train, args.batch_size):
-            index = order[first:first + args.batch_size]
-            optimizer.zero_grad(set_to_none=True)
-            loss = _relative_l2(predict_gino(model, lattice, u0[index], config), target[index])
-            loss.backward()
-            optimizer.step()
-            last = float(loss.detach())
+            last = step(order[first:first + args.batch_size])
         scheduler.step()
         epoch_seconds.append(time.perf_counter() - start)
         losses.append(last)
     val_seconds = []
     model.eval()
-    for _ in range(args.warmup + args.repeats):
+    for _ in range(1 + args.repeats):
         start = time.perf_counter()
         with torch.no_grad():
             for first in range(0, args.n_val, args.batch_size):
                 predict_gino(model, lattice, u0_val[first:first + args.batch_size], config)
         val_seconds.append(time.perf_counter() - start)
-    measured = epoch_seconds[args.warmup:]
-    measured_val = val_seconds[args.warmup:]
+    measured = epoch_seconds
+    measured_val = val_seconds[1:]
     return {
         "hidden_channels": width, "latent_resolution": latent, "n_modes": N_MODES[latent],
         "n_layers": N_LAYERS, "radius_factor": RADIUS_FACTOR, "learning_rate": lr,
         "config_digest": config.digest(), "n_parameters": int(n_params),
-        "warmup_epoch_seconds": epoch_seconds[:args.warmup],
+        "warmup_steps_seconds": warmup_seconds, "warmup_val_pass_seconds": val_seconds[0],
         "epoch_seconds": measured, "epoch_seconds_median": statistics.median(measured),
         "val_pass_seconds": measured_val, "val_pass_seconds_median": statistics.median(measured_val),
         "last_batch_loss_per_epoch": losses,
@@ -247,7 +256,8 @@ def build_report(args, argv: list[str]) -> dict:
                  "geometry": f"triangle_hex_lattice({_TRAINING_N}), {n_nodes} nodes",
                  "n_train": args.n_train, "n_val": args.n_val, "batch_size": args.batch_size,
                  "steps_per_epoch": math.ceil(args.n_train / args.batch_size)},
-        "protocol": {"warmup_epochs": args.warmup, "measured_epochs": args.repeats, "statistic": "median",
+        "protocol": {"warmup_steps": args.warmup_steps, "warmup_val_passes": 1,
+                     "measured_epochs": args.repeats, "statistic": "median",
                      "clock": "time.perf_counter", "optimizer": "Adam", "schedule": "CosineAnnealingLR",
                      "loss": "relative L2 (mean over batch)"},
         "configs": configs,
@@ -263,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--threads", type=_positive(int), required=True, help="torch.set_num_threads")
     parser.add_argument("--repeats", type=_positive(int), default=3)
-    parser.add_argument("--warmup", type=_positive(int), default=1)
+    parser.add_argument("--warmup-steps", type=_positive(int), default=10)
     parser.add_argument("--n-train", type=_positive(int), default=1800)
     parser.add_argument("--n-val", type=_positive(int), default=200)
     parser.add_argument("--batch-size", type=_positive(int), default=20)
