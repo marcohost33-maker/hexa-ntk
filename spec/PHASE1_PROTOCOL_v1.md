@@ -416,7 +416,9 @@ latency (unchanged); `break_even_at_equal_accuracy(training_time_s,
 data_generation_time_s, gino_upper_rel_l2, gino_latency_s, baseline_times_s,
 baseline_errors)` (added 2026-10-30, issue #82) recomputes that latency from the
 baseline frontier at the GINO upper error bound instead of accepting it, and
-returns `None` where the equal-accuracy rule is not evaluable.
+returns `None` where the equal-accuracy rule is not evaluable -- including an
+upper bound of 0 (an all-zero error table, which the decision path accepts and
+which lies below the positive baseline floor; Codex review of #93).
 
 ## 7. Run manifest (preregistration section 7)
 
@@ -459,7 +461,9 @@ tree is dirty; a dirty tree is recorded, not hidden.
   overflowed in their intermediate sums (issue #82 F-E5: `IQM([1e308] * 3)` was
   `inf`, the median of two durations of 1.5e308 s too); since 2026-10-30 such a
   statistic is recomputed on a copy scaled by an exact power of two and scaled
-  back, and only where the plain evaluation was non-finite, so every finite
+  back, and only the entries whose plain evaluation was non-finite are replaced
+  (per row for a row-wise statistic: rescaling every row underflowed a row of
+  5e-324 to 0 next to one overflowing row, Codex review of #93), so every finite
   result is unchanged bit for bit;
 - all randomness comes from an explicit seed; two calls with the same
   arguments return identical numbers.

@@ -229,7 +229,10 @@ def _finite_stat(fn: Callable[..., Any], arr: np.ndarray, **kwargs: Any) -> Any:
     statistic is recomputed on a copy scaled by a power of two small enough
     for every intermediate to stay finite, and scaled back; both scalings are
     exact (outside the subnormal range). Wherever the plain evaluation is
-    finite its result is returned unchanged, bit for bit.
+    finite its result is returned unchanged, bit for bit -- also per element:
+    only the non-finite entries of a row-wise result are replaced (Codex on
+    #93: rescaling every row underflowed a row of 5e-324 to 0 next to one
+    overflowing row).
     """
     with np.errstate(over="ignore", invalid="ignore"):
         out = fn(arr, **kwargs)
@@ -238,7 +241,9 @@ def _finite_stat(fn: Callable[..., Any], arr: np.ndarray, **kwargs: Any) -> Any:
     axis = kwargs.get("axis")
     n = arr.size if axis is None else arr.shape[axis]
     scale = 2.0 ** -(max(1, int(n)).bit_length() + 1)
-    return fn(arr * scale, **kwargs) / scale
+    with np.errstate(under="ignore"):
+        fallback = fn(arr * scale, **kwargs) / scale
+    return np.where(np.isfinite(out), out, fallback)
 
 
 def _percentile_interval(stats: np.ndarray, confidence: float) -> Tuple[float, float]:
@@ -1473,11 +1478,14 @@ def break_even_at_equal_accuracy(
     evaluable (bound below the baseline floor or above its coarsest error: no
     extrapolation) or where GINO is not faster.
     """
-    upper = _positive_float(gino_upper_rel_l2, name="gino_upper_rel_l2")
+    # >= 0 like gino.high in the decision path: an all-zero error table gives 0,
+    # which lies below the (positive) baseline floor -> not evaluable, None
+    # (Codex on #93: a positive-only check raised ValueError there).
+    upper = _non_negative_float(gino_upper_rel_l2, name="gino_upper_rel_l2")
     _, ft, fe = _frontier_arrays(baseline_times_s, baseline_errors)
-    t_base = time_at_error(ft, fe, upper)
-    if t_base is None:
+    if upper < float(fe[-1]) or upper > float(fe[0]):
         return None
+    t_base = time_at_error(ft, fe, upper)  # inside [floor, coarsest]: never None
     return break_even_queries(training_time_s, data_generation_time_s, gino_latency_s, t_base)
 
 

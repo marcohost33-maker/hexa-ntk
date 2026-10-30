@@ -378,8 +378,8 @@ MUTANTS = (
     Mutant(P1, "    if np.all(np.isfinite(out)):\n        return out\n", "    return out\n", I82),
     Mutant(P1, "    scale = 2.0 ** -(max(1, int(n)).bit_length() + 1)\n", "    scale = 0.5\n", I82),
     Mutant(P1, "        if not isinstance(dirty, bool):\n", "        if False:\n", I82),
-    Mutant(P1, "    if t_base is None:\n        return None\n    return break_even_queries(",
-           "    return break_even_queries(", I82),
+    Mutant(P1, "    if upper < float(fe[-1]) or upper > float(fe[0]):\n        return None\n", "", I82),
+    Mutant(P1, "    return np.where(np.isfinite(out), out, fallback)\n", "    return fallback\n", I82),
 )
 
 

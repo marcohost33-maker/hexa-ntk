@@ -1813,6 +1813,15 @@ class TestIssue82Residuals(unittest.TestCase):
         for value in (summary.point, summary.low, summary.high):
             self.assertTrue(math.isclose(value, 1.7e308, rel_tol=8 * 2.0 ** -52), value)
 
+    def test_only_the_overflowing_rows_are_recomputed(self):
+        # Codex on #93: one overflowing seed row must not rescale (and underflow) the others
+        errors = np.array([[1e308] * 3] + [[5e-324] * 3] * 4)
+        summary = pp.paired_bootstrap_iqm(errors, sample_ids=[0, 1, 2], n_resamples=20)[""]
+        self.assertEqual(summary.point, 5e-324)
+        rows = pp._finite_stat(np.mean, errors, axis=1)
+        self.assertEqual(rows[1:].tolist(), [5e-324] * 4)
+        self.assertTrue(math.isclose(rows[0], 1e308, rel_tol=8 * 2.0 ** -52))
+
     def test_quantile_of_opposite_huge_values_is_finite(self):
         low, high = pp._percentile_interval(np.array([-1.7e308, 1.7e308]), 0.95)
         self.assertTrue(math.isfinite(low) and math.isfinite(high))
@@ -1842,8 +1851,11 @@ class TestIssue82Residuals(unittest.TestCase):
         self.assertIsNone(pp.break_even_at_equal_accuracy(10.0, 0.0, 0.05, 1.0, times, errors))  # below floor
         self.assertIsNone(pp.break_even_at_equal_accuracy(10.0, 0.0, 0.5, 1.0, times, errors))  # above coarsest
         self.assertIsNone(pp.break_even_at_equal_accuracy(10.0, 0.0, 0.2, 3.0, times, errors))  # GINO slower
-        with self.assertRaises(ValueError):
-            pp.break_even_at_equal_accuracy(10.0, 0.0, 0.0, 1.0, times, errors)
+        # Codex on #93: an all-zero error table gives upper 0, below the floor -> None, not an error
+        self.assertIsNone(pp.break_even_at_equal_accuracy(10.0, 0.0, 0.0, 1.0, times, errors))
+        for bad in (-0.1, float("nan")):
+            with self.assertRaises(ValueError):
+                pp.break_even_at_equal_accuracy(10.0, 0.0, bad, 1.0, times, errors)
 
     # P3: documentation claims.
     def test_docs_name_the_real_dependencies_and_bootstrap(self):
