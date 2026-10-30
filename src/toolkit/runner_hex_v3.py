@@ -849,14 +849,21 @@ class HexTrainingRunner:
             raise
 
     def _rescue_oom(self, batch: Optional[Dict[str, Any]]) -> None:
-        """OOM rescue: GC + CUDA cache (order matters), then capsule + FailureSignature."""
-        logger.critical(
-            "CUDA OOM at step %d! Attempting rescue...",
-            self.global_step,
-        )
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        """OOM rescue: GC + CUDA cache (order matters), then capsule + FailureSignature.
+
+        Never raises: distributed, it runs on the failing rank before the
+        agreement, and a rank that left there would hang its peers.
+        """
+        try:
+            logger.critical(
+                "CUDA OOM at step %d! Attempting rescue...",
+                self.global_step,
+            )
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            logger.error("OOM rescue: freeing memory failed")
         # Now safe to dump capsule
         try:
             cap_path = dump_replay_capsule_safe(

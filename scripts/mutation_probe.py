@@ -342,6 +342,10 @@ MUTANTS = (
            "        mine = _config_digest(config)\n", T2),
     Mutant(RU, "            if _is_oom(exc):\n                # Preparing runs",
            "            if False:\n                # Preparing runs", "test_ddp_hex_v3.TestWorldSizeOne"),
+    # Review round 3: the OOM rescue never raises (it runs before the agreement).
+    Mutant(RU, "        except Exception:\n            logger.error(\"OOM rescue: freeing memory failed\")\n",
+           "        except ZeroDivisionError:\n            logger.error(\"OOM rescue: freeing memory failed\")\n",
+           "test_ddp_hex_v3.TestWorldSizeOne"),
     # Per-rank RNG streams across a resume (dropout + rank seeds must continue).
     Mutant(RU, "        if self.dist is not None:\n            self._restore_rank_rng(report)\n",
            "        pass\n", T2),

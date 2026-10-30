@@ -137,7 +137,11 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    the EMA copy is broadcast from rank 0, after checking that the buffers' names,
    dtypes and shapes agree (a broadcast of differently sized buffers is no exception
    but a process abort -- gloo `EnforceNotMet`, SIGABRT -- e.g. a non-persistent cache
-   following the last batch under `broadcast_buffers=False`; review round 2). DDP broadcasts rank 0's buffers at the start of each forward, but the
+   following the last batch under `broadcast_buffers=False`; review round 2).
+   *Behaviour change, deliberate:* such a setup (rank-dependent buffer shapes) ran
+   before this contract; it is now refused at the first validation, with a
+   `DistributedContractError` on every rank -- a pooled metric over different
+   buffers would belong to no single model, and the broadcast would abort. DDP broadcasts rank 0's buffers at the start of each forward, but the
    training forward then updates them with the local batch (BatchNorm running
    statistics) and the EMA copy averages those local buffers: without the sync the
    ranks evaluated different models, the pooled metric belonged to none of them,

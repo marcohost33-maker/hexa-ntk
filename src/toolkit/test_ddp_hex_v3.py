@@ -16,6 +16,7 @@ Three layers:
 """
 from __future__ import annotations
 
+import gc
 import json
 import math
 import os
@@ -438,6 +439,27 @@ class TestWorldSizeOne(unittest.TestCase):
             runner._prepare_step = oom
             with self.assertRaisesRegex(RuntimeError, "out of memory"):
                 runner.run()
+            self.assertTrue(list(runner.failure_dir.glob("*CUDA_OOM*.json")))
+
+    def test_oom_rescue_never_raises(self) -> None:
+        # Review round 3: a rescue that raised would leave the agreement early.
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp), distributed=True)
+
+            def oom(batch: Any) -> Any:
+                raise RuntimeError("CUDA out of memory (injected)")
+
+            def broken_gc() -> int:
+                raise MemoryError("gc failed (injected)")
+
+            runner._prepare_step = oom
+            original_gc = gc.collect
+            gc.collect = broken_gc
+            try:
+                with self.assertRaisesRegex(RuntimeError, "out of memory"):
+                    runner.run()
+            finally:
+                gc.collect = original_gc
             self.assertTrue(list(runner.failure_dir.glob("*CUDA_OOM*.json")))
 
     def test_effective_amp_names_scaler_and_dtype(self) -> None:
