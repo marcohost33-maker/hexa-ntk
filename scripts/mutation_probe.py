@@ -55,6 +55,7 @@ NT = "ntk_trajectory_hex_v3.py"
 DDP = "ddp_hex_v3.py"
 T2 = "test_ddp_hex_v3.TestTwoRanks"
 I82 = "test_phase1_protocol_hex_v3.TestIssue82Residuals"
+ME = "test_mid_epoch_resume_hex_v3.TestMidEpochResume"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -352,6 +353,21 @@ MUTANTS = (
            "        pass\n", T2),
     Mutant(RU, "        rank_rng = self._gather_rank_rng_states() if save_state else None\n",
            "        rank_rng = None\n", T2),
+    # Mid-epoch resume (spec/MID_EPOCH_RESUME_v1.md): interrupted == uninterrupted.
+    Mutant(RU, "        if mid is not None:\n            restore_rng_state_tensors(self._resume_rng_at_step)\n",
+           "        if False:\n            restore_rng_state_tensors(self._resume_rng_at_step)\n", ME),
+    Mutant(RU, '            torch.random.set_rng_state(mid["epoch_start"]["torch_rng"].cpu())\n', "", ME),
+    Mutant(RU, "                if state is not None:\n                    gen.set_state(state.cpu())\n",
+           "                pass\n", ME),
+    Mutant(RU, '        epoch_losses: List[float] = list(mid["losses"]) if mid is not None else []\n',
+           "        epoch_losses: List[float] = []\n", ME),
+    Mutant(RU, '            self.anomaly_detector.loss_history.extend(_float_list(history, "anomaly_history"))\n',
+           "            pass\n", ME),
+    Mutant(RU, "            for done in range(skip):\n", "            for done in range(0):\n", ME),
+    Mutant(RU, "    if len(losses) + n_anomalies != done or len(grad_norms) > len(losses):\n", "    if False:\n",
+           "test_mid_epoch_resume_hex_v3.TestMidEpochRecord"),
+    Mutant(RU, '    if record.get("world_size") != world_size:\n', "    if False:\n",
+           "test_mid_epoch_resume_hex_v3.TestMidEpochRecord"),
     # The same contract, pinned in-process (world size 1 and no process group).
     Mutant(RU, "            best_report = self.ckpt_mgr.save_best_model_checkpoint(\n"
            "                model=self.raw_model,",

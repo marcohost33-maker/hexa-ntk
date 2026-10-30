@@ -862,6 +862,59 @@ def _sc_effective_amp_differs(rank: int, world: int, out: Path) -> Any:
         _ddp_runner(rank, out, train=_train_loader(rank, world), val=_exact_val_loader(), num_epochs=1)
     finally:
         HexTrainingRunner._effective_amp = original
+class _BNDrop(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        torch.manual_seed(0)
+        self.net = nn.Sequential(nn.Linear(3, 8, dtype=torch.float64), nn.BatchNorm1d(8, dtype=torch.float64),
+                                 nn.Tanh(), nn.Dropout(0.3), nn.Linear(8, 2, dtype=torch.float64))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+def _sc_mid_epoch_resume(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """Mid-epoch resume under DDP: BatchNorm + dropout + rank seeds, crash inside epoch 1."""
+
+    class Crash(RuntimeError):
+        pass
+
+    def runner(directory: Path, crash_at: int = -1, **kw: Any) -> HexTrainingRunner:
+        model = DDP(_BNDrop())
+        torch.manual_seed(1000 + rank)
+        r = HexTrainingRunner(
+            _config(directory, distributed=True, is_main_process=rank == 0, num_epochs=4,
+                    save_every_n_steps=3, **kw),
+            model, torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9),
+            _train_loader(rank, world, shuffle=True), _exact_val_loader(),
+        )
+        if crash_at >= 0:
+            original = r._train_one_step
+
+            def crashing(batch: Any, prepared: Any = None) -> Any:
+                if r.global_step == crash_at:  # every rank: a preemption of the whole job
+                    raise Crash("injected preemption")
+                return original(batch, prepared)
+
+            r._train_one_step = crashing
+        return r
+
+    full = runner(out / "full")
+    reference = full.run()
+    try:
+        runner(out / "split", crash_at=3).run()  # after the mid-epoch save at step 3
+    except Crash:
+        pass
+    resumed = runner(out / "split", resume_from=str(out / "split" / "checkpoints" / "resume_last.pt"),
+                     resume_trusted=True)
+    result = resumed.run()
+    return {
+        "full": _digest(full.raw_model) + _buffer_digest(full.ema_model),
+        "resumed": _digest(resumed.raw_model) + _buffer_digest(resumed.ema_model),
+        "batches_done": result["resume_report"]["mid_epoch_batches_done"],
+        "same_reports": result["history"]["train"] == reference["history"]["train"][1:]
+        and result["history"]["val"] == reference["history"]["val"][1:],
+    }
 
 
 def _sc_save_failure_rank0(rank: int, world: int, out: Path) -> Any:
@@ -978,6 +1031,7 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "save_failure_rank0": _sc_save_failure_rank0,
     "buffer_shape_mismatch": _sc_buffer_shape_mismatch,
     "effective_amp_differs": _sc_effective_amp_differs,
+    "mid_epoch_resume": _sc_mid_epoch_resume,
     "bn_buffers": _sc_bn_buffers,
     "bn_resume": _sc_bn_resume,
     "prepare_error_bn": _sc_prepare_error_bn,
@@ -1161,6 +1215,11 @@ class TestTwoRanks(unittest.TestCase):
 
     def test_effective_amp_difference_fails_both(self) -> None:
         self.assertEqual(self._errors("effective_amp_differs"), ["DistributedContractError"] * 2)
+    def test_mid_epoch_resume_reproduces_the_uninterrupted_run(self) -> None:
+        for value in self._ok("mid_epoch_resume"):
+            self.assertEqual(value["batches_done"], 1)
+            self.assertEqual(value["full"], value["resumed"])
+            self.assertTrue(value["same_reports"])
 
     def test_checkpoint_write_failure_on_rank0_fails_both(self) -> None:
         self.assertEqual(self._errors("save_failure_rank0"), ["OSError", "PeerRankError"])

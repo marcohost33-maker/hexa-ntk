@@ -123,6 +123,70 @@ def _config_digest(config: "RunnerConfig") -> bytes:
     payload = json.dumps(fields, sort_keys=True, default=repr).encode("utf-8")
     return hashlib.sha256(payload).digest()
 
+def _float_list(values: Any, name: str) -> List[float]:
+    if not isinstance(values, (list, tuple)):
+        raise ValueError(f"{name} must be a list of floats")
+    out = []
+    for v in values:
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ValueError(f"{name} must be a list of floats, got an item {v!r}")
+        out.append(float(v))
+    return out
+
+
+_MID_EPOCH_VERSION = 1
+
+
+def _check_mid_epoch_record(
+    record: Any, *, epoch: int, path: Path, rank: int = 0, world_size: int = 1
+) -> Dict[str, Any]:
+    """Validate a mid-epoch record and return this rank's part (spec/MID_EPOCH_RESUME_v1.md).
+
+    Per-rank fields are lists indexed by rank. A record written with another
+    world size is refused: the ranks' sample partitions, and with them the
+    batches already done, would not correspond.
+    """
+    def bad(why: str) -> ValueError:
+        return ValueError(f"Resume checkpoint {path}: mid-epoch record {why}")
+
+    if not isinstance(record, dict) or record.get("version") != _MID_EPOCH_VERSION:
+        raise bad(f"is not a version-{_MID_EPOCH_VERSION} record")
+    if record.get("epoch") != epoch:
+        raise bad(f"names epoch {record.get('epoch')!r}, the checkpoint epoch {epoch}")
+    if record.get("world_size") != world_size:
+        raise bad(
+            f"was written by {record.get('world_size')!r} rank(s), this run has {world_size}; "
+            "a mid-epoch position cannot move to another world size (resume from an "
+            "epoch-boundary checkpoint instead)"
+        )
+    done = record.get("batches_done")
+    if isinstance(done, bool) or not isinstance(done, int) or done < 0:
+        raise bad(f"has batches_done {done!r}")
+    n_anomalies = record.get("n_anomalies")
+    if isinstance(n_anomalies, bool) or not isinstance(n_anomalies, int) or not 0 <= n_anomalies <= done:
+        raise bad(f"has n_anomalies {n_anomalies!r}")
+    try:
+        losses = _float_list(record["losses"][rank], "losses")
+        grad_norms = _float_list(record["grad_norms"][rank], "grad_norms")
+        start = record["epoch_start"]
+        torch_rng = start["torch_rng"][rank]
+        generators = {name: states[rank] for name, states in start["loader_generators"].items()}
+    except (KeyError, IndexError, TypeError) as exc:
+        raise bad(f"is incomplete ({exc!r})") from None
+    if len(losses) + n_anomalies != done or len(grad_norms) > len(losses):
+        raise bad("does not add up (healthy losses + skipped steps != batches done)")
+    for name, state in [("torch_rng", torch_rng), *generators.items()]:
+        if not (torch.is_tensor(state) and state.dtype == torch.uint8):
+            raise bad(f"carries no uint8 RNG state for {name!r}")
+    return {
+        "epoch": epoch,
+        "batches_done": done,
+        "n_anomalies": n_anomalies,
+        "losses": losses,
+        "grad_norms": grad_norms,
+        "epoch_start": {"torch_rng": torch_rng, "loader_generators": generators},
+    }
+
 
 # ------------------------------------------------------------------
 # Anomaly detection
@@ -246,6 +310,9 @@ class RunnerConfig:
 
     # Checkpointing
     save_every_n_epochs: int = 1
+    # Mid-epoch resume (0 = off): every n global steps the resume checkpoint is
+    # rewritten with the position inside the epoch (spec/MID_EPOCH_RESUME_v1.md).
+    save_every_n_steps: int = 0
     # Model selection uses the pooled relative L2 error computed in _validate
     # (E1=B, 2026-10-05). A configured metric missing from the validation
     # report raises KeyError instead of silently falling back to val_loss.
@@ -293,6 +360,7 @@ class RunnerConfig:
         _int_at_least("num_epochs", 0)
         _int_at_least("log_every_n_steps", 0)
         _int_at_least("save_every_n_epochs", 1)
+        _int_at_least("save_every_n_steps", 0)
         _int_at_least("warmup_steps", 0)
         _int_at_least("spike_window_size", 1)
         if math.isnan(self.grad_clip_max_norm) or self.grad_clip_max_norm <= 0:
@@ -477,6 +545,12 @@ class HexTrainingRunner:
         self.global_step: int = 0
         self.start_epoch: int = 0
         self.train_losses: List[float] = []
+        # Mid-epoch resume: the record of the interrupted epoch (consumed by its
+        # first _train_one_epoch), the RNG state at the interruption, and the
+        # state at the start of the running epoch (written into mid-epoch saves).
+        self._resume_mid: Optional[Dict[str, Any]] = None
+        self._resume_rng_at_step: Optional[Dict[str, torch.Tensor]] = None
+        self._epoch_start_state: Optional[Dict[str, Any]] = None
 
     # ------------------------------------------------------------------
     # Resume
@@ -558,9 +632,11 @@ class HexTrainingRunner:
         # leaving them in the first training collective.
         report = self.dist.run_agreed(self._resume_local, what="resume")
         best = self.ckpt_mgr.best_metric_value
+        done = report.get("mid_epoch_batches_done")
         self.dist.require_rank0_agreement(
-            [self.start_epoch, self.global_step, math.nan if best is None else best],
-            what="resumed epoch/global_step/best metric",
+            [self.start_epoch, self.global_step, math.nan if best is None else best,
+             -1 if done is None else done],
+            what="resumed epoch/global_step/best metric/mid-epoch position",
         )
         # load_resume adopts the run_id recorded in the file on each rank.
         mine = hashlib.sha256(self.ckpt_mgr.run_id.encode("utf-8")).digest()
@@ -603,7 +679,28 @@ class HexTrainingRunner:
         self._restore_loader_generators(report, resume_path)
         if self.dist is not None:
             self._restore_rank_rng(report)
-        self.start_epoch = report["epoch"] + 1
+        extra = report.get("extra") or {}
+        history = extra.get("anomaly_history")
+        if history is not None:
+            self.anomaly_detector.loss_history.clear()
+            self.anomaly_detector.loss_history.extend(_float_list(history, "anomaly_history"))
+        mid = extra.get("mid_epoch")
+        if mid is None:
+            self.start_epoch = report["epoch"] + 1
+            report["mid_epoch_batches_done"] = None
+        else:
+            self._resume_mid = _check_mid_epoch_record(
+                mid,
+                epoch=report["epoch"],
+                path=resume_path,
+                rank=0 if self.dist is None else self.dist.rank,
+                world_size=1 if self.dist is None else self.dist.world_size,
+            )
+            # The RNG state of the interruption; the fast-forward through the
+            # done batches consumes RNG and is followed by restoring this.
+            self._resume_rng_at_step = rng_state_tensors()
+            self.start_epoch = report["epoch"]
+            report["mid_epoch_batches_done"] = self._resume_mid["batches_done"]
         if report.get("global_step") is not None:
             self.global_step = report["global_step"]
         logger.info(
@@ -922,21 +1019,56 @@ class HexTrainingRunner:
         self.dist.require_equal_int(n, what="number of training batches per epoch (len of the train loader)")
 
     def _train_one_epoch(self, epoch: int) -> Dict[str, Any]:
-        """Run one training epoch."""
+        """Run one training epoch (continuing an interrupted one after a mid-epoch resume)."""
         self._set_sampler_epoch(self.train_loader, epoch)
         if self.dist is not None:
             self._require_equal_batch_count()
+        mid, self._resume_mid = self._resume_mid, None
+        if mid is not None:
+            # Back to the state the interrupted epoch started from: the new
+            # iterator then draws the same sampler permutation and the same
+            # worker base seed as the original one.
+            self._epoch_start_state = mid["epoch_start"]
+            torch.random.set_rng_state(mid["epoch_start"]["torch_rng"].cpu())
+            for name, gen in self._loader_generators().items():
+                state = mid["epoch_start"]["loader_generators"].get(name)
+                if state is not None:
+                    gen.set_state(state.cpu())
+        else:
+            self._epoch_start_state = {
+                "torch_rng": torch.random.get_rng_state(),
+                "loader_generators": {n: g.get_state() for n, g in self._loader_generators().items()},
+            }
         self.model.train()
-        epoch_losses: List[float] = []
-        epoch_grad_norms: List[float] = []
-        n_anomalies = 0
+        epoch_losses: List[float] = list(mid["losses"]) if mid is not None else []
+        epoch_grad_norms: List[float] = list(mid["grad_norms"]) if mid is not None else []
+        n_anomalies = mid["n_anomalies"] if mid is not None else 0
+        skip = mid["batches_done"] if mid is not None else 0
+
+        def start_iterator() -> Any:
+            iterator = iter(self.train_loader)
+            for done in range(skip):
+                # Fast-forward: load and drop the batches the interrupted run
+                # already trained on. Loading (not just advancing the sampler)
+                # also replays every worker's RNG consumption, so the later
+                # batches come out identical.
+                try:
+                    next(iterator)
+                except StopIteration:
+                    raise ValueError(
+                        f"mid-epoch resume: the train loader yields only {done} batches in epoch "
+                        f"{epoch}, the checkpoint recorded {skip} as done (loader or dataset changed)"
+                    ) from None
+            return iterator
 
         if self.dist is None:
-            iterator = iter(self.train_loader)
+            iterator = start_iterator()
         else:
-            iterator = self.dist.run_agreed(
-                lambda: iter(self.train_loader), what="creating the train loader iterator"
-            )
+            iterator = self.dist.run_agreed(start_iterator, what="creating the train loader iterator")
+        if mid is not None:
+            restore_rng_state_tensors(self._resume_rng_at_step)
+            self._resume_rng_at_step = None
+        position = skip
         while True:
             if self.dist is None:
                 try:
@@ -950,6 +1082,7 @@ class HexTrainingRunner:
                     break
                 batch, prepared = step
             loss_val, is_healthy, grad_norm = self._train_one_step(batch, prepared)
+            position += 1
             self.global_step += 1
 
             if is_healthy:
@@ -969,6 +1102,14 @@ class HexTrainingRunner:
                     self.global_step,
                     loss_val,
                     grad_norm if grad_norm is not None else -1.0,
+                )
+
+            if (
+                self.config.save_every_n_steps > 0
+                and self.global_step % self.config.save_every_n_steps == 0
+            ):
+                self._save_mid_epoch(
+                    epoch, position, epoch_losses, epoch_grad_norms, n_anomalies
                 )
 
         # Scheduler step (per epoch)
@@ -1289,6 +1430,100 @@ class HexTrainingRunner:
             what=f"checkpoint save at epoch {epoch}",
         )
 
+    def _save_mid_epoch(
+        self,
+        epoch: int,
+        batches_done: int,
+        losses: List[float],
+        grad_norms: List[float],
+        n_anomalies: int,
+    ) -> Dict[str, Any]:
+        """Rewrite the resume checkpoint with the position inside ``epoch``.
+
+        Records, per rank: the RNG and loader-generator states the epoch
+        started from (to rebuild the same iterator), the healthy losses and
+        gradient norms so far (the epoch means come out as without the
+        interruption) and the step count. The current RNG states are the
+        payload's own (rank 0) plus, distributed, every rank's.
+        """
+        start = self._epoch_start_state
+        if self.dist is None:
+            per_rank = {
+                "losses": [list(losses)],
+                "grad_norms": [list(grad_norms)],
+                "torch_rng": [start["torch_rng"]],
+                "loader_generators": {n: [s] for n, s in start["loader_generators"].items()},
+            }
+            rank_rng = None
+        else:
+            # No buffer sync here: EMA buffers never feed back into training,
+            # DDP overwrites the model's buffers at every forward, and the sync
+            # before the next validation equalises them (a sync here was an
+            # equivalent mutant, spec/MID_EPOCH_RESUME_v1.md section 2).
+            gather = self.dist.all_gather_tensor
+            self.dist.require_same_names(sorted(start["loader_generators"]), what="loader generator names")
+
+            def lists(values: List[float], what: str) -> List[List[float]]:
+                # Equal length on every rank: skips are agreed, every rank ran
+                # the same steps (an empty list needs no collective).
+                n = self.dist.require_equal_int(len(values), what=f"{what} count")
+                if n == 0:
+                    return [[] for _ in range(self.dist.world_size)]
+                t = torch.tensor(values, dtype=torch.float64)
+                return [part.tolist() for part in gather(t, what=what)]
+
+            per_rank = {
+                "losses": lists(losses, "mid-epoch losses"),
+                "grad_norms": lists(grad_norms, "mid-epoch gradient norms"),
+                "torch_rng": gather(start["torch_rng"], what="epoch-start RNG state"),
+                "loader_generators": {
+                    n: gather(s, what=f"epoch-start {n} generator state")
+                    for n, s in sorted(start["loader_generators"].items())
+                },
+            }
+            rank_rng = self._gather_rank_rng_states()
+        record = {
+            "version": _MID_EPOCH_VERSION,
+            "epoch": epoch,
+            "batches_done": batches_done,
+            "world_size": 1 if self.dist is None else self.dist.world_size,
+            "n_anomalies": n_anomalies,
+            "losses": per_rank["losses"],
+            "grad_norms": per_rank["grad_norms"],
+            "epoch_start": {
+                "torch_rng": per_rank["torch_rng"],
+                "loader_generators": per_rank["loader_generators"],
+            },
+        }
+        extra: Dict[str, Any] = {"mid_epoch": record}
+        if self.dist is None:
+            extra["anomaly_history"] = list(self.anomaly_detector.loss_history)
+        else:
+            extra["rank_rng_states"] = rank_rng
+
+        def save() -> Dict[str, Any]:
+            return self.ckpt_mgr.save_resume(
+                model=self.raw_model,
+                optimizer=self.optimizer,
+                epoch=epoch,
+                global_step=self.global_step,
+                scheduler=self.scheduler,
+                grad_scaler=self.grad_scaler,
+                include_python_rng=True,
+                include_numpy_rng=True,
+                include_torch_rng=True,
+                ema_state_dict=(
+                    self.ema_model.state_dict() if self.ema_model is not None else None
+                ),
+                ema_decay=self.config.ema_decay if self.ema_model is not None else None,
+                include_dataloader_state=self._loader_generator_payload(),
+                extra=extra,
+            )
+
+        if self.dist is None:
+            return save()
+        return self.dist.run_agreed(save, what=f"mid-epoch save at step {self.global_step}")
+
     def _gather_rank_rng_states(self) -> Dict[str, Any]:
         """Every rank's RNG states for rank 0's resume checkpoint.
 
@@ -1419,6 +1654,8 @@ class HexTrainingRunner:
                 "train_loss": train_report["mean_loss"],
                 "val_loss": val_report["val_loss"],
                 **({"rank_rng_states": rank_rng} if rank_rng is not None else {}),
+                **({"anomaly_history": list(self.anomaly_detector.loss_history)}
+                   if self.dist is None else {}),
             },
         )
         reports["resume"] = resume_report
