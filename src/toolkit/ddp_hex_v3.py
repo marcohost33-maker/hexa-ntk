@@ -269,7 +269,14 @@ class DistributedRunContext:
         rank 0 writes, or the pooled metric belongs to no single model.
         """
         buffers = list(module.named_buffers())
-        self.require_same_names([n for n, _ in buffers], what=f"{what} buffer names")
+        # Name, dtype and shape: a broadcast of buffers whose sizes differ
+        # between ranks is not an exception but an abort (gloo EnforceNotMet,
+        # SIGABRT), e.g. a non-persistent cache that follows the last batch
+        # under broadcast_buffers=False (review round 2).
+        self.require_same_names(
+            [f"{n}|{b.dtype}|{tuple(b.shape)}" for n, b in buffers],
+            what=f"{what} buffer names, dtypes or shapes",
+        )
         for _, buf in buffers:
             dist.broadcast(buf.data, src=0)
 

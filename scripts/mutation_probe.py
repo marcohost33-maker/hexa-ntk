@@ -328,12 +328,20 @@ MUTANTS = (
            "                \"RunnerConfig", "        if False:\n            raise DistributedContractError(\n"
            "                \"RunnerConfig", T2),
     Mutant(RU, "                if per_rank is not None:\n"
-           "                    gen.set_state(per_rank[self.dist.rank])\n",
+           "                    gen.set_state(per_rank[self.dist.rank].cpu())\n",
            "                pass\n", T2),
     Mutant(RU, '            restore_rng_state_tensors({key: states[key][self.dist.rank] for key in ("torch", "python", '
            '"numpy")})\n', '            torch.random.set_rng_state(states["torch"][self.dist.rank])\n', T2),
     Mutant(DDP, "        dist.all_reduce(t, op=dist.ReduceOp.SUM)\n        dist.broadcast(t, src=0)\n",
            "        dist.all_reduce(t, op=dist.ReduceOp.SUM)\n", T2),
+    # Review round 2 on 205f293: buffer shapes, OOM while preparing, effective AMP.
+    Mutant(DDP, '            [f"{n}|{b.dtype}|{tuple(b.shape)}" for n, b in buffers],\n',
+           "            [n for n, _ in buffers],\n", T2),
+    Mutant(RU, "        mine = hashlib.sha256(_config_digest(config) + "
+           'self._effective_amp().encode("utf-8")).digest()\n',
+           "        mine = _config_digest(config)\n", T2),
+    Mutant(RU, "            if _is_oom(exc):\n                # Preparing runs",
+           "            if False:\n                # Preparing runs", "test_ddp_hex_v3.TestWorldSizeOne"),
     # Per-rank RNG streams across a resume (dropout + rank seeds must continue).
     Mutant(RU, "        if self.dist is not None:\n            self._restore_rank_rng(report)\n",
            "        pass\n", T2),

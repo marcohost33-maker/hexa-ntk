@@ -427,6 +427,27 @@ class TestWorldSizeOne(unittest.TestCase):
             self.assertEqual(states["world_size"], 1)
             self.assertEqual([len(states[k]) for k in ("torch", "python", "numpy")], [1, 1, 1])
 
+    def test_oom_while_preparing_gets_the_rescue(self) -> None:
+        # Review round 2: preparing runs in _agreed_next, outside _train_one_step's handler.
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp), distributed=True)
+
+            def oom(batch: Any) -> Any:
+                raise RuntimeError("CUDA out of memory (injected)")
+
+            runner._prepare_step = oom
+            with self.assertRaisesRegex(RuntimeError, "out of memory"):
+                runner.run()
+            self.assertTrue(list(runner.failure_dir.glob("*CUDA_OOM*.json")))
+
+    def test_effective_amp_names_scaler_and_dtype(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp), distributed=True)
+            plain = runner._effective_amp()
+            self.assertIn("autocast=False", plain)
+            runner.grad_scaler = object()
+            self.assertNotEqual(runner._effective_amp(), plain)
+
     def test_decision_sums_are_rank0_bound(self) -> None:
         self.assertEqual(self.ctx.all_reduce_sum_rank0([1.25, -0.0]), [1.25, -0.0])
         self.assertEqual(self.ctx.max_int(2), 2)
@@ -784,6 +805,43 @@ def _sc_allreduce_noise(rank: int, world: int, out: Path) -> Dict[str, Any]:
             "best_metric_value": runner.ckpt_mgr.best_metric_value}
 
 
+class _Cache(nn.Module):
+    """A non-persistent buffer whose shape follows the last batch."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        torch.manual_seed(0)
+        self.lin = nn.Linear(3, 2, dtype=torch.float64)
+        self.register_buffer("last", torch.zeros(0, 3, dtype=torch.float64), persistent=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.last = x.detach()
+        return self.lin(x)
+
+
+def _sc_buffer_shape_mismatch(rank: int, world: int, out: Path) -> Any:
+    """Review round 2, finding 1: equal names, different shapes -> agreed error, not SIGABRT."""
+    model = DDP(_Cache(), broadcast_buffers=False)
+    train = DataLoader(_Data(5 - rank, seed=1), batch_size=3)  # last batch: 2 vs 1 samples
+    HexTrainingRunner(
+        # no EMA: AveragedModel(use_buffers=True) cannot average a buffer that changes
+        # shape (a symmetric RuntimeError on every rank) and would hide the sync path
+        _config(out, distributed=True, is_main_process=rank == 0, num_epochs=1, use_ema=False),
+        model, torch.optim.SGD(model.parameters(), lr=0.1), train, _exact_val_loader(),
+    ).run()
+
+
+def _sc_effective_amp_differs(rank: int, world: int, out: Path) -> Any:
+    """Review round 2, finding 4: one host resolves bfloat16 to float16 + GradScaler."""
+    original = HexTrainingRunner._effective_amp
+    if rank == 1:
+        HexTrainingRunner._effective_amp = lambda self: "autocast=True|dtype=torch.float16|grad_scaler=True"
+    try:
+        _ddp_runner(rank, out, train=_train_loader(rank, world), val=_exact_val_loader(), num_epochs=1)
+    finally:
+        HexTrainingRunner._effective_amp = original
+
+
 def _sc_save_failure_rank0(rank: int, world: int, out: Path) -> Any:
     runner = _ddp_runner(rank, out, train=_train_loader(rank, world), val=_exact_val_loader(), num_epochs=1)
     if rank == 0:
@@ -896,6 +954,8 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "forward_error_rank1": _sc_forward_error_rank1,
     "construction_error_rank1": _sc_construction_error_rank1,
     "save_failure_rank0": _sc_save_failure_rank0,
+    "buffer_shape_mismatch": _sc_buffer_shape_mismatch,
+    "effective_amp_differs": _sc_effective_amp_differs,
     "bn_buffers": _sc_bn_buffers,
     "bn_resume": _sc_bn_resume,
     "prepare_error_bn": _sc_prepare_error_bn,
@@ -1072,6 +1132,13 @@ class TestTwoRanks(unittest.TestCase):
     def test_decisions_survive_rank_dependent_allreduce_rounding(self) -> None:
         r0, r1 = self._ok("allreduce_noise")
         self.assertEqual(r0, r1)
+
+    def test_buffer_shape_mismatch_fails_both_instead_of_aborting(self) -> None:
+        self.assertEqual(self._errors("buffer_shape_mismatch"), ["DistributedContractError"] * 2)
+        self.assertIn("shapes", self.results[0].get("buffer_shape_mismatch", {}).get("message", ""))
+
+    def test_effective_amp_difference_fails_both(self) -> None:
+        self.assertEqual(self._errors("effective_amp_differs"), ["DistributedContractError"] * 2)
 
     def test_checkpoint_write_failure_on_rank0_fails_both(self) -> None:
         self.assertEqual(self._errors("save_failure_rank0"), ["OSError", "PeerRankError"])

@@ -5,7 +5,9 @@ self-review: agreed construction, adapter rule, agreed forward errors, determini
 validation sampler, rank-0-bound decision sums, per-rank RNG streams on resume;
 second round after an independent review of head a875020: errors before the forward
 agreed, step count agreed per step, buffers synchronised from rank 0, config digest,
-per-rank loader generators)
+per-rank loader generators; third round after the review of 205f293: buffer
+signatures include dtype and shape, OOM rescue while preparing, effective AMP mode
+agreed, RNG/generator states moved to the CPU before restore)
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -45,7 +47,10 @@ broadcast until the timeout.
 **Same configuration.** Next, a SHA-256 over all `RunnerConfig` fields except
 `is_main_process`, `output_dir` and the `resume_from` path (mount points may differ
 between hosts; *whether* `resume_from` is set is included) must equal rank 0's,
-else `DistributedContractError` on every rank. A different `num_epochs` or save
+else `DistributedContractError` on every rank. The digest also covers the AMP mode the
+host actually resolves (autocast on/off, dtype, GradScaler present): `amp_dtype="bfloat16"`
+falls back to float16 + GradScaler on a GPU without bf16 support, and ranks on mixed GPUs
+would all-reduce scaled with unscaled gradients (review round 2). A different `num_epochs` or save
 cadence would issue a different sequence of collectives (hang), a different best
 policy or `use_ema` would silently select differently, and `resume_from` on one
 rank only left the others in the first training collective (review finding 3).
@@ -70,7 +75,8 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    then one int64 all-reduce (SUM) of [ranks that raised, ranks out of data]:
    an error raises on every rank (the failing rank its own exception, the others
    `PeerRankError`); all ranks out of data ends the epoch; some out of data raises
-   `DistributedContractError` on every rank. This agreement must precede the DDP
+   `DistributedContractError` on every rank. An OOM while preparing gets the same
+   rescue (replay capsule, FailureSignature) as one inside the step. This agreement must precede the DDP
    forward: with buffers (BatchNorm) and the default `broadcast_buffers=True`, DDP
    starts every forward with a buffer broadcast, which a rank that failed before
    it never reaches (review finding 1: a missing `target` key on one rank hung
@@ -128,8 +134,10 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    its EMA copy; ranks may have different batch counts. A local exception during
    validation is agreed (section 5) before the reduction.
 4. **One model.** Before validation every buffer of the unwrapped module and of
-   the EMA copy is broadcast from rank 0 (after checking that the buffer names
-   agree). DDP broadcasts rank 0's buffers at the start of each forward, but the
+   the EMA copy is broadcast from rank 0, after checking that the buffers' names,
+   dtypes and shapes agree (a broadcast of differently sized buffers is no exception
+   but a process abort -- gloo `EnforceNotMet`, SIGABRT -- e.g. a non-persistent cache
+   following the last batch under `broadcast_buffers=False`; review round 2). DDP broadcasts rank 0's buffers at the start of each forward, but the
    training forward then updates them with the local batch (BatchNorm running
    statistics) and the EMA copy averages those local buffers: without the sync the
    ranks evaluated different models, the pooled metric belonged to none of them,

@@ -105,6 +105,10 @@ def _module_digest(module: nn.Module) -> bytes:
     return h.digest()
 
 
+def _is_oom(exc: BaseException) -> bool:
+    return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
+
+
 def _config_digest(config: "RunnerConfig") -> bytes:
     """SHA-256 of the fields every rank must share (spec/DDP_RUNNER_v1.md section 2).
 
@@ -377,18 +381,25 @@ class HexTrainingRunner:
         # issues a different sequence of collectives (hang), a different best
         # policy or EMA silently selects differently, and resume_from on one
         # rank only leaves the others in the first training collective.
-        mine = _config_digest(config)
+        mine = hashlib.sha256(_config_digest(config) + self._effective_amp().encode("utf-8")).digest()
         ref = self.dist.broadcast_bytes(mine if self.dist.rank == 0 else None, 32)
         if self.dist.any_true(ref != mine):
             raise DistributedContractError(
-                "RunnerConfig differs between ranks (all fields except is_main_process, "
-                "output_dir and the resume_from path must be equal, and resume_from must be "
-                "set on all ranks or on none)"
+                "RunnerConfig or the effective AMP mode differs between ranks (all config fields "
+                "except is_main_process, output_dir and the resume_from path must be equal, "
+                "resume_from must be set on all ranks or on none, and every rank must resolve "
+                "use_amp to the same autocast dtype and GradScaler: bfloat16 falls back to "
+                "float16 + GradScaler on a GPU without bf16 support)"
             )
         # One run identity: best.pt and the resume record carry rank 0's.
         self.ckpt_mgr.run_id = self.dist.broadcast_bytes(
             bytes.fromhex(self.ckpt_mgr.run_id) if self.dist.rank == 0 else None, 16
         ).hex()
+
+    def _effective_amp(self) -> str:
+        """The AMP mode this host actually runs (it depends on the GPU, not only the config)."""
+        active = self.config.use_amp and self.device.type == "cuda"
+        return f"autocast={active}|dtype={self.amp_dtype}|grad_scaler={self.grad_scaler is not None}"
 
     def _check_distributed_setup(self) -> None:
         if not isinstance(self.model, DistributedDataParallel):
@@ -507,7 +518,7 @@ class HexTrainingRunner:
                     f"Resume checkpoint {resume_path}: generator state for the "
                     f"{name} loader is not a uint8 tensor"
                 )
-            gen.set_state(state)
+            gen.set_state(state.cpu())  # map_location=<cuda> moved it; set_state needs CPU
             restored.append(name)
         report["loader_generators_restored"] = restored
         report["loader_generators_missing"] = missing
@@ -716,6 +727,10 @@ class HexTrainingRunner:
             exhausted = True
         except Exception as exc:  # re-raised below, after the peers know
             error = exc
+            if _is_oom(exc):
+                # Preparing runs outside _train_one_step's handler; an OOM in
+                # .to(device) gets the same rescue (review round 2).
+                self._rescue_oom(batch)
         n_failed, n_exhausted = self.dist.sum_ints([error is not None, exhausted])
         if error is not None:
             raise error
@@ -825,36 +840,40 @@ class HexTrainingRunner:
             return loss_val, True, grad_norm_val
 
         except RuntimeError as e:
-            if "out of memory" in str(e).lower():
-                logger.critical(
-                    "CUDA OOM at step %d! Attempting rescue...",
-                    self.global_step,
-                )
+            if _is_oom(e):
                 # 1. Destroy references holding VRAM
                 del pred
                 del loss
-                # 2. Python GC + CUDA cache (order matters)
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                # 3. Now safe to dump capsule
-                try:
-                    cap_path = dump_replay_capsule_safe(
-                        batch, self.raw_model,
-                        self.failure_dir,
-                        self.global_step,
-                    )
-                    FailureSignature(
-                        kind="CUDA_OOM",
-                        step=self.global_step,
-                        locus="train_step_oom",
-                        observable="OOM exception caught",
-                        replay_capsule=cap_path,
-                    ).register(self.failure_dir)
-                except Exception:
-                    logger.error("Failed to dump OOM replay capsule")
+                self._rescue_oom(batch)
                 raise
             raise
+
+    def _rescue_oom(self, batch: Optional[Dict[str, Any]]) -> None:
+        """OOM rescue: GC + CUDA cache (order matters), then capsule + FailureSignature."""
+        logger.critical(
+            "CUDA OOM at step %d! Attempting rescue...",
+            self.global_step,
+        )
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        # Now safe to dump capsule
+        try:
+            cap_path = dump_replay_capsule_safe(
+                batch if batch is not None else {},
+                self.raw_model,
+                self.failure_dir,
+                self.global_step,
+            )
+            FailureSignature(
+                kind="CUDA_OOM",
+                step=self.global_step,
+                locus="train_step_oom",
+                observable="OOM exception caught",
+                replay_capsule=cap_path,
+            ).register(self.failure_dir)
+        except Exception:
+            logger.error("Failed to dump OOM replay capsule")
 
     # ------------------------------------------------------------------
     # Epoch
@@ -1299,7 +1318,7 @@ class HexTrainingRunner:
             for name, gen in self._loader_generators().items():
                 per_rank = (states.get("loader_generators") or {}).get(name)
                 if per_rank is not None:
-                    gen.set_state(per_rank[self.dist.rank])
+                    gen.set_state(per_rank[self.dist.rank].cpu())
             report["rank_rng_restored"] = True
             return
         report["rank_rng_restored"] = False
