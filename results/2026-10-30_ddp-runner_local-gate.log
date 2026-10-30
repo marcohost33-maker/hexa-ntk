@@ -1,5 +1,5 @@
-# Local gate 2026-10-30 — DDP integration of the runner (spec/DDP_RUNNER_v1.md)
-# base: main a19c992 + working tree of branch claude/hexa-ntk-development-toqzyn (this commit)
+# Local gate 2026-10-30 — DDP integration of the runner (spec/DDP_RUNNER_v1.md), after the independent review round
+# base: main a19c992; branch claude/hexa-ntk-development-toqzyn @ 3279dfb + this commit's doc/SOURCES/log edits
 # platform: Linux x86_64, Linux container; Python 3.12.3; torch 2.6.0+cu124 (CPU only); numpy 2.5.3; neuraloperator 2.0.0; ruff 0.17.0; coverage 7.16.2
 # note: torch 2.6.0 from PyPI (+cu124 wheel, run on CPU): download.pytorch.org is not reachable from this container; CI uses the +cpu wheel
 
@@ -19,18 +19,18 @@ exit=0
 exit=0
 
 == coverage run -m unittest discover -s src/toolkit -t src/toolkit -p 'test_*.py'
-Ran 1017 tests in 52.295s
+Ran 1025 tests in 56.166s
 OK (skipped=1)
 exit=0
 
 == coverage report (fail_under 87)
-src/toolkit/ddp_hex_v3.py                        149      8     40      6    92%
-src/toolkit/runner_hex_v3.py                     485     24    178     16    93%
-TOTAL                                           5566    210   2114    169    95%
+src/toolkit/ddp_hex_v3.py                        162      9     44      7    91%
+src/toolkit/runner_hex_v3.py                     551     35    202     22    91%
+TOTAL                                           5645    222   2142    176    95%
 exit=0
 
 == GINO lane (CI gate job): unittest test_gino_adapter_hex_v3
-Ran 26 tests in 3.301s
+Ran 26 tests in 3.178s
 OK
 
 == unittest test_ddp_hex_v3 -v (from src/toolkit)
@@ -43,19 +43,27 @@ test_error_types (test_ddp_hex_v3.TestRunnerWithoutProcessGroup.test_error_types
 test_needs_a_process_group_for_implicit_rank (test_ddp_hex_v3.TestRunnerWithoutProcessGroup.test_needs_a_process_group_for_implicit_rank) ... ok
 test_rng_state_tensors_round_trip_exactly (test_ddp_hex_v3.TestRunnerWithoutProcessGroup.test_rng_state_tensors_round_trip_exactly) ... ok
 test_set_epoch_reaches_the_sampler_once (test_ddp_hex_v3.TestRunnerWithoutProcessGroup.test_set_epoch_reaches_the_sampler_once) ... ok
+test_bn_buffers_agree_and_the_metric_is_rank0s_model (test_ddp_hex_v3.TestTwoRanks.test_bn_buffers_agree_and_the_metric_is_rank0s_model) ... ok
+test_bn_resume_reproduces_the_uninterrupted_run (test_ddp_hex_v3.TestTwoRanks.test_bn_resume_reproduces_the_uninterrupted_run) ... ok
 test_checkpoint_write_failure_on_rank0_fails_both (test_ddp_hex_v3.TestTwoRanks.test_checkpoint_write_failure_on_rank0_fails_both) ... ok
 test_construction_error_on_one_rank_fails_both (test_ddp_hex_v3.TestTwoRanks.test_construction_error_on_one_rank_fails_both) ... ok
+test_decisions_survive_rank_dependent_allreduce_rounding (test_ddp_hex_v3.TestTwoRanks.test_decisions_survive_rank_dependent_allreduce_rounding) ... ok
 test_forward_error_on_one_rank_fails_both (test_ddp_hex_v3.TestTwoRanks.test_forward_error_on_one_rank_fails_both) ... ok
+test_lying_len_fails_both (test_ddp_hex_v3.TestTwoRanks.test_lying_len_fails_both) ... ok
 test_nan_on_one_rank_skips_the_step_everywhere (test_ddp_hex_v3.TestTwoRanks.test_nan_on_one_rank_skips_the_step_everywhere) ... ok
 test_nan_skip_under_find_unused_parameters_and_static_graph (test_ddp_hex_v3.TestTwoRanks.test_nan_skip_under_find_unused_parameters_and_static_graph) ... ok
 test_padded_validation_sampler_fails_on_both_ranks (test_ddp_hex_v3.TestTwoRanks.test_padded_validation_sampler_fails_on_both_ranks) ... ok
+test_prepare_error_with_buffers_fails_both (test_ddp_hex_v3.TestTwoRanks.test_prepare_error_with_buffers_fails_both) ... ok
+test_resume_continues_each_ranks_loader_generator (test_ddp_hex_v3.TestTwoRanks.test_resume_continues_each_ranks_loader_generator) ... ok
 test_resume_continues_each_ranks_own_rng_stream (test_ddp_hex_v3.TestTwoRanks.test_resume_continues_each_ranks_own_rng_stream) ... ok
 test_resume_file_missing_on_one_rank_fails_both (test_ddp_hex_v3.TestTwoRanks.test_resume_file_missing_on_one_rank_fails_both) ... ok
+test_resume_from_on_one_rank_only_fails_both (test_ddp_hex_v3.TestTwoRanks.test_resume_from_on_one_rank_only_fails_both) ... ok
 test_resume_reproduces_the_uninterrupted_run (test_ddp_hex_v3.TestTwoRanks.test_resume_reproduces_the_uninterrupted_run) ... ok
 test_resume_with_other_weights_on_one_rank_fails_both (test_ddp_hex_v3.TestTwoRanks.test_resume_with_other_weights_on_one_rank_fails_both) ... ok
 test_two_ranks_reproduce_the_single_process_run (test_ddp_hex_v3.TestTwoRanks.test_two_ranks_reproduce_the_single_process_run) ... ok
 test_unequal_batch_counts_fail_both (test_ddp_hex_v3.TestTwoRanks.test_unequal_batch_counts_fail_both) ... ok
 test_adapter_around_the_inner_module_is_refused (test_ddp_hex_v3.TestWorldSizeOne.test_adapter_around_the_inner_module_is_refused) ... ok
+test_config_digest_ignores_rank_local_fields_only (test_ddp_hex_v3.TestWorldSizeOne.test_config_digest_ignores_rank_local_fields_only) ... ok
 test_ddp_model_without_distributed_flag_is_refused (test_ddp_hex_v3.TestWorldSizeOne.test_ddp_model_without_distributed_flag_is_refused) ... ok
 test_decision_sums_are_rank0_bound (test_ddp_hex_v3.TestWorldSizeOne.test_decision_sums_are_rank0_bound) ... ok
 test_failure_records_go_to_a_rank_directory (test_ddp_hex_v3.TestWorldSizeOne.test_failure_records_go_to_a_rank_directory) ... ok
@@ -71,15 +79,15 @@ test_reductions_and_broadcast (test_ddp_hex_v3.TestWorldSizeOne.test_reductions_
 test_resume_checkpoint_carries_every_rank_rng (test_ddp_hex_v3.TestWorldSizeOne.test_resume_checkpoint_carries_every_rank_rng) ... ok
 test_run_agreed (test_ddp_hex_v3.TestWorldSizeOne.test_run_agreed) ... ok
 test_runner_refuses_distributed_without_ddp_model (test_ddp_hex_v3.TestWorldSizeOne.test_runner_refuses_distributed_without_ddp_model) ... ok
-test_unsized_train_loader_is_refused (test_ddp_hex_v3.TestWorldSizeOne.test_unsized_train_loader_is_refused) ... ok
+test_unsized_train_loader_runs (test_ddp_hex_v3.TestWorldSizeOne.test_unsized_train_loader_runs) ... ok
 test_validation_partition_is_checked (test_ddp_hex_v3.TestWorldSizeOne.test_validation_partition_is_checked) ... ok
 test_validation_without_batch_sampler (test_ddp_hex_v3.TestWorldSizeOne.test_validation_without_batch_sampler) ... ok
 test_world_one_reproduces_single_process_bitwise (test_ddp_hex_v3.TestWorldSizeOne.test_world_one_reproduces_single_process_bitwise) ... ok
 test_world_one_resume_round_trip (test_ddp_hex_v3.TestWorldSizeOne.test_world_one_resume_round_trip) ... ok
-Ran 42 tests in 5.912s
+Ran 50 tests in 8.741s
 OK
 
-== python scripts/mutation_probe.py (full probe, run on this tree before the final doc/SOURCES edits; code and tests unchanged since)
+== python scripts/mutation_probe.py (full probe on code+tests of 3279dfb, sharpened unequal_batches assertion included; only docs/SOURCES/log changed since)
 M86 KILLED    runner_hex_v3.py -> TestTwoRanks
 M87 KILLED    runner_hex_v3.py -> TestTwoRanks
 M88 KILLED    runner_hex_v3.py -> TestTwoRanks
@@ -95,19 +103,27 @@ M97 KILLED    ddp_hex_v3.py -> TestTwoRanks
 M98 KILLED    ddp_hex_v3.py -> TestTwoRanks
 M99 KILLED    runner_hex_v3.py -> TestTwoRanks
 M100 KILLED    runner_hex_v3.py -> TestTwoRanks
-M101 KILLED    runner_hex_v3.py -> TestWorldSizeOne
-M102 KILLED    runner_hex_v3.py -> TestWorldSizeOne
-M103 KILLED    runner_hex_v3.py -> TestWorldSizeOne
-M104 KILLED    ddp_hex_v3.py -> TestRunnerWithoutProcessGroup
-M105 KILLED    runner_hex_v3.py -> TestWorldSizeOne
-M106 KILLED    runner_hex_v3.py -> TestRunnerWithoutProcessGroup
-M107 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
-M108 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
-M109 KILLED    ddp_hex_v3.py -> TestExactDistributedEvalSampler
-[MUTATION-PROBE] baseline green | 109/109 killed | PASS
+M101 KILLED    runner_hex_v3.py -> TestTwoRanks
+M102 KILLED    runner_hex_v3.py -> TestTwoRanks
+M103 KILLED    runner_hex_v3.py -> TestTwoRanks
+M104 KILLED    runner_hex_v3.py -> TestTwoRanks
+M105 KILLED    ddp_hex_v3.py -> TestTwoRanks
+M106 KILLED    runner_hex_v3.py -> TestTwoRanks
+M107 KILLED    runner_hex_v3.py -> TestTwoRanks
+M108 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M109 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M110 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M111 KILLED    ddp_hex_v3.py -> TestRunnerWithoutProcessGroup
+M112 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M113 KILLED    runner_hex_v3.py -> TestRunnerWithoutProcessGroup
+M114 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M115 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M116 KILLED    ddp_hex_v3.py -> TestExactDistributedEvalSampler
+[MUTATION-PROBE] baseline green | 116/116 killed | PASS
 exit=0
 
-== measured, not assumed: forward without backward on every rank (agreed skip), torch 2.6.0, 2 gloo ranks
-default DDP: OK; find_unused_parameters=True: OK; static_graph=True: OK (scratch script; regression scenarios nan_skip_* in TestTwoRanks)
+== review rounds on this branch
+first full probe 102/102 (17 DDP mutants); self-review closed five gaps -> 109/109 (24); independent review of a875020 found six (errors before the forward with buffers hung peers; BatchNorm/EMA buffers diverged per rank; config not agreed; lying len(); per-rank loader generators lost on resume; two blind tests), each reproduced with a real 2-rank job by the reviewer, all closed in 3279dfb; full probe then 114/116 (the two len() fast-fail mutants survived because the new per-step agreement also catches unequal counts) -> test sharpened to the fast fail's message -> 116/116
 
-== history in this branch: first full probe 102/102 (17 DDP mutants, before the self-review); 7 of the first DDP-subset runs were INVALID (setUpClass error on a hung rank, two mutants with an empty if-body) -> harness writes results atomically after each scenario, mutants fixed
+== measured, not assumed: forward without backward on every rank (agreed skip), torch 2.6.0, 2 gloo ranks
+default DDP: OK; find_unused_parameters=True: OK; static_graph=True: OK (regression scenarios nan_skip_* in TestTwoRanks)

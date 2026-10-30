@@ -203,8 +203,10 @@ each agreed failure (also: an error before the forward of a BatchNorm model,
 `resume_from` on one rank only, a `len()` that lies) ends on both ranks with the
 expected exception (none hangs). World size 1 reproduces the
 non-distributed runner bitwise.
-Mutation probe: 24 mutants, each switching one guard of sections 2-6 off, all
-killed (`scripts/mutation_probe.py`, full probe 109/109 on 2026-10-30, exit 0).
+Mutation probe: 31 mutants, each switching one guard of sections 2-6 off, all
+killed (`scripts/mutation_probe.py`, full probe 116/116 on 2026-10-30, exit 0; the
+first full probe after the review round left the two `len()` fast-fail mutants alive,
+the test now checks the fast fail's own message).
 
 Not covered (open):
 - **CUDA RNG per rank** (`torch_cuda_random_state_all` of rank 0 is restored on
