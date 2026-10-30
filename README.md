@@ -119,6 +119,13 @@ Regressionstest:
 unterbrochener Lauf (2 + 2 Epochen) == ununterbrochener Lauf (4 Epochen), bitgleich fuer
 Modell und EMA.
 
+**Mid-Epoch-Resume (seit 2026-10-30, `spec/MID_EPOCH_RESUME_v1.md`).** Mit
+`RunnerConfig(save_every_n_steps=n)` laesst sich ein Lauf auch mitten in einer Epoche fortsetzen:
+der Iterator wird aus dem gesicherten Epochen-Startzustand neu erzeugt, die erledigten Batches
+werden geladen und verworfen (Worker-RNG inklusive), dann laeuft das Training mit dem RNG der
+Unterbrechung weiter -- bitgleich zum ununterbrochenen Lauf (getestet mit Workern, Dropout,
+Python/NumPy-Stroemen und 2 DDP-Ranks mit BatchNorm). Grenze: `persistent_workers=True`, CUDA-RNG.
+
 **DDP (seit 2026-10-30, `spec/DDP_RUNNER_v1.md`).** `RunnerConfig(distributed=True)` mit einem
 `DistributedDataParallel`-Modell: `set_epoch` auf den Samplern, gleiche Schrittzahl je Rank, ein
 gemeinsamer NaN-Skip vor `backward` (sonst Deadlock im Gradienten-All-Reduce), Validierung auf dem
