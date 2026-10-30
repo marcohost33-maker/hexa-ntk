@@ -54,6 +54,7 @@ P1 = "phase1_protocol_hex_v3.py"
 NT = "ntk_trajectory_hex_v3.py"
 DDP = "ddp_hex_v3.py"
 T2 = "test_ddp_hex_v3.TestTwoRanks"
+I82 = "test_phase1_protocol_hex_v3.TestIssue82Residuals"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -372,6 +373,13 @@ MUTANTS = (
            "        padded = -(-self.dataset_len // self.num_replicas) * self.num_replicas\n"
            "        return iter([i % max(self.dataset_len, 1) for i in range(self.rank, padded, self.num_replicas)])\n",
            "test_ddp_hex_v3.TestExactDistributedEvalSampler"),
+    # Issue #82 residuals (2026-10-30): no inf from finite data, dirty-tree slot,
+    # break-even bound to the equal-accuracy rule.
+    Mutant(P1, "    if np.all(np.isfinite(out)):\n        return out\n", "    return out\n", I82),
+    Mutant(P1, "    scale = 2.0 ** -(max(1, int(n)).bit_length() + 1)\n", "    scale = 0.5\n", I82),
+    Mutant(P1, "        if not isinstance(dirty, bool):\n", "        if False:\n", I82),
+    Mutant(P1, "    if t_base is None:\n        return None\n    return break_even_queries(",
+           "    return break_even_queries(", I82),
 )
 
 
