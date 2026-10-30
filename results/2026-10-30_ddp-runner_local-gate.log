@@ -1,5 +1,5 @@
-# Local gate 2026-10-30 — DDP integration of the runner (spec/DDP_RUNNER_v1.md), after three review rounds
-# base: main a19c992; branch claude/hexa-ntk-development-toqzyn @ 0e86c52 + this commit's doc/SOURCES/log edits
+# Local gate 2026-10-30 — DDP integration of the runner (spec/DDP_RUNNER_v1.md), after three review rounds and the closing check
+# base: main a19c992; branch claude/hexa-ntk-development-toqzyn @ e4b5817 + this commit's doc/SOURCES/log edits
 # platform: Linux x86_64, Linux container; Python 3.12.3; torch 2.6.0+cu124 (CPU only); numpy 2.5.3; neuraloperator 2.0.0; ruff 0.17.0; coverage 7.16.2
 # note: torch 2.6.0 from PyPI (+cu124 wheel, run on CPU): download.pytorch.org is not reachable from this container; CI uses the +cpu wheel
 
@@ -19,19 +19,19 @@ exit=0
 exit=0
 
 == coverage run -m unittest discover -s src/toolkit -t src/toolkit -p 'test_*.py'
-Ran 1029 tests in 64.136s
+Ran 1030 tests in 57.335s
 OK (skipped=1)
 exit=0
 
 == coverage report (fail_under 87)
 src/toolkit/ddp_hex_v3.py                        162      9     44      7    91%
 src/toolkit/resume_utils_hex_v3.py               149      3     80      2    98%
-src/toolkit/runner_hex_v3.py                     560     32    204     22    92%
-TOTAL                                           5654    219   2144    176    95%
+src/toolkit/runner_hex_v3.py                     563     32    204     22    92%
+TOTAL                                           5657    219   2144    176    95%
 exit=0
 
 == GINO lane (CI gate job): unittest test_gino_adapter_hex_v3
-Ran 26 tests in 3.898s
+Ran 26 tests in 3.382s
 OK
 
 == unittest test_ddp_hex_v3 -v (from src/toolkit)
@@ -77,6 +77,7 @@ test_is_main_process_must_match_rank (test_ddp_hex_v3.TestWorldSizeOne.test_is_m
 test_iterable_validation_is_refused (test_ddp_hex_v3.TestWorldSizeOne.test_iterable_validation_is_refused) ... ok
 test_missing_resume_file_raises (test_ddp_hex_v3.TestWorldSizeOne.test_missing_resume_file_raises) ... ok
 test_nondeterministic_validation_sampler_is_refused (test_ddp_hex_v3.TestWorldSizeOne.test_nondeterministic_validation_sampler_is_refused) ... ok
+test_oom_rescue_never_raises (test_ddp_hex_v3.TestWorldSizeOne.test_oom_rescue_never_raises) ... CUDA OOM at step 0! Attempting rescue...
 test_oom_while_preparing_gets_the_rescue (test_ddp_hex_v3.TestWorldSizeOne.test_oom_while_preparing_gets_the_rescue) ... CUDA OOM at step 0! Attempting rescue...
 test_partition_check_branches (test_ddp_hex_v3.TestWorldSizeOne.test_partition_check_branches) ... ok
 test_rank_rng_restore_reports_why_not (test_ddp_hex_v3.TestWorldSizeOne.test_rank_rng_restore_reports_why_not) ... ok
@@ -89,10 +90,10 @@ test_validation_partition_is_checked (test_ddp_hex_v3.TestWorldSizeOne.test_vali
 test_validation_without_batch_sampler (test_ddp_hex_v3.TestWorldSizeOne.test_validation_without_batch_sampler) ... ok
 test_world_one_reproduces_single_process_bitwise (test_ddp_hex_v3.TestWorldSizeOne.test_world_one_reproduces_single_process_bitwise) ... ok
 test_world_one_resume_round_trip (test_ddp_hex_v3.TestWorldSizeOne.test_world_one_resume_round_trip) ... ok
-Ran 54 tests in 10.939s
+Ran 55 tests in 8.240s
 OK
 
-== python scripts/mutation_probe.py (full probe on code+tests of 0e86c52; only docs/SOURCES/log changed since)
+== python scripts/mutation_probe.py (full probe on code+tests of e4b5817; only docs/SOURCES/log changed since)
 M86 KILLED    runner_hex_v3.py -> TestTwoRanks
 M87 KILLED    runner_hex_v3.py -> TestTwoRanks
 M88 KILLED    runner_hex_v3.py -> TestTwoRanks
@@ -116,24 +117,26 @@ M105 KILLED    ddp_hex_v3.py -> TestTwoRanks
 M106 KILLED    ddp_hex_v3.py -> TestTwoRanks
 M107 KILLED    runner_hex_v3.py -> TestTwoRanks
 M108 KILLED    runner_hex_v3.py -> TestWorldSizeOne
-M109 KILLED    runner_hex_v3.py -> TestTwoRanks
+M109 KILLED    runner_hex_v3.py -> TestWorldSizeOne
 M110 KILLED    runner_hex_v3.py -> TestTwoRanks
-M111 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M111 KILLED    runner_hex_v3.py -> TestTwoRanks
 M112 KILLED    runner_hex_v3.py -> TestWorldSizeOne
 M113 KILLED    runner_hex_v3.py -> TestWorldSizeOne
-M114 KILLED    ddp_hex_v3.py -> TestRunnerWithoutProcessGroup
-M115 KILLED    runner_hex_v3.py -> TestWorldSizeOne
-M116 KILLED    runner_hex_v3.py -> TestRunnerWithoutProcessGroup
-M117 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M114 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M115 KILLED    ddp_hex_v3.py -> TestRunnerWithoutProcessGroup
+M116 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M117 KILLED    runner_hex_v3.py -> TestRunnerWithoutProcessGroup
 M118 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
-M119 KILLED    ddp_hex_v3.py -> TestExactDistributedEvalSampler
-[MUTATION-PROBE] baseline green | 119/119 killed | PASS
+M119 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M120 KILLED    ddp_hex_v3.py -> TestExactDistributedEvalSampler
+[MUTATION-PROBE] baseline green | 120/120 killed | PASS
 exit=0
 
 == review rounds on this branch
 1) self-review of the first version (probe 102/102): adapter bypass, unagreed construction, forward errors hanging peers, decisions on unguaranteed bitwise-equal all-reduce results, per-rank RNG lost on resume -> closed (109/109)
 2) independent review of a875020 (each finding reproduced with a real 2-rank job): errors before the forward hung BatchNorm models; BatchNorm/EMA buffers diverged per rank; config not agreed; lying len(); per-rank loader generators lost; two blind tests -> closed in 3279dfb (116/116 after sharpening the len() fast-fail test)
 3) independent review of 205f293: round-2 findings re-run and confirmed closed; new: buffer-sync regression (shape mismatch aborted gloo with SIGABRT), OOM while preparing without rescue, CUDA-located RNG/generator states, effective AMP mode not agreed -> closed in 0e86c52 (119/119)
+4) closing check of 0e86c52: no findings (the buffer-shape scenario now ends in an agreed DistributedContractError on both ranks, no SIGABRT); residual taken along: the OOM rescue never raises (e4b5817, 120/120)
 
 == measured, not assumed: forward without backward on every rank (agreed skip), torch 2.6.0, 2 gloo ranks
 default DDP: OK; find_unused_parameters=True: OK; static_graph=True: OK (regression scenarios nan_skip_* in TestTwoRanks)

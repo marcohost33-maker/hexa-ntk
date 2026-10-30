@@ -70,6 +70,10 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   (3) RNG-/Generator-Zustaende kamen bei `map_location=<cuda>` als CUDA-Tensoren an -> `.cpu()`
   (auch im bestehenden `resume_utils.restore_rng_states`; CUDA hier nicht gelaufen);
   (4) der effektive AMP-Modus (bf16-Rueckfall je GPU) gehoert in den Konstruktions-Abgleich.
+  _Abschlusspruefung (Review von 0e86c52):_ keine Befunde; die vier Fixes aendern weder die
+  Reihenfolge der Collectives noch den Single-Process-Pfad. Mitgenommen: die OOM-Rettung wirft nie
+  (sie laeuft vor der Abstimmung), die bewusste Ablehnung rang-abhaengiger Buffer-Shapes steht in
+  der Spec.
   Evidenz: echter 2-Rank-gloo-Lauf (CPU, float64) == Single-Process-Lauf (Gewichte, EMA,
   `val_nrmse`, `mean_loss` <= 1e-12; beide Ranks bitgleich); Resume 2+2 == 4 Epochen bitgleich
   mit mischendem `DistributedSampler` (auch mit Dropout und Rank-Seeds); jedes Fehlerszenario
@@ -77,7 +81,7 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   Rank 0, ungleiche Batchzahl, Resume-Datei fehlt/abweichend auf einem Rank) endet auf beiden
   Ranks mit der erwarteten Ausnahme statt Haenger; Welt 1 == ohne DDP bitgleich; BatchNorm: Buffer
   beider Ranks bitgleich, Metrik == Rank 0s EMA-Modell auf dem ganzen Val-Satz, Resume bitgleich.
-  Mutationsprobe: 34 DDP-Mutanten (je ein Waechter aus). _Evidenz:_ `results/2026-10-30_ddp-runner_local-gate.log`.
+  Mutationsprobe: 35 DDP-Mutanten (je ein Waechter aus). _Evidenz:_ `results/2026-10-30_ddp-runner_local-gate.log`.
   Offen (Spec Abschnitt 8): NCCL/CUDA, > 2 Ranks, mehrere Hosts, AMP unter DDP; CUDA-RNG je Rank,
   Worker-RNG; Fehler in backward/optimizer.step; Mid-Epoch-Resume.
 
