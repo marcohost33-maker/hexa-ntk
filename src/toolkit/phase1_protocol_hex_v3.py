@@ -10,15 +10,18 @@ for sections 4-7 of spec/PREREGISTRATION_PHASE1_v1.md:
 - the Pareto-efficient frontier with log-log interpolation and NO
   extrapolation;
 - the IQM (trimmed mean, Agarwal et al. 2021) with its two-stage paired
-  bootstrap (seeds first, sample ids second, one index set shared by every
-  test set so the resolution axis stays paired);
+  bootstrap (seeds and sample ids resampled independently -- a crossed
+  design, Owen's pigeonhole bootstrap -- one index set shared by every test
+  set so the resolution axis stays paired);
 - the preregistered decision rules (equal runtime, equal accuracy, baseline
   floor, no claim outside the measured range);
 - the break-even query count;
 - the run manifest with its SHA-256.
 
-numpy only. Instruments only: nothing here trains, tunes or scores a model on
-T1 data. Every result of these functions is a measurement of the instrument
+Dependencies: numpy, plus the T1 task module ``heat_operator_task_hex_v3``
+(which imports torch for its dataset types) and the FV solver's lattice type;
+earlier versions claimed numpy alone (issue #82). Instruments only: nothing
+here trains, tunes or scores a model on T1 data. Every result of these functions is a measurement of the instrument
 on the numbers it was given, never a scientific claim.
 """
 
@@ -54,6 +57,7 @@ __all__ = [
     "decide_preregistered",
     "verify_preregistered_decision",
     "break_even_queries",
+    "break_even_at_equal_accuracy",
     "RunManifestError",
     "file_sha256",
     "source_revision",
@@ -216,9 +220,30 @@ def _rng(seed: int) -> np.random.Generator:
     return np.random.default_rng(np.random.SeedSequence(seed))
 
 
+def _finite_stat(fn: Callable[..., Any], arr: np.ndarray, **kwargs: Any) -> Any:
+    """``fn`` (np.mean, np.median, np.quantile) on finite data, never inf (spec section 8).
+
+    The sums inside a mean, the pair average of a median and the difference
+    inside a quantile's interpolation overflow for finite values near the
+    float limit (issue #82 F-E5: IQM([1e308] * 3) was inf). Only then the
+    statistic is recomputed on a copy scaled by a power of two small enough
+    for every intermediate to stay finite, and scaled back; both scalings are
+    exact (outside the subnormal range). Wherever the plain evaluation is
+    finite its result is returned unchanged, bit for bit.
+    """
+    with np.errstate(over="ignore", invalid="ignore"):
+        out = fn(arr, **kwargs)
+    if np.all(np.isfinite(out)):
+        return out
+    axis = kwargs.get("axis")
+    n = arr.size if axis is None else arr.shape[axis]
+    scale = 2.0 ** -(max(1, int(n)).bit_length() + 1)
+    return fn(arr * scale, **kwargs) / scale
+
+
 def _percentile_interval(stats: np.ndarray, confidence: float) -> Tuple[float, float]:
     alpha = (1.0 - confidence) / 2.0
-    low, high = np.quantile(stats, [alpha, 1.0 - alpha])
+    low, high = _finite_stat(np.quantile, stats, q=[alpha, 1.0 - alpha])
     return float(low), float(high)
 
 
@@ -292,8 +317,8 @@ def _bootstrap_median_rows(rows: np.ndarray, protocol: TimingProtocol) -> Tuple[
     chunk = max(1, 2_000_000 // (clusters * calls))
     for start in range(0, protocol.bootstrap_resamples, chunk):
         block = index[start:start + chunk]
-        stats[start:start + block.shape[0]] = np.median(
-            rows[block].reshape(block.shape[0], clusters * calls), axis=1
+        stats[start:start + block.shape[0]] = _finite_stat(
+            np.median, rows[block].reshape(block.shape[0], clusters * calls), axis=1
         )
     return _percentile_interval(stats, protocol.confidence)
 
@@ -325,7 +350,7 @@ def measure_latency(
     arr = np.asarray(times, dtype=np.float64)
     low, high = _bootstrap_median_rows(arr[:, None], protocol)
     return LatencyMeasurement(
-        times_s=tuple(times), median_s=float(np.median(arr)), ci_low_s=low, ci_high_s=high,
+        times_s=tuple(times), median_s=float(_finite_stat(np.median, arr)), ci_low_s=low, ci_high_s=high,
         protocol=protocol,
     )
 
@@ -469,9 +494,11 @@ def baseline_cost_accuracy_curve(
         points.append(CostAccuracyPoint(
             n=int(lattice.n), steps=int(steps), dt=settings["t_final"] / steps,
             sample_count=int(samples), timed_samples=int(timed),
-            mean_rel_l2=float(np.mean(rel_l2)), median_rel_l2=float(np.median(rel_l2)),
-            mean_rel_h1=float(np.mean(metrics["rel_h1"])), mean_rel_max=float(np.mean(metrics["rel_max"])),
-            median_wall_time_s=float(np.median(rows)), wall_time_ci_s=(low, high),
+            mean_rel_l2=float(_finite_stat(np.mean, np.asarray(rel_l2, dtype=np.float64))),
+            median_rel_l2=float(_finite_stat(np.median, np.asarray(rel_l2, dtype=np.float64))),
+            mean_rel_h1=float(_finite_stat(np.mean, np.asarray(metrics["rel_h1"], dtype=np.float64))),
+            mean_rel_max=float(_finite_stat(np.mean, np.asarray(metrics["rel_max"], dtype=np.float64))),
+            median_wall_time_s=float(_finite_stat(np.median, rows)), wall_time_ci_s=(low, high),
             cg_iterations_mean=float(np.mean(iterations)), domain=str(lattice.domain), **settings,
         ))
     return tuple(points)
@@ -538,7 +565,7 @@ def _iqm_rows(rows: np.ndarray, proportion: float) -> np.ndarray:
     n = rows.shape[1]
     cut = int(proportion * n)
     ordered = np.sort(rows, axis=1)
-    return np.mean(ordered[:, cut:n - cut], axis=1)
+    return _finite_stat(np.mean, ordered[:, cut:n - cut], axis=1)
 
 
 def interquartile_mean(values: Any, proportion: float = PREREGISTERED_IQM_PROPORTION) -> float:
@@ -684,12 +711,13 @@ def paired_bootstrap_iqm(
         cols = sample_index[start:start + chunk]
         for name, arr in table.items():
             resampled = arr[rows[:, :, None], cols[:, None, :]]  # (b, S, M)
-            stats[name][start:start + rows.shape[0]] = _iqm_rows(resampled.mean(axis=2), proportion)
+            stats[name][start:start + rows.shape[0]] = _iqm_rows(
+                _finite_stat(np.mean, resampled, axis=2), proportion)
     out: Dict[str, BootstrapSummary] = {}
     for name, arr in table.items():
         low, high = _percentile_interval(stats[name], confidence)
         out[name] = BootstrapSummary(
-            point=interquartile_mean(arr.mean(axis=1), proportion), low=low, high=high,
+            point=interquartile_mean(_finite_stat(np.mean, arr, axis=1), proportion), low=low, high=high,
             n_seeds=int(n_seeds), n_samples=int(n_samples), n_resamples=int(n_resamples),
             seed=int(seed), confidence=float(confidence), proportion=float(proportion),
         )
@@ -1339,7 +1367,7 @@ def decide_preregistered(
     # Codex #80 (426c97f): raw errors are >= 0 (section 5a), so an all-zero table gives
     # high == 0; both rules are defined for it (runtime compares, accuracy hits the floor).
     upper = _non_negative_float(high, name="gino.high")
-    latency = float(np.median(latency_calls))
+    latency = float(_finite_stat(np.median, np.asarray(latency_calls, dtype=np.float64)))
     runtime, accuracy, verdict = _rules(upper, latency, times, curve_errors)
 
     provenance = {
@@ -1428,6 +1456,31 @@ def break_even_queries(
     return -((-fixed) // saving)
 
 
+def break_even_at_equal_accuracy(
+    training_time_s: Any,
+    data_generation_time_s: Any,
+    gino_upper_rel_l2: Any,
+    gino_latency_s: Any,
+    baseline_times_s: Any,
+    baseline_errors: Any,
+) -> Optional[int]:
+    """Break-even with the baseline latency bound to the equal-accuracy rule (section 6).
+
+    ``break_even_queries`` takes any baseline latency; section 6 defines it as
+    the ``time_at_error`` of the equal-accuracy rule (issue #82: the binding was
+    prose only). Here it is recomputed from the baseline frontier at the GINO
+    upper error bound, never passed in; ``None`` where that rule is not
+    evaluable (bound below the baseline floor or above its coarsest error: no
+    extrapolation) or where GINO is not faster.
+    """
+    upper = _positive_float(gino_upper_rel_l2, name="gino_upper_rel_l2")
+    _, ft, fe = _frontier_arrays(baseline_times_s, baseline_errors)
+    t_base = time_at_error(ft, fe, upper)
+    if t_base is None:
+        return None
+    return break_even_queries(training_time_s, data_generation_time_s, gino_latency_s, t_base)
+
+
 # ------------------------------------------------------------------
 # Section 7: run manifest
 # ------------------------------------------------------------------
@@ -1441,7 +1494,10 @@ _REQUIRED_MANIFEST_KEYS = (
     "git_sha", "preregistration", "datasets", "split_ids", "backend", "config_digest",
     "seeds", "hardware", "reference_spec_ids", "metric_spec_sha256", "result_digests",
 )
-_OPTIONAL_MANIFEST_KEYS = ("extra",)
+# worktree_dirty: source_revision() returns it next to git_sha, so
+# {**fields, **source_revision()} must build (issue #82 F-E3: it raised
+# "unknown manifest keys"; section 7 says a dirty tree is recorded, not hidden).
+_OPTIONAL_MANIFEST_KEYS = ("extra", "worktree_dirty")
 _REQUIRED_HARDWARE_KEYS = ("machine", "threads", "dtype", "cuda")
 
 
@@ -1584,6 +1640,11 @@ def build_run_manifest(fields: Mapping[str, Any]) -> Dict[str, Any]:
                            for k, v in _str_mapping(fields["result_digests"], name="result_digests",
                                                     allow_empty=True).items()},
     }
+    if "worktree_dirty" in fields:
+        dirty = fields["worktree_dirty"]
+        if not isinstance(dirty, bool):
+            raise RunManifestError(f"worktree_dirty must be a bool, got {dirty!r}")
+        body["worktree_dirty"] = dirty
     if "extra" in fields:
         extra = fields["extra"]
         if not isinstance(extra, Mapping):

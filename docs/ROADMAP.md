@@ -22,6 +22,29 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Issue #82: Restbefunde der Equalita-Runde f1b54bc (2026-10-30, Linux-Container).** Jeder
+  Punkt gegen main @a19c992 nachgemessen. Offen und jetzt behoben: F-E5 (Spec Abschnitt 8 "keine
+  Funktion liefert inf" war falsch: `IQM([1e308] * 3)`, der Median zweier Dauern von 1.5e308 s,
+  Bootstrap-Mittel und Quantile ueberliefen auf endlichen Eingaben) -> `_finite_stat` rechnet nur
+  im Ueberlauffall auf einer exakt mit einer Zweierpotenz skalierten Kopie nach, jedes endliche
+  Ergebnis bleibt bitgleich; F-E3 (`{**fields, **source_revision()}` -> "unknown manifest keys")
+  -> optionaler Manifest-Schluessel `worktree_dirty` (bool, mitgehasht); Break-even an die
+  Gleich-Genauigkeits-Regel gebunden (`break_even_at_equal_accuracy` rechnet die Baseline-Latenz
+  aus der Front nach statt sie anzunehmen); Zitat korrigiert: der Code resampelt Seeds und
+  Sample-IDs unabhaengig (gekreuztes Design) = Pigeonhole-Bootstrap (Owen 2007, AOAS 1(2):386-411,
+  konservativ), nicht das genestete Schema von Davison/Hinkley 3.8; Modul-Docstring "numpy only"
+  korrigiert. Schon vorher erledigt (nur Statuspflege): F-E2 Hardware-Werte, F-E4 `\Z`,
+  Break-even-Overflow (HNT-R86-04), AMP/Backend auf Entscheidungs-Ebene (R4-F3, D7),
+  `n_seeds == 5` (Equalita R2). 8 neue Tests rot gegen a19c992, gruen jetzt; eine Positivkontrolle
+  (normale Werte bitgleich). Offene Messung aus #82 nachgeholt: Radius-Tie-Survey unter Linux
+  (Container, Python 3.12.3, torch 2.6.0, numpy 2.5.3, neuraloperator 2.0.0, @a19c992 sauber):
+  Tie- und Flip-Zahlen aller 48 Kandidaten identisch zu Windows 2026-10-20, dieselben 9 tie- und
+  flip-freien Kandidaten, 960 Backend-Graphen ohne Abweichung; verschieden nur der gemessene
+  float32-Distanzfehler nahe dem Radius (BLAS-Rundung, 16/48 Kandidaten). Abstand >= 2x
+  float32-Fehler haben auch unter Linux nur drei (latent 16 mit 1.5 / 2.25 / 2.75).
+  _Evidenz:_ `results/2026-10-30_gino_radius_tie_survey_float32-graphs_linux.json` (exit 0).
+  Offen fuer den Owner: ob ein entscheidungsfaehiger Lauf `worktree_dirty == False` verlangen soll
+  (heute nur aufgezeichnet); D4/D5 unveraendert.
 - [x] **DDP-Integration des Runners (2026-10-30, Linux-Container; ROADMAP-Punkt unten, Cross-Family
   GPT-6 R89 P1 / Antwort 2026-10-28 A6).** Vertrag `spec/DDP_RUNNER_v1.md`, Modul `ddp_hex_v3.py`,
   `RunnerConfig(distributed=True)`. Vorher: nur `is_main_process`, kein `set_epoch`, Validierung

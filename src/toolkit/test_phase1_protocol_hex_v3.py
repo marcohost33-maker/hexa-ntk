@@ -1781,3 +1781,73 @@ class TestBreakEvenRange(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIssue82Residuals(unittest.TestCase):
+    """Issue #82 residual findings (Equalita round f1b54bc), fixed 2026-10-30."""
+
+    # F-E5: section 8 "no function returns inf" was false for finite inputs near the limit.
+    def test_iqm_of_huge_finite_values_is_finite(self):
+        # finite and correct to rounding (a mean of three equal values is not exact even
+        # in the normal range: np.mean([0.1] * 3) == 0.10000000000000002)
+        for values, want in (([1e308] * 3, 1e308), ([1.7e308] * 5, 1.7e308),
+                             ([1.7e308, 1.6e308, 1.5e308, 0.0, 1.0], 1.5e308 / 3 + 1.6e308 / 3)):
+            got = pp.interquartile_mean(values)
+            self.assertTrue(math.isfinite(got), values)
+            self.assertTrue(math.isclose(got, want, rel_tol=8 * 2.0 ** -52), (values, got))
+
+    def test_ordinary_values_are_unchanged_bit_for_bit(self):
+        values = [0.1, 0.7, 0.3, 0.9, 0.5]
+        self.assertEqual(pp.interquartile_mean(values), float(np.mean(np.sort(values)[1:4])))
+
+    def test_median_latency_of_huge_durations_is_finite(self):
+        clock = itertools.cycle([0.0, 1.5e308]).__next__
+        protocol = pp.TimingProtocol(warmup=0, repeats=2, bootstrap_resamples=50)
+        measured = pp.measure_latency(lambda: None, protocol, clock=clock)
+        self.assertEqual(measured.median_s, 1.5e308)
+        self.assertEqual((measured.ci_low_s, measured.ci_high_s), (1.5e308, 1.5e308))
+
+    def test_bootstrap_of_huge_errors_is_finite(self):
+        errors = np.full((5, 4), 1.7e308)
+        summary = pp.paired_bootstrap_iqm(errors, sample_ids=[0, 1, 2, 3], n_resamples=20)[""]
+        for value in (summary.point, summary.low, summary.high):
+            self.assertTrue(math.isclose(value, 1.7e308, rel_tol=8 * 2.0 ** -52), value)
+
+    def test_quantile_of_opposite_huge_values_is_finite(self):
+        low, high = pp._percentile_interval(np.array([-1.7e308, 1.7e308]), 0.95)
+        self.assertTrue(math.isfinite(low) and math.isfinite(high))
+        self.assertLess(low, high)
+
+    # F-E3: a dirty tree is recorded, not hidden -- it had no manifest slot.
+    def test_source_revision_fits_into_the_manifest(self):
+        manifest = pp.build_run_manifest({**_manifest_fields(), **pp.source_revision()})
+        self.assertIsInstance(manifest["worktree_dirty"], bool)
+
+    def test_worktree_dirty_is_recorded_and_digested(self):
+        clean = pp.build_run_manifest({**_manifest_fields(), "worktree_dirty": False})
+        dirty = pp.build_run_manifest({**_manifest_fields(), "worktree_dirty": True})
+        self.assertIs(dirty["worktree_dirty"], True)
+        self.assertNotEqual(clean["manifest_sha256"], dirty["manifest_sha256"])
+        self.assertNotIn("worktree_dirty", pp.build_run_manifest(_manifest_fields()))
+        for bad in ("yes", 1, None):
+            with self.assertRaisesRegex(pp.RunManifestError, "worktree_dirty must be a bool"):
+                pp.build_run_manifest({**_manifest_fields(), "worktree_dirty": bad})
+
+    # P3: break-even's baseline latency is the time_at_error of the equal-accuracy rule.
+    def test_break_even_is_bound_to_the_equal_accuracy_rule(self):
+        times, errors = [1.0, 2.0, 4.0], [0.4, 0.2, 0.1]
+        self.assertEqual(pp.break_even_at_equal_accuracy(10.0, 0.0, 0.2, 1.0, times, errors),
+                         pp.break_even_queries(10.0, 0.0, 1.0, 2.0))
+        self.assertEqual(pp.break_even_at_equal_accuracy(10.0, 0.0, 0.2, 1.0, times, errors), 10)
+        self.assertIsNone(pp.break_even_at_equal_accuracy(10.0, 0.0, 0.05, 1.0, times, errors))  # below floor
+        self.assertIsNone(pp.break_even_at_equal_accuracy(10.0, 0.0, 0.5, 1.0, times, errors))  # above coarsest
+        self.assertIsNone(pp.break_even_at_equal_accuracy(10.0, 0.0, 0.2, 3.0, times, errors))  # GINO slower
+        with self.assertRaises(ValueError):
+            pp.break_even_at_equal_accuracy(10.0, 0.0, 0.0, 1.0, times, errors)
+
+    # P3: documentation claims.
+    def test_docs_name_the_real_dependencies_and_bootstrap(self):
+        self.assertNotIn("numpy only", pp.__doc__)
+        spec = (_ROOT / "spec" / "PHASE1_PROTOCOL_v1.md").read_text(encoding="utf-8")
+        self.assertIn("pigeonhole bootstrap", spec)
+        self.assertIn("10.1214/07-AOAS122", spec)

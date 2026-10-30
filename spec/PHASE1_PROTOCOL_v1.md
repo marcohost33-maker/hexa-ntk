@@ -127,11 +127,23 @@ row pairwise only over contiguous memory, and at 3b041db a Fortran-ordered or
 column-indexed copy of the same values moved the point estimate by one ulp.
 
 The index sets depend only on `(seed, n_resamples, S, M)`; the evaluation is
-chunked for memory and the chunk size does not change the result. Resampling
-seeds first and sample ids second is the two-stage bootstrap of Davison and
-Hinkley (1997, section 3.8) for a two-level design; the seed is the cluster.
-Percentile intervals carry no coverage guarantee for five clusters; the
-preregistration reports every seed and every test set next to them.
+chunked for memory and the chunk size does not change the result.
+
+*Design and citation (corrected 2026-10-30, issue #82).* Seeds and sample ids
+are **crossed**, not nested: every sample id is evaluated under every seed, and
+one sample-id draw is applied to all drawn seeds. Resampling the rows (seeds)
+and the columns (sample ids) independently with replacement is Owen's
+*pigeonhole bootstrap* for crossed random-effects data (A. B. Owen, Ann. Appl.
+Stat. 1(2):386-411, 2007, doi:10.1214/07-AOAS122; extended to more factors by Owen and
+Eckles 2012, doi:10.1214/12-AOAS547). It is mildly conservative: its variance estimate
+is biased upward (Owen 2007); no bootstrap is exact for crossed designs
+(McCullagh, "Resampling and exchangeable arrays", Bernoulli 6(2), 2000). The earlier text cited the two-stage bootstrap
+of Davison and Hinkley (1997, section 3.8), which resamples sample ids *within*
+each drawn cluster (nested design) -- that is not what the code does, and the
+code is not changed: the preregistration's wording "resample training seeds,
+then sample ids" with "the same resampled sample ids ... jointly" describes the
+crossed scheme. Percentile intervals carry no coverage guarantee for five
+seeds; the preregistration reports every seed and every test set next to them.
 
 ## 5. Decision rules (preregistration section 6)
 
@@ -399,7 +411,12 @@ is the count computed exactly on the given binary64 values, as an unbounded int
 (HNT-R86-04, issue #82, cross-family GPT-6 R86). Wherever the float evaluation
 is finite its result is unchanged. The baseline latency is the
 `time_at_error` of the equal-accuracy rule, so a break-even count exists only
-where that rule is evaluable.
+where that rule is evaluable. `break_even_queries` itself takes any baseline
+latency (unchanged); `break_even_at_equal_accuracy(training_time_s,
+data_generation_time_s, gino_upper_rel_l2, gino_latency_s, baseline_times_s,
+baseline_errors)` (added 2026-10-30, issue #82) recomputes that latency from the
+baseline frontier at the GINO upper error bound instead of accepting it, and
+returns `None` where the equal-accuracy rule is not evaluable.
 
 ## 7. Run manifest (preregistration section 7)
 
@@ -419,6 +436,7 @@ Required, each non-empty and typed:
 | `reference_spec_ids` | the Phase 0 ReferenceSpec ids |
 | `metric_spec_sha256` | `file_sha256` of `spec/HEAT_OPERATOR_TASK_v1.md` |
 | `result_digests` | name -> SHA-256 (64 lowercase hex) of every result file (may be empty before results exist; each value is checked, Codex #80 2026-10-23) |
+| `worktree_dirty` (optional) | bool from `source_revision()`; recorded as given (added 2026-10-30, issue #82 F-E3: `{**fields, **source_revision()}` raised "unknown manifest keys", so a dirty tree had no slot) |
 | `extra` (optional) | free-form mapping |
 
 Any other key, a missing key, a wrong type, a NaN or an empty required value
@@ -437,7 +455,12 @@ tree is dirty; a dirty tree is recorded, not hidden.
 - non-finite inputs are rejected everywhere; a non-finite derived statistic
   cannot occur for finite inputs (means, medians, quantiles of finite data);
 - no function returns `inf` or `NaN`; "not evaluable" is `None` with a
-  reason;
+  reason. Means, medians and quantiles of finite data near the float limit
+  overflowed in their intermediate sums (issue #82 F-E5: `IQM([1e308] * 3)` was
+  `inf`, the median of two durations of 1.5e308 s too); since 2026-10-30 such a
+  statistic is recomputed on a copy scaled by an exact power of two and scaled
+  back, and only where the plain evaluation was non-finite, so every finite
+  result is unchanged bit for bit;
 - all randomness comes from an explicit seed; two calls with the same
   arguments return identical numbers.
 
@@ -497,6 +520,7 @@ amendment 2026-10-21).
 References: McGreivy and Hakim, Nat. Mach. Intell. 6:1256 (2024), rules 1-2
 (equal accuracy, equal runtime, no weak baseline); Agarwal, Schwarzer,
 Castro, Courville and Bellemare, NeurIPS 2021 (IQM, stratified bootstrap);
-Davison and Hinkley, Bootstrap Methods and Their Application, CUP 1997,
-section 3.8 (two-stage resampling); Efron and Tibshirani 1993, chapter 13
-(percentile interval).
+Owen, The pigeonhole bootstrap, Ann. Appl. Stat. 1(2):386-411 (2007)
+(crossed designs; replaces the earlier citation of Davison and Hinkley 1997,
+section 3.8, nested two-stage resampling -- issue #82); Efron and Tibshirani 1993,
+chapter 13 (percentile interval).
