@@ -31,10 +31,20 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   wiederherstellen. Behauptung und Beleg: unterbrochen == ununterbrochen, bitgleich (Gewichte,
   EMA, Epochen- und Val-Berichte, Anomalie-Historie) -- mit explizitem Generator und ohne, mit
   2 DataLoader-Workern und Worker-RNG-Rauschen, mit Dropout und Python/NumPy-Stroemen, und als
-  echter 2-Rank-DDP-Lauf mit BatchNorm + Dropout + Rank-Seeds. Positivkontrolle: ohne
-  Mid-Epoch-Record weicht das Ergebnis ab. 8 Mutanten (je ein Waechter aus); einer davon zeigte
-  einen ueberfluessigen Buffer-Sync vor dem Mid-Save (aequivalenter Mutant) -> entfernt.
-  Grenzen (Spec Abschnitt 4): `persistent_workers=True`, CUDA-RNG, gleiche Maschine/Software.
+  echter 2-Rank-DDP-Lauf mit BatchNorm + Dropout + Rank-Seeds sowie mit
+  `broadcast_buffers=False` und einem Buffer, den der Trainings-Forward liest. Positivkontrolle:
+  ohne Mid-Epoch-Record weicht das Ergebnis ab. Unabhaengiges Review vor dem Merge (Sweep ueber
+  jeden Abbruchschritt, Scheduler, Warmup, NaN-Skips, Kadenzen, Worker: sauber) fand 4 Befunde,
+  alle rot reproduziert und behoben: (1) DDP mit `broadcast_buffers=False` setzte jeden Rank auf
+  Rank 0s Buffer -> rank-eigene Buffer im Record; (2) ein Resume mit anderer Batch-Groesse oder
+  Datensatzlaenge lief still durch (Batch-Groesse 4: Fast-Forward frisst die Epoche) -> Loader-Form
+  im Record, Abweichung abgelehnt; (3) unter DDP fehlte die Anomalie-Historie -> je Rank
+  gesichert; (4) zwei Waechter ohne Test (Skip-Zahl, abgestimmte Position) -> Tests. Eigene
+  Gegenpruefung: die Spec-Behauptung, bei `persistent_workers=True` bleibe die Sample-Reihenfolge
+  erhalten, war falsch (mit und ohne Generator) -> die Kombination wird abgelehnt. 17 Mutanten
+  (je ein Waechter aus); einer davon zeigte einen ueberfluessigen Buffer-Sync vor dem Mid-Save
+  (aequivalenter Mutant) -> entfernt. Grenzen (Spec Abschnitt 4): CUDA-RNG, nicht-persistente
+  Buffer, gleiche Maschine/Software.
 - [x] **Issue #82: Restbefunde der Equalita-Runde f1b54bc (2026-10-30, Linux-Container).** Jeder
   Punkt gegen main @a19c992 nachgemessen. Offen und jetzt behoben: F-E5 (Spec Abschnitt 8 "keine
   Funktion liefert inf" war falsch: `IQM([1e308] * 3)`, der Median zweier Dauern von 1.5e308 s,

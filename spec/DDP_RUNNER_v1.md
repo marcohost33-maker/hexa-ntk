@@ -176,10 +176,17 @@ NumPy (legacy MT19937) RNG states and the states of its loaders' explicit
 tensors (`rng_state_tensors`; floats as IEEE-754 bits, exact) into
 `extra["rank_rng_states"]`; on resume each rank restores its own after the
 manager restored rank 0's (review finding 5: per-rank shards shuffled with
-per-rank generator seeds continued rank 0's permutation). With another world size, or a checkpoint without the
-field, the rank-0 states stay, `rank_rng_restored = False` and a warning is logged.
+per-rank generator seeds continued rank 0's permutation). The same field carries
+every rank's anomaly-detector loss history (`anomaly_history`, encoded as
+`[count, values..., NaN padding]` of length `spike_window_size + 1`, since a spike
+kept out of the window on one rank makes the counts differ): each rank checks its
+own loss, and a resumed rank would otherwise start the spike median from an empty
+window (review of #94). With another world size, or a checkpoint without the
+field, the rank-0 states stay, the history window starts empty,
+`rank_rng_restored = False` and a warning is logged.
 Afterwards the resumed epoch, global step and best metric value (bitwise,
-NaN for `None`), the SHA-256 of the adopted `run_id`, and a SHA-256 over the
+NaN for `None`), the mid-epoch position (`spec/MID_EPOCH_RESUME_v1.md`, -1 at an
+epoch boundary), the SHA-256 of the adopted `run_id`, and a SHA-256 over the
 names, dtypes, shapes and bytes of the loaded model state must equal rank 0's,
 else `DistributedContractError` on every rank (same path, different bytes: no
 shared file system, a stale copy).

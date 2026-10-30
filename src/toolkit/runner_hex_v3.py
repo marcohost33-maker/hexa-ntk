@@ -137,13 +137,49 @@ def _float_list(values: Any, name: str) -> List[float]:
 _MID_EPOCH_VERSION = 1
 
 
+def _refuse_persistent_workers(loader: Any, why: str) -> None:
+    """Mid-epoch resume needs a fresh training iterator per epoch.
+
+    A persistent-worker iterator is created once per run and draws its worker
+    base seed only then; later epochs reuse it. The resumed run's new iterator
+    draws that seed again from the restored epoch-start state, so the sampler
+    permutation (and the worker RNG) differs from the uninterrupted run's --
+    with or without an explicit loader generator (spec/MID_EPOCH_RESUME_v1.md
+    section 4).
+    """
+    if getattr(loader, "persistent_workers", False):
+        raise ValueError(
+            f"{why}, but the training loader has persistent_workers=True: a resumed run "
+            "would not reproduce the sample order (create the loader with "
+            "persistent_workers=False, or set save_every_n_steps=0 and resume from an "
+            "epoch-boundary checkpoint)"
+        )
+
+
+def _loader_shape(loader: Any) -> List[int]:
+    """[batches per epoch, batch size, dataset length] of a loader; -1 where undefined."""
+
+    def size(obj: Any) -> int:
+        try:
+            return len(obj)
+        except TypeError:
+            return -1
+
+    batch_size = getattr(loader, "batch_size", None)
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+        batch_size = -1
+    dataset = getattr(loader, "dataset", None)
+    return [size(loader), batch_size, -1 if dataset is None else size(dataset)]
+
+
 def _check_mid_epoch_record(
-    record: Any, *, epoch: int, path: Path, rank: int = 0, world_size: int = 1
+    record: Any, *, epoch: int, path: Path, loader_shape: List[int], rank: int = 0, world_size: int = 1
 ) -> Dict[str, Any]:
     """Validate a mid-epoch record and return this rank's part (spec/MID_EPOCH_RESUME_v1.md).
 
     Per-rank fields are lists indexed by rank. A record written with another
-    world size is refused: the ranks' sample partitions, and with them the
+    world size or for another train loader shape (``loader_shape``, see
+    _loader_shape) is refused: the ranks' sample partitions, and with them the
     batches already done, would not correspond.
     """
     def bad(why: str) -> ValueError:
@@ -171,13 +207,24 @@ def _check_mid_epoch_record(
         start = record["epoch_start"]
         torch_rng = start["torch_rng"][rank]
         generators = {name: states[rank] for name, states in start["loader_generators"].items()}
-    except (KeyError, IndexError, TypeError) as exc:
+        shape = list(record["train_loader"][rank])
+        rank_buffers = record.get("rank_buffers")
+        buffers = None if rank_buffers is None else {n: parts[rank] for n, parts in rank_buffers.items()}
+    except (KeyError, IndexError, TypeError, AttributeError) as exc:
         raise bad(f"is incomplete ({exc!r})") from None
+    if shape != list(loader_shape):
+        raise bad(
+            f"was written for a train loader with [batches per epoch, batch size, dataset length] "
+            f"= {shape}, this run's is {list(loader_shape)}; the batches already done would not "
+            "correspond (resume from an epoch-boundary checkpoint instead)"
+        )
     if len(losses) + n_anomalies != done or len(grad_norms) > len(losses):
         raise bad("does not add up (healthy losses + skipped steps != batches done)")
     for name, state in [("torch_rng", torch_rng), *generators.items()]:
         if not (torch.is_tensor(state) and state.dtype == torch.uint8):
             raise bad(f"carries no uint8 RNG state for {name!r}")
+    if buffers is not None and not all(torch.is_tensor(b) for b in buffers.values()):
+        raise bad("carries a rank buffer that is not a tensor")
     return {
         "epoch": epoch,
         "batches_done": done,
@@ -185,6 +232,7 @@ def _check_mid_epoch_record(
         "losses": losses,
         "grad_norms": grad_norms,
         "epoch_start": {"torch_rng": torch_rng, "loader_generators": generators},
+        "buffers": buffers,
     }
 
 
@@ -494,6 +542,8 @@ class HexTrainingRunner:
         config = self.config
         if self.dist is not None:
             self._check_distributed_setup()
+        if config.save_every_n_steps > 0:
+            _refuse_persistent_workers(self.train_loader, "save_every_n_steps > 0")
 
         # Output directory
         self.output_dir = Path(config.output_dir)
@@ -689,13 +739,29 @@ class HexTrainingRunner:
             self.start_epoch = report["epoch"] + 1
             report["mid_epoch_batches_done"] = None
         else:
+            _refuse_persistent_workers(
+                self.train_loader, f"resume checkpoint {resume_path} holds a mid-epoch position"
+            )
             self._resume_mid = _check_mid_epoch_record(
                 mid,
                 epoch=report["epoch"],
                 path=resume_path,
+                loader_shape=_loader_shape(self.train_loader),
                 rank=0 if self.dist is None else self.dist.rank,
                 world_size=1 if self.dist is None else self.dist.world_size,
             )
+            saved = self._resume_mid["buffers"]
+            if saved is not None:
+                # Checked here, inside the agreed resume; copied in at the start
+                # of the interrupted epoch (after the weight-digest agreement).
+                have = {n: (b.dtype, tuple(b.shape)) for n, b in self._persistent_buffers()}
+                got = {n: (b.dtype, tuple(b.shape)) for n, b in saved.items()}
+                if got != have:
+                    raise ValueError(
+                        f"Resume checkpoint {resume_path}: the mid-epoch rank buffers "
+                        f"{sorted(got)} do not match the model's persistent buffers {sorted(have)} "
+                        "(names, dtypes and shapes)"
+                    )
             # The RNG state of the interruption; the fast-forward through the
             # done batches consumes RNG and is followed by restoring this.
             self._resume_rng_at_step = rng_state_tensors()
@@ -1029,6 +1095,13 @@ class HexTrainingRunner:
             # iterator then draws the same sampler permutation and the same
             # worker base seed as the original one.
             self._epoch_start_state = mid["epoch_start"]
+            if mid["buffers"] is not None:
+                # broadcast_buffers=False: this rank's own buffers at the save,
+                # not rank 0's from the loaded state dict.
+                buffers = dict(self._persistent_buffers())
+                with torch.no_grad():
+                    for name, saved in mid["buffers"].items():
+                        buffers[name].copy_(saved.to(buffers[name].device))
             torch.random.set_rng_state(mid["epoch_start"]["torch_rng"].cpu())
             for name, gen in self._loader_generators().items():
                 state = mid["epoch_start"]["loader_generators"].get(name)
@@ -1447,19 +1520,25 @@ class HexTrainingRunner:
         payload's own (rank 0) plus, distributed, every rank's.
         """
         start = self._epoch_start_state
+        rank_buffers = None
         if self.dist is None:
             per_rank = {
                 "losses": [list(losses)],
                 "grad_norms": [list(grad_norms)],
                 "torch_rng": [start["torch_rng"]],
                 "loader_generators": {n: [s] for n, s in start["loader_generators"].items()},
+                "train_loader": [_loader_shape(self.train_loader)],
             }
             rank_rng = None
         else:
-            # No buffer sync here: EMA buffers never feed back into training,
-            # DDP overwrites the model's buffers at every forward, and the sync
-            # before the next validation equalises them (a sync here was an
-            # equivalent mutant, spec/MID_EPOCH_RESUME_v1.md section 2).
+            # No buffer sync here: where a training forward reads a buffer, the
+            # save cadence would change the run. EMA buffers
+            # never feed back into training and the sync before the next
+            # validation equalises them. The model's buffers: with
+            # broadcast_buffers=True DDP overwrites them with rank 0's at the
+            # next forward, so rank 0's (in the payload) are every rank's;
+            # without it each rank keeps its own, recorded below
+            # (spec/MID_EPOCH_RESUME_v1.md section 2).
             gather = self.dist.all_gather_tensor
             self.dist.require_same_names(sorted(start["loader_generators"]), what="loader generator names")
 
@@ -1480,7 +1559,24 @@ class HexTrainingRunner:
                     n: gather(s, what=f"epoch-start {n} generator state")
                     for n, s in sorted(start["loader_generators"].items())
                 },
+                "train_loader": [
+                    part.tolist()
+                    for part in gather(
+                        torch.tensor(_loader_shape(self.train_loader), dtype=torch.int64),
+                        what="train loader shape",
+                    )
+                ],
             }
+            if not getattr(self.model, "broadcast_buffers", True):
+                buffers = self._persistent_buffers()
+                self.dist.require_same_names(
+                    [f"{n}|{b.dtype}|{tuple(b.shape)}" for n, b in buffers],
+                    what="model buffer names, dtypes or shapes",
+                )
+                rank_buffers = {
+                    n: [part.reshape(b.shape) for part in gather(b.detach(), what=f"buffer {n}")]
+                    for n, b in buffers
+                }
             rank_rng = self._gather_rank_rng_states()
         record = {
             "version": _MID_EPOCH_VERSION,
@@ -1494,7 +1590,10 @@ class HexTrainingRunner:
                 "torch_rng": per_rank["torch_rng"],
                 "loader_generators": per_rank["loader_generators"],
             },
+            "train_loader": per_rank["train_loader"],
         }
+        if rank_buffers is not None:
+            record["rank_buffers"] = rank_buffers
         extra: Dict[str, Any] = {"mid_epoch": record}
         if self.dist is None:
             extra["anomaly_history"] = list(self.anomaly_detector.loss_history)
@@ -1524,13 +1623,21 @@ class HexTrainingRunner:
             return save()
         return self.dist.run_agreed(save, what=f"mid-epoch save at step {self.global_step}")
 
+    def _persistent_buffers(self) -> List[Tuple[str, torch.Tensor]]:
+        """The model's buffers that are part of its state dict (resume state)."""
+        state = self.raw_model.state_dict(keep_vars=True)
+        return [(n, b) for n, b in self.raw_model.named_buffers() if n in state]
+
     def _gather_rank_rng_states(self) -> Dict[str, Any]:
-        """Every rank's RNG states for rank 0's resume checkpoint.
+        """Every rank's RNG states and anomaly history for rank 0's resume checkpoint.
 
         The resume payload records the RNG of the process that writes it
         (rank 0). Ranks that draw different numbers (per-rank seeds, dropout)
         would all continue rank 0's streams after a resume; with these states
-        each rank continues its own (spec/DDP_RUNNER_v1.md section 6).
+        each rank continues its own (spec/DDP_RUNNER_v1.md section 6). The
+        anomaly detector's loss history is rank-local too (each rank checks
+        its own loss): without it a resumed rank starts the spike median from
+        an empty window.
         """
         local = rng_state_tensors()
         gathered: Dict[str, Any] = {
@@ -1546,6 +1653,16 @@ class HexTrainingRunner:
             name: self.dist.all_gather_tensor(gens[name].get_state(), what=f"{name} loader generator")
             for name in names
         }
+        # Fixed length (window + 1): [count, values..., NaN padding]; the
+        # counts differ between ranks when a spike was kept out on one rank.
+        history = list(self.anomaly_detector.loss_history)
+        encoded = torch.full((self.anomaly_detector.window_size + 1,), math.nan, dtype=torch.float64)
+        encoded[0] = len(history)
+        encoded[1:1 + len(history)] = torch.tensor(history, dtype=torch.float64)
+        gathered["anomaly_history"] = [
+            part[1:1 + int(part[0])].tolist()
+            for part in self.dist.all_gather_tensor(encoded, what="anomaly history")
+        ]
         return {"world_size": self.dist.world_size, **gathered}
 
     def _restore_rank_rng(self, report: Dict[str, Any]) -> None:
@@ -1561,12 +1678,18 @@ class HexTrainingRunner:
                 per_rank = (states.get("loader_generators") or {}).get(name)
                 if per_rank is not None:
                     gen.set_state(per_rank[self.dist.rank].cpu())
+            history = states.get("anomaly_history")
+            if history is not None:
+                self.anomaly_detector.loss_history.clear()
+                self.anomaly_detector.loss_history.extend(
+                    _float_list(history[self.dist.rank], "anomaly_history")
+                )
             report["rank_rng_restored"] = True
             return
         report["rank_rng_restored"] = False
         logger.warning(
-            "Resume: per-rank RNG states not restored (%s); every rank continues "
-            "rank 0's RNG streams.",
+            "Resume: per-rank RNG states and anomaly histories not restored (%s); every "
+            "rank continues rank 0's RNG streams with an empty anomaly window.",
             reason,
         )
 

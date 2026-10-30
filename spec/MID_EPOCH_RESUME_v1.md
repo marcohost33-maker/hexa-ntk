@@ -6,8 +6,10 @@ Infrastructure contract; it trains no model for the Phase 1 study and makes no l
 claim. Single process and distributed (`spec/DDP_RUNNER_v1.md`).
 **Implementation:** `src/toolkit/runner_hex_v3.py` (`_save_mid_epoch`,
 `_check_mid_epoch_record`, `_train_one_epoch`).
-**Tests:** `src/toolkit/test_mid_epoch_resume_hex_v3.py`; 2-rank DDP scenario
-`mid_epoch_resume` in `src/toolkit/test_ddp_hex_v3.py`; mutants in `scripts/mutation_probe.py`.
+**Tests:** `src/toolkit/test_mid_epoch_resume_hex_v3.py`; 2-rank DDP scenarios
+`mid_epoch_resume`, `mid_epoch_rank_buffers` and `resume_other_position_on_rank1` and the
+world-1 rank-buffer check in `src/toolkit/test_ddp_hex_v3.py`; mutants in
+`scripts/mutation_probe.py`.
 **Origin:** ROADMAP "Mid-Epoch-Resume" (the loader state was saved but resume worked only at
 epoch boundaries); cross-family GPT-6 R89/R90 P1 ("rank-local mid-epoch state coupled with
 model/optimizer/RNG").
@@ -20,8 +22,11 @@ the same weights, EMA, epoch reports (`mean_loss`, `mean_grad_norm`, `n_batches`
 never interrupted, bit for bit, on the same machine and software (the tests compare with
 `==`). Shown for: shuffling through an explicit `torch.Generator` and through the global
 torch RNG (no generator), dropout, loss weights drawn from the Python and NumPy streams,
-`num_workers=2` with a dataset transform that draws from the worker RNG, and 2 DDP ranks
-with BatchNorm, dropout and rank-specific seeds.
+a step skipped (NaN) before the save, `num_workers=2` with a dataset transform that draws
+from the worker RNG, and 2 DDP ranks with BatchNorm, dropout and rank-specific seeds, and
+with `broadcast_buffers=False` and a buffer the training forward reads and updates from
+the local batch. Distributed, "the same" holds per rank: each rank's own parameters,
+buffers, EMA and anomaly history.
 
 ## 2. What a mid-epoch save records
 
@@ -37,15 +42,25 @@ file as the epoch-boundary save, the newest wins) is rewritten with the full res
 | `losses`, `grad_norms` | per rank: the healthy losses and gradient norms so far (the epoch means are then summed in the same order as without the interruption) |
 | `n_anomalies` | skipped steps so far (agreed across ranks, one value) |
 | `epoch_start` | per rank: the global torch RNG state and every explicit loader generator state *at the start of the epoch* |
+| `train_loader` | per rank: `[batches per epoch, batch size, dataset length]` of the train loader (-1 where undefined, e.g. an unsized stream) |
+| `rank_buffers` | distributed with `broadcast_buffers=False` only: per rank, every persistent buffer of the model |
 
-Single process it also records the anomaly detector's loss history (also at epoch
-boundaries now). Distributed, the per-rank fields are all-gathered (fixed-length tensors,
-names checked equal first), every rank's current RNG and generator states go into
-`extra["rank_rng_states"]` (`spec/DDP_RUNNER_v1.md` section 6) and the save is one
-`run_agreed`. The buffers are *not* synchronised before a mid-epoch save: EMA buffers never
-feed back into training, DDP overwrites the model's buffers at every forward, and the sync
-before the next validation (DDP_RUNNER section 4.4) equalises them; a sync here survived as an
-equivalent mutant and was removed.
+Every resume save (mid-epoch and at epoch boundaries) also records the anomaly detector's
+loss history: single process in `extra["anomaly_history"]`, distributed every rank's in
+`extra["rank_rng_states"]` together with every rank's current RNG and generator states
+(`spec/DDP_RUNNER_v1.md` section 6). Distributed, the per-rank fields are all-gathered
+(fixed-length tensors, names checked equal first) and the save is one `run_agreed`.
+
+**Buffers.** They are *not* synchronised before a mid-epoch save: where a training forward
+reads a buffer, a sync would make the save cadence change the run. EMA buffers never feed
+back into training and the sync before the next validation (DDP_RUNNER section 4.4)
+equalises them. The model's buffers: with `broadcast_buffers=True` (the DDP default) DDP
+overwrites them with rank 0's at the next forward, so rank 0's in the payload are every
+rank's. With `broadcast_buffers=False` each rank keeps its own; the payload holds only rank
+0's, so every rank's persistent buffers go into `rank_buffers` (names, dtypes and shapes
+checked equal first) and each rank copies its own back in at the start of the resumed epoch.
+Without that, a rank-local buffer read by the training forward changed the weights and both
+reports (review of #94, 2-rank reproduction).
 
 ## 3. Resume: rebuild the iterator, fast-forward, continue
 
@@ -69,18 +84,31 @@ equivalent mutant and was removed.
 
 The record is validated (`_check_mid_epoch_record`): version, epoch equal to the checkpoint's,
 `batches_done >= 0`, `0 <= n_anomalies <= batches_done`, healthy losses + skips =
-`batches_done`, uint8 RNG states. A record written by another world size is refused: the
-ranks' sample partitions, and with them the batches already done, would not correspond
-(resume from an epoch-boundary checkpoint then). Distributed, the resumed position is part of
-the rank-0 agreement after the load.
+`batches_done`, uint8 RNG states, rank buffers that are tensors with the names, dtypes and
+shapes of the model's persistent buffers. A record written by another world size or for a
+train loader of another shape is refused: the ranks' sample partitions, and with them the
+batches already done, would not correspond (resume from an epoch-boundary checkpoint then).
+Before the shape was recorded, a resume with batch size 4 instead of 2 ran without an error
+and its fast-forward consumed the whole epoch, so those samples never trained (review of
+#94). An unsized loader records -1; only the fast-forward then sees a shorter stream.
+Distributed, the resumed position is part of the rank-0 agreement after the load.
 
 ## 4. Limits
 
-- **`persistent_workers=True`**: the iterator, and with it `_base_seed`, is created once per
-  run, so worker RNG streams after a resume differ from the uninterrupted run's (the order
-  of samples is still reproduced). Not tested.
+- **`persistent_workers=True` is refused** (`ValueError`, at construction with
+  `save_every_n_steps > 0` and at the resume of a mid-epoch checkpoint): the iterator is created
+  once per run and draws `_base_seed` only then, later epochs reuse it. The resumed run's fresh
+  iterator draws that seed again from the restored epoch-start state, so not only the worker
+  RNG but the sampler permutation differs, with or without an explicit loader generator
+  (`test_persistent_workers_break_the_replay` pins this for torch 2.6). The same mechanism makes
+  an *epoch-boundary* resume with persistent workers inexact; that path is not refused and
+  carries no equality claim.
 - **CUDA RNG** per device is not part of the epoch-start record; **custom samplers** must be
   deterministic given the RNG/generator state (stock samplers are).
+- **Non-persistent buffers** are not state (`state_dict` leaves them out) at any resume; a
+  model whose training forward reads a non-persistent buffer it also updates is not covered.
+- **The loader shape** is `[len(loader), batch_size, len(dataset)]`; a changed sampler or
+  transform with the same shape is not detected.
 - **Gradient accumulation** does not exist in the runner; a save always falls on an optimizer
   step.
 - **Equality is bitwise only on the same machine and software** (PyTorch documents no

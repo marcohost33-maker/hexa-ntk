@@ -364,6 +364,22 @@ MUTANTS = (
     Mutant(RU, '            self.anomaly_detector.loss_history.extend(_float_list(history, "anomaly_history"))\n',
            "            pass\n", ME),
     Mutant(RU, "            for done in range(skip):\n", "            for done in range(0):\n", ME),
+    # A persistent-worker iterator breaks the replay: refused at construction and at resume.
+    Mutant(RU, "        if config.save_every_n_steps > 0:\n            _refuse_persistent_workers(",
+           "        if False:\n            _refuse_persistent_workers(", ME),
+    Mutant(RU, "            _refuse_persistent_workers(\n                self.train_loader, f\"resume checkpoint",
+           "            (\n                self.train_loader, f\"resume checkpoint", ME),
+    # Review of #94: skips carried, loader shape pinned, rank buffers under
+    # broadcast_buffers=False, per-rank anomaly history, agreed position.
+    Mutant(RU, '        n_anomalies = mid["n_anomalies"] if mid is not None else 0\n',
+           "        n_anomalies = 0\n", ME),
+    Mutant(RU, "    if shape != list(loader_shape):\n", "    if False:\n", ME),
+    Mutant(RU, '            if not getattr(self.model, "broadcast_buffers", True):\n',
+           "            if False:\n", T2),
+    Mutant(RU, '            if mid["buffers"] is not None:\n', "            if False:\n", T2),
+    Mutant(RU, "                if got != have:\n", "                if False:\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, '            history = states.get("anomaly_history")\n', "            history = None\n", T2),
+    Mutant(RU, "             -1 if done is None else done],\n", "             -1 if done is None else 0],\n", T2),
     Mutant(RU, "    if len(losses) + n_anomalies != done or len(grad_norms) > len(losses):\n", "    if False:\n",
            "test_mid_epoch_resume_hex_v3.TestMidEpochRecord"),
     Mutant(RU, '    if record.get("world_size") != world_size:\n', "    if False:\n",
