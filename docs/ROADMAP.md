@@ -22,6 +22,43 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **DDP-Integration des Runners (2026-10-30, Linux-Container; ROADMAP-Punkt unten, Cross-Family
+  GPT-6 R89 P1 / Antwort 2026-10-28 A6).** Vertrag `spec/DDP_RUNNER_v1.md`, Modul `ddp_hex_v3.py`,
+  `RunnerConfig(distributed=True)`. Vorher: nur `is_main_process`, kein `set_epoch`, Validierung
+  rank-lokal, keine Barriere nach dem Checkpoint-Write. Jetzt: `set_epoch` auf Train-/Val-Sampler;
+  gleiche Schrittzahl je Rank (sonst `DistributedContractError` statt Haenger); NaN-Skip als ODER
+  ueber alle Ranks vor `backward` (sonst Deadlock im Gradienten-All-Reduce); Validierung auf dem
+  ungewrappten Modul, exakte Partition geprueft (Index-Zaehlung per All-Reduce; der gepaddete
+  `DistributedSampler` n=5/W=2 aus R89 D1 wird abgelehnt, `ExactDistributedEvalSampler` neu),
+  `val_nrmse` aus float64-Summen `sqrt(sum e^2 / sum y^2)` (R89 D2); Checkpoint-Schritt und Resume
+  per `run_agreed` (Fehler auf einem Rank -> Fehler auf allen, das All-Reduce ist die Barriere);
+  Resume prueft Epoche/Schritt/Best-Wert/run_id und SHA-256 der geladenen Gewichte gegen Rank 0;
+  `run_id` von Rank 0; FailureSignatures je Rank in `failures/rank{r}/`; Checkpoints ohne
+  `module.`-Praefix. Nur Tensor-Collectives, kein Pickle.
+  _Kritische Selbstpruefung vor dem Merge (gleicher Tag), fuenf Luecken geschlossen:_
+  (1) ein `OperatorAdapterV3` um `model.module` haette den Trainings-Forward an DDP vorbei
+  gefuehrt (kein Gradienten-All-Reduce, Ranks divergieren still) -> `adapter.model is model`
+  Pflicht; (2) Konstruktions-Pruefungen waren selbst nicht abgestimmt (falsches
+  `is_main_process` nur auf Rank 1 -> Rank 0 haengt im run_id-Broadcast) -> Konstruktion in
+  `run_agreed`; (3) eine Exception im Forward/Loss eines Ranks liess die anderen haengen -> der
+  Schritt-Status traegt jetzt 0/1/2 (ok/Skip/Fehler) im selben All-Reduce; (4) die
+  Entscheidungswerte der Validierung sind rank-0-gebunden (Broadcast nach dem All-Reduce, keine
+  Annahme ueber Bitgleichheit der Backends); (5) rank-eigene RNG-Stroeme (torch/Python/NumPy)
+  werden vor jedem Resume-Save gesammelt und beim Resume je Rank restauriert (Dropout +
+  Rank-Seeds: Resume == ununterbrochen, bitgleich). Dazu: Val-Sampler muss deterministisch sein
+  (zweimal gelesen), NCCL-Tensoren auf dem Runner-Device. Gemessen statt angenommen: Forward ohne
+  Backward auf allen Ranks funktioniert mit default-DDP, `find_unused_parameters` und
+  `static_graph` (torch 2.6.0).
+  Evidenz: echter 2-Rank-gloo-Lauf (CPU, float64) == Single-Process-Lauf (Gewichte, EMA,
+  `val_nrmse`, `mean_loss` <= 1e-12; beide Ranks bitgleich); Resume 2+2 == 4 Epochen bitgleich
+  mit mischendem `DistributedSampler` (auch mit Dropout und Rank-Seeds); jedes Fehlerszenario
+  (gepaddeter Val-Sampler, NaN auf einem Rank, Forward-Fehler, Konstruktionsfehler, Schreibfehler
+  Rank 0, ungleiche Batchzahl, Resume-Datei fehlt/abweichend auf einem Rank) endet auf beiden
+  Ranks mit der erwarteten Ausnahme statt Haenger; Welt 1 == ohne DDP bitgleich. Mutationsprobe:
+  24 DDP-Mutanten (je ein Waechter aus). _Evidenz:_ `results/2026-10-30_ddp-runner_local-gate.log`.
+  Offen (Spec Abschnitt 8): NCCL/CUDA, > 2 Ranks, mehrere Hosts, AMP unter DDP; CUDA-RNG je Rank,
+  Worker-RNG; Fehler in backward/optimizer.step; Mid-Epoch-Resume.
+
 - [x] **Cross-Family GPT-6 R88..R98 gegen main triagiert und eingebaut (2026-10-26, Windows).**
   Die meisten Befunde R88..R98 betreffen ein externes Sidecar (DDP-/Trust-/Katalog-Module), das auf
   main nicht existiert; eingebaut sind die zwei, die `ntk_trajectory_hex_v3.py` treffen.
@@ -388,8 +425,10 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 - [ ] **Mid-Epoch-Resume.** `dataloader_state_dict` wird gespeichert/geladen, der Runner nutzt es
   aber nicht (Resume nur an Epochengrenzen). Fuer lange Epochen auf Preemptible-Clustern relevant
   (Muster: `torchdata.StatefulDataLoader`).
-- [ ] **DDP-Integration des Runners.** Nur `is_main_process`-Guard; kein `DistributedSampler.
-  set_epoch`, kein Barrier nach dem Checkpoint-Write, Metriken nicht ueber Ranks reduziert.
+- [x] ~~**DDP-Integration des Runners.** Nur `is_main_process`-Guard; kein `DistributedSampler.
+  set_epoch`, kein Barrier nach dem Checkpoint-Write, Metriken nicht ueber Ranks reduziert.~~
+  Erledigt 2026-10-30 (`spec/DDP_RUNNER_v1.md`, Eintrag unter Erledigt). Offen daraus: NCCL/CUDA,
+  > 2 Ranks, AMP unter DDP, CUDA-RNG je Rank, Fehler in backward/optimizer.step.
 - [x] ~~**CI-Reproduzierbarkeit:** `numpy` ist im Testjob ungepinnt.~~ Erledigt 2026-10-14
   (siehe oben): `numpy==2.5.3` im Testjob, wie in den Evidence-Lanes; inline wie `torch==2.6.0`,
   weil `requirements-dev.txt` laut Kopf nur Dev-Tools pinnt.
