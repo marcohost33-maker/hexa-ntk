@@ -52,6 +52,8 @@ FV = "hex_fv_solver_hex_v3.py"
 T1 = "heat_operator_task_hex_v3.py"
 P1 = "phase1_protocol_hex_v3.py"
 NT = "ntk_trajectory_hex_v3.py"
+DDP = "ddp_hex_v3.py"
+T2 = "test_ddp_hex_v3.TestTwoRanks"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -289,6 +291,87 @@ MUTANTS = (
     Mutant(NT, "        if _loaded_digest(twin, reference) != state_digest:\n",
            "        if state_dict_sha256(twin.state_dict()) != state_digest:\n",
            "test_ntk_trajectory_hex_v3.TestCrossFamilyR88R98"),
+    # DDP runner (spec/DDP_RUNNER_v1.md, ROADMAP "DDP-Integration des Runners"): every
+    # rank decision is agreed. A mutant that makes ranks disagree ends in a gloo
+    # timeout (60 s) or a wrong result; both turn TestTwoRanks red.
+    Mutant(RU, "        status = self.dist.max_int(local)\n", "        status = local\n", T2),
+    Mutant(RU, "        if status == 2:\n", "        if False:\n", T2),
+    Mutant(RU, '        self.dist.run_agreed(self._build, what="runner construction")\n',
+           "        self._build()\n", T2),
+    Mutant(RU, "            loss_sum, n_batches, sq_err_sum, sq_ref_sum = self.dist.all_reduce_sum_rank0(local)\n",
+           "            loss_sum, n_batches, sq_err_sum, sq_ref_sum = local\n", T2),
+    Mutant(RU, "            self.dist.check_exact_partition(\n                indices,",
+           "            (lambda *a, **k: None)(\n                indices,", T2),
+    Mutant(RU, "        if self.dist is None:\n            return self._save_checkpoints_local(",
+           "        if True:\n            return self._save_checkpoints_local(", T2),
+    Mutant(RU, "        if self.dist is not None:\n            self._require_equal_batch_count()\n", "", T2),
+    Mutant(RU, "        if self.dist.any_true(ref != mine):\n"
+           "            raise DistributedContractError(\"resumed model",
+           "        if False:\n            raise DistributedContractError(\"resumed model", T2),
+    Mutant(RU, '        report = self.dist.run_agreed(self._resume_local, what="resume")\n',
+           "        report = self._resume_local()\n", T2),
+    Mutant(RU, "            loss_sum, loss_n, grad_sum, grad_n = self.dist.all_reduce_sum(\n"
+           "                [loss_sum, loss_n, grad_sum, grad_n]\n            )\n", "            pass\n", T2),
+    Mutant(RU, "        self.ckpt_mgr.run_id = self.dist.broadcast_bytes(\n"
+           "            bytes.fromhex(self.ckpt_mgr.run_id) if self.dist.rank == 0 else None, 16\n        ).hex()\n",
+           "", T2),
+    Mutant(DDP, "        failed_somewhere = self.any_true(error is not None)\n",
+           "        failed_somewhere = False\n", T2),
+    Mutant(DDP, "        if lo != hi:\n", "        if False:\n", T2),
+    # Independent review of #92 (2026-10-30): errors before the forward, buffers,
+    # config, lying len(), per-rank loader generators, rank-0-bound sums.
+    Mutant(RU, "            prepared = self._prepare_step(batch)\n        except StopIteration:",
+           "            prepared = None\n        except StopIteration:", T2),
+    Mutant(RU, "        if n_exhausted:\n", "        if False:\n", T2),
+    Mutant(RU, "            self._sync_buffers()\n", "            pass\n", T2),
+    Mutant(RU, "        if self.dist.any_true(ref != mine):\n            raise DistributedContractError(\n"
+           "                \"RunnerConfig", "        if False:\n            raise DistributedContractError(\n"
+           "                \"RunnerConfig", T2),
+    Mutant(RU, "                if per_rank is not None:\n"
+           "                    gen.set_state(per_rank[self.dist.rank].cpu())\n",
+           "                pass\n", T2),
+    Mutant(RU, '            restore_rng_state_tensors({key: states[key][self.dist.rank] for key in ("torch", "python", '
+           '"numpy")})\n', '            torch.random.set_rng_state(states["torch"][self.dist.rank])\n', T2),
+    Mutant(DDP, "        dist.all_reduce(t, op=dist.ReduceOp.SUM)\n        dist.broadcast(t, src=0)\n",
+           "        dist.all_reduce(t, op=dist.ReduceOp.SUM)\n", T2),
+    # Review round 2 on 205f293: buffer shapes, OOM while preparing, effective AMP.
+    Mutant(DDP, '            [f"{n}|{b.dtype}|{tuple(b.shape)}" for n, b in buffers],\n',
+           "            [n for n, _ in buffers],\n", T2),
+    Mutant(RU, "        mine = hashlib.sha256(_config_digest(config) + "
+           'self._effective_amp().encode("utf-8")).digest()\n',
+           "        mine = _config_digest(config)\n", T2),
+    Mutant(RU, "            if _is_oom(exc):\n                # Preparing runs",
+           "            if False:\n                # Preparing runs", "test_ddp_hex_v3.TestWorldSizeOne"),
+    # Review round 3: the OOM rescue never raises (it runs before the agreement).
+    Mutant(RU, "        except Exception:\n            logger.error(\"OOM rescue: freeing memory failed\")\n",
+           "        except ZeroDivisionError:\n            logger.error(\"OOM rescue: freeing memory failed\")\n",
+           "test_ddp_hex_v3.TestWorldSizeOne"),
+    # Per-rank RNG streams across a resume (dropout + rank seeds must continue).
+    Mutant(RU, "        if self.dist is not None:\n            self._restore_rank_rng(report)\n",
+           "        pass\n", T2),
+    Mutant(RU, "        rank_rng = self._gather_rank_rng_states() if save_state else None\n",
+           "        rank_rng = None\n", T2),
+    # The same contract, pinned in-process (world size 1 and no process group).
+    Mutant(RU, "            best_report = self.ckpt_mgr.save_best_model_checkpoint(\n"
+           "                model=self.raw_model,",
+           "            best_report = self.ckpt_mgr.save_best_model_checkpoint(\n"
+           "                model=self.model,", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, "        if self.adapter is not None and self.adapter.model is not self.model:\n",
+           "        if False:\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, "        if first != second:\n", "        if False:\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(DDP, "    gauss = _bits_float(py[-1]) if py[-2] else None\n", "    gauss = None\n",
+           "test_ddp_hex_v3.TestRunnerWithoutProcessGroup"),
+    Mutant(RU, '            self.failure_dir = self.failure_dir / f"rank{self.dist.rank}"\n', "            pass\n",
+           "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, "            if callable(set_epoch):\n                set_epoch(epoch)\n",
+           "            if False:\n                set_epoch(epoch)\n",
+           "test_ddp_hex_v3.TestRunnerWithoutProcessGroup"),
+    Mutant(DDP, "        if duplicated or missing:\n", "        if missing:\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(DDP, "        if self.any_true(out_of_range):\n", "        if False:\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(DDP, "        return iter(range(self.rank, self.dataset_len, self.num_replicas))\n",
+           "        padded = -(-self.dataset_len // self.num_replicas) * self.num_replicas\n"
+           "        return iter([i % max(self.dataset_len, 1) for i in range(self.rank, padded, self.num_replicas)])\n",
+           "test_ddp_hex_v3.TestExactDistributedEvalSampler"),
 )
 
 

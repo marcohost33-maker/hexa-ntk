@@ -13,6 +13,10 @@ Integrates:
 - OOM rescue (gc.collect + cuda.empty_cache with safe variable cleanup)
 - Operator adapter validation (OperatorAdapterV3)
 - FailureSignature registration
+- DistributedDataParallel (config.distributed, spec/DDP_RUNNER_v1.md): sampler
+  set_epoch, equal step counts, one agreed skip decision per step, exact
+  validation partition, metrics reduced as sufficient statistics, checkpoint
+  writes and resume agreed across ranks
 
 Best practices applied:
 - GradScaler.unscale_ BEFORE clip_grad_norm_ (PyTorch AMP requirement)
@@ -42,7 +46,10 @@ __all__ = [
 ]
 
 import collections
+import dataclasses
 import gc
+import hashlib
+import json
 import logging
 import math
 import statistics
@@ -53,11 +60,19 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data import DataLoader, IterableDataset
 
 from checkpoint_integration_hex_v3 import (
     BestCheckpointPolicy,
     CheckpointIntegrationManager,
+)
+from ddp_hex_v3 import (
+    DistributedContractError,
+    DistributedRunContext,
+    PeerRankError,
+    restore_rng_state_tensors,
+    rng_state_tensors,
 )
 from ema_hex_v3 import create_ema_model
 from failure_signature_hex_v3 import FailureSignature
@@ -76,6 +91,37 @@ def _is_non_finite_metric(value: Any) -> bool:
         return not math.isfinite(value)
     except (TypeError, ValueError, OverflowError):
         return False
+
+
+def _module_digest(module: nn.Module) -> bytes:
+    """SHA-256 over the names, dtypes, shapes and bytes of a module's state."""
+    h = hashlib.sha256()
+    for name, tensor in module.state_dict(keep_vars=False).items():
+        if not torch.is_tensor(tensor):
+            continue
+        t = tensor.detach().cpu().contiguous()
+        h.update(f"{name}|{t.dtype}|{tuple(t.shape)}|".encode("utf-8"))
+        h.update(t.reshape(-1).view(torch.uint8).numpy().tobytes())
+    return h.digest()
+
+
+def _is_oom(exc: BaseException) -> bool:
+    return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
+
+
+def _config_digest(config: "RunnerConfig") -> bytes:
+    """SHA-256 of the fields every rank must share (spec/DDP_RUNNER_v1.md section 2).
+
+    Excluded: is_main_process (differs by design), output_dir and the
+    resume_from path (mount points may differ between hosts); whether
+    resume_from is set is included.
+    """
+    fields = dataclasses.asdict(config)
+    for key in ("is_main_process", "output_dir"):
+        fields.pop(key)
+    fields["resume_from"] = fields["resume_from"] is not None
+    payload = json.dumps(fields, sort_keys=True, default=repr).encode("utf-8")
+    return hashlib.sha256(payload).digest()
 
 
 # ------------------------------------------------------------------
@@ -223,8 +269,10 @@ class RunnerConfig:
     spike_multiplier: float = 3.0
     spike_window_size: int = 50
 
-    # DDP
+    # DDP. distributed=True requires an initialized process group and a
+    # DistributedDataParallel model; is_main_process must then be rank == 0.
     is_main_process: bool = True
+    distributed: bool = False
 
     # Resume
     resume_from: Optional[str] = None
@@ -258,6 +306,10 @@ class RunnerConfig:
             )
         if not (math.isfinite(self.ema_decay) and 0.0 <= self.ema_decay <= 1.0):
             raise ValueError(f"ema_decay must be in [0, 1], got {self.ema_decay!r}")
+        if not isinstance(self.distributed, bool):
+            raise ValueError(f"distributed must be a bool, got {self.distributed!r}")
+        if not isinstance(self.is_main_process, bool):
+            raise ValueError(f"is_main_process must be a bool, got {self.is_main_process!r}")
         if self.amp_dtype not in ("float16", "bfloat16"):
             raise ValueError(
                 f"amp_dtype must be 'float16' or 'bfloat16', got {self.amp_dtype!r}"
@@ -303,6 +355,77 @@ class HexTrainingRunner:
         self.scheduler = scheduler
         self.adapter = adapter
         self.device = torch.device(device)
+        # Checkpoints, EMA, validation and replay capsules use the unwrapped
+        # module: no "module." key prefix, no DDP collective in validation.
+        self.raw_model: nn.Module = (
+            model.module if isinstance(model, DistributedDataParallel) else model
+        )
+        # Rank coordination (None = single process). A DDP model without it
+        # would train in sync but validate, select the best model and skip
+        # steps rank-locally, so that combination is refused.
+        self.dist: Optional[DistributedRunContext] = None
+        if not config.distributed:
+            if isinstance(model, DistributedDataParallel):
+                raise ValueError(
+                    "model is DistributedDataParallel but config.distributed is False: "
+                    "validation, best-model selection and step skipping would be rank-local"
+                )
+            self._build()
+            return
+        self.dist = DistributedRunContext(device=self.device)
+        # Every check and every local construction step (directories, the EMA
+        # copy) runs before the first collective; a failure on one rank fails
+        # all of them instead of leaving the others in the run_id broadcast.
+        self.dist.run_agreed(self._build, what="runner construction")
+        # The same run on every rank: a different num_epochs or save cadence
+        # issues a different sequence of collectives (hang), a different best
+        # policy or EMA silently selects differently, and resume_from on one
+        # rank only leaves the others in the first training collective.
+        mine = hashlib.sha256(_config_digest(config) + self._effective_amp().encode("utf-8")).digest()
+        ref = self.dist.broadcast_bytes(mine if self.dist.rank == 0 else None, 32)
+        if self.dist.any_true(ref != mine):
+            raise DistributedContractError(
+                "RunnerConfig or the effective AMP mode differs between ranks (all config fields "
+                "except is_main_process, output_dir and the resume_from path must be equal, "
+                "resume_from must be set on all ranks or on none, and every rank must resolve "
+                "use_amp to the same autocast dtype and GradScaler: bfloat16 falls back to "
+                "float16 + GradScaler on a GPU without bf16 support)"
+            )
+        # One run identity: best.pt and the resume record carry rank 0's.
+        self.ckpt_mgr.run_id = self.dist.broadcast_bytes(
+            bytes.fromhex(self.ckpt_mgr.run_id) if self.dist.rank == 0 else None, 16
+        ).hex()
+
+    def _effective_amp(self) -> str:
+        """The AMP mode this host actually runs (it depends on the GPU, not only the config)."""
+        active = self.config.use_amp and self.device.type == "cuda"
+        return f"autocast={active}|dtype={self.amp_dtype}|grad_scaler={self.grad_scaler is not None}"
+
+    def _check_distributed_setup(self) -> None:
+        if not isinstance(self.model, DistributedDataParallel):
+            raise ValueError(
+                "config.distributed=True needs a DistributedDataParallel model; "
+                "an unwrapped model would train independently on every rank"
+            )
+        if self.config.is_main_process != (self.dist.rank == 0):
+            raise ValueError(
+                f"config.is_main_process={self.config.is_main_process} on rank "
+                f"{self.dist.rank}; with distributed=True it must be rank == 0"
+            )
+        # The adapter runs the training forward. Around the unwrapped module it
+        # would bypass DDP: no gradient all-reduce, silently diverging ranks.
+        if self.adapter is not None and self.adapter.model is not self.model:
+            raise ValueError(
+                "with distributed=True the adapter must wrap the DistributedDataParallel "
+                "model itself (adapter.model is model); around the inner module the "
+                "training forward bypasses DDP and gradients are never synchronised"
+            )
+
+    def _build(self) -> None:
+        """Local construction: directories, checkpoint manager, EMA, AMP, state."""
+        config = self.config
+        if self.dist is not None:
+            self._check_distributed_setup()
 
         # Output directory
         self.output_dir = Path(config.output_dir)
@@ -317,6 +440,11 @@ class HexTrainingRunner:
             ),
             is_main_process=config.is_main_process,
         )
+        # Per-rank failure records: FailureSignature names its file by step and
+        # kind, so two ranks on a shared file system would overwrite each other.
+        self.failure_dir = self.output_dir / "failures"
+        if self.dist is not None:
+            self.failure_dir = self.failure_dir / f"rank{self.dist.rank}"
 
         # Anomaly detector
         self.anomaly_detector = TrainingAnomalyDetector(
@@ -330,7 +458,7 @@ class HexTrainingRunner:
             # One EMA construction path for the toolkit (validation + the
             # scalar fallback for PyTorch < 2.0 live in ema_hex_v3).
             self.ema_model = create_ema_model(
-                model, decay=config.ema_decay, use_buffers=True
+                self.raw_model, decay=config.ema_decay, use_buffers=True
             )
 
         # AMP
@@ -390,7 +518,7 @@ class HexTrainingRunner:
                     f"Resume checkpoint {resume_path}: generator state for the "
                     f"{name} loader is not a uint8 tensor"
                 )
-            gen.set_state(state)
+            gen.set_state(state.cpu())  # map_location=<cuda> moved it; set_state needs CPU
             restored.append(name)
         report["loader_generators_restored"] = restored
         report["loader_generators_missing"] = missing
@@ -416,9 +544,38 @@ class HexTrainingRunner:
         missing path raises FileNotFoundError (fail-closed): silently starting
         at epoch 0 would turn a typo in the resume path into an unnoticed
         full retraining that overwrites the run directory.
+
+        Distributed: every rank loads the file; a failure on any rank raises
+        on all of them, and the resumed epoch, step, best metric, run_id and
+        model weights must equal rank 0's (DistributedContractError).
         """
         if self.config.resume_from is None:
             return None
+        if self.dist is None:
+            return self._resume_local()
+        # Every rank loads the file itself (shared file system). A rank that
+        # cannot (missing file, corrupt payload) fails all ranks instead of
+        # leaving them in the first training collective.
+        report = self.dist.run_agreed(self._resume_local, what="resume")
+        best = self.ckpt_mgr.best_metric_value
+        self.dist.require_rank0_agreement(
+            [self.start_epoch, self.global_step, math.nan if best is None else best],
+            what="resumed epoch/global_step/best metric",
+        )
+        # load_resume adopts the run_id recorded in the file on each rank.
+        mine = hashlib.sha256(self.ckpt_mgr.run_id.encode("utf-8")).digest()
+        ref = self.dist.broadcast_bytes(mine if self.dist.rank == 0 else None, 32)
+        if self.dist.any_true(ref != mine):
+            raise DistributedContractError("resumed run_id differs from rank 0 on at least one rank")
+        # Same path, different bytes (no shared file system, a stale copy):
+        # the weights each rank actually loaded must be rank 0's.
+        mine = _module_digest(self.raw_model)
+        ref = self.dist.broadcast_bytes(mine if self.dist.rank == 0 else None, 32)
+        if self.dist.any_true(ref != mine):
+            raise DistributedContractError("resumed model weights differ from rank 0 on at least one rank")
+        return report
+
+    def _resume_local(self) -> Dict[str, Any]:
         resume_path = Path(self.config.resume_from)
         if not resume_path.exists():
             raise FileNotFoundError(
@@ -426,7 +583,7 @@ class HexTrainingRunner:
                 f"{resume_path}"
             )
         report = self.ckpt_mgr.load_resume(
-            model=self.model,
+            model=self.raw_model,
             optimizer=self.optimizer,
             scheduler=self.scheduler,
             grad_scaler=self.grad_scaler,
@@ -444,6 +601,8 @@ class HexTrainingRunner:
                 resume_path,
             )
         self._restore_loader_generators(report, resume_path)
+        if self.dist is not None:
+            self._restore_rank_rng(report)
         self.start_epoch = report["epoch"] + 1
         if report.get("global_step") is not None:
             self.global_step = report["global_step"]
@@ -458,9 +617,179 @@ class HexTrainingRunner:
     # Single training step
     # ------------------------------------------------------------------
 
+    def _prepare_step(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor, Any]:
+        """Everything of a step before the model forward; returns (x, target, ctx).
+
+        Kept apart from the forward because, distributed, its errors must be
+        agreed before any rank enters DDP's forward: with buffers (BatchNorm,
+        broadcast_buffers=True) that forward starts with a collective.
+        """
+        self.model.train()
+        self.optimizer.zero_grad(set_to_none=True)
+
+        # Learning rate warmup (linear)
+        if (
+            self.config.warmup_steps > 0
+            and self.global_step < self.config.warmup_steps
+        ):
+            warmup_factor = self.config.warmup_start_factor + (
+                1.0 - self.config.warmup_start_factor
+            ) * (self.global_step / self.config.warmup_steps)
+            for pg in self.optimizer.param_groups:
+                if "_base_lr" not in pg:
+                    pg["_base_lr"] = pg["lr"]
+                pg["lr"] = pg["_base_lr"] * warmup_factor
+
+        x = batch["input"].to(self.device)
+        target = batch["target"].to(self.device)
+
+        # Build context if adapter is used
+        ctx = None
+        if self.adapter is not None and "context" in batch:
+            ctx = batch["context"]
+            if self.dist is not None:
+                # The adapter validates before it calls the DDP model; a
+                # rejection must surface here, before the agreement.
+                self.adapter.validate_context(x, ctx)
+        return x, target, ctx
+
+    def _forward_and_check(
+        self,
+        batch: Dict[str, Any],
+        prepared: Tuple[torch.Tensor, torch.Tensor, Any],
+    ) -> Tuple[torch.Tensor, torch.Tensor, float, bool]:
+        """Forward + loss + anomaly check; returns (pred, loss, loss_val, skip)."""
+        x, target, ctx = prepared
+
+        # Forward pass (optionally with AMP)
+        use_autocast = (
+            self.config.use_amp and self.device.type == "cuda"
+        )
+
+        if use_autocast:
+            with torch.autocast(
+                device_type="cuda", dtype=self.amp_dtype
+            ):
+                if self.adapter is not None and ctx is not None:
+                    pred = self.adapter(x, ctx)
+                else:
+                    pred = self.model(x)
+                loss = self.loss_fn(pred, target)
+        else:
+            if self.adapter is not None and ctx is not None:
+                pred = self.adapter(x, ctx)
+            else:
+                pred = self.model(x)
+            loss = self.loss_fn(pred, target)
+
+        loss_val = loss.item()
+
+        # NaN/Inf check BEFORE backward
+        is_anomaly, reason = self.anomaly_detector.check_loss(loss_val)
+        if is_anomaly:
+            logger.error(
+                "Anomaly at step %d: %s", self.global_step, reason
+            )
+            cap_path = dump_replay_capsule_safe(
+                batch, self.raw_model, self.failure_dir,
+                self.global_step,
+            )
+            FailureSignature(
+                kind=reason,
+                step=self.global_step,
+                locus="train_step_loss_check",
+                observable=f"loss={loss_val}",
+                replay_capsule=cap_path,
+            ).register(self.failure_dir)
+
+        skip_update = is_anomaly and ("NaN" in reason or "Inf" in reason)
+        return pred, loss, loss_val, skip_update
+
+    def _agreed_next(
+        self, iterator: Any
+    ) -> Optional[Tuple[Dict[str, Any], Tuple[torch.Tensor, torch.Tensor, Any]]]:
+        """Distributed: the next batch, prepared, agreed before any forward.
+
+        One int64 all-reduce of [ranks that raised, ranks out of data]: an
+        error (a missing key, an OOM in ``.to(device)``, a rejected adapter
+        context) raises on every rank; all ranks out of data ends the epoch;
+        some out of data is an unequal step count (a sized IterableDataset
+        whose ``len`` is wrong, a sampler that lies) and raises on every rank.
+        Returns None at the agreed end of the epoch.
+        """
+        error: Optional[BaseException] = None
+        exhausted = False
+        batch = prepared = None
+        try:
+            batch = next(iterator)
+            prepared = self._prepare_step(batch)
+        except StopIteration:
+            exhausted = True
+        except Exception as exc:  # re-raised below, after the peers know
+            error = exc
+            if _is_oom(exc):
+                # Preparing runs outside _train_one_step's handler; an OOM in
+                # .to(device) gets the same rescue (review round 2).
+                self._rescue_oom(batch)
+        n_failed, n_exhausted = self.dist.sum_ints([error is not None, exhausted])
+        if error is not None:
+            raise error
+        if n_failed:
+            raise PeerRankError(
+                f"preparing training step {self.global_step} failed on a peer rank (see that rank's log)"
+            )
+        if n_exhausted == self.dist.world_size:
+            return None
+        if n_exhausted:
+            raise DistributedContractError(
+                f"{n_exhausted} of {self.dist.world_size} ranks ran out of training batches at step "
+                f"{self.global_step} while the others had more: unequal step counts (len() of the "
+                "train loader does not match what it yields)"
+            )
+        return batch, prepared
+
+    def _agreed_forward(
+        self,
+        batch: Dict[str, Any],
+        prepared: Tuple[torch.Tensor, torch.Tensor, Any],
+    ) -> Tuple[torch.Tensor, torch.Tensor, float, bool]:
+        """Distributed forward: one agreed status per step before backward.
+
+        Status 0 = step, 1 = skip (a non-finite loss on some rank), 2 = a rank
+        raised in its forward. All ranks take the same branch: a rank that
+        skips backward or leaves the step while its peers enter DDP's gradient
+        all-reduce deadlocks them. The failing rank re-raises its exception
+        (an OOM still reaches the rescue path), the others raise PeerRankError.
+        The agreement is one int64 all-reduce per step; an agreed skip runs no
+        backward on any rank (checked with default DDP, find_unused_parameters
+        and static_graph, spec/DDP_RUNNER_v1.md section 3).
+        """
+        error: Optional[BaseException] = None
+        result = None
+        try:
+            result = self._forward_and_check(batch, prepared)
+        except Exception as exc:  # re-raised below, after the peers know
+            error = exc
+        local = 2 if error is not None else (1 if result[3] else 0)
+        status = self.dist.max_int(local)
+        if error is not None:
+            raise error
+        if status == 2:
+            raise PeerRankError(
+                f"training step {self.global_step} failed on a peer rank (see that rank's log)"
+            )
+        pred, loss, loss_val, skip_update = result
+        if status == 1 and not skip_update:
+            logger.error(
+                "Step %d skipped: a peer rank reported a non-finite loss",
+                self.global_step,
+            )
+        return pred, loss, loss_val, status == 1
+
     def _train_one_step(
         self,
         batch: Dict[str, Any],
+        prepared: Optional[Tuple[torch.Tensor, torch.Tensor, Any]] = None,
     ) -> Tuple[float, bool, Optional[float]]:
         """
         Execute one training step with all safety guards.
@@ -472,74 +801,15 @@ class HexTrainingRunner:
         loss = None
 
         try:
-            self.model.train()
-            self.optimizer.zero_grad(set_to_none=True)
-
-            # Learning rate warmup (linear)
-            if (
-                self.config.warmup_steps > 0
-                and self.global_step < self.config.warmup_steps
-            ):
-                warmup_factor = self.config.warmup_start_factor + (
-                    1.0 - self.config.warmup_start_factor
-                ) * (self.global_step / self.config.warmup_steps)
-                for pg in self.optimizer.param_groups:
-                    if "_base_lr" not in pg:
-                        pg["_base_lr"] = pg["lr"]
-                    pg["lr"] = pg["_base_lr"] * warmup_factor
-
-            x = batch["input"].to(self.device)
-            target = batch["target"].to(self.device)
-
-            # Build context if adapter is used
-            ctx = None
-            if self.adapter is not None and "context" in batch:
-                ctx = batch["context"]
-
-            # Forward pass (optionally with AMP)
-            use_autocast = (
-                self.config.use_amp and self.device.type == "cuda"
-            )
-
-            if use_autocast:
-                with torch.autocast(
-                    device_type="cuda", dtype=self.amp_dtype
-                ):
-                    if self.adapter is not None and ctx is not None:
-                        pred = self.adapter(x, ctx)
-                    else:
-                        pred = self.model(x)
-                    loss = self.loss_fn(pred, target)
+            if prepared is None:
+                prepared = self._prepare_step(batch)
+            if self.dist is None:
+                pred, loss, loss_val, skip_update = self._forward_and_check(batch, prepared)
             else:
-                if self.adapter is not None and ctx is not None:
-                    pred = self.adapter(x, ctx)
-                else:
-                    pred = self.model(x)
-                loss = self.loss_fn(pred, target)
-
-            loss_val = loss.item()
-
-            # NaN/Inf check BEFORE backward
-            is_anomaly, reason = self.anomaly_detector.check_loss(loss_val)
-            if is_anomaly:
-                logger.error(
-                    "Anomaly at step %d: %s", self.global_step, reason
-                )
-                cap_path = dump_replay_capsule_safe(
-                    batch, self.model, self.output_dir / "failures",
-                    self.global_step,
-                )
-                FailureSignature(
-                    kind=reason,
-                    step=self.global_step,
-                    locus="train_step_loss_check",
-                    observable=f"loss={loss_val}",
-                    replay_capsule=cap_path,
-                ).register(self.output_dir / "failures")
-
-                if "NaN" in reason or "Inf" in reason:
-                    # Do NOT backward or step — protect optimizer
-                    return loss_val, False, None
+                pred, loss, loss_val, skip_update = self._agreed_forward(batch, prepared)
+            if skip_update:
+                # Do NOT backward or step — protect optimizer
+                return loss_val, False, None
 
             # Backward
             if self.grad_scaler is not None:
@@ -565,55 +835,121 @@ class HexTrainingRunner:
 
             # EMA update
             if self.ema_model is not None:
-                self.ema_model.update_parameters(self.model)
+                self.ema_model.update_parameters(self.raw_model)
 
             return loss_val, True, grad_norm_val
 
         except RuntimeError as e:
-            if "out of memory" in str(e).lower():
-                logger.critical(
-                    "CUDA OOM at step %d! Attempting rescue...",
-                    self.global_step,
-                )
+            if _is_oom(e):
                 # 1. Destroy references holding VRAM
                 del pred
                 del loss
-                # 2. Python GC + CUDA cache (order matters)
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                # 3. Now safe to dump capsule
-                try:
-                    cap_path = dump_replay_capsule_safe(
-                        batch, self.model,
-                        self.output_dir / "failures",
-                        self.global_step,
-                    )
-                    FailureSignature(
-                        kind="CUDA_OOM",
-                        step=self.global_step,
-                        locus="train_step_oom",
-                        observable="OOM exception caught",
-                        replay_capsule=cap_path,
-                    ).register(self.output_dir / "failures")
-                except Exception:
-                    logger.error("Failed to dump OOM replay capsule")
+                self._rescue_oom(batch)
                 raise
             raise
+
+    def _rescue_oom(self, batch: Optional[Dict[str, Any]]) -> None:
+        """OOM rescue: GC + CUDA cache (order matters), then capsule + FailureSignature.
+
+        Never raises: distributed, it runs on the failing rank before the
+        agreement, and a rank that left there would hang its peers.
+        """
+        try:
+            logger.critical(
+                "CUDA OOM at step %d! Attempting rescue...",
+                self.global_step,
+            )
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            logger.error("OOM rescue: freeing memory failed")
+        # Now safe to dump capsule
+        try:
+            cap_path = dump_replay_capsule_safe(
+                batch if batch is not None else {},
+                self.raw_model,
+                self.failure_dir,
+                self.global_step,
+            )
+            FailureSignature(
+                kind="CUDA_OOM",
+                step=self.global_step,
+                locus="train_step_oom",
+                observable="OOM exception caught",
+                replay_capsule=cap_path,
+            ).register(self.failure_dir)
+        except Exception:
+            logger.error("Failed to dump OOM replay capsule")
 
     # ------------------------------------------------------------------
     # Epoch
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _set_sampler_epoch(loader: Any, epoch: int) -> None:
+        """Call ``set_epoch`` on the loader's sampler(s) if they have one.
+
+        DistributedSampler shuffles with seed + epoch; without set_epoch every
+        epoch repeats the first permutation. Its order is a function of the
+        epoch, so it also needs no generator state on resume.
+        """
+        seen = set()
+        for sampler in (
+            getattr(loader, "sampler", None),
+            getattr(getattr(loader, "batch_sampler", None), "sampler", None),
+        ):
+            if sampler is None or id(sampler) in seen:
+                continue
+            seen.add(id(sampler))
+            set_epoch = getattr(sampler, "set_epoch", None)
+            if callable(set_epoch):
+                set_epoch(epoch)
+
+    def _require_equal_batch_count(self) -> None:
+        """Distributed fast fail: the declared step counts must be equal.
+
+        Each step is a DDP gradient all-reduce; a rank with an extra batch
+        would wait forever for its peers. ``len()`` can be wrong (a sized
+        IterableDataset), so the binding check is the per-step agreement in
+        _agreed_next; this one only fails before the first step when the
+        declared counts already differ. Unsized loaders count as -1.
+        """
+        try:
+            n = len(self.train_loader)
+        except TypeError:
+            n = -1
+        self.dist.require_equal_int(n, what="number of training batches per epoch (len of the train loader)")
+
     def _train_one_epoch(self, epoch: int) -> Dict[str, Any]:
         """Run one training epoch."""
+        self._set_sampler_epoch(self.train_loader, epoch)
+        if self.dist is not None:
+            self._require_equal_batch_count()
         self.model.train()
         epoch_losses: List[float] = []
         epoch_grad_norms: List[float] = []
         n_anomalies = 0
 
-        for batch_idx, batch in enumerate(self.train_loader):
-            loss_val, is_healthy, grad_norm = self._train_one_step(batch)
+        if self.dist is None:
+            iterator = iter(self.train_loader)
+        else:
+            iterator = self.dist.run_agreed(
+                lambda: iter(self.train_loader), what="creating the train loader iterator"
+            )
+        while True:
+            if self.dist is None:
+                try:
+                    batch = next(iterator)
+                except StopIteration:
+                    break
+                prepared = None
+            else:
+                step = self._agreed_next(iterator)
+                if step is None:
+                    break
+                batch, prepared = step
+            loss_val, is_healthy, grad_norm = self._train_one_step(batch, prepared)
             self.global_step += 1
 
             if is_healthy:
@@ -640,14 +976,16 @@ class HexTrainingRunner:
             self.scheduler.step()
 
         # No healthy step means no measurement: NaN, not a perfect 0.0.
-        mean_loss = (
-            sum(epoch_losses) / len(epoch_losses) if epoch_losses else float("nan")
-        )
-        mean_grad_norm = (
-            sum(epoch_grad_norms) / len(epoch_grad_norms)
-            if epoch_grad_norms
-            else float("nan")
-        )
+        loss_sum, loss_n = sum(epoch_losses), len(epoch_losses)
+        grad_sum, grad_n = sum(epoch_grad_norms), len(epoch_grad_norms)
+        if self.dist is not None:
+            # Means over all ranks' healthy steps. Skips are agreed, so the
+            # step counts (n_batches, n_anomalies) are already global.
+            loss_sum, loss_n, grad_sum, grad_n = self.dist.all_reduce_sum(
+                [loss_sum, loss_n, grad_sum, grad_n]
+            )
+        mean_loss = loss_sum / loss_n if loss_n else float("nan")
+        mean_grad_norm = grad_sum / grad_n if grad_n else float("nan")
 
         return {
             "epoch": epoch,
@@ -676,11 +1014,93 @@ class HexTrainingRunner:
           the same kwargs the adapter would build, or we temporarily
           wrap EMA's module in the adapter.
         """
+        self._set_sampler_epoch(self.val_loader, epoch)
+        if self.dist is None:
+            loss_sum, n_batches, sq_err_sum, sq_ref_sum = self._validate_local()
+        else:
+            # Every rank evaluates (and rank 0 then saves) rank 0's model:
+            # training forwards updated buffers with local batches.
+            self._sync_buffers()
+            # Every sample on exactly one rank, then the sufficient statistics
+            # are summed: the pooled nRMSE is then independent of how the
+            # samples were split (a mean of rank nRMSEs is not).
+            indices = self.dist.run_agreed(
+                self._deterministic_val_indices, what="reading the validation sampler"
+            )
+            self.dist.check_exact_partition(
+                indices, len(self.val_loader.dataset), what="validation sampler"
+            )
+            local = self.dist.run_agreed(self._validate_local, what="validation")
+            loss_sum, n_batches, sq_err_sum, sq_ref_sum = self.dist.all_reduce_sum_rank0(local)
+            n_batches = int(n_batches)
+
+        if n_batches:
+            mean_val_loss = loss_sum / n_batches
+            # sq_ref_sum == 0 (all-zero targets): the relative metric is
+            # undefined -- nan for 0/0, inf for e/0. Both are non-finite, so
+            # the best-checkpoint skip path records them; 0/0 must never
+            # become a "perfect" best value (Codex PR #58).
+            if sq_ref_sum > 0:
+                val_nrmse = math.sqrt(sq_err_sum / sq_ref_sum)
+            elif sq_err_sum == 0:
+                val_nrmse = float("nan")
+            else:
+                val_nrmse = float("inf")
+        else:
+            # No validation batch: no measurement. 0.0 used to become the
+            # best value and blocked every later real improvement.
+            mean_val_loss = float("nan")
+            val_nrmse = float("nan")
+
+        return {
+            "epoch": epoch,
+            "val_loss": mean_val_loss,
+            "val_nrmse": val_nrmse,
+            "n_batches": n_batches,
+            "used_ema": self.ema_model is not None,
+        }
+
+    def _sync_buffers(self) -> None:
+        self.dist.sync_buffers_from_rank0(self.raw_model, what="model")
+        if self.ema_model is not None:
+            self.dist.sync_buffers_from_rank0(self.ema_model, what="EMA model")
+
+    def _deterministic_val_indices(self) -> List[int]:
+        """The validation indices, read twice: the check sees one iteration of
+        the sampler and the loop runs another, so they must be the same."""
+        first, second = self._val_indices(), self._val_indices()
+        if first != second:
+            raise DistributedContractError(
+                "the validation sampler yields a different index sequence on each "
+                "iteration; the partition checked would not be the one evaluated"
+            )
+        return first
+
+    def _val_indices(self) -> List[int]:
+        """The dataset indices this rank's validation loader will visit."""
+        loader = self.val_loader
+        if isinstance(loader.dataset, IterableDataset):
+            raise DistributedContractError(
+                "distributed validation needs a map-style dataset; an IterableDataset "
+                "has no index set whose partition could be checked"
+            )
+        if loader.batch_sampler is not None:
+            return [int(i) for batch in loader.batch_sampler for i in batch]
+        return [int(i) for i in loader.sampler]
+
+    @torch.no_grad()
+    def _validate_local(self) -> List[float]:
+        """This process's validation sums: [loss_sum, n_batches, sq_err, sq_ref].
+
+        Runs on the unwrapped module (EMA copy if enabled): a DDP forward may
+        broadcast buffers, a collective that ranks with different batch
+        counts would not all reach.
+        """
         # Select which model to evaluate
         if self.ema_model is not None:
             eval_module = self.ema_model.module
         else:
-            eval_module = self.model
+            eval_module = self.raw_model
 
         eval_module.eval()
 
@@ -714,31 +1134,7 @@ class HexTrainingRunner:
         # Restore training mode
         self.model.train()
 
-        if val_losses:
-            mean_val_loss = sum(val_losses) / len(val_losses)
-            # sq_ref_sum == 0 (all-zero targets): the relative metric is
-            # undefined -- nan for 0/0, inf for e/0. Both are non-finite, so
-            # the best-checkpoint skip path records them; 0/0 must never
-            # become a "perfect" best value (Codex PR #58).
-            if sq_ref_sum > 0:
-                val_nrmse = math.sqrt(sq_err_sum / sq_ref_sum)
-            elif sq_err_sum == 0:
-                val_nrmse = float("nan")
-            else:
-                val_nrmse = float("inf")
-        else:
-            # No validation batch: no measurement. 0.0 used to become the
-            # best value and blocked every later real improvement.
-            mean_val_loss = float("nan")
-            val_nrmse = float("nan")
-
-        return {
-            "epoch": epoch,
-            "val_loss": mean_val_loss,
-            "val_nrmse": val_nrmse,
-            "n_batches": len(val_losses),
-            "used_ema": self.ema_model is not None,
-        }
+        return [sum(val_losses), len(val_losses), sq_err_sum, sq_ref_sum]
 
     # ------------------------------------------------------------------
     # Main training loop
@@ -844,7 +1240,7 @@ class HexTrainingRunner:
             locus="save_checkpoints_best_metric",
             observable=f"{metric_name}={metric_value}",
             extra={"epoch": epoch, "metric_name": metric_name},
-        ).register(self.output_dir / "failures")
+        ).register(self.failure_dir)
         return {
             "saved": False,
             "reason": reason,
@@ -875,7 +1271,79 @@ class HexTrainingRunner:
 
         The report always has the keys "best", "last" and "resume"; skipped
         periodic saves carry reason "not_scheduled".
+
+        Distributed: rank 0 writes, every rank runs the same validation and
+        best-policy update; a failure on any rank (e.g. rank 0's write)
+        raises on all ranks, and no rank continues before rank 0's write
+        finished (the agreement all-reduce is the barrier).
         """
+        if self.dist is None:
+            return self._save_checkpoints_local(
+                epoch, val_report, train_report, save_state=save_state
+            )
+        rank_rng = self._gather_rank_rng_states() if save_state else None
+        return self.dist.run_agreed(
+            lambda: self._save_checkpoints_local(
+                epoch, val_report, train_report, save_state=save_state, rank_rng=rank_rng
+            ),
+            what=f"checkpoint save at epoch {epoch}",
+        )
+
+    def _gather_rank_rng_states(self) -> Dict[str, Any]:
+        """Every rank's RNG states for rank 0's resume checkpoint.
+
+        The resume payload records the RNG of the process that writes it
+        (rank 0). Ranks that draw different numbers (per-rank seeds, dropout)
+        would all continue rank 0's streams after a resume; with these states
+        each rank continues its own (spec/DDP_RUNNER_v1.md section 6).
+        """
+        local = rng_state_tensors()
+        gathered: Dict[str, Any] = {
+            key: self.dist.all_gather_tensor(local[key], what=f"{key} RNG state")
+            for key in ("torch", "python", "numpy")
+        }
+        # Loader generators too: ranks may shuffle their own shards with their
+        # own seeds; the payload's generator states are rank 0's.
+        gens = self._loader_generators()
+        names = sorted(gens)
+        self.dist.require_same_names(names, what="loader generator names")
+        gathered["loader_generators"] = {
+            name: self.dist.all_gather_tensor(gens[name].get_state(), what=f"{name} loader generator")
+            for name in names
+        }
+        return {"world_size": self.dist.world_size, **gathered}
+
+    def _restore_rank_rng(self, report: Dict[str, Any]) -> None:
+        """Distributed resume: this rank's own RNG streams, if recorded."""
+        states = (report.get("extra") or {}).get("rank_rng_states")
+        if not isinstance(states, dict):
+            reason = "absent"
+        elif states.get("world_size") != self.dist.world_size:
+            reason = f"world_size {states.get('world_size')} != {self.dist.world_size}"
+        else:
+            restore_rng_state_tensors({key: states[key][self.dist.rank] for key in ("torch", "python", "numpy")})
+            for name, gen in self._loader_generators().items():
+                per_rank = (states.get("loader_generators") or {}).get(name)
+                if per_rank is not None:
+                    gen.set_state(per_rank[self.dist.rank].cpu())
+            report["rank_rng_restored"] = True
+            return
+        report["rank_rng_restored"] = False
+        logger.warning(
+            "Resume: per-rank RNG states not restored (%s); every rank continues "
+            "rank 0's RNG streams.",
+            reason,
+        )
+
+    def _save_checkpoints_local(
+        self,
+        epoch: int,
+        val_report: Dict[str, Any],
+        train_report: Dict[str, Any],
+        *,
+        save_state: bool = True,
+        rank_rng: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         reports: Dict[str, Any] = {}
 
         if self.config.best_metric_name not in val_report:
@@ -904,7 +1372,7 @@ class HexTrainingRunner:
             best_report = self._skip_non_finite_best_metric(epoch, metric_value)
         else:
             best_report = self.ckpt_mgr.save_best_model_checkpoint(
-                model=self.model,
+                model=self.raw_model,
                 metric_value=metric_value,
                 metric_name=self.config.best_metric_name,
                 epoch=epoch,
@@ -925,7 +1393,7 @@ class HexTrainingRunner:
 
         # Last model
         last_report = self.ckpt_mgr.save_last_model_checkpoint(
-            model=self.model,
+            model=self.raw_model,
             epoch=epoch,
             global_step=self.global_step,
         )
@@ -933,7 +1401,7 @@ class HexTrainingRunner:
 
         # Resume (full state)
         resume_report = self.ckpt_mgr.save_resume(
-            model=self.model,
+            model=self.raw_model,
             optimizer=self.optimizer,
             epoch=epoch,
             global_step=self.global_step,
@@ -950,6 +1418,7 @@ class HexTrainingRunner:
             extra={
                 "train_loss": train_report["mean_loss"],
                 "val_loss": val_report["val_loss"],
+                **({"rank_rng_states": rank_rng} if rank_rng is not None else {}),
             },
         )
         reports["resume"] = resume_report
