@@ -1,9 +1,13 @@
-# Local gate 2026-10-30 — issue #82 residual findings (Equalita round f1b54bc)
-# base: main c9dc01a (#92); branch claude/hexa-ntk-development-toqzyn @ 4cffe32 + this commit's doc/SOURCES/log edits
+# Local gate 2026-10-30 — issue #82 residual findings (Equalita round f1b54bc), after the Codex review of #93
+# base: main c9dc01a (#92); branch claude/hexa-ntk-development-toqzyn @ 00979a9 + this commit's doc/SOURCES/log edits
 # platform: Linux x86_64, Linux container; Python 3.12.3; torch 2.6.0+cu124 (CPU only); numpy 2.5.3; neuraloperator 2.0.0; ruff 0.17.0
 
-== RED: TestIssue82Residuals against phase1_protocol_hex_v3.py of a19c992 (test file of this branch)
+== RED: TestIssue82Residuals against phase1_protocol_hex_v3.py of a19c992 (first version of the tests)
 8 of 9 red (failures=4, errors=4): docs, iqm huge, median latency huge, quantile opposite huge, bootstrap huge, break-even binding, source_revision in manifest, worktree_dirty slot; green: the positive control (ordinary values unchanged bit for bit)
+
+== RED: Codex review of #93 at 3e7c5bc, reproduced before the fix
+paired_bootstrap_iqm([[1e308]*3] + [[5e-324]*3]*4).point == 0.0 (expected 5e-324: every row was rescaled, the small rows underflowed)
+break_even_at_equal_accuracy(..., gino_upper_rel_l2=0.0, ...) -> ValueError 'must be > 0' (expected None: below the baseline floor)
 
 == ruff check src scripts
 All checks passed!
@@ -21,13 +25,13 @@ exit=0
 exit=0
 
 == coverage run -m unittest discover -s src/toolkit -t src/toolkit -p 'test_*.py'
-Ran 1039 tests in 64.628s
+Ran 1040 tests in 70.497s
 OK (skipped=1)
 exit=0
 
 == coverage report (fail_under 87)
-src/toolkit/phase1_protocol_hex_v3.py            846      9    340      7    99%
-TOTAL                                           5678    219   2152    176    95%
+src/toolkit/phase1_protocol_hex_v3.py            848      9    340      7    99%
+TOTAL                                           5680    219   2152    176    95%
 exit=0
 
 == unittest test_phase1_protocol_hex_v3.TestIssue82Residuals -v
@@ -36,20 +40,22 @@ test_break_even_is_bound_to_the_equal_accuracy_rule (test_phase1_protocol_hex_v3
 test_docs_name_the_real_dependencies_and_bootstrap (test_phase1_protocol_hex_v3.TestIssue82Residuals.test_docs_name_the_real_dependencies_and_bootstrap) ... ok
 test_iqm_of_huge_finite_values_is_finite (test_phase1_protocol_hex_v3.TestIssue82Residuals.test_iqm_of_huge_finite_values_is_finite) ... ok
 test_median_latency_of_huge_durations_is_finite (test_phase1_protocol_hex_v3.TestIssue82Residuals.test_median_latency_of_huge_durations_is_finite) ... ok
+test_only_the_overflowing_rows_are_recomputed (test_phase1_protocol_hex_v3.TestIssue82Residuals.test_only_the_overflowing_rows_are_recomputed) ... ok
 test_ordinary_values_are_unchanged_bit_for_bit (test_phase1_protocol_hex_v3.TestIssue82Residuals.test_ordinary_values_are_unchanged_bit_for_bit) ... ok
 test_quantile_of_opposite_huge_values_is_finite (test_phase1_protocol_hex_v3.TestIssue82Residuals.test_quantile_of_opposite_huge_values_is_finite) ... ok
 test_source_revision_fits_into_the_manifest (test_phase1_protocol_hex_v3.TestIssue82Residuals.test_source_revision_fits_into_the_manifest) ... ok
 test_worktree_dirty_is_recorded_and_digested (test_phase1_protocol_hex_v3.TestIssue82Residuals.test_worktree_dirty_is_recorded_and_digested) ... ok
-Ran 9 tests in 0.029s
+Ran 10 tests in 0.045s
 OK
 
-== python scripts/mutation_probe.py (full probe on code+tests of this branch before the doc/SOURCES/log edits)
+== python scripts/mutation_probe.py (full probe on code+tests of 00979a9; only docs/SOURCES/log changed since)
 M120 KILLED    ddp_hex_v3.py -> TestExactDistributedEvalSampler
 M121 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
 M122 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
 M123 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
 M124 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
-[MUTATION-PROBE] baseline green | 124/124 killed | PASS
+M125 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
+[MUTATION-PROBE] baseline green | 125/125 killed | PASS
 exit=0
 
 == open measurement from #82: radius-tie survey on Linux

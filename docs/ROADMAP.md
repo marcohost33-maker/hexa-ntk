@@ -36,7 +36,9 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   korrigiert. Schon vorher erledigt (nur Statuspflege): F-E2 Hardware-Werte, F-E4 `\Z`,
   Break-even-Overflow (HNT-R86-04), AMP/Backend auf Entscheidungs-Ebene (R4-F3, D7),
   `n_seeds == 5` (Equalita R2). 8 neue Tests rot gegen a19c992, gruen jetzt; eine Positivkontrolle
-  (normale Werte bitgleich); 4 neue Mutanten, volle Probe 124/124. _Evidenz:_
+  (normale Werte bitgleich). Codex-Review von #93: zwei echte Fehler im ersten Wurf (der
+  Ueberlauf-Rueckfall skalierte alle Zeilen neu, eine Zeile 5e-324 unterlief zu 0; Break-even warf bei
+  oberer Schranke 0 statt `None`) -> rot reproduziert, behoben. 5 neue Mutanten, volle Probe 125/125. _Evidenz:_
   `results/2026-10-30_issue82_local-gate.log`. Offene Messung aus #82 nachgeholt: Radius-Tie-Survey unter Linux
   (Container, Python 3.12.3, torch 2.6.0, numpy 2.5.3, neuraloperator 2.0.0, @a19c992 sauber):
   Tie- und Flip-Zahlen aller 48 Kandidaten identisch zu Windows 2026-10-20, dieselben 9 tie- und
