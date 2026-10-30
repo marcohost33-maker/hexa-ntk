@@ -26,7 +26,7 @@ import time
 import unittest
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import torch
 import torch.distributed as dist
@@ -331,6 +331,26 @@ class TestWorldSizeOne(unittest.TestCase):
             # checkpoints hold the unwrapped module: no "module." prefix
             payload = torch.load(Path(tmp) / "ddp" / "checkpoints" / "best.pt", weights_only=True)
             self.assertEqual(sorted(payload["model_state_dict"]), sorted(plain.raw_model.state_dict()))
+
+    def test_mid_epoch_rank_buffers_must_match_the_model(self) -> None:
+        # broadcast_buffers=False: the mid-epoch record carries every rank's
+        # buffers; a record whose buffers are not the model's is refused inside
+        # the agreed resume (a KeyError in the copy would hit one rank only)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            kw = {"model_fn": _RunningScale, "ddp_kw": {"broadcast_buffers": False}}
+            with self.assertRaises(_Preempted):
+                _mid_runner(0, 1, out, crash_at=3, **kw).run()
+            path = out / "checkpoints" / "resume_last.pt"
+            payload = torch.load(path, weights_only=False)
+            buffers = payload["extra"]["mid_epoch"]["rank_buffers"]
+            self.assertEqual(sorted(buffers), ["scale"])
+            self.assertEqual(len(buffers["scale"]), 1)
+            buffers["other"] = buffers.pop("scale")
+            torch.save(payload, path)
+            resumed = _mid_runner(0, 1, out, resume_from=str(path), resume_trusted=True, **kw)
+            with self.assertRaisesRegex(ValueError, r"do not match the model's persistent buffers \['scale'\]"):
+                resumed.run()
 
     def test_world_one_resume_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -862,6 +882,111 @@ def _sc_effective_amp_differs(rank: int, world: int, out: Path) -> Any:
         _ddp_runner(rank, out, train=_train_loader(rank, world), val=_exact_val_loader(), num_epochs=1)
     finally:
         HexTrainingRunner._effective_amp = original
+class _BNDrop(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        torch.manual_seed(0)
+        self.net = nn.Sequential(nn.Linear(3, 8, dtype=torch.float64), nn.BatchNorm1d(8, dtype=torch.float64),
+                                 nn.Tanh(), nn.Dropout(0.3), nn.Linear(8, 2, dtype=torch.float64))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class _RunningScale(nn.Module):
+    """A buffer the training forward reads and then updates from the local batch."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        torch.manual_seed(0)
+        self.lin = nn.Linear(3, 2, dtype=torch.float64)
+        self.register_buffer("scale", torch.ones((), dtype=torch.float64))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.lin(x) * self.scale.clone()
+        if self.training:
+            with torch.no_grad():
+                self.scale.mul_(0.5).add_(0.5 * x.abs().mean())
+        return out
+
+
+class _Preempted(RuntimeError):
+    pass
+
+
+def _mid_runner(rank: int, world: int, directory: Path, *, crash_at: int = -1,
+                model_fn: Callable[[], nn.Module] = _BNDrop, ddp_kw: Optional[Dict[str, Any]] = None,
+                **kw: Any) -> HexTrainingRunner:
+    model = DDP(model_fn(), **(ddp_kw or {}))
+    torch.manual_seed(1000 + rank)
+    r = HexTrainingRunner(
+        _config(directory, distributed=True, is_main_process=rank == 0, num_epochs=4,
+                save_every_n_steps=3, **kw),
+        model, torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9),
+        _train_loader(rank, world, shuffle=True), _exact_val_loader(),
+    )
+    if crash_at >= 0:
+        original = r._train_one_step
+
+        def crashing(batch: Any, prepared: Any = None) -> Any:
+            if r.global_step == crash_at:  # every rank: a preemption of the whole job
+                raise _Preempted("injected preemption")
+            return original(batch, prepared)
+
+        r._train_one_step = crashing
+    return r
+
+
+def _mid_epoch_pair(rank: int, world: int, out: Path, **kw: Any) -> Dict[str, Any]:
+    """Uninterrupted run vs crash after the mid-epoch save at step 3 (epoch 1) + resume."""
+    full = _mid_runner(rank, world, out / "full", **kw)
+    reference = full.run()
+    try:
+        _mid_runner(rank, world, out / "split", crash_at=3, **kw).run()
+    except _Preempted:
+        pass
+    resumed = _mid_runner(rank, world, out / "split", resume_trusted=True,
+                          resume_from=str(out / "split" / "checkpoints" / "resume_last.pt"), **kw)
+    result = resumed.run()
+    return {
+        # this rank's own model: parameters, buffers and EMA
+        "full": _digest(full.raw_model) + _buffer_digest(full.raw_model) + _buffer_digest(full.ema_model),
+        "resumed": _digest(resumed.raw_model) + _buffer_digest(resumed.raw_model)
+        + _buffer_digest(resumed.ema_model),
+        "batches_done": result["resume_report"]["mid_epoch_batches_done"],
+        "same_reports": result["history"]["train"] == reference["history"]["train"][1:]
+        and result["history"]["val"] == reference["history"]["val"][1:],
+        "same_history": list(resumed.anomaly_detector.loss_history) == list(full.anomaly_detector.loss_history),
+        "history_len": len(full.anomaly_detector.loss_history),
+    }
+
+
+def _sc_mid_epoch_resume(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """Mid-epoch resume under DDP: BatchNorm + dropout + rank seeds, crash inside epoch 1."""
+    return _mid_epoch_pair(rank, world, out)
+
+
+def _sc_mid_epoch_rank_buffers(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """broadcast_buffers=False and a buffer the training forward reads: each rank resumes its own."""
+    return _mid_epoch_pair(rank, world, out, model_fn=_RunningScale, ddp_kw={"broadcast_buffers": False})
+
+
+def _sc_resume_other_position_on_rank1(rank: int, world: int, out: Path) -> Any:
+    """Same weights and step, rank 1's copy one batch earlier: the resume agreement refuses."""
+    try:
+        _mid_runner(rank, world, out, crash_at=3).run()
+    except _Preempted:
+        pass
+    path = out / "checkpoints" / "resume_last.pt"
+    if rank == 1:
+        payload = torch.load(path, weights_only=False)
+        mid = payload["extra"]["mid_epoch"]
+        mid["batches_done"] -= 1  # still consistent: one healthy loss less per rank
+        for key in ("losses", "grad_norms"):
+            mid[key] = [part[:-1] for part in mid[key]]
+        path = out / "rank1_copy.pt"
+        torch.save(payload, path)
+    _mid_runner(rank, world, out, resume_from=str(path), resume_trusted=True).run()
 
 
 def _sc_save_failure_rank0(rank: int, world: int, out: Path) -> Any:
@@ -978,6 +1103,9 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "save_failure_rank0": _sc_save_failure_rank0,
     "buffer_shape_mismatch": _sc_buffer_shape_mismatch,
     "effective_amp_differs": _sc_effective_amp_differs,
+    "mid_epoch_resume": _sc_mid_epoch_resume,
+    "mid_epoch_rank_buffers": _sc_mid_epoch_rank_buffers,
+    "resume_other_position_on_rank1": _sc_resume_other_position_on_rank1,
     "bn_buffers": _sc_bn_buffers,
     "bn_resume": _sc_bn_resume,
     "prepare_error_bn": _sc_prepare_error_bn,
@@ -1161,6 +1289,21 @@ class TestTwoRanks(unittest.TestCase):
 
     def test_effective_amp_difference_fails_both(self) -> None:
         self.assertEqual(self._errors("effective_amp_differs"), ["DistributedContractError"] * 2)
+    def test_mid_epoch_resume_reproduces_the_uninterrupted_run(self) -> None:
+        for name in ("mid_epoch_resume", "mid_epoch_rank_buffers"):
+            for rank, value in enumerate(self._ok(name)):
+                with self.subTest(name, rank=rank):
+                    self.assertEqual(value["batches_done"], 1)
+                    self.assertEqual(value["full"], value["resumed"])
+                    self.assertTrue(value["same_reports"])
+                    # the rank's own anomaly history, not an empty window
+                    self.assertGreater(value["history_len"], 1)
+                    self.assertTrue(value["same_history"])
+
+    def test_another_mid_epoch_position_on_rank1_fails_both(self) -> None:
+        self.assertEqual(self._errors("resume_other_position_on_rank1"), ["DistributedContractError"] * 2)
+        for res in self.results:
+            self.assertIn("mid-epoch position", res.get("resume_other_position_on_rank1", {}).get("message", ""))
 
     def test_checkpoint_write_failure_on_rank0_fails_both(self) -> None:
         self.assertEqual(self._errors("save_failure_rank0"), ["OSError", "PeerRankError"])

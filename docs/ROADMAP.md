@@ -22,6 +22,33 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Mid-Epoch-Resume (2026-10-30, Linux-Container; ROADMAP-Punkt unten, Cross-Family GPT-6
+  R89/R90 P1).** Vertrag `spec/MID_EPOCH_RESUME_v1.md`, `RunnerConfig(save_every_n_steps=n)`: alle
+  n globalen Schritte wird der Resume-Checkpoint mit der Position in der Epoche neu geschrieben
+  (Epochen-Startzustand von RNG und Loader-Generatoren je Rank, bisherige Losses/Gradnormen,
+  Skip-Zahl). Resume: Iterator aus dem Epochen-Startzustand neu erzeugen, die erledigten Batches
+  laden und verwerfen (reproduziert auch Worker-RNG), dann den RNG der Unterbrechung
+  wiederherstellen. Behauptung und Beleg: unterbrochen == ununterbrochen, bitgleich (Gewichte,
+  EMA, Epochen- und Val-Berichte, Anomalie-Historie) -- mit explizitem Generator und ohne, mit
+  2 DataLoader-Workern und Worker-RNG-Rauschen, mit Dropout und Python/NumPy-Stroemen, und als
+  echter 2-Rank-DDP-Lauf mit BatchNorm + Dropout + Rank-Seeds sowie mit
+  `broadcast_buffers=False` und einem Buffer, den der Trainings-Forward liest. Positivkontrolle:
+  ohne Mid-Epoch-Record weicht das Ergebnis ab. Unabhaengiges Review vor dem Merge (Sweep ueber
+  jeden Abbruchschritt, Scheduler, Warmup, NaN-Skips, Kadenzen, Worker: sauber) fand 4 Befunde,
+  alle rot reproduziert und behoben: (1) DDP mit `broadcast_buffers=False` setzte jeden Rank auf
+  Rank 0s Buffer -> rank-eigene Buffer im Record; (2) ein Resume mit anderer Batch-Groesse oder
+  Datensatzlaenge lief still durch (Batch-Groesse 4: Fast-Forward frisst die Epoche) -> Loader-Form
+  im Record, Abweichung abgelehnt; (3) unter DDP fehlte die Anomalie-Historie -> je Rank
+  gesichert; (4) zwei Waechter ohne Test (Skip-Zahl, abgestimmte Position) -> Tests. Codex fand
+  (1) und (3) ebenfalls und dazu (5): ein Generator, der nur dem Sampler gehoert
+  (`RandomSampler(ds, generator=g)`), fehlte im Epochen-Startzustand -> Fast-Forward ueber die
+  Permutation der ersten Epoche; rot reproduziert, jetzt erfasst (auch im Batch-Sampler und mit
+  `batch_size=None`), fremde Generator-Namen abgelehnt. Eigene
+  Gegenpruefung: die Spec-Behauptung, bei `persistent_workers=True` bleibe die Sample-Reihenfolge
+  erhalten, war falsch (mit und ohne Generator) -> die Kombination wird abgelehnt. 21 Mutanten
+  (je ein Waechter aus); einer davon zeigte einen ueberfluessigen Buffer-Sync vor dem Mid-Save
+  (aequivalenter Mutant) -> entfernt. Grenzen (Spec Abschnitt 4): CUDA-RNG, nicht-persistente
+  Buffer, gleiche Maschine/Software.
 - [x] **Issue #82: Restbefunde der Equalita-Runde f1b54bc (2026-10-30, Linux-Container).** Jeder
   Punkt gegen main @a19c992 nachgemessen. Offen und jetzt behoben: F-E5 (Spec Abschnitt 8 "keine
   Funktion liefert inf" war falsch: `IQM([1e308] * 3)`, der Median zweier Dauern von 1.5e308 s,
@@ -474,9 +501,10 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   im Branch-Schutz aendern. Nachtrag 2026-10-07: ein Session-Handoff vom 2026-10-05 (Drive)
   meldet "Required gate + tests (cpu)" als gesetzt; aus dem Repo/der Agent-Sitzung nicht
   pruefbar (keine Branch-Protection-API) -> Owner bestaetigt, dann diesen Punkt schliessen.
-- [ ] **Mid-Epoch-Resume.** `dataloader_state_dict` wird gespeichert/geladen, der Runner nutzt es
+- [x] ~~**Mid-Epoch-Resume.** `dataloader_state_dict` wird gespeichert/geladen, der Runner nutzt es
   aber nicht (Resume nur an Epochengrenzen). Fuer lange Epochen auf Preemptible-Clustern relevant
-  (Muster: `torchdata.StatefulDataLoader`).
+  (Muster: `torchdata.StatefulDataLoader`).~~ Erledigt 2026-10-30 (`spec/MID_EPOCH_RESUME_v1.md`,
+  Eintrag unter Erledigt).
 - [x] ~~**DDP-Integration des Runners.** Nur `is_main_process`-Guard; kein `DistributedSampler.
   set_epoch`, kein Barrier nach dem Checkpoint-Write, Metriken nicht ueber Ranks reduziert.~~
   Erledigt 2026-10-30 (`spec/DDP_RUNNER_v1.md`, Eintrag unter Erledigt). Offen daraus: NCCL/CUDA,
