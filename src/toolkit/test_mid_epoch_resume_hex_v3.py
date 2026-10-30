@@ -22,7 +22,7 @@ from typing import Any, Dict, Iterator, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Dataset, IterableDataset
+from torch.utils.data import BatchSampler, DataLoader, Dataset, IterableDataset, RandomSampler
 
 from runner_hex_v3 import HexTrainingRunner, RunnerConfig, _check_mid_epoch_record
 
@@ -80,7 +80,7 @@ class _Crash(RuntimeError):
 
 def _runner(out: Path, *, workers: int = 0, crash_at: int = -1, n: int = 8, generator: bool = True,
             persistent: bool = False, batch_size: int = 2, stream: bool = False,
-            nan_at: Tuple[int, ...] = (), **kw: Any) -> HexTrainingRunner:
+            nan_at: Tuple[int, ...] = (), owner: str = "loader", **kw: Any) -> HexTrainingRunner:
     torch.manual_seed(5)
     random.seed(6)
     np.random.seed(7)
@@ -90,6 +90,16 @@ def _runner(out: Path, *, workers: int = 0, crash_at: int = -1, n: int = 8, gene
     gen = torch.Generator().manual_seed(123) if generator else None
     if stream:
         train = DataLoader(_Stream(n), batch_size=batch_size)
+    elif owner == "sampler":  # the generator belongs to the sampler, not to the loader
+        data = _Data(n)
+        train = DataLoader(data, batch_size=batch_size, sampler=RandomSampler(data, generator=gen))
+    elif owner == "unbatched":  # batch_size=None: no batch sampler, the sampler alone
+        data = _Data(n)
+        train = DataLoader(data, batch_size=None, sampler=RandomSampler(data, generator=gen))
+    elif owner == "batch_sampler":
+        data = _Data(n)
+        train = DataLoader(data, batch_sampler=BatchSampler(RandomSampler(data, generator=gen),
+                                                            batch_size=batch_size, drop_last=False))
     else:
         train = DataLoader(_Data(n, noise=workers > 0), batch_size=batch_size, shuffle=True,
                            generator=gen, num_workers=workers, persistent_workers=persistent)
@@ -158,6 +168,13 @@ class TestMidEpochResume(unittest.TestCase):
         self._check(workers=0, generator=False)
         self._check(workers=2, generator=False)
 
+    def test_interrupted_equals_uninterrupted_with_a_sampler_owned_generator(self) -> None:
+        # RandomSampler(generator=g) passed to the loader (Codex #94): g's
+        # epoch-start state must be captured like a loader generator's
+        self._check(workers=0, owner="sampler")
+        self._check(workers=0, owner="batch_sampler")
+        self._check(workers=0, owner="unbatched", n=4)  # 4 single samples per epoch
+
     def test_a_step_skipped_before_the_save_is_carried(self) -> None:
         # NaN at step 5 (epoch 1, batch 2): the save at step 6 records 1 skip
         reference = self._check(workers=0, nan_at=(5,))
@@ -196,6 +213,23 @@ class TestMidEpochResume(unittest.TestCase):
                     resumed = _runner(run, resume_from=str(run / "checkpoints" / "resume_last.pt"),
                                       resume_trusted=True, **change)
                     with self.assertRaisesRegex(ValueError, r"train loader with .* = \[4, 2, 8\]"):
+                        resumed.run()
+
+    def test_other_loader_generators_are_refused(self) -> None:
+        # a generator whose epoch-start state is missing would replay another
+        # epoch's permutation; one the run no longer has cannot be restored
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            interrupted = _runner(tmp, crash_at=7)
+            with self.assertRaises(_Crash):
+                interrupted.run()
+            for i, change in enumerate(({"generator": False}, {"owner": "sampler"})):
+                with self.subTest(**change):
+                    run = tmp / f"resume{i}"
+                    shutil.copytree(tmp / "checkpoints", run / "checkpoints")
+                    resumed = _runner(run, resume_from=str(run / "checkpoints" / "resume_last.pt"),
+                                      resume_trusted=True, **change)
+                    with self.assertRaisesRegex(ValueError, r"generators \['train'\], this run's loaders have"):
                         resumed.run()
 
     def test_a_shrunk_stream_is_refused(self) -> None:

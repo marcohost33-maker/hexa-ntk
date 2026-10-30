@@ -20,8 +20,9 @@ A run interrupted inside an epoch and resumed from its last mid-epoch checkpoint
 the same weights, EMA, epoch reports (`mean_loss`, `mean_grad_norm`, `n_batches`,
 `n_anomalies`, `lr`), validation reports and anomaly-detector history as the run that was
 never interrupted, bit for bit, on the same machine and software (the tests compare with
-`==`). Shown for: shuffling through an explicit `torch.Generator` and through the global
-torch RNG (no generator), dropout, loss weights drawn from the Python and NumPy streams,
+`==`). Shown for: shuffling through an explicit `torch.Generator` (the loader's, or one owned
+only by its `RandomSampler`, also inside a `BatchSampler` and with `batch_size=None`) and
+through the global torch RNG (no generator), dropout, loss weights drawn from the Python and NumPy streams,
 a step skipped (NaN) before the save, `num_workers=2` with a dataset transform that draws
 from the worker RNG, and 2 DDP ranks with BatchNorm, dropout and rank-specific seeds, and
 with `broadcast_buffers=False` and a buffer the training forward reads and updates from
@@ -41,7 +42,7 @@ file as the epoch-boundary save, the newest wins) is rewritten with the full res
 | `world_size` | ranks that wrote it |
 | `losses`, `grad_norms` | per rank: the healthy losses and gradient norms so far (the epoch means are then summed in the same order as without the interruption) |
 | `n_anomalies` | skipped steps so far (agreed across ranks, one value) |
-| `epoch_start` | per rank: the global torch RNG state and every explicit loader generator state *at the start of the epoch* |
+| `epoch_start` | per rank: the global torch RNG state and the state of every explicit generator *at the start of the epoch*: the loader's (`train`, `val`) and one owned only by its sampler (`train.sampler`) or by its batch sampler's sampler (`train.batch_sampler.sampler`), each object once |
 | `train_loader` | per rank: `[batches per epoch, batch size, dataset length]` of the train loader (-1 where undefined, e.g. an unsized stream) |
 | `rank_buffers` | distributed with `broadcast_buffers=False` only: per rank, every persistent buffer of the model |
 
@@ -85,8 +86,11 @@ reports (review of #94, 2-rank reproduction).
 The record is validated (`_check_mid_epoch_record`): version, epoch equal to the checkpoint's,
 `batches_done >= 0`, `0 <= n_anomalies <= batches_done`, healthy losses + skips =
 `batches_done`, uint8 RNG states, rank buffers that are tensors with the names, dtypes and
-shapes of the model's persistent buffers. A record written by another world size or for a
-train loader of another shape is refused: the ranks' sample partitions, and with them the
+shapes of the model's persistent buffers, epoch-start states for exactly the generators the
+run's loaders have (one without its state would replay another epoch's permutation; before
+sampler-owned generators were captured, `RandomSampler(ds, generator=g)` did exactly that,
+Codex #94). A record written by another world size or for a train loader of another shape is
+refused: the ranks' sample partitions, and with them the
 batches already done, would not correspond (resume from an epoch-boundary checkpoint then).
 Before the shape was recorded, a resume with batch size 4 instead of 2 ran without an error
 and its fast-forward consumed the whole epoch, so those samples never trained (review of
@@ -104,7 +108,8 @@ Distributed, the resumed position is part of the rank-0 agreement after the load
   an *epoch-boundary* resume with persistent workers inexact; that path is not refused and
   carries no equality claim.
 - **CUDA RNG** per device is not part of the epoch-start record; **custom samplers** must be
-  deterministic given the RNG/generator state (stock samplers are).
+  deterministic given the global RNG and the generators above (stock samplers are); a
+  generator held anywhere else (another attribute name, the dataset) is not captured.
 - **Non-persistent buffers** are not state (`state_dict` leaves them out) at any resume; a
   model whose training forward reads a non-persistent buffer it also updates is not covered.
 - **The loader shape** is `[len(loader), batch_size, len(dataset)]`; a changed sampler or

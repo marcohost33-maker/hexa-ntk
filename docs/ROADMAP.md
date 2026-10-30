@@ -39,9 +39,13 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   Rank 0s Buffer -> rank-eigene Buffer im Record; (2) ein Resume mit anderer Batch-Groesse oder
   Datensatzlaenge lief still durch (Batch-Groesse 4: Fast-Forward frisst die Epoche) -> Loader-Form
   im Record, Abweichung abgelehnt; (3) unter DDP fehlte die Anomalie-Historie -> je Rank
-  gesichert; (4) zwei Waechter ohne Test (Skip-Zahl, abgestimmte Position) -> Tests. Eigene
+  gesichert; (4) zwei Waechter ohne Test (Skip-Zahl, abgestimmte Position) -> Tests. Codex fand
+  (1) und (3) ebenfalls und dazu (5): ein Generator, der nur dem Sampler gehoert
+  (`RandomSampler(ds, generator=g)`), fehlte im Epochen-Startzustand -> Fast-Forward ueber die
+  Permutation der ersten Epoche; rot reproduziert, jetzt erfasst (auch im Batch-Sampler und mit
+  `batch_size=None`), fremde Generator-Namen abgelehnt. Eigene
   Gegenpruefung: die Spec-Behauptung, bei `persistent_workers=True` bleibe die Sample-Reihenfolge
-  erhalten, war falsch (mit und ohne Generator) -> die Kombination wird abgelehnt. 17 Mutanten
+  erhalten, war falsch (mit und ohne Generator) -> die Kombination wird abgelehnt. 21 Mutanten
   (je ein Waechter aus); einer davon zeigte einen ueberfluessigen Buffer-Sync vor dem Mid-Save
   (aequivalenter Mutant) -> entfernt. Grenzen (Spec Abschnitt 4): CUDA-RNG, nicht-persistente
   Buffer, gleiche Maschine/Software.

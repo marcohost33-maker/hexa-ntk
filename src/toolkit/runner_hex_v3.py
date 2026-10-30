@@ -612,13 +612,27 @@ class HexTrainingRunner:
         make_reproducible_dataloader_kwargs() gives a shuffled loader its own
         generator. Its state is part of the run: without it, a resumed run
         repeats the seed's first permutation instead of continuing the
-        uninterrupted sequence (Codex PR #58 round 2).
+        uninterrupted sequence (Codex PR #58 round 2). A generator can also
+        belong to the sampler alone (``sampler=RandomSampler(ds, generator=g)``,
+        or one inside a ``batch_sampler``): those are collected too, each
+        object once (``DataLoader(shuffle=True, generator=g)`` hands its ``g``
+        to its RandomSampler), under ``<loader>.sampler`` and
+        ``<loader>.batch_sampler.sampler`` (Codex #94).
         """
         gens: Dict[str, torch.Generator] = {}
+        seen: set = set()
         for name, loader in (("train", self.train_loader), ("val", self.val_loader)):
-            gen = getattr(loader, "generator", None)
-            if isinstance(gen, torch.Generator):
-                gens[name] = gen
+            owners = (
+                (name, loader),
+                (f"{name}.sampler", getattr(loader, "sampler", None)),
+                (f"{name}.batch_sampler.sampler",
+                 getattr(getattr(loader, "batch_sampler", None), "sampler", None)),
+            )
+            for key, owner in owners:
+                gen = getattr(owner, "generator", None)
+                if isinstance(gen, torch.Generator) and id(gen) not in seen:
+                    seen.add(id(gen))
+                    gens[key] = gen
         return gens
 
     def _restore_loader_generators(
@@ -750,6 +764,15 @@ class HexTrainingRunner:
                 rank=0 if self.dist is None else self.dist.rank,
                 world_size=1 if self.dist is None else self.dist.world_size,
             )
+            recorded = sorted(self._resume_mid["epoch_start"]["loader_generators"])
+            current = sorted(self._loader_generators())
+            if recorded != current:
+                # a generator without its epoch-start state would replay
+                # another epoch's permutation in the fast-forward
+                raise ValueError(
+                    f"Resume checkpoint {resume_path}: the mid-epoch record holds epoch-start "
+                    f"states for the generators {recorded}, this run's loaders have {current}"
+                )
             saved = self._resume_mid["buffers"]
             if saved is not None:
                 # Checked here, inside the agreed resume; copied in at the start
