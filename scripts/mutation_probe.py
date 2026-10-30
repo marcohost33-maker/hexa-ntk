@@ -318,6 +318,22 @@ MUTANTS = (
     Mutant(DDP, "        failed_somewhere = self.any_true(error is not None)\n",
            "        failed_somewhere = False\n", T2),
     Mutant(DDP, "        if lo != hi:\n", "        if False:\n", T2),
+    # Independent review of #92 (2026-10-30): errors before the forward, buffers,
+    # config, lying len(), per-rank loader generators, rank-0-bound sums.
+    Mutant(RU, "            prepared = self._prepare_step(batch)\n        except StopIteration:",
+           "            prepared = None\n        except StopIteration:", T2),
+    Mutant(RU, "        if n_exhausted:\n", "        if False:\n", T2),
+    Mutant(RU, "            self._sync_buffers()\n", "            pass\n", T2),
+    Mutant(RU, "        if self.dist.any_true(ref != mine):\n            raise DistributedContractError(\n"
+           "                \"RunnerConfig", "        if False:\n            raise DistributedContractError(\n"
+           "                \"RunnerConfig", T2),
+    Mutant(RU, "                if per_rank is not None:\n"
+           "                    gen.set_state(per_rank[self.dist.rank])\n",
+           "                pass\n", T2),
+    Mutant(RU, '            restore_rng_state_tensors({key: states[key][self.dist.rank] for key in ("torch", "python", '
+           '"numpy")})\n', '            torch.random.set_rng_state(states["torch"][self.dist.rank])\n', T2),
+    Mutant(DDP, "        dist.all_reduce(t, op=dist.ReduceOp.SUM)\n        dist.broadcast(t, src=0)\n",
+           "        dist.all_reduce(t, op=dist.ReduceOp.SUM)\n", T2),
     # Per-rank RNG streams across a resume (dropout + rank seeds must continue).
     Mutant(RU, "        if self.dist is not None:\n            self._restore_rank_rng(report)\n",
            "        pass\n", T2),

@@ -46,8 +46,10 @@ __all__ = [
 ]
 
 import collections
+import dataclasses
 import gc
 import hashlib
+import json
 import logging
 import math
 import statistics
@@ -101,6 +103,21 @@ def _module_digest(module: nn.Module) -> bytes:
         h.update(f"{name}|{t.dtype}|{tuple(t.shape)}|".encode("utf-8"))
         h.update(t.reshape(-1).view(torch.uint8).numpy().tobytes())
     return h.digest()
+
+
+def _config_digest(config: "RunnerConfig") -> bytes:
+    """SHA-256 of the fields every rank must share (spec/DDP_RUNNER_v1.md section 2).
+
+    Excluded: is_main_process (differs by design), output_dir and the
+    resume_from path (mount points may differ between hosts); whether
+    resume_from is set is included.
+    """
+    fields = dataclasses.asdict(config)
+    for key in ("is_main_process", "output_dir"):
+        fields.pop(key)
+    fields["resume_from"] = fields["resume_from"] is not None
+    payload = json.dumps(fields, sort_keys=True, default=repr).encode("utf-8")
+    return hashlib.sha256(payload).digest()
 
 
 # ------------------------------------------------------------------
@@ -356,6 +373,18 @@ class HexTrainingRunner:
         # copy) runs before the first collective; a failure on one rank fails
         # all of them instead of leaving the others in the run_id broadcast.
         self.dist.run_agreed(self._build, what="runner construction")
+        # The same run on every rank: a different num_epochs or save cadence
+        # issues a different sequence of collectives (hang), a different best
+        # policy or EMA silently selects differently, and resume_from on one
+        # rank only leaves the others in the first training collective.
+        mine = _config_digest(config)
+        ref = self.dist.broadcast_bytes(mine if self.dist.rank == 0 else None, 32)
+        if self.dist.any_true(ref != mine):
+            raise DistributedContractError(
+                "RunnerConfig differs between ranks (all fields except is_main_process, "
+                "output_dir and the resume_from path must be equal, and resume_from must be "
+                "set on all ranks or on none)"
+            )
         # One run identity: best.pt and the resume record carry rank 0's.
         self.ckpt_mgr.run_id = self.dist.broadcast_bytes(
             bytes.fromhex(self.ckpt_mgr.run_id) if self.dist.rank == 0 else None, 16
@@ -577,10 +606,13 @@ class HexTrainingRunner:
     # Single training step
     # ------------------------------------------------------------------
 
-    def _forward_and_check(
-        self, batch: Dict[str, Any]
-    ) -> Tuple[torch.Tensor, torch.Tensor, float, bool]:
-        """Forward + loss + anomaly check; returns (pred, loss, loss_val, skip)."""
+    def _prepare_step(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor, Any]:
+        """Everything of a step before the model forward; returns (x, target, ctx).
+
+        Kept apart from the forward because, distributed, its errors must be
+        agreed before any rank enters DDP's forward: with buffers (BatchNorm,
+        broadcast_buffers=True) that forward starts with a collective.
+        """
         self.model.train()
         self.optimizer.zero_grad(set_to_none=True)
 
@@ -604,6 +636,19 @@ class HexTrainingRunner:
         ctx = None
         if self.adapter is not None and "context" in batch:
             ctx = batch["context"]
+            if self.dist is not None:
+                # The adapter validates before it calls the DDP model; a
+                # rejection must surface here, before the agreement.
+                self.adapter.validate_context(x, ctx)
+        return x, target, ctx
+
+    def _forward_and_check(
+        self,
+        batch: Dict[str, Any],
+        prepared: Tuple[torch.Tensor, torch.Tensor, Any],
+    ) -> Tuple[torch.Tensor, torch.Tensor, float, bool]:
+        """Forward + loss + anomaly check; returns (pred, loss, loss_val, skip)."""
+        x, target, ctx = prepared
 
         # Forward pass (optionally with AMP)
         use_autocast = (
@@ -649,8 +694,49 @@ class HexTrainingRunner:
         skip_update = is_anomaly and ("NaN" in reason or "Inf" in reason)
         return pred, loss, loss_val, skip_update
 
+    def _agreed_next(
+        self, iterator: Any
+    ) -> Optional[Tuple[Dict[str, Any], Tuple[torch.Tensor, torch.Tensor, Any]]]:
+        """Distributed: the next batch, prepared, agreed before any forward.
+
+        One int64 all-reduce of [ranks that raised, ranks out of data]: an
+        error (a missing key, an OOM in ``.to(device)``, a rejected adapter
+        context) raises on every rank; all ranks out of data ends the epoch;
+        some out of data is an unequal step count (a sized IterableDataset
+        whose ``len`` is wrong, a sampler that lies) and raises on every rank.
+        Returns None at the agreed end of the epoch.
+        """
+        error: Optional[BaseException] = None
+        exhausted = False
+        batch = prepared = None
+        try:
+            batch = next(iterator)
+            prepared = self._prepare_step(batch)
+        except StopIteration:
+            exhausted = True
+        except Exception as exc:  # re-raised below, after the peers know
+            error = exc
+        n_failed, n_exhausted = self.dist.sum_ints([error is not None, exhausted])
+        if error is not None:
+            raise error
+        if n_failed:
+            raise PeerRankError(
+                f"preparing training step {self.global_step} failed on a peer rank (see that rank's log)"
+            )
+        if n_exhausted == self.dist.world_size:
+            return None
+        if n_exhausted:
+            raise DistributedContractError(
+                f"{n_exhausted} of {self.dist.world_size} ranks ran out of training batches at step "
+                f"{self.global_step} while the others had more: unequal step counts (len() of the "
+                "train loader does not match what it yields)"
+            )
+        return batch, prepared
+
     def _agreed_forward(
-        self, batch: Dict[str, Any]
+        self,
+        batch: Dict[str, Any],
+        prepared: Tuple[torch.Tensor, torch.Tensor, Any],
     ) -> Tuple[torch.Tensor, torch.Tensor, float, bool]:
         """Distributed forward: one agreed status per step before backward.
 
@@ -666,7 +752,7 @@ class HexTrainingRunner:
         error: Optional[BaseException] = None
         result = None
         try:
-            result = self._forward_and_check(batch)
+            result = self._forward_and_check(batch, prepared)
         except Exception as exc:  # re-raised below, after the peers know
             error = exc
         local = 2 if error is not None else (1 if result[3] else 0)
@@ -688,6 +774,7 @@ class HexTrainingRunner:
     def _train_one_step(
         self,
         batch: Dict[str, Any],
+        prepared: Optional[Tuple[torch.Tensor, torch.Tensor, Any]] = None,
     ) -> Tuple[float, bool, Optional[float]]:
         """
         Execute one training step with all safety guards.
@@ -699,10 +786,12 @@ class HexTrainingRunner:
         loss = None
 
         try:
+            if prepared is None:
+                prepared = self._prepare_step(batch)
             if self.dist is None:
-                pred, loss, loss_val, skip_update = self._forward_and_check(batch)
+                pred, loss, loss_val, skip_update = self._forward_and_check(batch, prepared)
             else:
-                pred, loss, loss_val, skip_update = self._agreed_forward(batch)
+                pred, loss, loss_val, skip_update = self._agreed_forward(batch, prepared)
             if skip_update:
                 # Do NOT backward or step — protect optimizer
                 return loss_val, False, None
@@ -792,19 +881,19 @@ class HexTrainingRunner:
                 set_epoch(epoch)
 
     def _require_equal_batch_count(self) -> None:
-        """Distributed: every rank must run the same number of training steps.
+        """Distributed fast fail: the declared step counts must be equal.
 
-        Each step is a DDP gradient all-reduce (and one skip agreement); a
-        rank with an extra batch waits forever for its peers.
+        Each step is a DDP gradient all-reduce; a rank with an extra batch
+        would wait forever for its peers. ``len()`` can be wrong (a sized
+        IterableDataset), so the binding check is the per-step agreement in
+        _agreed_next; this one only fails before the first step when the
+        declared counts already differ. Unsized loaders count as -1.
         """
         try:
             n = len(self.train_loader)
         except TypeError:
-            n = -1  # unsized (IterableDataset): the count cannot be agreed
-        if self.dist.require_equal_int(n, what="number of training batches per epoch") < 0:
-            raise DistributedContractError(
-                "distributed training needs a sized train_loader (len() defined on every rank)"
-            )
+            n = -1
+        self.dist.require_equal_int(n, what="number of training batches per epoch (len of the train loader)")
 
     def _train_one_epoch(self, epoch: int) -> Dict[str, Any]:
         """Run one training epoch."""
@@ -816,8 +905,25 @@ class HexTrainingRunner:
         epoch_grad_norms: List[float] = []
         n_anomalies = 0
 
-        for batch_idx, batch in enumerate(self.train_loader):
-            loss_val, is_healthy, grad_norm = self._train_one_step(batch)
+        if self.dist is None:
+            iterator = iter(self.train_loader)
+        else:
+            iterator = self.dist.run_agreed(
+                lambda: iter(self.train_loader), what="creating the train loader iterator"
+            )
+        while True:
+            if self.dist is None:
+                try:
+                    batch = next(iterator)
+                except StopIteration:
+                    break
+                prepared = None
+            else:
+                step = self._agreed_next(iterator)
+                if step is None:
+                    break
+                batch, prepared = step
+            loss_val, is_healthy, grad_norm = self._train_one_step(batch, prepared)
             self.global_step += 1
 
             if is_healthy:
@@ -886,6 +992,9 @@ class HexTrainingRunner:
         if self.dist is None:
             loss_sum, n_batches, sq_err_sum, sq_ref_sum = self._validate_local()
         else:
+            # Every rank evaluates (and rank 0 then saves) rank 0's model:
+            # training forwards updated buffers with local batches.
+            self._sync_buffers()
             # Every sample on exactly one rank, then the sufficient statistics
             # are summed: the pooled nRMSE is then independent of how the
             # samples were split (a mean of rank nRMSEs is not).
@@ -924,6 +1033,11 @@ class HexTrainingRunner:
             "n_batches": n_batches,
             "used_ema": self.ema_model is not None,
         }
+
+    def _sync_buffers(self) -> None:
+        self.dist.sync_buffers_from_rank0(self.raw_model, what="model")
+        if self.ema_model is not None:
+            self.dist.sync_buffers_from_rank0(self.ema_model, what="EMA model")
 
     def _deterministic_val_indices(self) -> List[int]:
         """The validation indices, read twice: the check sees one iteration of
@@ -1158,9 +1272,18 @@ class HexTrainingRunner:
         each rank continues its own (spec/DDP_RUNNER_v1.md section 6).
         """
         local = rng_state_tensors()
-        gathered = {
+        gathered: Dict[str, Any] = {
             key: self.dist.all_gather_tensor(local[key], what=f"{key} RNG state")
             for key in ("torch", "python", "numpy")
+        }
+        # Loader generators too: ranks may shuffle their own shards with their
+        # own seeds; the payload's generator states are rank 0's.
+        gens = self._loader_generators()
+        names = sorted(gens)
+        self.dist.require_same_names(names, what="loader generator names")
+        gathered["loader_generators"] = {
+            name: self.dist.all_gather_tensor(gens[name].get_state(), what=f"{name} loader generator")
+            for name in names
         }
         return {"world_size": self.dist.world_size, **gathered}
 
@@ -1173,6 +1296,10 @@ class HexTrainingRunner:
             reason = f"world_size {states.get('world_size')} != {self.dist.world_size}"
         else:
             restore_rng_state_tensors({key: states[key][self.dist.rank] for key in ("torch", "python", "numpy")})
+            for name, gen in self._loader_generators().items():
+                per_rank = (states.get("loader_generators") or {}).get(name)
+                if per_rank is not None:
+                    gen.set_state(per_rank[self.dist.rank])
             report["rank_rng_restored"] = True
             return
         report["rank_rng_restored"] = False

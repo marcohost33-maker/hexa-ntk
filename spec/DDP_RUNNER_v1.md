@@ -2,7 +2,10 @@
 
 **Version:** 1.0 (2026-10-30; hardened before merge the same day after a critical
 self-review: agreed construction, adapter rule, agreed forward errors, deterministic
-validation sampler, rank-0-bound decision sums, per-rank RNG streams on resume)
+validation sampler, rank-0-bound decision sums, per-rank RNG streams on resume;
+second round after an independent review of head a875020: errors before the forward
+agreed, step count agreed per step, buffers synchronised from rank 0, config digest,
+per-rank loader generators)
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -39,6 +42,14 @@ check that fails on one rank only (e.g. `is_main_process=True` on rank 1) raises
 there and `PeerRankError` on the others, instead of leaving them in the `run_id`
 broadcast until the timeout.
 
+**Same configuration.** Next, a SHA-256 over all `RunnerConfig` fields except
+`is_main_process`, `output_dir` and the `resume_from` path (mount points may differ
+between hosts; *whether* `resume_from` is set is included) must equal rank 0's,
+else `DistributedContractError` on every rank. A different `num_epochs` or save
+cadence would issue a different sequence of collectives (hang), a different best
+policy or `use_ema` would silently select differently, and `resume_from` on one
+rank only left the others in the first training collective (review finding 3).
+
 `distributed` and `is_main_process` must be `bool`. All checkpoints, the EMA copy,
 validation and replay capsules use the unwrapped module (`runner.raw_model`):
 checkpoint keys carry no `module.` prefix, and validation runs no DDP collective.
@@ -49,11 +60,22 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    train and validation loaders' sampler (and batch sampler's sampler) if it has
    one — also without DDP. `DistributedSampler` shuffles with `seed + epoch`;
    without `set_epoch` every epoch repeats the first permutation.
-2. **Equal step count.** `len(train_loader)` must be equal on every rank
-   (all-reduce of min and max); an unsized loader is refused. Each step is a DDP
-   gradient all-reduce plus one skip agreement; a rank with an extra batch would
-   wait forever. `torch.distributed.algorithms.Join` is not used.
-3. **Step status.** Forward, loss and the non-finite-loss check run per rank
+2. **Equal step count.** Each step is a DDP gradient all-reduce; a rank with an
+   extra batch would wait forever. `len(train_loader)` must be equal on every rank
+   (fast fail before the first step; unsized loaders count as -1), but `len` can
+   be wrong (a sized `IterableDataset` declaring 4 and yielding 3), so the binding
+   check is per step (next item). `torch.distributed.algorithms.Join` is not used.
+3. **Before the forward.** Each rank takes its next batch and prepares it
+   (`zero_grad`, warm-up LR, `.to(device)`, the adapter's context validation);
+   then one int64 all-reduce (SUM) of [ranks that raised, ranks out of data]:
+   an error raises on every rank (the failing rank its own exception, the others
+   `PeerRankError`); all ranks out of data ends the epoch; some out of data raises
+   `DistributedContractError` on every rank. This agreement must precede the DDP
+   forward: with buffers (BatchNorm) and the default `broadcast_buffers=True`, DDP
+   starts every forward with a buffer broadcast, which a rank that failed before
+   it never reaches (review finding 1: a missing `target` key on one rank hung
+   both). The train iterator itself is created inside `run_agreed`.
+4. **Step status.** Forward, loss and the non-finite-loss check run per rank
    (the detecting rank writes its FailureSignature and replay capsule); then one
    int64 all-reduce (MAX) agrees on a status before any backward:
    0 = step, 1 = skip (a non-finite loss on some rank), 2 = a rank raised in its
@@ -67,7 +89,8 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    Loss-spike detection only logs and needs no agreement. An exception inside
    backward or the optimizer step (e.g. an OOM there) is not covered: the peers are
    already inside the gradient all-reduce (section 8).
-4. **Training metrics.** `mean_loss` and `mean_grad_norm` are sums over all
+   A step therefore costs two 1-element all-reduces besides DDP's own.
+5. **Training metrics.** `mean_loss` and `mean_grad_norm` are sums over all
    ranks' healthy steps divided by their count. `n_batches` (healthy steps) and
    `n_anomalies` (skipped steps) are per rank and equal on every rank because the
    skips are agreed.
@@ -104,6 +127,15 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
 3. **No collective inside the loop.** Validation runs on the unwrapped module or
    its EMA copy; ranks may have different batch counts. A local exception during
    validation is agreed (section 5) before the reduction.
+4. **One model.** Before validation every buffer of the unwrapped module and of
+   the EMA copy is broadcast from rank 0 (after checking that the buffer names
+   agree). DDP broadcasts rank 0's buffers at the start of each forward, but the
+   training forward then updates them with the local batch (BatchNorm running
+   statistics) and the EMA copy averages those local buffers: without the sync the
+   ranks evaluated different models, the pooled metric belonged to none of them,
+   and `best.pt` (rank 0's) was not the model the metric scored (review finding 2,
+   2 ranks / 3 epochs: 0.91806 pooled vs. 0.92015 for rank 0's EMA). The
+   following checkpoint save therefore also writes the model every rank holds.
 
 ## 5. Checkpoints and errors
 
@@ -127,10 +159,12 @@ Every rank loads `config.resume_from` itself (shared file system assumed). The
 load is one `run_agreed` (a missing or unreadable file on one rank fails all).
 **Per-rank RNG streams.** The resume payload records the RNG of the process that
 writes it (rank 0). Before each resume save, every rank's torch-CPU, Python and
-NumPy (legacy MT19937) RNG states are all-gathered as fixed-length tensors
-(`rng_state_tensors`; floats as IEEE-754 bits, exact) into
+NumPy (legacy MT19937) RNG states and the states of its loaders' explicit
+`torch.Generator`s (names checked equal first) are all-gathered as fixed-length
+tensors (`rng_state_tensors`; floats as IEEE-754 bits, exact) into
 `extra["rank_rng_states"]`; on resume each rank restores its own after the
-manager restored rank 0's. With another world size, or a checkpoint without the
+manager restored rank 0's (review finding 5: per-rank shards shuffled with
+per-rank generator seeds continued rank 0's permutation). With another world size, or a checkpoint without the
 field, the rank-0 states stay, `rank_rng_restored = False` and a warning is logged.
 Afterwards the resumed epoch, global step and best metric value (bitwise,
 NaN for `None`), the SHA-256 of the adopted `run_id`, and a SHA-256 over the
@@ -144,7 +178,8 @@ Only tensor collectives (`all_reduce`, `broadcast`, `all_gather`), never the
 `*_object` variants, which unpickle peer data. Tensors live on the CPU; on the
 NCCL backend on the runner's CUDA device (`device="cuda:k"`), else on the current
 CUDA device (`torch.cuda.set_device(local_rank)` first). Only the default process
-group is used. Cost per training step: one 1-element all-reduce. Per validation:
+group is used. Cost per training step: a 2-element and a 1-element all-reduce. Per validation:
+broadcast of every buffer of the model and the EMA copy;
 one all-reduce of `len(dataset)` int64 counts (8 bytes per sample), a few
 1-element flags, one all-reduce + broadcast of 4 float64. Per resume save: three
 all-gathers of ~10 KB per rank. Rank 0's checkpoint write happens while the
@@ -158,8 +193,15 @@ Evidence (2-rank gloo, CPU, float64; `src/toolkit/test_ddp_hex_v3.py`): the DDP 
 run with batch 4 for weights, EMA, `val_nrmse` and `mean_loss` within 1e-12, and
 the two ranks agree bitwise; a 2 + 2 epoch resume with a shuffling
 `DistributedSampler` equals the 4-epoch run bitwise, also with dropout and
-rank-specific seeds (per-rank RNG streams); each agreed failure ends on
-both ranks with the expected exception (none hangs). World size 1 reproduces the
+rank-specific seeds and loss weights drawn from the Python and NumPy streams,
+with per-rank loader generators on per-rank shards, and with a BatchNorm model;
+with a BatchNorm model both ranks hold bitwise equal buffers (model and EMA) after
+training and the pooled `val_nrmse` equals rank 0's EMA model on the whole
+validation set (<= 1e-12); under fault injection (rank 1's float64 all-reduce
+results moved by one ulp) both ranks still decide on identical validation values;
+each agreed failure (also: an error before the forward of a BatchNorm model,
+`resume_from` on one rank only, a `len()` that lies) ends on both ranks with the
+expected exception (none hangs). World size 1 reproduces the
 non-distributed runner bitwise.
 Mutation probe: 24 mutants, each switching one guard of sections 2-6 off, all
 killed (`scripts/mutation_probe.py`, full probe 109/109 on 2026-10-30, exit 0).
@@ -170,6 +212,10 @@ Not covered (open):
   `Generator` held by user code.
 - **NCCL/CUDA, more than 2 ranks, more than one host, AMP under DDP**: not run.
 - **Mid-epoch resume** (separate ROADMAP item): resume stays at epoch boundaries.
+- **Errors before the forward are agreed (section 3.3), errors inside DDP's forward
+  before the module runs are not** (none known besides the buffer broadcast itself).
+- **SyncBatchNorm / models with collectives of their own in forward** are untested;
+  a rank that fails inside such a forward hangs its peers like an error in backward.
 - **A rank that raises inside backward or the optimizer step** (e.g. an OOM in
   backward) still leaves its peers in the gradient all-reduce until the
   process-group timeout; the NCCL watchdog / the gloo timeout govern that case.

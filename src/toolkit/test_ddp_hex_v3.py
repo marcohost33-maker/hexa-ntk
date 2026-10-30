@@ -73,6 +73,43 @@ class _Stream(IterableDataset):
         yield {"input": torch.zeros(3, dtype=torch.float64), "target": torch.zeros(2, dtype=torch.float64)}
 
 
+class _BN(nn.Module):
+    """A model with buffers: DDP broadcasts them at the start of every forward."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        torch.manual_seed(0)
+        self.lin = nn.Linear(3, 8, dtype=torch.float64)
+        self.bn = nn.BatchNorm1d(8, dtype=torch.float64)
+        self.out = nn.Linear(8, 2, dtype=torch.float64)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.out(torch.tanh(self.bn(self.lin(x))))
+
+
+class _LyingStream(IterableDataset):
+    """Declares 4 samples, yields ``n``."""
+
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def __len__(self) -> int:
+        return 4
+
+    def __iter__(self):
+        data = _Data(4, seed=1)
+        for i in range(self.n):
+            yield data[i]
+
+
+class _NoTarget(Dataset):
+    def __len__(self) -> int:
+        return 4
+
+    def __getitem__(self, i: int) -> Dict[str, torch.Tensor]:
+        return {"input": _Data(4, seed=1)[i]["input"]}
+
+
 def _model(seed: int = 0) -> nn.Module:
     torch.manual_seed(seed)
     return nn.Sequential(
@@ -431,11 +468,24 @@ class TestWorldSizeOne(unittest.TestCase):
             with self.assertRaisesRegex(DistributedContractError, "map-style"):
                 runner.run()
 
-    def test_unsized_train_loader_is_refused(self) -> None:
+    def test_unsized_train_loader_runs(self) -> None:
+        # The end of the data is agreed per step, so an IterableDataset can train.
         with tempfile.TemporaryDirectory() as tmp:
-            runner = self._runner(Path(tmp), distributed=True, train=DataLoader(_Stream(), batch_size=1))
-            with self.assertRaisesRegex(DistributedContractError, "sized train_loader"):
-                runner.run()
+            runner = self._runner(Path(tmp), distributed=True, train=DataLoader(_Stream(), batch_size=1),
+                                  num_epochs=2)
+            history = runner.run()["history"]["train"]
+            self.assertEqual([t["n_batches"] for t in history], [1, 1])
+            self.assertEqual(runner.global_step, 2)
+
+    def test_config_digest_ignores_rank_local_fields_only(self) -> None:
+        from runner_hex_v3 import _config_digest
+        base = RunnerConfig(output_dir="/a")
+        self.assertEqual(_config_digest(base), _config_digest(RunnerConfig(output_dir="/b", is_main_process=False)))
+        self.assertEqual(_config_digest(RunnerConfig(resume_from="/x/r.pt")),
+                         _config_digest(RunnerConfig(resume_from="/y/r.pt")))
+        for changed in (RunnerConfig(resume_from="/x/r.pt"), RunnerConfig(num_epochs=7),
+                        RunnerConfig(best_metric_min_delta=0.5), RunnerConfig(use_ema=False)):
+            self.assertNotEqual(_config_digest(base), _config_digest(changed))
 
     def test_missing_resume_file_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -622,6 +672,118 @@ def _sc_construction_error_rank1(rank: int, world: int, out: Path) -> Any:
     )
 
 
+def _bn_runner(rank: int, world: int, out: Path, *, epochs: int = 3, shuffle: bool = False,
+               **kw: Any) -> HexTrainingRunner:
+    model = DDP(_BN())
+    return HexTrainingRunner(
+        _config(out, distributed=True, is_main_process=rank == 0, num_epochs=epochs, **kw),
+        model, torch.optim.SGD(model.parameters(), lr=0.1),
+        _train_loader(rank, world, shuffle=shuffle), _exact_val_loader(),
+    )
+
+
+def _buffer_digest(module: nn.Module) -> str:
+    return b"".join(b.detach().reshape(-1).to(torch.float64).numpy().tobytes()
+                    for _, b in sorted(module.named_buffers())).hex()
+
+
+def _sc_bn_buffers(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """Review finding 2: validation must evaluate one model, the one rank 0 saves."""
+    runner = _bn_runner(rank, world, out)
+    result = runner.run()
+    value: Dict[str, Any] = {
+        "raw": _buffer_digest(runner.raw_model), "ema": _buffer_digest(runner.ema_model),
+        "val_nrmse": result["history"]["val"][-1]["val_nrmse"],
+    }
+    if rank == 0:
+        # rank 0's EMA model, evaluated alone on the whole validation set
+        module = runner.ema_model.module.eval()
+        data = _Data(5, seed=2)
+        with torch.no_grad():
+            pred = module(data.x)
+        value["full_set_nrmse"] = float(((pred - data.y).pow(2).sum() / data.y.pow(2).sum()).sqrt())
+    return value
+
+
+def _sc_bn_resume(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    full = _bn_runner(rank, world, out / "full", epochs=4, shuffle=True)
+    full.run()
+    _bn_runner(rank, world, out / "split", epochs=2, shuffle=True).run()
+    resumed = _bn_runner(rank, world, out / "split", epochs=4, shuffle=True,
+                         resume_from=str(out / "split" / "checkpoints" / "resume_last.pt"), resume_trusted=True)
+    resumed.run()
+    return {"full": _digest(full.raw_model) + _buffer_digest(full.ema_model),
+            "resumed": _digest(resumed.raw_model) + _buffer_digest(resumed.ema_model)}
+
+
+def _sc_prepare_error_bn(rank: int, world: int, out: Path) -> Any:
+    """Review finding 1: an error before the forward of a model with buffers."""
+    ds = _NoTarget() if rank == 1 else _Data(4, seed=1)
+    model = DDP(_BN())
+    HexTrainingRunner(
+        _config(out, distributed=True, is_main_process=rank == 0, num_epochs=1),
+        model, torch.optim.SGD(model.parameters(), lr=0.1),
+        DataLoader(ds, batch_size=2), _exact_val_loader(),
+    ).run()
+
+
+def _sc_resume_from_on_rank0_only(rank: int, world: int, out: Path) -> Any:
+    """Review finding 3: resume_from set on one rank only."""
+    _ddp_runner(rank, out, train=_train_loader(rank, world), val=_exact_val_loader(), num_epochs=1).run()
+    resume = str(out / "checkpoints" / "resume_last.pt") if rank == 0 else None
+    _ddp_runner(rank, out, train=_train_loader(rank, world), val=_exact_val_loader(), num_epochs=2,
+                resume_from=resume, resume_trusted=True).run()
+
+
+def _sc_lying_len(rank: int, world: int, out: Path) -> Any:
+    """Review finding 4: equal len(), unequal number of batches."""
+    train = DataLoader(_LyingStream(3 + rank), batch_size=1)
+    _ddp_runner(rank, out, train=train, val=_exact_val_loader(), num_epochs=1).run()
+
+
+def _sc_resume_rank_generators(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """Review finding 5: per-rank shards shuffled by per-rank loader generators."""
+
+    def runner(directory: Path, epochs: int, **kw: Any) -> HexTrainingRunner:
+        shard = torch.utils.data.Subset(_Data(8, seed=1), list(range(rank, 8, world)))
+        gen = torch.Generator().manual_seed(42 + rank)
+        return _ddp_runner(rank, directory, train=DataLoader(shard, batch_size=2, shuffle=True, generator=gen),
+                           val=_exact_val_loader(), num_epochs=epochs, **kw)
+
+    full = runner(out / "full", 4)
+    full.run()
+    runner(out / "split", 2).run()
+    resumed = runner(out / "split", 4, resume_from=str(out / "split" / "checkpoints" / "resume_last.pt"),
+                     resume_trusted=True)
+    resumed.run()
+    return {"full": _digest(full.raw_model), "resumed": _digest(resumed.raw_model)}
+
+
+def _sc_allreduce_noise(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """Review finding 6: decision values must not rely on bitwise-equal all-reduce results.
+
+    Fault injection: on rank 1 every float64 all-reduce result is moved by one ulp,
+    as a backend whose reduction order differs per rank could. The validation
+    values are rank-0-bound, so both ranks must still decide on the same numbers.
+    """
+    original = dist.all_reduce
+
+    def noisy(tensor: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
+        work = original(tensor, *args, **kwargs)
+        if rank == 1 and tensor.dtype == torch.float64:
+            tensor.copy_(torch.nextafter(tensor, torch.full_like(tensor, math.inf)))
+        return work
+
+    runner = _ddp_runner(rank, out, train=_train_loader(rank, world), val=_exact_val_loader())
+    dist.all_reduce = noisy
+    try:
+        result = runner.run()
+    finally:
+        dist.all_reduce = original
+    return {"val": [[v["val_nrmse"], v["val_loss"]] for v in result["history"]["val"]],
+            "best_metric_value": runner.ckpt_mgr.best_metric_value}
+
+
 def _sc_save_failure_rank0(rank: int, world: int, out: Path) -> Any:
     runner = _ddp_runner(rank, out, train=_train_loader(rank, world), val=_exact_val_loader(), num_epochs=1)
     if rank == 0:
@@ -672,13 +834,23 @@ class _Dropout(nn.Module):
 def _sc_resume_rank_rng(rank: int, world: int, out: Path) -> Dict[str, Any]:
     """Per-rank seeds + dropout: each rank must continue its own RNG stream."""
 
+    mse = nn.MSELoss()
+
+    def loss_fn(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        loss = mse(pred, target)
+        if pred.requires_grad:  # the Python and NumPy streams shape the update too
+            loss = loss * (1.0 + 0.01 * random.random()) * (1.0 + 0.01 * float(np.random.rand()))
+        return loss
+
     def runner(directory: Path, epochs: int, **kw: Any) -> HexTrainingRunner:
         model = DDP(_Dropout())
-        torch.manual_seed(1000 + rank)  # rank-specific stream (dropout masks)
+        torch.manual_seed(1000 + rank)  # rank-specific streams (dropout masks, loss weights)
+        random.seed(2000 + rank)
+        np.random.seed(3000 + rank)
         return HexTrainingRunner(
             _config(directory, distributed=True, is_main_process=rank == 0, num_epochs=epochs, **kw),
             model, torch.optim.SGD(model.parameters(), lr=0.1),
-            _train_loader(rank, world, shuffle=True), _exact_val_loader(),
+            _train_loader(rank, world, shuffle=True), _exact_val_loader(), loss_fn=loss_fn,
         )
 
     full = runner(out / "full", 4)
@@ -724,6 +896,13 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "forward_error_rank1": _sc_forward_error_rank1,
     "construction_error_rank1": _sc_construction_error_rank1,
     "save_failure_rank0": _sc_save_failure_rank0,
+    "bn_buffers": _sc_bn_buffers,
+    "bn_resume": _sc_bn_resume,
+    "prepare_error_bn": _sc_prepare_error_bn,
+    "resume_from_on_rank0_only": _sc_resume_from_on_rank0_only,
+    "lying_len": _sc_lying_len,
+    "resume_rank_generators": _sc_resume_rank_generators,
+    "allreduce_noise": _sc_allreduce_noise,
     "unequal_batches": _sc_unequal_batches,
     "resume_equivalence": _sc_resume_equivalence,
     "resume_rank_rng": _sc_resume_rank_rng,
@@ -865,11 +1044,44 @@ class TestTwoRanks(unittest.TestCase):
     def test_construction_error_on_one_rank_fails_both(self) -> None:
         self.assertEqual(self._errors("construction_error_rank1"), ["PeerRankError", "ValueError"])
 
+    def test_bn_buffers_agree_and_the_metric_is_rank0s_model(self) -> None:
+        r0, r1 = self._ok("bn_buffers")
+        self.assertEqual(r0["raw"], r1["raw"])
+        self.assertEqual(r0["ema"], r1["ema"])
+        self.assertEqual(r0["val_nrmse"], r1["val_nrmse"])
+        self.assertAlmostEqual(r0["val_nrmse"], r0["full_set_nrmse"], delta=1e-12)
+
+    def test_bn_resume_reproduces_the_uninterrupted_run(self) -> None:
+        for value in self._ok("bn_resume"):
+            self.assertEqual(value["full"], value["resumed"])
+
+    def test_prepare_error_with_buffers_fails_both(self) -> None:
+        self.assertEqual(self._errors("prepare_error_bn"), ["PeerRankError", "KeyError"])
+
+    def test_resume_from_on_one_rank_only_fails_both(self) -> None:
+        self.assertEqual(self._errors("resume_from_on_rank0_only"), ["DistributedContractError"] * 2)
+
+    def test_lying_len_fails_both(self) -> None:
+        self.assertEqual(self._errors("lying_len"), ["DistributedContractError"] * 2)
+        self.assertIn("ran out of training batches", self.results[0].get("lying_len", {}).get("message", ""))
+
+    def test_resume_continues_each_ranks_loader_generator(self) -> None:
+        for value in self._ok("resume_rank_generators"):
+            self.assertEqual(value["full"], value["resumed"])
+
+    def test_decisions_survive_rank_dependent_allreduce_rounding(self) -> None:
+        r0, r1 = self._ok("allreduce_noise")
+        self.assertEqual(r0, r1)
+
     def test_checkpoint_write_failure_on_rank0_fails_both(self) -> None:
         self.assertEqual(self._errors("save_failure_rank0"), ["OSError", "PeerRankError"])
 
     def test_unequal_batch_counts_fail_both(self) -> None:
         self.assertEqual(self._errors("unequal_batches"), ["DistributedContractError"] * 2)
+        # the declared counts already differ: the fast fail before the first step,
+        # not the per-step agreement after a partial epoch (lying_len covers that)
+        for res in self.results:
+            self.assertIn("number of training batches per epoch", res.get("unequal_batches", {}).get("message", ""))
 
     def test_resume_reproduces_the_uninterrupted_run(self) -> None:
         for value in self._ok("resume_equivalence"):

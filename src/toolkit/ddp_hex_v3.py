@@ -42,6 +42,7 @@ __all__ = [
     "restore_rng_state_tensors",
 ]
 
+import hashlib
 import random
 import struct
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, TypeVar, Union
@@ -211,6 +212,10 @@ class DistributedRunContext:
         dist.all_reduce(t, op=op)
         return [int(v) for v in t.cpu().tolist()]
 
+    def sum_ints(self, values: Sequence[int]) -> List[int]:
+        """Element-wise int64 sum over ranks (e.g. how many ranks failed / ran dry)."""
+        return self._all_reduce_int(values, dist.ReduceOp.SUM)
+
     def max_int(self, value: int) -> int:
         """The largest ``value`` over all ranks (a status code: 0 ok, higher worse)."""
         return self._all_reduce_int([value], dist.ReduceOp.MAX)[0]
@@ -242,6 +247,31 @@ class DistributedRunContext:
         parts = [torch.empty_like(local) for _ in range(self.world_size)]
         dist.all_gather(parts, local)
         return [part.cpu() for part in parts]
+
+    def require_same_names(self, names: Sequence[str], *, what: str) -> None:
+        """The ordered ``names`` must be identical on every rank (SHA-256 vs rank 0).
+
+        Run before a sequence of per-name collectives: a rank with one name
+        more would issue one collective more and hang its peers.
+        """
+        mine = hashlib.sha256("\n".join(names).encode("utf-8")).digest()
+        ref = self.broadcast_bytes(mine if self.rank == 0 else None, 32)
+        if self.any_true(ref != mine):
+            raise DistributedContractError(f"{what} differ between ranks")
+
+    def sync_buffers_from_rank0(self, module: torch.nn.Module, *, what: str) -> None:
+        """Overwrite every buffer of ``module`` with rank 0's (in place).
+
+        DDP broadcasts rank 0's buffers at the start of each forward, but a
+        training forward then updates them with the local batch (BatchNorm
+        running statistics), and an EMA copy averages those local buffers.
+        Before validation and a checkpoint save every rank must hold the model
+        rank 0 writes, or the pooled metric belongs to no single model.
+        """
+        buffers = list(module.named_buffers())
+        self.require_same_names([n for n, _ in buffers], what=f"{what} buffer names")
+        for _, buf in buffers:
+            dist.broadcast(buf.data, src=0)
 
     # -- agreement -------------------------------------------------------
 

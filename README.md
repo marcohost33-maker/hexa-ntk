@@ -124,9 +124,12 @@ Modell und EMA.
 gemeinsamer NaN-Skip vor `backward` (sonst Deadlock im Gradienten-All-Reduce), Validierung auf dem
 ungewrappten Modul mit gepruefter exakter Partition (`ExactDistributedEvalSampler`; ein gepaddeter
 `DistributedSampler` wird abgelehnt) und `val_nrmse` aus ueber die Ranks summierten float64-Summen;
-Konstruktion, Forward-Fehler, Checkpoint-Schritt und Resume enden bei einem Fehler auf irgendeinem
-Rank auf allen Ranks mit einer Ausnahme statt einem Haenger; ein Adapter muss das DDP-Modell selbst
-wrappen (sonst laeuft der Forward an DDP vorbei); rank-eigene RNG-Stroeme ueberleben ein Resume.
+Konstruktion (inkl. gleicher Konfiguration), Batch-Vorbereitung, Forward-Fehler, Datenende,
+Checkpoint-Schritt und Resume enden bei einem Fehler auf irgendeinem Rank auf allen Ranks mit einer
+Ausnahme statt einem Haenger; ein Adapter muss das DDP-Modell selbst wrappen (sonst laeuft der
+Forward an DDP vorbei); Buffer (BatchNorm, EMA) werden vor Validierung und Save von Rank 0
+uebernommen, damit alle Ranks das Modell bewerten, das Rank 0 speichert; rank-eigene RNG-Stroeme
+und Loader-Generatoren ueberleben ein Resume.
 Getestet mit echten 2 gloo-Ranks auf CPU (== Single-Process-Lauf bis 1e-12, Resume bitgleich);
 NCCL/CUDA, mehr Ranks und Hosts sind nicht gelaufen.
 

@@ -49,13 +49,27 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   (zweimal gelesen), NCCL-Tensoren auf dem Runner-Device. Gemessen statt angenommen: Forward ohne
   Backward auf allen Ranks funktioniert mit default-DDP, `find_unused_parameters` und
   `static_graph` (torch 2.6.0).
+  _Zweite Runde nach unabhaengigem Review von a875020 (gleicher Tag), sechs Befunde, alle mit
+  echtem 2-Rank-Lauf reproduziert und geschlossen:_ (1) ein Fehler VOR dem Forward (fehlender
+  `target`-Key, OOM in `.to(device)`, Adapter-Kontext) liess bei Modellen mit Buffern (BatchNorm,
+  `broadcast_buffers=True`) den Peer im Buffer-Broadcast haengen -> Vorbereitung + naechster Batch
+  werden vor dem DDP-Forward abgestimmt ([Fehler, erschoepft] je Schritt); (2) BatchNorm-/EMA-Buffer
+  divergierten je Rank, die gepoolte Metrik gehoerte zu keinem Modell (0.91806 vs. 0.92015 fuer
+  Rank 0s EMA) -> Buffer-Sync von Rank 0 vor Validierung und Save; (3) Konfiguration nicht
+  abgeglichen (`resume_from` nur auf Rank 0 -> Haenger) -> Config-Digest bei der Konstruktion;
+  (4) `len()` eines IterableDataset kann luegen -> Schrittzahl wird pro Schritt abgestimmt
+  (IterableDataset dadurch erlaubt); (5) Resume gab allen Ranks Rank 0s Loader-Generator ->
+  je Rank gesammelt/restauriert; (6) zwei blinde Tests (Python/NumPy-Stroeme, Rank-0-Bindung
+  unter gloo unbeobachtbar) -> Verlust haengt jetzt von beiden Stroemen ab, Fault-Injection
+  verschiebt Rank 1s All-Reduce-Ergebnisse um 1 ulp.
   Evidenz: echter 2-Rank-gloo-Lauf (CPU, float64) == Single-Process-Lauf (Gewichte, EMA,
   `val_nrmse`, `mean_loss` <= 1e-12; beide Ranks bitgleich); Resume 2+2 == 4 Epochen bitgleich
   mit mischendem `DistributedSampler` (auch mit Dropout und Rank-Seeds); jedes Fehlerszenario
   (gepaddeter Val-Sampler, NaN auf einem Rank, Forward-Fehler, Konstruktionsfehler, Schreibfehler
   Rank 0, ungleiche Batchzahl, Resume-Datei fehlt/abweichend auf einem Rank) endet auf beiden
-  Ranks mit der erwarteten Ausnahme statt Haenger; Welt 1 == ohne DDP bitgleich. Mutationsprobe:
-  24 DDP-Mutanten (je ein Waechter aus). _Evidenz:_ `results/2026-10-30_ddp-runner_local-gate.log`.
+  Ranks mit der erwarteten Ausnahme statt Haenger; Welt 1 == ohne DDP bitgleich; BatchNorm: Buffer
+  beider Ranks bitgleich, Metrik == Rank 0s EMA-Modell auf dem ganzen Val-Satz, Resume bitgleich.
+  Mutationsprobe: 31 DDP-Mutanten (je ein Waechter aus). _Evidenz:_ `results/2026-10-30_ddp-runner_local-gate.log`.
   Offen (Spec Abschnitt 8): NCCL/CUDA, > 2 Ranks, mehrere Hosts, AMP unter DDP; CUDA-RNG je Rank,
   Worker-RNG; Fehler in backward/optimizer.step; Mid-Epoch-Resume.
 
