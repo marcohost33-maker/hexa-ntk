@@ -1,5 +1,5 @@
-# Local gate 2026-10-30 — DDP integration of the runner (spec/DDP_RUNNER_v1.md), after the independent review round
-# base: main a19c992; branch claude/hexa-ntk-development-toqzyn @ 3279dfb + this commit's doc/SOURCES/log edits
+# Local gate 2026-10-30 — DDP integration of the runner (spec/DDP_RUNNER_v1.md), after three review rounds
+# base: main a19c992; branch claude/hexa-ntk-development-toqzyn @ 0e86c52 + this commit's doc/SOURCES/log edits
 # platform: Linux x86_64, Linux container; Python 3.12.3; torch 2.6.0+cu124 (CPU only); numpy 2.5.3; neuraloperator 2.0.0; ruff 0.17.0; coverage 7.16.2
 # note: torch 2.6.0 from PyPI (+cu124 wheel, run on CPU): download.pytorch.org is not reachable from this container; CI uses the +cpu wheel
 
@@ -19,18 +19,19 @@ exit=0
 exit=0
 
 == coverage run -m unittest discover -s src/toolkit -t src/toolkit -p 'test_*.py'
-Ran 1025 tests in 56.166s
+Ran 1029 tests in 64.136s
 OK (skipped=1)
 exit=0
 
 == coverage report (fail_under 87)
 src/toolkit/ddp_hex_v3.py                        162      9     44      7    91%
-src/toolkit/runner_hex_v3.py                     551     35    202     22    91%
-TOTAL                                           5645    222   2142    176    95%
+src/toolkit/resume_utils_hex_v3.py               149      3     80      2    98%
+src/toolkit/runner_hex_v3.py                     560     32    204     22    92%
+TOTAL                                           5654    219   2144    176    95%
 exit=0
 
 == GINO lane (CI gate job): unittest test_gino_adapter_hex_v3
-Ran 26 tests in 3.178s
+Ran 26 tests in 3.898s
 OK
 
 == unittest test_ddp_hex_v3 -v (from src/toolkit)
@@ -45,9 +46,11 @@ test_rng_state_tensors_round_trip_exactly (test_ddp_hex_v3.TestRunnerWithoutProc
 test_set_epoch_reaches_the_sampler_once (test_ddp_hex_v3.TestRunnerWithoutProcessGroup.test_set_epoch_reaches_the_sampler_once) ... ok
 test_bn_buffers_agree_and_the_metric_is_rank0s_model (test_ddp_hex_v3.TestTwoRanks.test_bn_buffers_agree_and_the_metric_is_rank0s_model) ... ok
 test_bn_resume_reproduces_the_uninterrupted_run (test_ddp_hex_v3.TestTwoRanks.test_bn_resume_reproduces_the_uninterrupted_run) ... ok
+test_buffer_shape_mismatch_fails_both_instead_of_aborting (test_ddp_hex_v3.TestTwoRanks.test_buffer_shape_mismatch_fails_both_instead_of_aborting) ... ok
 test_checkpoint_write_failure_on_rank0_fails_both (test_ddp_hex_v3.TestTwoRanks.test_checkpoint_write_failure_on_rank0_fails_both) ... ok
 test_construction_error_on_one_rank_fails_both (test_ddp_hex_v3.TestTwoRanks.test_construction_error_on_one_rank_fails_both) ... ok
 test_decisions_survive_rank_dependent_allreduce_rounding (test_ddp_hex_v3.TestTwoRanks.test_decisions_survive_rank_dependent_allreduce_rounding) ... ok
+test_effective_amp_difference_fails_both (test_ddp_hex_v3.TestTwoRanks.test_effective_amp_difference_fails_both) ... ok
 test_forward_error_on_one_rank_fails_both (test_ddp_hex_v3.TestTwoRanks.test_forward_error_on_one_rank_fails_both) ... ok
 test_lying_len_fails_both (test_ddp_hex_v3.TestTwoRanks.test_lying_len_fails_both) ... ok
 test_nan_on_one_rank_skips_the_step_everywhere (test_ddp_hex_v3.TestTwoRanks.test_nan_on_one_rank_skips_the_step_everywhere) ... ok
@@ -66,6 +69,7 @@ test_adapter_around_the_inner_module_is_refused (test_ddp_hex_v3.TestWorldSizeOn
 test_config_digest_ignores_rank_local_fields_only (test_ddp_hex_v3.TestWorldSizeOne.test_config_digest_ignores_rank_local_fields_only) ... ok
 test_ddp_model_without_distributed_flag_is_refused (test_ddp_hex_v3.TestWorldSizeOne.test_ddp_model_without_distributed_flag_is_refused) ... ok
 test_decision_sums_are_rank0_bound (test_ddp_hex_v3.TestWorldSizeOne.test_decision_sums_are_rank0_bound) ... ok
+test_effective_amp_names_scaler_and_dtype (test_ddp_hex_v3.TestWorldSizeOne.test_effective_amp_names_scaler_and_dtype) ... ok
 test_failure_records_go_to_a_rank_directory (test_ddp_hex_v3.TestWorldSizeOne.test_failure_records_go_to_a_rank_directory) ... ok
 test_forward_error_is_raised_after_the_agreement (test_ddp_hex_v3.TestWorldSizeOne.test_forward_error_is_raised_after_the_agreement) ... ok
 test_implicit_rank_from_group (test_ddp_hex_v3.TestWorldSizeOne.test_implicit_rank_from_group) ... ok
@@ -73,6 +77,7 @@ test_is_main_process_must_match_rank (test_ddp_hex_v3.TestWorldSizeOne.test_is_m
 test_iterable_validation_is_refused (test_ddp_hex_v3.TestWorldSizeOne.test_iterable_validation_is_refused) ... ok
 test_missing_resume_file_raises (test_ddp_hex_v3.TestWorldSizeOne.test_missing_resume_file_raises) ... ok
 test_nondeterministic_validation_sampler_is_refused (test_ddp_hex_v3.TestWorldSizeOne.test_nondeterministic_validation_sampler_is_refused) ... ok
+test_oom_while_preparing_gets_the_rescue (test_ddp_hex_v3.TestWorldSizeOne.test_oom_while_preparing_gets_the_rescue) ... CUDA OOM at step 0! Attempting rescue...
 test_partition_check_branches (test_ddp_hex_v3.TestWorldSizeOne.test_partition_check_branches) ... ok
 test_rank_rng_restore_reports_why_not (test_ddp_hex_v3.TestWorldSizeOne.test_rank_rng_restore_reports_why_not) ... ok
 test_reductions_and_broadcast (test_ddp_hex_v3.TestWorldSizeOne.test_reductions_and_broadcast) ... ok
@@ -84,10 +89,10 @@ test_validation_partition_is_checked (test_ddp_hex_v3.TestWorldSizeOne.test_vali
 test_validation_without_batch_sampler (test_ddp_hex_v3.TestWorldSizeOne.test_validation_without_batch_sampler) ... ok
 test_world_one_reproduces_single_process_bitwise (test_ddp_hex_v3.TestWorldSizeOne.test_world_one_reproduces_single_process_bitwise) ... ok
 test_world_one_resume_round_trip (test_ddp_hex_v3.TestWorldSizeOne.test_world_one_resume_round_trip) ... ok
-Ran 50 tests in 8.741s
+Ran 54 tests in 10.939s
 OK
 
-== python scripts/mutation_probe.py (full probe on code+tests of 3279dfb, sharpened unequal_batches assertion included; only docs/SOURCES/log changed since)
+== python scripts/mutation_probe.py (full probe on code+tests of 0e86c52; only docs/SOURCES/log changed since)
 M86 KILLED    runner_hex_v3.py -> TestTwoRanks
 M87 KILLED    runner_hex_v3.py -> TestTwoRanks
 M88 KILLED    runner_hex_v3.py -> TestTwoRanks
@@ -108,22 +113,28 @@ M102 KILLED    runner_hex_v3.py -> TestTwoRanks
 M103 KILLED    runner_hex_v3.py -> TestTwoRanks
 M104 KILLED    runner_hex_v3.py -> TestTwoRanks
 M105 KILLED    ddp_hex_v3.py -> TestTwoRanks
-M106 KILLED    runner_hex_v3.py -> TestTwoRanks
+M106 KILLED    ddp_hex_v3.py -> TestTwoRanks
 M107 KILLED    runner_hex_v3.py -> TestTwoRanks
 M108 KILLED    runner_hex_v3.py -> TestWorldSizeOne
-M109 KILLED    runner_hex_v3.py -> TestWorldSizeOne
-M110 KILLED    runner_hex_v3.py -> TestWorldSizeOne
-M111 KILLED    ddp_hex_v3.py -> TestRunnerWithoutProcessGroup
+M109 KILLED    runner_hex_v3.py -> TestTwoRanks
+M110 KILLED    runner_hex_v3.py -> TestTwoRanks
+M111 KILLED    runner_hex_v3.py -> TestWorldSizeOne
 M112 KILLED    runner_hex_v3.py -> TestWorldSizeOne
-M113 KILLED    runner_hex_v3.py -> TestRunnerWithoutProcessGroup
-M114 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
-M115 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
-M116 KILLED    ddp_hex_v3.py -> TestExactDistributedEvalSampler
-[MUTATION-PROBE] baseline green | 116/116 killed | PASS
+M113 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M114 KILLED    ddp_hex_v3.py -> TestRunnerWithoutProcessGroup
+M115 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M116 KILLED    runner_hex_v3.py -> TestRunnerWithoutProcessGroup
+M117 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M118 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M119 KILLED    ddp_hex_v3.py -> TestExactDistributedEvalSampler
+[MUTATION-PROBE] baseline green | 119/119 killed | PASS
 exit=0
 
 == review rounds on this branch
-first full probe 102/102 (17 DDP mutants); self-review closed five gaps -> 109/109 (24); independent review of a875020 found six (errors before the forward with buffers hung peers; BatchNorm/EMA buffers diverged per rank; config not agreed; lying len(); per-rank loader generators lost on resume; two blind tests), each reproduced with a real 2-rank job by the reviewer, all closed in 3279dfb; full probe then 114/116 (the two len() fast-fail mutants survived because the new per-step agreement also catches unequal counts) -> test sharpened to the fast fail's message -> 116/116
+1) self-review of the first version (probe 102/102): adapter bypass, unagreed construction, forward errors hanging peers, decisions on unguaranteed bitwise-equal all-reduce results, per-rank RNG lost on resume -> closed (109/109)
+2) independent review of a875020 (each finding reproduced with a real 2-rank job): errors before the forward hung BatchNorm models; BatchNorm/EMA buffers diverged per rank; config not agreed; lying len(); per-rank loader generators lost; two blind tests -> closed in 3279dfb (116/116 after sharpening the len() fast-fail test)
+3) independent review of 205f293: round-2 findings re-run and confirmed closed; new: buffer-sync regression (shape mismatch aborted gloo with SIGABRT), OOM while preparing without rescue, CUDA-located RNG/generator states, effective AMP mode not agreed -> closed in 0e86c52 (119/119)
 
 == measured, not assumed: forward without backward on every rank (agreed skip), torch 2.6.0, 2 gloo ranks
 default DDP: OK; find_unused_parameters=True: OK; static_graph=True: OK (regression scenarios nan_skip_* in TestTwoRanks)
+not run here: CUDA/NCCL (the .cpu() fixes for map_location=<cuda> are untested by construction)

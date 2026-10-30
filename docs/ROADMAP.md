@@ -62,6 +62,14 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   je Rank gesammelt/restauriert; (6) zwei blinde Tests (Python/NumPy-Stroeme, Rank-0-Bindung
   unter gloo unbeobachtbar) -> Verlust haengt jetzt von beiden Stroemen ab, Fault-Injection
   verschiebt Rank 1s All-Reduce-Ergebnisse um 1 ulp.
+  _Dritte Runde (Review von 205f293):_ alle fuenf Befunde der ersten Runde vom Reviewer erneut
+  reproduziert und als geschlossen bestaetigt; neu: (1) Regression des Buffer-Syncs -- der
+  Namensabgleich pruefte keine Shapes, ein je Rank anders geformter nicht-persistenter Buffer
+  (`broadcast_buffers=False`) brach gloo mit SIGABRT ab -> Signatur aus Name, dtype und Shape;
+  (2) OOM in der Batch-Vorbereitung unter DDP ohne Rettung -> gleiche Rettung wie im Schritt;
+  (3) RNG-/Generator-Zustaende kamen bei `map_location=<cuda>` als CUDA-Tensoren an -> `.cpu()`
+  (auch im bestehenden `resume_utils.restore_rng_states`; CUDA hier nicht gelaufen);
+  (4) der effektive AMP-Modus (bf16-Rueckfall je GPU) gehoert in den Konstruktions-Abgleich.
   Evidenz: echter 2-Rank-gloo-Lauf (CPU, float64) == Single-Process-Lauf (Gewichte, EMA,
   `val_nrmse`, `mean_loss` <= 1e-12; beide Ranks bitgleich); Resume 2+2 == 4 Epochen bitgleich
   mit mischendem `DistributedSampler` (auch mit Dropout und Rank-Seeds); jedes Fehlerszenario
@@ -69,7 +77,7 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   Rank 0, ungleiche Batchzahl, Resume-Datei fehlt/abweichend auf einem Rank) endet auf beiden
   Ranks mit der erwarteten Ausnahme statt Haenger; Welt 1 == ohne DDP bitgleich; BatchNorm: Buffer
   beider Ranks bitgleich, Metrik == Rank 0s EMA-Modell auf dem ganzen Val-Satz, Resume bitgleich.
-  Mutationsprobe: 31 DDP-Mutanten (je ein Waechter aus). _Evidenz:_ `results/2026-10-30_ddp-runner_local-gate.log`.
+  Mutationsprobe: 34 DDP-Mutanten (je ein Waechter aus). _Evidenz:_ `results/2026-10-30_ddp-runner_local-gate.log`.
   Offen (Spec Abschnitt 8): NCCL/CUDA, > 2 Ranks, mehrere Hosts, AMP unter DDP; CUDA-RNG je Rank,
   Worker-RNG; Fehler in backward/optimizer.step; Mid-Epoch-Resume.
 
