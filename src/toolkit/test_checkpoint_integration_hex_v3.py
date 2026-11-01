@@ -19,7 +19,11 @@ Covers:
 """
 from __future__ import annotations
 
+import hashlib
+import io
+import json
 import os
+import shutil
 import stat
 import tempfile
 import unittest
@@ -37,6 +41,7 @@ from checkpoint_integration_hex_v3 import (
     BestCheckpointPolicy,
     CheckpointDurabilityError,
     CheckpointIntegrationManager,
+    GENERATION_MANIFEST_NAME,
 )
 from resume_utils_hex_v3 import EMADecayError, save_resume_checkpoint
 
@@ -1025,11 +1030,13 @@ class TestResumeRestoresBestMetric(_TmpRootCase):
     def test_not_restored_when_same_run_best_file_is_worse(self) -> None:
         mgr = self._make_manager()
         self._run_with_best(mgr, 0.4)
-        same_run = self._make_manager(Path(self.tmpdir.name) / "other", run_id=mgr.run_id)
+        # NR-03: the worse best.pt is published by a writer of the same run in
+        # this root (a pinned generation), so the semantic check decides; a
+        # file swapped in without republishing is TestBestGenerationPin's case.
+        same_run = self._make_manager(run_id=mgr.run_id)
         same_run.save_best_model_checkpoint(
             model=build_test_model(), metric_value=0.9, metric_name="v", epoch=0
         )
-        os.replace(same_run.best_model_path, mgr.best_model_path)
         report = self._resume(self._make_manager())
         self.assertEqual(report["best_metric_restore_reason"], "best_checkpoint_mismatch")
 
@@ -1039,11 +1046,10 @@ class TestResumeRestoresBestMetric(_TmpRootCase):
         # later save and leave best.pt pointing at unrelated weights).
         mgr = self._make_manager()
         self._run_with_best(mgr, 0.4)
-        foreign = self._make_manager(Path(self.tmpdir.name) / "other")
+        foreign = self._make_manager()  # NR-03: another run writing into this root
         foreign.save_best_model_checkpoint(
             model=build_test_model(), metric_value=0.01, metric_name="v", epoch=0
         )
-        os.replace(foreign.best_model_path, mgr.best_model_path)
         fresh = self._make_manager()
         report = self._resume(fresh)
         self.assertFalse(report["best_metric_restored"])
@@ -1059,11 +1065,10 @@ class TestResumeRestoresBestMetric(_TmpRootCase):
         # rejected must not keep comparing against its previous best value.
         mgr = self._make_manager()
         self._run_with_best(mgr, 0.4)
-        foreign = self._make_manager(Path(self.tmpdir.name) / "other")
+        foreign = self._make_manager()  # NR-03: another run writing into this root
         foreign.save_best_model_checkpoint(
             model=build_test_model(), metric_value=0.01, metric_name="v", epoch=0
         )
-        os.replace(foreign.best_model_path, mgr.best_model_path)
         report = self._resume(mgr)
         self.assertFalse(report["best_metric_restored"])
         self.assertEqual(report["best_metric_restore_reason"], "run_id_mismatch")
@@ -1077,11 +1082,10 @@ class TestResumeRestoresBestMetric(_TmpRootCase):
     def test_best_file_of_other_metric_is_not_adopted(self) -> None:
         mgr = self._make_manager()
         self._run_with_best(mgr, 0.4)
-        same_run = self._make_manager(Path(self.tmpdir.name) / "other", run_id=mgr.run_id)
+        same_run = self._make_manager(run_id=mgr.run_id)  # NR-03: published in this root
         same_run.save_best_model_checkpoint(
             model=build_test_model(), metric_value=0.1, metric_name="other_metric", epoch=2
         )
-        os.replace(same_run.best_model_path, mgr.best_model_path)
         report = self._resume(self._make_manager())
         self.assertEqual(report["best_metric_restore_reason"], "metric_name_mismatch")
 
@@ -1312,6 +1316,228 @@ class TestResumeEmaState(_TmpRootCase):
         self.assertFalse(report["ema_restored"])
         self.assertIsNone(report["ema_decay"])
 
+
+
+class TestBestGenerationPin(_TmpRootCase):
+    """NR-03 / NR-R8-03: best.pt is a second trust boundary.
+
+    _restore_best_metric may interpret best.pt only from bytes read once
+    through one descriptor and matched against the generation manifest
+    (sha256 + size + run_id) published by this manager's own writes.
+    """
+
+    def _run(self, mgr: CheckpointIntegrationManager, *metrics: float) -> nn.Module:
+        model = build_test_model()
+        for epoch, metric in enumerate(metrics):
+            mgr.save_best_model_checkpoint(model=model, metric_value=metric, metric_name="v", epoch=epoch)
+        mgr.save_resume(model=model, optimizer=build_test_optimizer(model), epoch=len(metrics) - 1,
+                        include_python_rng=False, include_numpy_rng=False)
+        return model
+
+    def _resume(self, mgr: CheckpointIntegrationManager) -> dict:
+        model = build_test_model()
+        return mgr.load_resume(model=model, optimizer=build_test_optimizer(model))
+
+    def _manifest_path(self) -> Path:
+        return self.root / GENERATION_MANIFEST_NAME
+
+    def _manifest(self) -> dict:
+        return json.loads(self._manifest_path().read_text(encoding="utf-8"))
+
+    def _put_manifest(self, doc: Any) -> None:
+        raw = doc if isinstance(doc, str) else json.dumps(doc)
+        self._manifest_path().write_text(raw, encoding="utf-8")
+
+    @staticmethod
+    def _pin(path: Path) -> dict:
+        data = path.read_bytes()
+        return {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+
+    def _assert_rejected(self, report: dict, mgr: CheckpointIntegrationManager, reason: str) -> None:
+        self.assertEqual(report["best_metric_restore_reason"], reason)
+        self.assertFalse(report["best_metric_restored"])
+        self.assertIsNone(mgr.best_metric_value)
+
+    # -- positive control ------------------------------------------------
+
+    def test_valid_generation_is_restored(self) -> None:
+        mgr = self._make_manager()
+        self._run(mgr, 1.0, 0.4)
+        doc = self._manifest()
+        self.assertEqual(set(doc), {"format", "version", "generation_id", "run_id", "files"})
+        self.assertEqual(doc["run_id"], mgr.run_id)
+        self.assertEqual(doc["files"]["best.pt"], self._pin(self.root / "best.pt"))
+        self.assertEqual(doc["files"]["resume_last.pt"], self._pin(self.root / "resume_last.pt"))
+        fresh = self._make_manager()
+        report = self._resume(fresh)
+        self.assertEqual(report["best_metric_restore_reason"], "restored")
+        self.assertEqual(fresh.best_metric_value, 0.4)
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()),
+                         sorted(["best.pt", "resume_last.pt", GENERATION_MANIFEST_NAME]))
+
+    # -- negative control: a legitimately newer, better best.pt --------------
+
+    def test_newer_better_best_republishes_pin_and_is_adopted(self) -> None:
+        mgr = self._make_manager()
+        model = self._run(mgr, 1.0, 0.5)
+        resume_pin = self._manifest()["files"]["resume_last.pt"]
+        mgr.save_best_model_checkpoint(model=model, metric_value=0.3, metric_name="v", epoch=2)
+        doc = self._manifest()
+        self.assertEqual(doc["files"]["resume_last.pt"], resume_pin)
+        self.assertEqual(doc["files"]["best.pt"], self._pin(self.root / "best.pt"))
+        fresh = self._make_manager()
+        report = self._resume(fresh)
+        self.assertEqual(report["best_metric_restore_reason"], "restored_from_newer_best")
+        self.assertEqual(fresh.best_metric_value, 0.3)
+
+    # -- negative cases ----------------------------------------------------
+
+    def test_swapped_best_of_same_length_is_rejected(self) -> None:
+        # Strongest forger: same run_id, better metric, identical length. The
+        # semantic checks alone would adopt it as "restored_from_newer_best".
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        forger = self._make_manager(Path(self.tmpdir.name) / "forger", run_id=mgr.run_id)
+        forger.save_best_model_checkpoint(model=build_test_model(), metric_value=0.01,
+                                          metric_name="v", epoch=0)
+        self.assertEqual(os.path.getsize(forger.best_model_path), os.path.getsize(mgr.best_model_path))
+        os.replace(forger.best_model_path, mgr.best_model_path)
+        fresh = self._make_manager()
+        self._assert_rejected(self._resume(fresh), fresh, "best_checkpoint_digest_mismatch")
+
+    def test_manifest_of_other_run_is_rejected(self) -> None:
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        doc = self._manifest()
+        doc["run_id"] = "another-run"
+        self._put_manifest(doc)
+        fresh = self._make_manager()
+        self._assert_rejected(self._resume(fresh), fresh, "run_id_mismatch")
+
+    def test_correctly_pinned_foreign_best_is_rejected_by_payload(self) -> None:
+        # NR-R8-02: SHA identity is not semantics. A manifest that pins the
+        # exact bytes of another run's best.pt under this run's id is refused.
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        foreign = self._make_manager(Path(self.tmpdir.name) / "foreign")
+        foreign.save_best_model_checkpoint(model=build_test_model(), metric_value=0.01,
+                                           metric_name="v", epoch=0)
+        os.replace(foreign.best_model_path, mgr.best_model_path)
+        doc = self._manifest()
+        doc["files"]["best.pt"] = self._pin(self.root / "best.pt")
+        self._put_manifest(doc)
+        fresh = self._make_manager()
+        self._assert_rejected(self._resume(fresh), fresh, "run_id_mismatch")
+
+    def test_unpinned_best_entry_is_rejected(self) -> None:
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        doc = self._manifest()
+        doc["files"]["best.pt"] = None
+        self._put_manifest(doc)
+        fresh = self._make_manager()
+        self._assert_rejected(self._resume(fresh), fresh, "best_checkpoint_unpinned")
+
+    def test_legacy_directory_without_manifest_is_controlled(self) -> None:
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        os.remove(self._manifest_path())
+        fresh = self._make_manager()
+        self._assert_rejected(self._resume(fresh), fresh, "best_checkpoint_unpinned")
+        saved = fresh.save_best_model_checkpoint(model=build_test_model(), metric_value=0.5,
+                                                 metric_name="v", epoch=1)
+        self.assertTrue(saved["saved"])
+        self.assertEqual(self._manifest()["files"]["best.pt"], self._pin(self.root / "best.pt"))
+
+    def test_manifest_with_extra_or_duplicate_fields_is_rejected(self) -> None:
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        good = self._manifest()
+        top = dict(good, note="x")
+        entry = json.loads(json.dumps(good))
+        entry["files"]["best.pt"]["mtime"] = 0
+        dup = json.dumps(good)[:-1] + ', "run_id": ' + json.dumps(good["run_id"]) + "}"
+        for name, doc in (("top_level_extra", top), ("entry_extra", entry), ("duplicate_key", dup)):
+            with self.subTest(case=name):
+                self._put_manifest(doc)
+                fresh = self._make_manager()
+                self._assert_rejected(self._resume(fresh), fresh, "generation_manifest_invalid")
+
+    def test_symlinked_best_is_rejected_even_with_matching_bytes(self) -> None:
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        target = Path(self.tmpdir.name) / "elsewhere.pt"
+        shutil.copyfile(mgr.best_model_path, target)
+        os.remove(mgr.best_model_path)
+        try:
+            os.symlink(target, mgr.best_model_path)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"cannot create symlinks here: {exc}")
+        fresh = self._make_manager()
+        self._assert_rejected(self._resume(fresh), fresh, "best_checkpoint_not_regular")
+
+    def test_oversized_best_is_rejected(self) -> None:
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        fresh = self._make_manager(max_pinned_checkpoint_bytes=16)
+        self._assert_rejected(self._resume(fresh), fresh, "best_checkpoint_too_large")
+
+    def test_interrupted_publish_after_best_replace_is_rejected(self) -> None:
+        # Crash window: best.pt already replaced, manifest not yet published.
+        mgr = self._make_manager()
+        model = self._run(mgr, 0.4)
+        with mock.patch.object(CheckpointIntegrationManager, "_publish_generation",
+                               side_effect=OSError("simulated crash before manifest publish")):
+            with self.assertRaises(OSError):
+                mgr.save_best_model_checkpoint(model=model, metric_value=0.2, metric_name="v", epoch=1)
+        self.assertEqual(self._disk_metric(mgr), 0.2)
+        fresh = self._make_manager()
+        self._assert_rejected(self._resume(fresh), fresh, "best_checkpoint_digest_mismatch")
+
+    def test_interrupted_best_write_keeps_previous_generation(self) -> None:
+        mgr = self._make_manager()
+        model = self._run(mgr, 0.4)
+        before = self._manifest()
+        with mock.patch("checkpoint_integration_hex_v3.torch.save",
+                        side_effect=OSError("simulated crash during write")):
+            with self.assertRaises(OSError):
+                mgr.save_best_model_checkpoint(model=model, metric_value=0.2, metric_name="v", epoch=1)
+        self.assertEqual(self._manifest(), before)
+        fresh = self._make_manager()
+        report = self._resume(fresh)
+        self.assertEqual(report["best_metric_restore_reason"], "restored")
+        self.assertEqual(fresh.best_metric_value, 0.4)
+
+    def test_restore_loads_best_only_from_verified_bytes(self) -> None:
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        real_load = torch.load
+        sources = []
+
+        def spy(f, *args, **kwargs):
+            sources.append(f)
+            return real_load(f, *args, **kwargs)
+
+        state = torch.load(mgr.resume_path, weights_only=True)["checkpoint_manager_state"]
+        fresh = self._make_manager()
+        with mock.patch("checkpoint_integration_hex_v3.torch.load", side_effect=spy):
+            restored, reason = fresh._restore_best_metric(state)
+        self.assertEqual((restored, reason), (True, "restored"))
+        self.assertTrue(sources)
+        for src in sources:
+            self.assertIsInstance(src, io.BytesIO)
+
+    def test_foreign_writer_in_same_root_drops_the_resume_pin(self) -> None:
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        foreign = self._make_manager()
+        foreign.save_best_model_checkpoint(model=build_test_model(), metric_value=0.9,
+                                           metric_name="v", epoch=0)
+        doc = self._manifest()
+        self.assertEqual(doc["run_id"], foreign.run_id)
+        self.assertIsNone(doc["files"]["resume_last.pt"])
+        fresh = self._make_manager()
+        self._assert_rejected(self._resume(fresh), fresh, "run_id_mismatch")
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,10 @@ Design invariants:
   resumed run neither overwrites a better best.pt nor restarts its average
 - In-memory best value always matches best.pt: committed after the write,
   and also when the file was replaced but the directory fsync failed
+- best.pt is a trust boundary of its own (NR-03): every write of best.pt or
+  resume_last.pt republishes checkpoint_generation.json (sha256 + size of
+  both files, run_id, generation_id); the resume restore interprets best.pt
+  only from bytes read once through one descriptor and matched against it
 
 PyTorch 2.6+ compatibility:
 - weights_only=True is the default
@@ -30,12 +34,17 @@ __all__ = [
     "AtomicCheckpointWriter",
     "CheckpointDurabilityError",
     "CheckpointIntegrationManager",
+    "GENERATION_MANIFEST_NAME",
 ]
 
+import hashlib
+import io
+import json
 import logging
 import math
 import numbers
 import os
+import stat
 import tempfile
 import uuid
 from dataclasses import asdict, dataclass
@@ -54,6 +63,115 @@ from resume_utils_hex_v3 import (
 from warmstart_utils_hex_v3 import load_partial_checkpoint
 
 logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------------------------
+# Generation manifest (NR-03): best.pt is read only from pinned bytes
+# ------------------------------------------------------------------
+
+GENERATION_MANIFEST_NAME = "checkpoint_generation.json"
+GENERATION_MANIFEST_FORMAT = "hexantk.checkpoint_generation"
+GENERATION_MANIFEST_VERSION = 1
+_GENERATION_FILES = ("best.pt", "resume_last.pt")
+_MANIFEST_MAX_BYTES = 64 * 1024
+DEFAULT_MAX_PINNED_CHECKPOINT_BYTES = 4 * 1024**3
+_HEX = frozenset("0123456789abcdef")
+
+
+class _PinnedReadError(Exception):
+    """A pinned read was refused; ``reason`` is the controlled reason code."""
+
+    def __init__(self, reason: str, detail: str = "") -> None:
+        super().__init__(detail or reason)
+        self.reason = reason
+
+
+def _read_regular_file_once(path: Path, *, max_bytes: int) -> bytes:
+    """Read ``path`` through ONE descriptor: regular file, no symlink, budget.
+
+    lstat refuses a symlink or a non-regular entry; O_NOFOLLOW (where the
+    platform has it) refuses a symlink swapped in before the open; fstat on
+    the open descriptor must be the regular file the lstat saw. The returned
+    bytes are the only bytes the caller may interpret.
+    """
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        raise _PinnedReadError("missing") from None
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        raise _PinnedReadError("not_regular")
+    if st.st_size > max_bytes:
+        raise _PinnedReadError("too_large")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        raise _PinnedReadError("missing") from None
+    except OSError as exc:  # e.g. ELOOP: a symlink swapped in after the lstat
+        raise _PinnedReadError("not_regular", str(exc)) from exc
+    try:
+        fst = os.fstat(fd)
+        if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (st.st_dev, st.st_ino):
+            raise _PinnedReadError("not_regular")
+        chunks: List[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(fd, min(1 << 20, max_bytes + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > max_bytes:
+                raise _PinnedReadError("too_large")
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _reject_duplicate_keys(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"duplicate key {key!r}")
+        out[key] = value
+    return out
+
+
+def _is_hex(value: Any, length: int) -> bool:
+    return isinstance(value, str) and len(value) == length and set(value) <= _HEX
+
+
+def _parse_generation_manifest(data: bytes) -> Dict[str, Any]:
+    """Strict parse: UTF-8 JSON, no duplicate keys, exact key sets, typed values."""
+    try:
+        doc = json.loads(data.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise _PinnedReadError("generation_manifest_invalid", str(exc)) from exc
+    if not isinstance(doc, dict) or set(doc) != {
+        "format", "version", "generation_id", "run_id", "files"
+    }:
+        raise _PinnedReadError("generation_manifest_invalid", "top-level keys")
+    version = doc["version"]
+    if doc["format"] != GENERATION_MANIFEST_FORMAT or isinstance(version, bool) \
+            or version != GENERATION_MANIFEST_VERSION:
+        raise _PinnedReadError("generation_manifest_invalid", "format/version")
+    if not _is_hex(doc["generation_id"], 32):
+        raise _PinnedReadError("generation_manifest_invalid", "generation_id")
+    if not (isinstance(doc["run_id"], str) and doc["run_id"]):
+        raise _PinnedReadError("generation_manifest_invalid", "run_id")
+    files = doc["files"]
+    if not isinstance(files, dict) or set(files) != set(_GENERATION_FILES):
+        raise _PinnedReadError("generation_manifest_invalid", "files keys")
+    for name in _GENERATION_FILES:
+        entry = files[name]
+        if entry is None:
+            continue
+        size = entry.get("size") if isinstance(entry, dict) else None
+        if not isinstance(entry, dict) or set(entry) != {"sha256", "size"} \
+                or not _is_hex(entry["sha256"], 64) \
+                or not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            raise _PinnedReadError("generation_manifest_invalid", f"files[{name!r}]")
+    return doc
 
 
 # ------------------------------------------------------------------
@@ -148,23 +266,54 @@ class AtomicCheckpointWriter:
 
     @staticmethod
     def save_torch_payload_atomic(
-        path: Union[str, Path], payload: Dict[str, Any]
+        path: Union[str, Path],
+        payload: Dict[str, Any],
+        *,
+        pin: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Save a payload dict atomically via temp file + os.replace."""
-        path = Path(path)
+        """Save a payload dict atomically via temp file + os.replace.
+
+        ``pin``, if given, is filled with ``sha256``/``size`` of the bytes
+        that were fsynced and renamed onto ``path`` (hashed from the temp file
+        before the rename, so the pin never describes a file swapped in later).
+        """
+        return AtomicCheckpointWriter._replace_atomic(
+            Path(path), lambda tmp: torch.save(payload, tmp), suffix=".pt", pin=pin
+        )
+
+    @staticmethod
+    def write_bytes_atomic(
+        path: Union[str, Path], data: bytes, *, suffix: str = ".tmp"
+    ) -> str:
+        """Write ``data`` atomically (temp file -> fsync -> rename -> dir fsync)."""
+
+        def write(tmp: Path) -> None:
+            with open(tmp, "wb") as f:
+                f.write(data)
+
+        return AtomicCheckpointWriter._replace_atomic(Path(path), write, suffix=suffix, pin=None)
+
+    @staticmethod
+    def _replace_atomic(
+        path: Path,
+        write: Callable[[Path], None],
+        *,
+        suffix: str,
+        pin: Optional[Dict[str, Any]],
+    ) -> str:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         fd, tmp_path_str = tempfile.mkstemp(
             dir=path.parent,
             prefix=f".tmp_{path.name}_",
-            suffix=".pt",
+            suffix=suffix,
         )
         os.close(fd)
         tmp_path = Path(tmp_path_str)
         replaced = False
 
         try:
-            torch.save(payload, tmp_path)
+            write(tmp_path)
             # fsync to ensure data is flushed to disk before rename.
             # Without this, a power failure between torch.save() and
             # os.replace() could leave the temp file with incomplete
@@ -179,6 +328,15 @@ class AtomicCheckpointWriter:
             with open(tmp_path, "rb+") as f:
                 f.flush()
                 os.fsync(f.fileno())
+                if pin is not None:
+                    f.seek(0)
+                    digest = hashlib.sha256()
+                    size = 0
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        digest.update(chunk)
+                        size += len(chunk)
+                    pin.clear()
+                    pin.update(sha256=digest.hexdigest(), size=size)
             os.replace(tmp_path, path)
             replaced = True
             # fsync the parent directory so the rename (the filename entry)
@@ -224,8 +382,9 @@ class AtomicCheckpointWriter:
         extra: Optional[Dict[str, Any]] = None,
         ema_model_state: Optional[Dict[str, Any]] = None,
         checkpoint_type: str = "best_model",
+        pin: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Save a model state_dict checkpoint atomically."""
+        """Save a model state_dict checkpoint atomically (``pin``: see above)."""
         payload: Dict[str, Any] = {
             "checkpoint_type": checkpoint_type,
             "checkpoint_semantics": checkpoint_type,
@@ -237,7 +396,7 @@ class AtomicCheckpointWriter:
         if extra is not None:
             payload["extra"] = extra
 
-        return AtomicCheckpointWriter.save_torch_payload_atomic(path, payload)
+        return AtomicCheckpointWriter.save_torch_payload_atomic(path, payload, pin=pin)
 
 
 # ------------------------------------------------------------------
@@ -275,7 +434,9 @@ class CheckpointIntegrationManager:
         best_policy: Optional[BestCheckpointPolicy] = None,
         is_main_process: bool = True,
         run_id: Optional[str] = None,
+        max_pinned_checkpoint_bytes: int = DEFAULT_MAX_PINNED_CHECKPOINT_BYTES,
     ) -> None:
+        self.max_pinned_checkpoint_bytes = max_pinned_checkpoint_bytes
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self.best_policy = best_policy or BestCheckpointPolicy(mode="min", min_delta=0.0)
@@ -294,8 +455,59 @@ class CheckpointIntegrationManager:
         return str(self.root_dir / "best.pt")
 
     @property
+    def generation_manifest_path(self) -> str:
+        return str(self.root_dir / GENERATION_MANIFEST_NAME)
+
+    @property
     def last_model_path(self) -> str:
         return str(self.root_dir / "last.pt")
+
+    # ------------------------------------------------------------------
+    # Generation manifest (NR-03)
+    # ------------------------------------------------------------------
+
+    def _read_generation_manifest(self) -> Optional[Dict[str, Any]]:
+        """The strictly parsed manifest; None if there is none (legacy dir).
+
+        Raises _PinnedReadError("generation_manifest_invalid") otherwise.
+        """
+        try:
+            data = _read_regular_file_once(
+                Path(self.generation_manifest_path), max_bytes=_MANIFEST_MAX_BYTES
+            )
+        except _PinnedReadError as exc:
+            if exc.reason == "missing":
+                return None
+            raise _PinnedReadError("generation_manifest_invalid", exc.reason) from exc
+        return _parse_generation_manifest(data)
+
+    def _publish_generation(self, name: str, pin: Dict[str, Any]) -> None:
+        """Publish a new generation after ``name`` was replaced with ``pin``'s bytes.
+
+        The other file's pin is carried over only from a valid manifest of
+        this same run; otherwise it is dropped (null), so that file is
+        unpinned and its restore fails closed. Written atomically.
+        """
+        files: Dict[str, Any] = {other: None for other in _GENERATION_FILES}
+        try:
+            previous = self._read_generation_manifest()
+        except _PinnedReadError:
+            previous = None
+        if previous is not None and previous["run_id"] == self.run_id:
+            files.update(previous["files"])
+        files[name] = {"sha256": pin["sha256"], "size": pin["size"]}
+        doc = {
+            "format": GENERATION_MANIFEST_FORMAT,
+            "version": GENERATION_MANIFEST_VERSION,
+            "generation_id": uuid.uuid4().hex,
+            "run_id": self.run_id,
+            "files": files,
+        }
+        AtomicCheckpointWriter.write_bytes_atomic(
+            self.generation_manifest_path,
+            json.dumps(doc, sort_keys=True, indent=2).encode("utf-8"),
+            suffix=".json",
+        )
 
     @property
     def resume_path(self) -> str:
@@ -397,6 +609,7 @@ class CheckpointIntegrationManager:
 
         if callable(ema_model_state):
             ema_model_state = ema_model_state()
+        pin: Dict[str, Any] = {}
         try:
             AtomicCheckpointWriter.save_model_state_dict_atomic(
                 self.best_model_path,
@@ -404,17 +617,25 @@ class CheckpointIntegrationManager:
                 extra=payload_extra,
                 ema_model_state=ema_model_state,
                 checkpoint_type="best_model",
+                pin=pin,
             )
         except CheckpointDurabilityError:
             # best.pt already holds the new model (#40 P3-3): keeping the old
             # value would let a later, worse metric overwrite it.
             self.best_metric_value = metric
             self.best_metric_name = metric_name
+            try:
+                self._publish_generation("best.pt", pin)
+            except OSError:
+                logger.warning("Generation manifest not republished after %s.", self.best_model_path)
             raise
         # Commit only after the durable write: a failed save must not move
         # the best value, or the same improvement would never be saved.
         self.best_metric_value = metric
         self.best_metric_name = metric_name
+        # A crash or failure here leaves best.pt unpinned: the restore then
+        # refuses it (fail-closed) instead of trusting unverified bytes.
+        self._publish_generation("best.pt", pin)
 
         return {
             "saved": True,
@@ -544,7 +765,16 @@ class CheckpointIntegrationManager:
             "run_id": self.run_id,
         }
 
-        AtomicCheckpointWriter.save_torch_payload_atomic(self.resume_path, payload)
+        pin: Dict[str, Any] = {}
+        try:
+            AtomicCheckpointWriter.save_torch_payload_atomic(self.resume_path, payload, pin=pin)
+        except CheckpointDurabilityError:
+            try:
+                self._publish_generation("resume_last.pt", pin)
+            except OSError:
+                logger.warning("Generation manifest not republished after %s.", self.resume_path)
+            raise
+        self._publish_generation("resume_last.pt", pin)
 
         requires_trusted_load = include_python_rng or include_numpy_rng
 
@@ -719,6 +949,16 @@ class CheckpointIntegrationManager:
         equal ``metric_name`` if the caller names it. A best.pt of another
         run, of another metric, a worse or a missing one is not trusted, so it
         cannot block saving a new best model. Returns (restored, reason).
+
+        Before any of that, best.pt must be pinned (NR-03): the generation
+        manifest must parse strictly, carry the recorded run_id and a
+        sha256/size for best.pt, and best.pt must be a regular file (no
+        symlink, within ``max_pinned_checkpoint_bytes``) whose bytes, read
+        once, match the pin; only those bytes are deserialised. Refusals are
+        controlled reasons, never exceptions: "best_checkpoint_unpinned"
+        (legacy directory without manifest, or no pin), "generation_manifest_invalid",
+        "best_checkpoint_digest_mismatch", "best_checkpoint_not_regular",
+        "best_checkpoint_too_large".
         """
         if not isinstance(state, dict):
             return False, "absent"
@@ -736,13 +976,36 @@ class CheckpointIntegrationManager:
             return False, "invalid_record"
 
         best_path = Path(self.best_model_path)
-        if not best_path.exists():
+        if not os.path.lexists(best_path):
             return False, "best_checkpoint_missing"
+        # NR-03: best.pt is a trust boundary of its own. It is interpreted
+        # only from bytes read once through one descriptor and matched against
+        # the generation manifest this manager published when writing it; a
+        # second torch.load(path) would read whatever is on disk by then.
         try:
-            # mmap: read the metadata without materialising the weights.
-            best_extra = torch.load(
-                best_path, map_location="cpu", weights_only=True, mmap=True
-            )["extra"]
+            manifest = self._read_generation_manifest()
+        except _PinnedReadError as exc:
+            return False, exc.reason
+        if manifest is None or manifest["files"]["best.pt"] is None:
+            return False, "best_checkpoint_unpinned"
+        if manifest["run_id"] != state.get("run_id"):
+            return False, "run_id_mismatch"
+        expected = manifest["files"]["best.pt"]
+        try:
+            data = _read_regular_file_once(
+                best_path, max_bytes=min(self.max_pinned_checkpoint_bytes, expected["size"])
+            )
+        except _PinnedReadError as exc:
+            if exc.reason == "too_large" and expected["size"] <= self.max_pinned_checkpoint_bytes:
+                return False, "best_checkpoint_digest_mismatch"  # longer than pinned
+            return False, f"best_checkpoint_{exc.reason}"
+        if len(data) != expected["size"] or hashlib.sha256(data).hexdigest() != expected["sha256"]:
+            return False, "best_checkpoint_digest_mismatch"
+        try:
+            best_payload = torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)
+            if best_payload.get("checkpoint_type") != "best_model":
+                return False, "best_checkpoint_mismatch"
+            best_extra = best_payload["extra"]
             on_disk = _finite_metric_value(best_extra["metric_value"])
             disk_mode = best_extra.get("best_policy", {}).get("mode", self.best_policy.mode)
             disk_run_id = best_extra.get("run_id")
