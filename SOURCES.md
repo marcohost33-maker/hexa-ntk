@@ -878,3 +878,5 @@
 | 5A8048363413493F | 2026-11-02 01:10 | src/toolkit | NR-03 / NR-R8-03: best.pt pinned by checkpoint_generation.json (sha256+size+run_id+generation_id), restore reads it once via one FD and deserialises only verified bytes: checkpoint_integration_hex_v3.py |
 | 6B4360909CF8147E | 2026-11-02 01:10 | src/toolkit | NR-03: TestBestGenerationPin (swap same length, foreign run, pinned foreign payload, unpinned, legacy, extra/duplicate fields, symlink, budget, interrupted writes, newer better best): test_checkpoint_integration_hex_v3.py |
 | F50A3EB689086607 | 2026-11-02 01:10 | scripts | NR-03: best-restore mutants retargeted, 4 pin mutants added: mutation_probe.py |
+| D6D405575242AF63 | 2026-11-02 12:30 | src/toolkit | Codex P2 on #96 (39e377b): pinned-read OSError (EIO from lstat/fstat/read) becomes the controlled reason best_checkpoint_unreadable instead of aborting load_resume: checkpoint_integration_hex_v3.py |
+| EFDB227B5AAD9159 | 2026-11-02 12:30 | src/toolkit | Codex P2 on #96: test_io_error_while_reading_best_is_a_controlled_refusal (EIO on os.read / os.fstat of best.pt): test_checkpoint_integration_hex_v3.py |

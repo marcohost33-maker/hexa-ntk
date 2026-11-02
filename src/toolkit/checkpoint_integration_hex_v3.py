@@ -98,6 +98,8 @@ def _read_regular_file_once(path: Path, *, max_bytes: int) -> bytes:
         st = os.lstat(path)
     except FileNotFoundError:
         raise _PinnedReadError("missing") from None
+    except OSError as exc:  # Codex P2 on #96: EIO etc. is a refusal, not a crash
+        raise _PinnedReadError("unreadable", str(exc)) from exc
     if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
         raise _PinnedReadError("not_regular")
     if st.st_size > max_bytes:
@@ -124,6 +126,8 @@ def _read_regular_file_once(path: Path, *, max_bytes: int) -> bytes:
             if total > max_bytes:
                 raise _PinnedReadError("too_large")
         return b"".join(chunks)
+    except OSError as exc:  # Codex P2 on #96: fstat/read I/O error (EIO) -> controlled reason
+        raise _PinnedReadError("unreadable", str(exc)) from exc
     finally:
         os.close(fd)
 
@@ -958,7 +962,8 @@ class CheckpointIntegrationManager:
         controlled reasons, never exceptions: "best_checkpoint_unpinned"
         (legacy directory without manifest, or no pin), "generation_manifest_invalid",
         "best_checkpoint_digest_mismatch", "best_checkpoint_not_regular",
-        "best_checkpoint_too_large".
+        "best_checkpoint_too_large", "best_checkpoint_unreadable" (also an
+        I/O error such as EIO during the pinned read).
         """
         if not isinstance(state, dict):
             return False, "absent"

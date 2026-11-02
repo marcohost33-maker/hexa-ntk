@@ -19,6 +19,7 @@ Covers:
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import json
@@ -1481,6 +1482,33 @@ class TestBestGenerationPin(_TmpRootCase):
         self._run(mgr, 0.4)
         fresh = self._make_manager(max_pinned_checkpoint_bytes=16)
         self._assert_rejected(self._resume(fresh), fresh, "best_checkpoint_too_large")
+
+    def test_io_error_while_reading_best_is_a_controlled_refusal(self) -> None:
+        # Codex P2 on #96 (39e377b): EIO from the pinned read of best.pt must
+        # become a refusal reason; a raw OSError aborted load_resume after the
+        # model/optimizer state had already been restored.
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        best = Path(mgr.best_model_path)
+        real_read, real_fstat = os.read, os.fstat
+
+        def eio_read(fd: int, n: int) -> bytes:
+            if os.path.samestat(real_fstat(fd), os.stat(best)):
+                raise OSError(errno.EIO, "injected EIO")
+            return real_read(fd, n)
+
+        def eio_fstat(fd: int) -> os.stat_result:
+            st = real_fstat(fd)
+            if os.path.samestat(st, os.stat(best)):
+                raise OSError(errno.EIO, "injected EIO")
+            return st
+
+        for name, target, fake in (("read", "os.read", eio_read), ("fstat", "os.fstat", eio_fstat)):
+            with self.subTest(call=name):
+                fresh = self._make_manager()
+                with mock.patch(f"checkpoint_integration_hex_v3.{target}", side_effect=fake):
+                    report = self._resume(fresh)
+                self._assert_rejected(report, fresh, "best_checkpoint_unreadable")
 
     def test_interrupted_publish_after_best_replace_is_rejected(self) -> None:
         # Crash window: best.pt already replaced, manifest not yet published.
