@@ -11,8 +11,11 @@ Three layers:
 - two real gloo ranks (torch.multiprocessing, file:// rendezvous): equality
   with a single-process reference run, and every agreed failure (padded
   validation sampler, NaN loss on one rank, checkpoint write failure on
-  rank 0, unequal batch counts, resume file missing or different on one rank)
-  ends on both ranks with an error instead of a hang.
+  rank 0, unequal batch counts, resume file missing or different on one rank,
+  an error after backward on one rank) ends on both ranks with an error
+  instead of a hang;
+- three real gloo ranks (spec section 8, v1.1): equality with a single-process
+  run on an uneven validation partition (2/2/1) and the same agreements.
 """
 from __future__ import annotations
 
@@ -460,6 +463,39 @@ class TestWorldSizeOne(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "out of memory"):
                 runner.run()
             self.assertTrue(list(runner.failure_dir.glob("*CUDA_OOM*.json")))
+
+    def test_error_after_backward_is_held_until_the_next_agreement(self) -> None:
+        # Spec section 3.6: the step returns, the next agreement point raises.
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp), distributed=True, num_epochs=1)
+
+            def oom() -> float:
+                raise RuntimeError("CUDA out of memory in optimizer.step (injected)")
+
+            runner._apply_update = oom
+            batch = next(iter(runner.train_loader))
+            loss_val, healthy, grad_norm = runner._train_one_step(batch)
+            self.assertFalse(healthy)
+            self.assertIsNone(grad_norm)
+            self.assertIsInstance(runner._post_step_error, RuntimeError)
+            # the OOM got the rescue before it was held
+            self.assertTrue(list(runner.failure_dir.glob("*CUDA_OOM*.json")))
+            runner.global_step = 1
+            with self.assertRaisesRegex(RuntimeError, "optimizer.step"):
+                runner._agreed_next(iter(runner.train_loader))
+            self.assertIsNone(runner._post_step_error)  # raised once, not again
+
+    def test_error_after_backward_stops_the_mid_epoch_save(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp), distributed=True, num_epochs=1, save_every_n_steps=1)
+
+            def broken() -> float:
+                raise ValueError("EMA update failed (injected)")
+
+            runner._apply_update = broken
+            with self.assertRaisesRegex(ValueError, "EMA update failed"):
+                runner.run()
+            self.assertFalse((Path(tmp) / "checkpoints" / "resume_last.pt").exists())
 
     def test_oom_rescue_never_raises(self) -> None:
         # Review round 3: a rescue that raised would leave the agreement early.
@@ -1092,6 +1128,105 @@ def _sc_resume_other_weights_on_rank1(rank: int, world: int, out: Path) -> Any:
                 resume_from=str(path), resume_trusted=True).run()
 
 
+class _StepFailure(RuntimeError):
+    """Injected error after backward (optimizer step / EMA update)."""
+
+
+class _FailingSGD(torch.optim.SGD):
+    """SGD whose ``fail_at``-th step raises (1-based; -1 never)."""
+
+    def __init__(self, params: Any, *, fail_at: int, **kw: Any) -> None:
+        super().__init__(params, **kw)
+        self.fail_at = fail_at
+        self.calls = 0
+
+    def step(self, closure: Any = None) -> Any:
+        self.calls += 1
+        if self.calls == self.fail_at:
+            raise _StepFailure(f"optimizer step {self.calls} failed (injected)")
+        return super().step(closure)
+
+
+def _post_step_outcome(runner: HexTrainingRunner, out: Path) -> Dict[str, Any]:
+    """Run, expecting a failure; report it and whether any checkpoint was written."""
+    try:
+        runner.run()
+    except Exception as exc:
+        return {"error": type(exc).__name__, "message": str(exc),
+                "checkpoints": sorted(p.name for p in (out / "checkpoints").glob("*.pt"))}
+    return {"error": None, "message": "", "checkpoints": []}
+
+
+def _failing_step_runner(rank: int, world: int, out: Path, *, failing_rank: int, fail_at: int,
+                         **kw: Any) -> HexTrainingRunner:
+    model = DDP(_model())
+    return HexTrainingRunner(
+        _config(out, distributed=True, is_main_process=rank == 0, **kw),
+        model,
+        _FailingSGD(model.parameters(), fail_at=fail_at if rank == failing_rank else -1, lr=0.1),
+        _train_loader(rank, world), _exact_val_loader(),
+    )
+
+
+def _sc_step_error_last_step_rank1(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """Section 3.6: optimizer.step raises on rank 1 in the last step of epoch 0.
+
+    Without the agreement rank 1 leaves while its peers ask for the next batch
+    (the epoch's end): the next collective each side issues no longer matches.
+    """
+    runner = _failing_step_runner(rank, world, out, failing_rank=1, fail_at=2, num_epochs=2)
+    return _post_step_outcome(runner, out)
+
+
+def _sc_step_error_before_mid_save_rank1(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """Section 3.6: optimizer.step raises on rank 1 in step 0, a mid-epoch save is due after it."""
+    runner = _failing_step_runner(rank, world, out, failing_rank=1, fail_at=1, num_epochs=1,
+                                  save_every_n_steps=1)
+    return _post_step_outcome(runner, out)
+
+
+def _sc_ema_error_rank0(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """Section 3.6: the EMA update raises on rank 0 (the rank that writes checkpoints)."""
+    runner = _failing_step_runner(rank, world, out, failing_rank=-1, fail_at=-1, num_epochs=1)
+    if rank == 0:
+        def broken(_model: nn.Module) -> None:
+            raise _StepFailure("EMA update failed (injected)")
+
+        runner.ema_model.update_parameters = broken
+    return _post_step_outcome(runner, out)
+
+
+def _equivalence_reference_3(out: Path) -> Dict[str, Any]:
+    """The run the 3-rank job must reproduce: 12 samples, global batch 6, no sharding."""
+    model = _model()
+    runner = HexTrainingRunner(
+        _config(out), model, torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9),
+        DataLoader(_Data(12, seed=1), batch_size=6), DataLoader(_Data(5, seed=2), batch_size=5),
+    )
+    result = runner.run()
+    return {
+        "params": _flat_params(model),
+        "ema": _flat_params(runner.ema_model.module),
+        "val_nrmse": [v["val_nrmse"] for v in result["history"]["val"]],
+        "mean_loss": [t["mean_loss"] for t in result["history"]["train"]],
+    }
+
+
+def _sc_equivalence_12(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """12 training samples, batch 2 per rank: with world 3 one step sees samples 0..5."""
+    ds = _Data(12, seed=1)
+    train = DataLoader(ds, batch_size=2, sampler=DistributedSampler(ds, world, rank, shuffle=False))
+    runner = _ddp_runner(rank, out, train=train, val=_exact_val_loader())
+    result = runner.run()
+    return {
+        "params": _flat_params(runner.raw_model),
+        "ema": _flat_params(runner.ema_model.module),
+        "val_nrmse": [v["val_nrmse"] for v in result["history"]["val"]],
+        "mean_loss": [t["mean_loss"] for t in result["history"]["train"]],
+        "val_indices": list(iter(runner.val_loader.sampler)),
+    }
+
+
 _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "equivalence": _sc_equivalence,
     "padded_val": _sc_padded_val,
@@ -1118,7 +1253,24 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "resume_rank_rng": _sc_resume_rank_rng,
     "resume_missing_on_rank1": _sc_resume_missing_on_rank1,
     "resume_other_weights_on_rank1": _sc_resume_other_weights_on_rank1,
+    "step_error_last_step_rank1": _sc_step_error_last_step_rank1,
+    "step_error_before_mid_save_rank1": _sc_step_error_before_mid_save_rank1,
+    "ema_error_rank0": _sc_ema_error_rank0,
 }
+
+# The 3-rank job (spec section 8, v1.1): equivalence with an uneven validation
+# partition (5 samples -> 2/2/1) and the agreements, each ending on all ranks.
+_SCENARIOS_3: Dict[str, Callable[[int, int, Path], Any]] = {
+    "equivalence_12": _sc_equivalence_12,
+    "padded_val": _sc_padded_val,
+    "nan_on_rank1": _sc_nan_on_rank1,
+    "forward_error_rank1": _sc_forward_error_rank1,
+    "step_error_last_step_rank1": _sc_step_error_last_step_rank1,
+    "step_error_before_mid_save_rank1": _sc_step_error_before_mid_save_rank1,
+    "ema_error_rank0": _sc_ema_error_rank0,
+}
+
+_SUITES: Dict[str, Dict[str, Callable[[int, int, Path], Any]]] = {"two": _SCENARIOS, "three": _SCENARIOS_3}
 
 
 def _write_atomic(path: Path, data: Dict[str, Any]) -> None:
@@ -1127,7 +1279,7 @@ def _write_atomic(path: Path, data: Dict[str, Any]) -> None:
     os.replace(tmp, path)  # a rank killed mid-write leaves the previous file
 
 
-def _worker(rank: int, world: int, root: str) -> None:
+def _worker(rank: int, world: int, root: str, suite: str = "two") -> None:
     dist.init_process_group(
         "gloo",
         init_method=(Path(root) / "rendezvous").as_uri(),  # file:///C:/... on Windows
@@ -1138,7 +1290,7 @@ def _worker(rank: int, world: int, root: str) -> None:
     results: Dict[str, Any] = {}
     out = Path(root) / f"rank{rank}.json"
     try:
-        for name, scenario in _SCENARIOS.items():
+        for name, scenario in _SUITES[suite].items():
             try:
                 results[name] = {"ok": True, "value": scenario(rank, world, Path(root) / name)}
             except Exception as exc:  # recorded and asserted by the parent
@@ -1155,14 +1307,17 @@ def _worker(rank: int, world: int, root: str) -> None:
         dist.destroy_process_group()
 
 
-class TestTwoRanks(unittest.TestCase):
-    """Real 2-rank gloo job; every scenario must end, none may hang."""
+class _MultiRankJob(unittest.TestCase):
+    """Base: a real gloo job of WORLD ranks running SUITE; every scenario must end, none may hang."""
 
     WORLD = 2
+    SUITE = "two"
     DEADLINE_S = 400
 
     @classmethod
     def setUpClass(cls) -> None:
+        if cls is _MultiRankJob:
+            raise unittest.SkipTest("base class")
         if not dist.is_gloo_available():
             raise unittest.SkipTest("gloo backend not available")
         if os.environ.get("HEXANTK_SKIP_MULTIPROCESS") == "1":
@@ -1172,7 +1327,7 @@ class TestTwoRanks(unittest.TestCase):
         # A hang or a crashed rank must turn the scenario tests red, not end
         # in a setUpClass error: record the job error, assert per scenario.
         cls.job_error = None
-        ctx = mp.start_processes(_worker, args=(cls.WORLD, root), nprocs=cls.WORLD,
+        ctx = mp.start_processes(_worker, args=(cls.WORLD, root, cls.SUITE), nprocs=cls.WORLD,
                                  join=False, start_method="spawn")
         deadline = time.monotonic() + cls.DEADLINE_S
         try:
@@ -1180,7 +1335,7 @@ class TestTwoRanks(unittest.TestCase):
                 if time.monotonic() > deadline:
                     for p in ctx.processes:
                         p.kill()
-                    cls.job_error = f"2-rank job did not finish within {cls.DEADLINE_S} s (hang)"
+                    cls.job_error = f"{cls.WORLD}-rank job did not finish within {cls.DEADLINE_S} s (hang)"
                     break
         except Exception as exc:  # a rank process died
             cls.job_error = f"{type(exc).__name__}: {exc}"
@@ -1192,11 +1347,16 @@ class TestTwoRanks(unittest.TestCase):
             except (OSError, ValueError) as exc:
                 cls.results.append({"_job": f"rank {r} result unreadable: {exc}"})
         with tempfile.TemporaryDirectory() as ref_dir:
-            cls.reference = _single_process_reference(Path(ref_dir))
+            cls.reference = cls._reference(Path(ref_dir))
+
+    @staticmethod
+    def _reference(out: Path) -> Dict[str, Any]:
+        return _single_process_reference(out)
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls._tmp.cleanup()
+        if cls is not _MultiRankJob:
+            cls._tmp.cleanup()
 
     def _ok(self, name: str) -> List[Any]:
         values = []
@@ -1209,6 +1369,40 @@ class TestTwoRanks(unittest.TestCase):
 
     def _errors(self, name: str) -> List[str]:
         return [res.get(name, {}).get("error", "<no result>") for res in self.results]
+
+    def _post_step(self, name: str, failing_rank: int, step: int, before: str) -> List[Dict[str, Any]]:
+        """Section 3.6: the failing rank raises its own error, every peer PeerRankError."""
+        values = self._ok(name)
+        for rank, value in enumerate(values):
+            with self.subTest(name, rank=rank):
+                if rank == failing_rank:
+                    self.assertEqual(value["error"], "_StepFailure")
+                else:
+                    self.assertEqual(value["error"], "PeerRankError")
+                    self.assertIn(f"training step {step} failed after backward on 1 peer rank", value["message"])
+                    self.assertIn(before, value["message"])
+        return values
+
+    def _check_post_step_scenarios(self) -> None:
+        # last step of epoch 0 (2 steps per epoch): agreed before the epoch may end
+        values = self._post_step("step_error_last_step_rank1", 1, 1, "stopped before step 2")
+        # the epoch-0 save never ran: no checkpoint at all
+        self.assertEqual(values[0]["checkpoints"], [])
+        # a mid-epoch save due right after the failed step 0: no rank writes it
+        values = self._post_step("step_error_before_mid_save_rank1", 1, 0, "the mid-epoch save")
+        self.assertEqual(values[0]["checkpoints"], [])
+        values = self._post_step("ema_error_rank0", 0, 0, "stopped before step 1")
+        self.assertEqual(values[0]["checkpoints"], [])
+
+
+class TestTwoRanks(_MultiRankJob):
+    """Real 2-rank gloo job; every scenario must end, none may hang."""
+
+    WORLD = 2
+    SUITE = "two"
+
+    def test_error_after_backward_on_one_rank_fails_both(self) -> None:
+        self._check_post_step_scenarios()
 
     def test_two_ranks_reproduce_the_single_process_run(self) -> None:
         r0, r1 = self._ok("equivalence")
@@ -1330,6 +1524,44 @@ class TestTwoRanks(unittest.TestCase):
 
     def test_resume_with_other_weights_on_one_rank_fails_both(self) -> None:
         self.assertEqual(self._errors("resume_other_weights_on_rank1"), ["DistributedContractError"] * 2)
+
+
+class TestThreeRanks(_MultiRankJob):
+    """Real 3-rank gloo job (spec section 8, v1.1): more than two ranks, uneven validation shards."""
+
+    WORLD = 3
+    SUITE = "three"
+    DEADLINE_S = 300
+
+    @staticmethod
+    def _reference(out: Path) -> Dict[str, Any]:
+        return _equivalence_reference_3(out)
+
+    def test_three_ranks_reproduce_the_single_process_run(self) -> None:
+        values = self._ok("equivalence_12")
+        # 5 validation samples on 3 ranks: 2/2/1, together exactly range(5)
+        self.assertEqual([v["val_indices"] for v in values], [[0, 3], [1, 4], [2]])
+        for other in values[1:]:
+            for key in ("params", "ema", "val_nrmse", "mean_loss"):
+                self.assertEqual(values[0][key], other[key], key)
+        for key in ("params", "ema", "val_nrmse", "mean_loss"):
+            for got, want in zip(values[0][key], self.reference[key]):
+                self.assertAlmostEqual(got, want, delta=1e-12, msg=key)
+
+    def test_padded_validation_sampler_fails_on_every_rank(self) -> None:
+        self.assertEqual(self._errors("padded_val"), ["DistributedContractError"] * 3)
+
+    def test_nan_on_one_rank_skips_the_step_everywhere(self) -> None:
+        values = self._ok("nan_on_rank1")
+        self.assertEqual(len({v["digest"] for v in values}), 1)
+        for value in values:
+            self.assertEqual(value["n_anomalies"], [1, 0])
+
+    def test_forward_error_on_one_rank_fails_all(self) -> None:
+        self.assertEqual(self._errors("forward_error_rank1"), ["PeerRankError", "KeyError", "PeerRankError"])
+
+    def test_error_after_backward_on_one_rank_fails_all(self) -> None:
+        self._check_post_step_scenarios()
 
 
 if __name__ == "__main__":

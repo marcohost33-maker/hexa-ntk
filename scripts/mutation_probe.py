@@ -311,6 +311,15 @@ MUTANTS = (
     # rank decision is agreed. A mutant that makes ranks disagree ends in a gloo
     # timeout (60 s) or a wrong result; both turn TestTwoRanks red.
     Mutant(RU, "        status = self.dist.max_int(local)\n", "        status = local\n", T2),
+    # DDP_RUNNER v1.1 section 3.6: an error after backward is held and agreed.
+    Mutant(RU, '        self._raise_held_step_error(step_error, n_step_failed, f"step {self.global_step}")\n',
+           "", T2),
+    Mutant(RU, '            self._raise_held_step_error(step_error, n_step_failed, "the mid-epoch save")\n',
+           "", T2),
+    Mutant(RU, "                    self._post_step_error = exc\n                    return loss_val, False, None\n",
+           "                    raise\n", T2),
+    Mutant(RU, "                    if _is_oom(exc):\n                        del pred\n",
+           "                    if False:\n                        del pred\n", "test_ddp_hex_v3.TestWorldSizeOne"),
     Mutant(RU, "        if status == 2:\n", "        if False:\n", T2),
     Mutant(RU, '        self.dist.run_agreed(self._build, what="runner construction")\n',
            "        self._build()\n", T2),
@@ -336,8 +345,8 @@ MUTANTS = (
     Mutant(DDP, "        if lo != hi:\n", "        if False:\n", T2),
     # Independent review of #92 (2026-10-30): errors before the forward, buffers,
     # config, lying len(), per-rank loader generators, rank-0-bound sums.
-    Mutant(RU, "            prepared = self._prepare_step(batch)\n        except StopIteration:",
-           "            prepared = None\n        except StopIteration:", T2),
+    Mutant(RU, "                prepared = self._prepare_step(batch)\n            except StopIteration:",
+           "                prepared = None\n            except StopIteration:", T2),
     Mutant(RU, "        if n_exhausted:\n", "        if False:\n", T2),
     Mutant(RU, "            self._sync_buffers()\n", "            pass\n", T2),
     Mutant(RU, "        if self.dist.any_true(ref != mine):\n            raise DistributedContractError(\n"
@@ -356,8 +365,8 @@ MUTANTS = (
     Mutant(RU, "        mine = hashlib.sha256(_config_digest(config) + "
            'self._effective_amp().encode("utf-8")).digest()\n',
            "        mine = _config_digest(config)\n", T2),
-    Mutant(RU, "            if _is_oom(exc):\n                # Preparing runs",
-           "            if False:\n                # Preparing runs", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, "                if _is_oom(exc):\n                    # Preparing runs",
+           "                if False:\n                    # Preparing runs", "test_ddp_hex_v3.TestWorldSizeOne"),
     # Review round 3: the OOM rescue never raises (it runs before the agreement).
     Mutant(RU, "        except Exception:\n            logger.error(\"OOM rescue: freeing memory failed\")\n",
            "        except ZeroDivisionError:\n            logger.error(\"OOM rescue: freeing memory failed\")\n",
