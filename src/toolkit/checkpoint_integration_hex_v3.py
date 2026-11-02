@@ -104,7 +104,10 @@ def _read_regular_file_once(path: Path, *, max_bytes: int) -> bytes:
         raise _PinnedReadError("not_regular")
     if st.st_size > max_bytes:
         raise _PinnedReadError("too_large")
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    # O_NONBLOCK: a FIFO swapped in after the lstat must reach the fstat check
+    # below instead of blocking this open until a writer appears (Codex P2 on #96).
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_NONBLOCK", 0))
     try:
         fd = os.open(path, flags)
     except FileNotFoundError:
@@ -149,7 +152,8 @@ def _parse_generation_manifest(data: bytes) -> Dict[str, Any]:
     """Strict parse: UTF-8 JSON, no duplicate keys, exact key sets, typed values."""
     try:
         doc = json.loads(data.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
-    except (UnicodeDecodeError, ValueError) as exc:
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        # RecursionError: deeply nested JSON well below the byte budget (Codex P2 on #96).
         raise _PinnedReadError("generation_manifest_invalid", str(exc)) from exc
     if not isinstance(doc, dict) or set(doc) != {
         "format", "version", "generation_id", "run_id", "files"

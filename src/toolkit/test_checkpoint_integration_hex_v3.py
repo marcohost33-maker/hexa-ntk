@@ -27,6 +27,7 @@ import os
 import shutil
 import stat
 import tempfile
+import threading
 import unittest
 from fractions import Fraction
 from pathlib import Path
@@ -43,6 +44,7 @@ from checkpoint_integration_hex_v3 import (
     CheckpointDurabilityError,
     CheckpointIntegrationManager,
     GENERATION_MANIFEST_NAME,
+    _read_regular_file_once,
 )
 from resume_utils_hex_v3 import EMADecayError, save_resume_checkpoint
 
@@ -1512,6 +1514,78 @@ class TestBestGenerationPin(_TmpRootCase):
                     except Exception as exc:  # classify: an escape is a contract failure
                         self.fail(f"load_resume raised {type(exc).__name__} instead of refusing: {exc}")
                 self._assert_rejected(report, fresh, "best_checkpoint_unreadable")
+
+    def test_deeply_nested_manifest_is_a_controlled_refusal(self) -> None:
+        # Codex P2 on #96: nesting below the byte budget raises RecursionError in
+        # json.loads; it must become a refusal, not abort load_resume.
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        self._put_manifest("[" * 15000 + "]" * 15000)
+        fresh = self._make_manager()
+        try:
+            report = self._resume(fresh)
+        except RecursionError as exc:
+            self.fail(f"load_resume raised RecursionError instead of refusing: {exc}")
+        self._assert_rejected(report, fresh, "generation_manifest_invalid")
+
+    def test_pinned_read_opens_nonblocking(self) -> None:
+        # Portable half of the FIFO case below: the flag is requested even on a
+        # platform without FIFOs, where the real swap cannot be staged.
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        real_open = os.open
+        seen: list[int] = []
+        fake_flag = 0o4000
+
+        def spy_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+            seen.append(flags)
+            return real_open(path, flags & ~fake_flag, *args, **kwargs)
+
+        with mock.patch.object(os, "O_NONBLOCK", fake_flag, create=True), \
+                mock.patch("checkpoint_integration_hex_v3.os.open", side_effect=spy_open):
+            _read_regular_file_once(Path(mgr.best_model_path), max_bytes=1 << 30)
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0] & fake_flag, "pinned read must open with O_NONBLOCK")
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs POSIX FIFOs")
+    def test_fifo_swapped_in_after_lstat_is_refused_without_blocking(self) -> None:
+        # Codex P2 on #96: O_NOFOLLOW does not stop a FIFO; a blocking open would
+        # hang resume. The watchdog releases a hung open so red is red, not a hang.
+        mgr = self._make_manager()
+        self._run(mgr, 0.4)
+        best = str(mgr.best_model_path)
+        real_lstat = os.lstat
+        swapped: list[bool] = []
+        hung: list[bool] = []
+
+        def swapping_lstat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+            st = real_lstat(path, *args, **kwargs)
+            if not swapped and str(path) == best:
+                swapped.append(True)
+                os.remove(best)
+                os.mkfifo(best)
+            return st
+
+        def release_hung_open() -> None:
+            try:
+                fd = os.open(best, os.O_WRONLY | os.O_NONBLOCK)
+            except OSError:  # ENXIO: nobody is blocked on the read side
+                return
+            hung.append(True)
+            os.close(fd)
+
+        watchdog = threading.Timer(15.0, release_hung_open)
+        watchdog.daemon = True
+        fresh = self._make_manager()
+        watchdog.start()
+        try:
+            with mock.patch("checkpoint_integration_hex_v3.os.lstat", side_effect=swapping_lstat):
+                report = self._resume(fresh)
+        finally:
+            watchdog.cancel()
+        self.assertEqual(swapped, [True], "the swap was not staged")
+        self.assertEqual(hung, [], "the pinned read blocked on the FIFO")
+        self._assert_rejected(report, fresh, "best_checkpoint_not_regular")
 
     def test_interrupted_publish_after_best_replace_is_rejected(self) -> None:
         # Crash window: best.pt already replaced, manifest not yet published.
