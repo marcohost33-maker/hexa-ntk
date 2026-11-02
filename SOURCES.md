@@ -875,3 +875,11 @@
 | B3EB0A24A433D854 | 2026-10-30 07:43 | src/toolkit | Codex #94: interrupted == uninterrupted with a sampler-owned generator (sampler, batch sampler, batch_size=None), other loader generators refused: test_mid_epoch_resume_hex_v3.py |
 | A42E29CBFBBC77E7 | 2026-10-30 07:43 | spec | Codex #94: sampler-owned generators in the epoch-start state, generator names checked on resume: MID_EPOCH_RESUME_v1.md |
 | 969105B0E81E45BE | 2026-10-30 07:43 | scripts | 4 mutants for Codex #94 (sampler and batch-sampler generators, each object once, generator names checked): mutation_probe.py |
+| 5A8048363413493F | 2026-11-02 01:10 | src/toolkit | NR-03 / NR-R8-03: best.pt pinned by checkpoint_generation.json (sha256+size+run_id+generation_id), restore reads it once via one FD and deserialises only verified bytes: checkpoint_integration_hex_v3.py |
+| 6B4360909CF8147E | 2026-11-02 01:10 | src/toolkit | NR-03: TestBestGenerationPin (swap same length, foreign run, pinned foreign payload, unpinned, legacy, extra/duplicate fields, symlink, budget, interrupted writes, newer better best): test_checkpoint_integration_hex_v3.py |
+| F50A3EB689086607 | 2026-11-02 01:10 | scripts | NR-03: best-restore mutants retargeted, 4 pin mutants added: mutation_probe.py |
+| D6D405575242AF63 | 2026-11-02 12:30 | src/toolkit | Codex P2 on #96 (39e377b): pinned-read OSError (EIO from lstat/fstat/read) becomes the controlled reason best_checkpoint_unreadable instead of aborting load_resume: checkpoint_integration_hex_v3.py |
+| EFDB227B5AAD9159 | 2026-11-02 12:30 | src/toolkit | Codex P2 on #96: test_io_error_while_reading_best_is_a_controlled_refusal (EIO on os.read / os.fstat of best.pt): test_checkpoint_integration_hex_v3.py |
+| B532B579CA04220A | 2026-11-02 12:45 | src/toolkit | Codex P2 on #96: the EIO test reports an escaping exception as an assertion failure (classifiable red): test_checkpoint_integration_hex_v3.py |
+| 357170CF61A65339 | 2026-11-02 13:40 | src/toolkit | Codex P2 on #96: RecursionError from a deeply nested manifest is a refusal; pinned read opens O_NONBLOCK so a swapped-in FIFO reaches the fstat check: checkpoint_integration_hex_v3.py |
+| A306151B2ED6C10E | 2026-11-02 13:40 | src/toolkit | Codex P2 on #96: nested-manifest, O_NONBLOCK flag and POSIX FIFO swap tests: test_checkpoint_integration_hex_v3.py |

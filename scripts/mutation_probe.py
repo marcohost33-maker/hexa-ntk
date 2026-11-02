@@ -66,12 +66,14 @@ MUTANTS = (
            "test_checkpoint_integration_hex_v3.TestNonMainRankStoresValidatedFloat"),
     # #40 P3-3: no commit when the file was replaced but dir-fsync failed.
     Mutant(CK, "            self.best_metric_value = metric\n            self.best_metric_name = metric_name\n"
-           "            raise\n", "            raise\n",
+           "            try:\n", "            try:\n",
            "test_checkpoint_integration_hex_v3.TestDurabilityErrorAfterReplace"),
     # Codex review on #46: run identity / metric identity / EMA decay.
+    # Since NR-03 the manifest run_id check fires first for a foreign writer;
+    # the payload run_id check is pinned by a correctly pinned foreign best.pt.
     Mutant(CK, '        if disk_run_id is None or disk_run_id != state.get("run_id"):\n',
            "        if False:\n",
-           "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
+           "test_checkpoint_integration_hex_v3.TestBestGenerationPin"),
     Mutant(CK, "        if disk_name != recorded_name:\n", "        if False:\n",
            "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
     Mutant("resume_utils_hex_v3.py", "        if recorded != current_decay:\n",
@@ -98,8 +100,20 @@ MUTANTS = (
     Mutant(CK, 'on_disk <= value if self.best_policy.mode == "min" else on_disk >= value',
            "on_disk <= value",
            "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
-    Mutant(CK, '        if not best_path.exists():\n            return False, "best_checkpoint_missing"\n', "",
+    Mutant(CK, '        if not os.path.lexists(best_path):\n            return False, "best_checkpoint_missing"\n', "",
            "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
+    # NR-03 / NR-R8-03: best.pt only from pinned, once-read bytes.
+    Mutant(CK, '        if len(data) != expected["size"] or hashlib.sha256(data).hexdigest() != expected["sha256"]:\n',
+           "        if False:\n",
+           "test_checkpoint_integration_hex_v3.TestBestGenerationPin"),
+    Mutant(CK, '        if manifest["run_id"] != state.get("run_id"):\n', "        if False:\n",
+           "test_checkpoint_integration_hex_v3.TestBestGenerationPin"),
+    Mutant(CK, 'torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)',
+           'torch.load(best_path, map_location="cpu", weights_only=True)',
+           "test_checkpoint_integration_hex_v3.TestBestGenerationPin"),
+    Mutant(CK, 'instead of trusting unverified bytes.\n        self._publish_generation("best.pt", pin)\n',
+           "instead of trusting unverified bytes.\n",
+           "test_checkpoint_integration_hex_v3.TestBestGenerationPin"),
     # #40 counters: accept non-integral / negative values.
     Mutant("resume_utils_hex_v3.py", "    if count != value or count < 0:\n", "    if count < 0:\n",
            "test_resume_utils_hex_v3.TestAsStepCount"),
