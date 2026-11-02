@@ -880,3 +880,4 @@
 | F50A3EB689086607 | 2026-11-02 01:10 | scripts | NR-03: best-restore mutants retargeted, 4 pin mutants added: mutation_probe.py |
 | D6D405575242AF63 | 2026-11-02 12:30 | src/toolkit | Codex P2 on #96 (39e377b): pinned-read OSError (EIO from lstat/fstat/read) becomes the controlled reason best_checkpoint_unreadable instead of aborting load_resume: checkpoint_integration_hex_v3.py |
 | EFDB227B5AAD9159 | 2026-11-02 12:30 | src/toolkit | Codex P2 on #96: test_io_error_while_reading_best_is_a_controlled_refusal (EIO on os.read / os.fstat of best.pt): test_checkpoint_integration_hex_v3.py |
+| B532B579CA04220A | 2026-11-02 12:45 | src/toolkit | Codex P2 on #96: the EIO test reports an escaping exception as an assertion failure (classifiable red): test_checkpoint_integration_hex_v3.py |

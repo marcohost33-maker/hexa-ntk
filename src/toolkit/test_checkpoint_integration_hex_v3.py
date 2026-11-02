@@ -1507,7 +1507,10 @@ class TestBestGenerationPin(_TmpRootCase):
             with self.subTest(call=name):
                 fresh = self._make_manager()
                 with mock.patch(f"checkpoint_integration_hex_v3.{target}", side_effect=fake):
-                    report = self._resume(fresh)
+                    try:
+                        report = self._resume(fresh)
+                    except Exception as exc:  # classify: an escape is a contract failure
+                        self.fail(f"load_resume raised {type(exc).__name__} instead of refusing: {exc}")
                 self._assert_rejected(report, fresh, "best_checkpoint_unreadable")
 
     def test_interrupted_publish_after_best_replace_is_rejected(self) -> None:
