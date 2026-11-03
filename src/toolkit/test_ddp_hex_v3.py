@@ -485,6 +485,44 @@ class TestWorldSizeOne(unittest.TestCase):
                 runner._agreed_next(iter(runner.train_loader))
             self.assertIsNone(runner._post_step_error)  # raised once, not again
 
+    def test_unscale_error_is_held_too(self) -> None:
+        # GradScaler.unscale_ runs after DDP's gradient all-reduce as well.
+        class _Scaler:
+            def scale(self, loss: torch.Tensor) -> torch.Tensor:
+                return loss
+
+            def unscale_(self, optimizer: Any) -> None:
+                raise RuntimeError("unscale_ failed (injected)")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp), distributed=True, num_epochs=1)
+            runner.grad_scaler = _Scaler()
+            with self.assertLogs("runner_hex_v3", level="ERROR") as logs:
+                _, healthy, _ = runner._train_one_step(next(iter(runner.train_loader)))
+            self.assertFalse(healthy)
+            self.assertIn("held until the next agreement point", " ".join(logs.output))
+            self.assertRegex(str(runner._post_step_error), "unscale_ failed")
+            runner.global_step = 1
+            with self.assertRaisesRegex(RuntimeError, "unscale_ failed") as caught:
+                runner._agreed_next(iter(runner.train_loader))
+            self.assertIn("training step 0 after backward", " ".join(caught.exception.__notes__))
+
+    def test_held_error_survives_a_failed_agreement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp), distributed=True, num_epochs=1)
+            runner._post_step_error = ValueError("optimizer failed (injected)")
+
+            def broken(values: Any) -> Any:
+                raise RuntimeError("Application timeout caused pair closure (injected)")
+
+            runner.dist.sum_ints = broken
+            try:
+                with self.assertRaisesRegex(ValueError, "optimizer failed") as caught:
+                    runner._agreed_next(iter(runner.train_loader))
+            finally:
+                del runner.dist.sum_ints
+            self.assertIn("the agreement on this error failed too", " ".join(caught.exception.__notes__))
+
     def test_error_after_backward_stops_the_mid_epoch_save(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runner = self._runner(Path(tmp), distributed=True, num_epochs=1, save_every_n_steps=1)
@@ -610,8 +648,38 @@ class TestWorldSizeOne(unittest.TestCase):
 
     def test_run_agreed(self) -> None:
         self.assertEqual(self.ctx.run_agreed(lambda: 7, what="t"), 7)
-        with self.assertRaisesRegex(KeyError, "boom"):
-            self.ctx.run_agreed(lambda: {}["boom"], what="t")
+        with self.assertLogs("ddp_hex_v3", level="ERROR") as logs:
+            with self.assertRaisesRegex(KeyError, "boom") as caught:
+                self.ctx.run_agreed(lambda: {}["boom"], what="t")
+        self.assertIn("[rank 0] t: agreed failure on rank(s) [0]; every rank raises", caught.exception.__notes__)
+        # "see their logs": the failing rank logged it, with traceback
+        self.assertIn("rank 0: t failed", logs.output[0])
+        self.assertIn("Traceback", logs.output[0])
+
+    def test_failed_ranks_is_a_one_hot_sum(self) -> None:
+        self.assertEqual(self.ctx.failed_ranks(True), [0])
+        self.assertEqual(self.ctx.failed_ranks(False), [])
+
+    def test_own_error_survives_a_failed_agreement(self) -> None:
+        # The agreement collective itself fails (a peer died, the timeout): the
+        # caller must still see this rank's exception, the root cause.
+        original = self.ctx.any_true
+
+        def broken(flag: bool) -> bool:
+            raise RuntimeError("Connection closed by peer (injected)")
+
+        self.ctx.any_true = broken
+        try:
+            with self.assertRaisesRegex(KeyError, "boom") as caught:
+                self.ctx.run_agreed(lambda: {}["boom"], what="t")
+            notes = " ".join(caught.exception.__notes__)
+            self.assertIn("the agreement on this error failed too (RuntimeError: Connection closed", notes)
+            self.assertIsInstance(caught.exception.__context__, RuntimeError)
+            # without an own error the transport error itself propagates
+            with self.assertRaisesRegex(RuntimeError, "Connection closed"):
+                self.ctx.run_agreed(lambda: 7, what="t")
+        finally:
+            self.ctx.any_true = original
 
     def test_reductions_and_broadcast(self) -> None:
         self.assertEqual(self.ctx.all_reduce_sum([1.5, 2.0]), [1.5, 2.0])
@@ -1152,7 +1220,7 @@ def _post_step_outcome(runner: HexTrainingRunner, out: Path) -> Dict[str, Any]:
     try:
         runner.run()
     except Exception as exc:
-        return {"error": type(exc).__name__, "message": str(exc),
+        return {"error": type(exc).__name__, "message": str(exc), "notes": list(getattr(exc, "__notes__", [])),
                 "checkpoints": sorted(p.name for p in (out / "checkpoints").glob("*.pt"))}
     return {"error": None, "message": "", "checkpoints": []}
 
@@ -1294,7 +1362,8 @@ def _worker(rank: int, world: int, root: str, suite: str = "two") -> None:
             try:
                 results[name] = {"ok": True, "value": scenario(rank, world, Path(root) / name)}
             except Exception as exc:  # recorded and asserted by the parent
-                results[name] = {"ok": False, "error": type(exc).__name__, "message": str(exc)}
+                results[name] = {"ok": False, "error": type(exc).__name__, "message": str(exc),
+                                 "notes": list(getattr(exc, "__notes__", []))}
             # after every scenario: a later hang must not erase earlier results
             _write_atomic(out, results)
             try:
@@ -1377,11 +1446,26 @@ class _MultiRankJob(unittest.TestCase):
             with self.subTest(name, rank=rank):
                 if rank == failing_rank:
                     self.assertEqual(value["error"], "_StepFailure")
+                    # its own exception, annotated with the agreed failing ranks
+                    self.assertTrue(any(f"agreed failure on rank(s) [{failing_rank}]" in n for n in value["notes"]),
+                                    value["notes"])
                 else:
                     self.assertEqual(value["error"], "PeerRankError")
-                    self.assertIn(f"training step {step} failed after backward on 1 peer rank", value["message"])
+                    self.assertIn(f"training step {step} after backward", value["message"])
+                    self.assertIn(f"failed on rank(s) [{failing_rank}]", value["message"])
                     self.assertIn(before, value["message"])
         return values
+
+    def _check_named_rank(self, name: str, failing_rank: int, what: str) -> None:
+        """Every peer's PeerRankError names the failing rank; the failing rank's own error carries the note."""
+        for rank, res in enumerate(self.results):
+            entry = res.get(name, {})
+            with self.subTest(name, rank=rank):
+                if rank == failing_rank:
+                    self.assertTrue(any(f"agreed failure on rank(s) [{failing_rank}]" in n
+                                        for n in entry.get("notes", [])), entry)
+                else:
+                    self.assertIn(f"{what} failed on rank(s) [{failing_rank}]", entry.get("message", ""))
 
     def _check_post_step_scenarios(self) -> None:
         # last step of epoch 0 (2 steps per epoch): agreed before the epoch may end
@@ -1444,9 +1528,11 @@ class TestTwoRanks(_MultiRankJob):
 
     def test_forward_error_on_one_rank_fails_both(self) -> None:
         self.assertEqual(self._errors("forward_error_rank1"), ["PeerRankError", "KeyError"])
+        self._check_named_rank("forward_error_rank1", 1, "training step 0 (forward or loss)")
 
     def test_construction_error_on_one_rank_fails_both(self) -> None:
         self.assertEqual(self._errors("construction_error_rank1"), ["PeerRankError", "ValueError"])
+        self._check_named_rank("construction_error_rank1", 1, "runner construction")
 
     def test_bn_buffers_agree_and_the_metric_is_rank0s_model(self) -> None:
         r0, r1 = self._ok("bn_buffers")
@@ -1559,6 +1645,8 @@ class TestThreeRanks(_MultiRankJob):
 
     def test_forward_error_on_one_rank_fails_all(self) -> None:
         self.assertEqual(self._errors("forward_error_rank1"), ["PeerRankError", "KeyError", "PeerRankError"])
+        # rank 1 of 3: the one-hot identification maps the middle rank correctly
+        self._check_named_rank("forward_error_rank1", 1, "training step 0 (forward or loss)")
 
     def test_error_after_backward_on_one_rank_fails_all(self) -> None:
         self._check_post_step_scenarios()

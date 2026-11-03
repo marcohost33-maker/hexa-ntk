@@ -59,3 +59,42 @@ exit=0
 ## Not run here
 # NCCL/CUDA, more than 3 ranks, more than one host, AMP under DDP; an error inside backward (still governed by
 # the process-group timeout / NCCL watchdog, spec/DDP_RUNNER_v1.md section 8)
+
+## Review round 2026-11-03 (critical re-check of PR #97 head 8448003; same container and versions)
+# Gaps found: (1) GradScaler.unscale_ ran after the all-reduce but outside the held region;
+# (2) PeerRankError said "see that rank's log" without naming the rank, and nothing was logged there;
+# (3) a failing agreement collective (peer died, timeout) replaced the rank's own exception.
+# Red first: new/sharpened tests against the 8448003 runner_hex_v3.py + ddp_hex_v3.py
+# python -m unittest test_ddp_hex_v3
+Ran 70 tests in 14.955s
+FAILED (failures=22, errors=5)
+# all 27 are the new/sharpened checks (rank named in PeerRankError / note on own error with 2 and 3 ranks,
+# unscale_ held, own error survives a failed agreement, failed_ranks, failing-rank log)
+
+## Green after the fix (final tree of this commit)
+# python -m unittest test_ddp_hex_v3
+Ran 70 tests in 31.369s
+OK
+# ruff check src scripts
+All checks passed!
+ruffexit=0
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+engexit=0
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+vsexit=0
+# python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+Ran 1087 tests in 51.994s
+OK (skipped=7)
+exit=0
+src/toolkit/ddp_hex_v3.py                        185      9     46      7    92%
+src/toolkit/runner_hex_v3.py                     757     35    282     27    93%
+TOTAL                                           6057    245   2280    190    95%
+covexit=0
+# python scripts/mutation_probe.py (all 159 sites checked to apply exactly once before the run)
+[MUTATION-PROBE] baseline green | 159/159 killed | PASS
+exit=0
+# 5 new mutants: one-hot index flags[0], keeping always re-raises the transport error, the two error logs
+# demoted to debug, unscale_ back outside the held region; 5 existing sites moved (indent / new call)
+# Looked for and not adopted: an NCCL communicator abort that frees peers stuck in backward exists only as a
+# private API (ProcessGroupNCCL._abort / _shutdown) and not for gloo; errors inside backward stay with the
+# timeout / NCCL watchdog (spec section 8).

@@ -40,6 +40,17 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   enden auf allen drei Ranks. 8 neue Tests, 4 neue Mutanten. Die Spec-Zeile "Mid-epoch resume:
   resume stays at epoch boundaries" war seit #94 veraltet und ist korrigiert.
   _Evidenz:_ `results/2026-11-02_ddp-post-step_local-gate.log`.
+  - [x] **Kritische Nachpruefung desselben PRs (#97, 2026-11-02).** Drei Luecken gefunden und
+    geschlossen, jede zuerst rot gegen den PR-Kopf 8448003: (1) `GradScaler.unscale_` lief nach dem
+    All-Reduce, aber ausserhalb des gehaltenen Bereichs -> jetzt in `_apply_update`; (2)
+    `PeerRankError` sagte "see that rank's log", nannte den Rank aber nicht, und dort war nichts
+    geloggt -> jede abgestimmte Ausnahme nennt die gescheiterten Ranks (`failed_ranks`, ein
+    One-Hot-All-Reduce nur im Fehlerpfad) und wird auf ihnen mit Traceback geloggt; (3) scheiterte
+    die Abstimmung selbst (Peer tot, Timeout), ersetzte der Transportfehler die eigentliche
+    Ursache -> `keeping` reicht die eigene Ausnahme mit Notiz weiter. 5 neue Mutanten.
+    Gesucht und nicht uebernommen: ein NCCL-Abort, der Peers aus einem haengenden `backward`
+    befreit, existiert nur als private API (`ProcessGroupNCCL._abort`/`_shutdown`), nicht fuer gloo
+    -> Fehler in `backward` bleiben beim Timeout/Watchdog.
 - [x] **Mid-Epoch-Resume (2026-10-30, Linux-Container; ROADMAP-Punkt unten, Cross-Family GPT-6
   R89/R90 P1).** Vertrag `spec/MID_EPOCH_RESUME_v1.md`, `RunnerConfig(save_every_n_steps=n)`: alle
   n globalen Schritte wird der Resume-Checkpoint mit der Position in der Epoche neu geschrieben

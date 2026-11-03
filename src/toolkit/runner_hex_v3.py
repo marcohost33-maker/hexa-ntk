@@ -70,7 +70,6 @@ from checkpoint_integration_hex_v3 import (
 from ddp_hex_v3 import (
     DistributedContractError,
     DistributedRunContext,
-    PeerRankError,
     restore_rng_state_tensors,
     rng_state_tensors,
 )
@@ -925,17 +924,16 @@ class HexTrainingRunner:
                     # Preparing runs outside _train_one_step's handler; an OOM in
                     # .to(device) gets the same rescue (review round 2).
                     self._rescue_oom(batch)
-        n_failed, n_exhausted, n_step_failed = self.dist.sum_ints(
-            [error is not None, exhausted, step_error is not None]
-        )
-        # The previous step's failure first: it happened before this batch.
-        self._raise_held_step_error(step_error, n_step_failed, f"step {self.global_step}")
-        if error is not None:
-            raise error
-        if n_failed:
-            raise PeerRankError(
-                f"preparing training step {self.global_step} failed on a peer rank (see that rank's log)"
+        with self.dist.keeping(step_error if step_error is not None else error):
+            n_failed, n_exhausted, n_step_failed = self.dist.sum_ints(
+                [error is not None, exhausted, step_error is not None]
             )
+        # The previous step's failure first: it happened before this batch.
+        if n_step_failed and error is not None:
+            # a rare double failure: this rank's own preparing error is only logged
+            logger.error("preparing training step %d failed too", self.global_step, exc_info=error)
+        self.dist.raise_agreed_failure(step_error, n_step_failed > 0, self._held_what())
+        self.dist.raise_agreed_failure(error, n_failed > 0, f"preparing training step {self.global_step}")
         if n_exhausted == self.dist.world_size:
             return None
         if n_exhausted:
@@ -957,7 +955,8 @@ class HexTrainingRunner:
         raised in its forward. All ranks take the same branch: a rank that
         skips backward or leaves the step while its peers enter DDP's gradient
         all-reduce deadlocks them. The failing rank re-raises its exception
-        (an OOM still reaches the rescue path), the others raise PeerRankError.
+        (an OOM still reaches the rescue path), the others raise PeerRankError
+        naming the failing ranks.
         The agreement is one int64 all-reduce per step; an agreed skip runs no
         backward on any rank (checked with default DDP, find_unused_parameters
         and static_graph, spec/DDP_RUNNER_v1.md section 3).
@@ -969,13 +968,9 @@ class HexTrainingRunner:
         except Exception as exc:  # re-raised below, after the peers know
             error = exc
         local = 2 if error is not None else (1 if result[3] else 0)
-        status = self.dist.max_int(local)
-        if error is not None:
-            raise error
-        if status == 2:
-            raise PeerRankError(
-                f"training step {self.global_step} failed on a peer rank (see that rank's log)"
-            )
+        with self.dist.keeping(error):
+            status = self.dist.max_int(local)
+        self.dist.raise_agreed_failure(error, status == 2, f"training step {self.global_step} (forward or loss)")
         pred, loss, loss_val, skip_update = result
         if status == 1 and not skip_update:
             logger.error(
@@ -1009,11 +1004,9 @@ class HexTrainingRunner:
                 # Do NOT backward or step — protect optimizer
                 return loss_val, False, None
 
-            # Backward
+            # Backward (DDP's gradient all-reduce runs inside it)
             if self.grad_scaler is not None:
                 self.grad_scaler.scale(loss).backward()
-                # Unscale BEFORE clipping (PyTorch AMP requirement)
-                self.grad_scaler.unscale_(self.optimizer)
             else:
                 loss.backward()
 
@@ -1032,6 +1025,10 @@ class HexTrainingRunner:
                         del pred
                         del loss
                         self._rescue_oom(batch)
+                    # one line now (the traceback comes with the agreement): if the
+                    # agreement never completes, this rank's log still names the cause
+                    logger.error("step %d failed after backward on this rank (%s: %s); held until the next "
+                                 "agreement point", self.global_step, type(exc).__name__, exc)
                     self._post_step_error = exc
                     return loss_val, False, None
 
@@ -1047,12 +1044,15 @@ class HexTrainingRunner:
             raise
 
     def _apply_update(self) -> float:
-        """Clip, optimizer (or scaler) step and EMA update after backward.
+        """Unscale (AMP), clip, optimizer (or scaler) step and EMA update after backward.
 
         Returns the gradient norm before clipping. Distributed, every call
         site runs after DDP's gradient all-reduce, so nothing here is a
         collective; an error is held by _train_one_step and agreed later.
         """
+        if self.grad_scaler is not None:
+            # Unscale BEFORE clipping (PyTorch AMP requirement)
+            self.grad_scaler.unscale_(self.optimizer)
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self.model.parameters(),
             max_norm=self.config.grad_clip_max_norm,
@@ -1069,19 +1069,11 @@ class HexTrainingRunner:
             self.ema_model.update_parameters(self.raw_model)
         return grad_norm_val
 
-    def _raise_held_step_error(self, error: Optional[BaseException], n_failed: int, what: str) -> None:
-        """Raise a step error held since the last step, on every rank (spec section 3.6).
-
-        ``n_failed`` is the agreed number of ranks holding one. The rank that
-        holds it re-raises its own exception, the others raise PeerRankError.
-        """
-        if error is not None:
-            raise error
-        if n_failed:
-            raise PeerRankError(
-                f"training step {self.global_step - 1} failed after backward on {n_failed} peer rank(s) "
-                f"(clipping, optimizer step or EMA update; see that rank's log); stopped before {what}"
-            )
+    def _held_what(self, before: str = "") -> str:
+        """What a held step error (spec section 3.6) is reported as; the step is the one just taken."""
+        before = before or f"step {self.global_step}"
+        return (f"training step {self.global_step - 1} after backward (unscale, clipping, optimizer step or "
+                f"EMA update; stopped before {before})")
 
     def _rescue_oom(self, batch: Optional[Dict[str, Any]]) -> None:
         """OOM rescue: GC + CUDA cache (order matters), then capsule + FailureSignature.
@@ -1598,8 +1590,9 @@ class HexTrainingRunner:
         """
         if self.dist is not None:
             step_error, self._post_step_error = self._post_step_error, None
-            (n_step_failed,) = self.dist.sum_ints([step_error is not None])
-            self._raise_held_step_error(step_error, n_step_failed, "the mid-epoch save")
+            with self.dist.keeping(step_error):
+                (n_step_failed,) = self.dist.sum_ints([step_error is not None])
+            self.dist.raise_agreed_failure(step_error, n_step_failed > 0, self._held_what("the mid-epoch save"))
         start = self._epoch_start_state
         rank_buffers = None
         if self.dist is None:
