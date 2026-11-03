@@ -22,6 +22,35 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **DDP v1.1: Fehler nach `backward` abgestimmt + 3-Rank-Evidenz (2026-11-02, Linux-Container;
+  offen aus dem DDP-Eintrag unten: "Fehler in backward/optimizer.step", "> 2 Ranks").**
+  `spec/DDP_RUNNER_v1.md` Abschnitt 3.6: Clipping, Optimizer-/`GradScaler`-Schritt und EMA-Update
+  laufen nach DDPs Gradienten-All-Reduce; warf dort ein Rank, verliess er den Lauf allein, und die
+  Peers warteten in der naechsten Abstimmung bis zum Prozessgruppen-Timeout (rot reproduziert gegen
+  f414a98: Rank 0 bekam `RuntimeError: Application timeout caused pair closure` statt
+  `PeerRankError`, danach liefen die Ranks im Test-Job auseinander). Jetzt haelt der Rank den Fehler
+  (ein OOM bekommt zuerst die Rettung), und der naechste Abstimmungspunkt wirft ihn auf allen Ranks:
+  `_agreed_next` traegt dafuer einen dritten Zaehler im selben All-Reduce (kein zusaetzlicher
+  Kollektiv-Aufruf je Schritt; auch im letzten Schritt einer Epoche), `_save_mid_epoch` stimmt vor
+  jedem Gather/Write ab (kein Checkpoint eines auf einem Peer gescheiterten Schritts). Fehler
+  *innerhalb* von `backward` bleiben offen (Peers sind schon im All-Reduce; Timeout/NCCL-Watchdog).
+  Neu: 3-Rank-gloo-Job (12 Trainings-Samples, globaler Batch 3 x 2, Validierung 2/2/1 per
+  `ExactDistributedEvalSampler`) == Single-Process-Lauf mit Batch 6 bis 1e-12, alle drei Ranks
+  bitgleich; gepaddeter Val-Sampler, NaN-Skip, Forward-Fehler und die drei Post-Step-Szenarien
+  enden auf allen drei Ranks. 8 neue Tests, 4 neue Mutanten. Die Spec-Zeile "Mid-epoch resume:
+  resume stays at epoch boundaries" war seit #94 veraltet und ist korrigiert.
+  _Evidenz:_ `results/2026-11-02_ddp-post-step_local-gate.log`.
+  - [x] **Kritische Nachpruefung desselben PRs (#97, 2026-11-02).** Drei Luecken gefunden und
+    geschlossen, jede zuerst rot gegen den PR-Kopf 8448003: (1) `GradScaler.unscale_` lief nach dem
+    All-Reduce, aber ausserhalb des gehaltenen Bereichs -> jetzt in `_apply_update`; (2)
+    `PeerRankError` sagte "see that rank's log", nannte den Rank aber nicht, und dort war nichts
+    geloggt -> jede abgestimmte Ausnahme nennt die gescheiterten Ranks (`failed_ranks`, ein
+    One-Hot-All-Reduce nur im Fehlerpfad) und wird auf ihnen mit Traceback geloggt; (3) scheiterte
+    die Abstimmung selbst (Peer tot, Timeout), ersetzte der Transportfehler die eigentliche
+    Ursache -> `keeping` reicht die eigene Ausnahme mit Notiz weiter. 5 neue Mutanten.
+    Gesucht und nicht uebernommen: ein NCCL-Abort, der Peers aus einem haengenden `backward`
+    befreit, existiert nur als private API (`ProcessGroupNCCL._abort`/`_shutdown`), nicht fuer gloo
+    -> Fehler in `backward` bleiben beim Timeout/Watchdog.
 - [x] **Mid-Epoch-Resume (2026-10-30, Linux-Container; ROADMAP-Punkt unten, Cross-Family GPT-6
   R89/R90 P1).** Vertrag `spec/MID_EPOCH_RESUME_v1.md`, `RunnerConfig(save_every_n_steps=n)`: alle
   n globalen Schritte wird der Resume-Checkpoint mit der Position in der Epoche neu geschrieben
@@ -479,8 +508,13 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   (`_observed_order_from_finest_three`, `reference_spec_hex_v3.py`), verlangt konstantes
   Verfeinerungsverhaeltnis und monotone Differenzen und weist eine abweichende Angabe ab
   (`spec/REFERENCE_SPEC_v1.md`). Die Zeile war stehen geblieben.
-- [ ] **dt-Gruppierung als deklarierter Quantisierungsvertrag (#59).** `dt_round_ndigits=-1` wird
-  akzeptiert; Vertrag fuer zulaessige Werte und Semantik fehlt.
+- [x] ~~**dt-Gruppierung als deklarierter Quantisierungsvertrag (#59).** `dt_round_ndigits=-1` wird
+  akzeptiert; Vertrag fuer zulaessige Werte und Semantik fehlt.~~ Ueberholt (nachgemessen
+  2026-11-02): seit #58 (0a03436, 2026-10-05) verlangt `_validate_dt_round_ndigits`
+  (`dataset_split_hex_v3.py`) `None` oder ein nicht-negatives int (bool abgelehnt), der Modul-Docstring
+  nennt den Vertrag ("non-negative number of decimal places in dt's native unit"; negative Werte
+  wuerden 0.1 und 0.2 auf 0.0 zusammenlegen), `test_dt_round_ndigits_non_negative_contract` prueft
+  -1, -308 und `np.int64(-1)`. Die Zeile war stehen geblieben.
 
 - [x] ~~**Coverage-Ratchet Richtung 80–90%.**~~ Erledigt 2026-09-27: 89,6 % Branch-Coverage,
   `fail_under = 87` (siehe oben). Schwaechste Module jetzt `runner_hex_v3.py` / `stress_hex_v3.py`
@@ -508,7 +542,9 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 - [x] ~~**DDP-Integration des Runners.** Nur `is_main_process`-Guard; kein `DistributedSampler.
   set_epoch`, kein Barrier nach dem Checkpoint-Write, Metriken nicht ueber Ranks reduziert.~~
   Erledigt 2026-10-30 (`spec/DDP_RUNNER_v1.md`, Eintrag unter Erledigt). Offen daraus: NCCL/CUDA,
-  > 2 Ranks, AMP unter DDP, CUDA-RNG je Rank, Fehler in backward/optimizer.step.
+  > 2 Ranks, AMP unter DDP, CUDA-RNG je Rank, Fehler in backward/optimizer.step. Nachtrag
+  2026-11-02 (v1.1): 3 Ranks und Fehler nach backward (Optimizer-Schritt, EMA) erledigt; offen
+  bleiben NCCL/CUDA, > 3 Ranks, mehrere Hosts, AMP unter DDP, CUDA-RNG je Rank, Fehler in backward.
 - [x] ~~**CI-Reproduzierbarkeit:** `numpy` ist im Testjob ungepinnt.~~ Erledigt 2026-10-14
   (siehe oben): `numpy==2.5.3` im Testjob, wie in den Evidence-Lanes; inline wie `torch==2.6.0`,
   weil `requirements-dev.txt` laut Kopf nur Dev-Tools pinnt.

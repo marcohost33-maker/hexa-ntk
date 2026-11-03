@@ -70,7 +70,6 @@ from checkpoint_integration_hex_v3 import (
 from ddp_hex_v3 import (
     DistributedContractError,
     DistributedRunContext,
-    PeerRankError,
     restore_rng_state_tensors,
     rng_state_tensors,
 )
@@ -601,6 +600,10 @@ class HexTrainingRunner:
         self._resume_mid: Optional[Dict[str, Any]] = None
         self._resume_rng_at_step: Optional[Dict[str, torch.Tensor]] = None
         self._epoch_start_state: Optional[Dict[str, Any]] = None
+        # Distributed: an error raised after the gradient all-reduce (clipping,
+        # optimizer/scaler step, EMA update) on this rank, held until the next
+        # agreement point so that every rank raises there (spec section 3.6).
+        self._post_step_error: Optional[BaseException] = None
 
     # ------------------------------------------------------------------
     # Resume
@@ -896,8 +899,10 @@ class HexTrainingRunner:
     ) -> Optional[Tuple[Dict[str, Any], Tuple[torch.Tensor, torch.Tensor, Any]]]:
         """Distributed: the next batch, prepared, agreed before any forward.
 
-        One int64 all-reduce of [ranks that raised, ranks out of data]: an
-        error (a missing key, an OOM in ``.to(device)``, a rejected adapter
+        One int64 all-reduce of [ranks that raised, ranks out of data, ranks
+        whose previous step failed after backward]: a held step error (spec
+        section 3.6) raises on every rank first, even at the end of the epoch;
+        an error (a missing key, an OOM in ``.to(device)``, a rejected adapter
         context) raises on every rank; all ranks out of data ends the epoch;
         some out of data is an unequal step count (a sized IterableDataset
         whose ``len`` is wrong, a sampler that lies) and raises on every rank.
@@ -906,24 +911,29 @@ class HexTrainingRunner:
         error: Optional[BaseException] = None
         exhausted = False
         batch = prepared = None
-        try:
-            batch = next(iterator)
-            prepared = self._prepare_step(batch)
-        except StopIteration:
-            exhausted = True
-        except Exception as exc:  # re-raised below, after the peers know
-            error = exc
-            if _is_oom(exc):
-                # Preparing runs outside _train_one_step's handler; an OOM in
-                # .to(device) gets the same rescue (review round 2).
-                self._rescue_oom(batch)
-        n_failed, n_exhausted = self.dist.sum_ints([error is not None, exhausted])
-        if error is not None:
-            raise error
-        if n_failed:
-            raise PeerRankError(
-                f"preparing training step {self.global_step} failed on a peer rank (see that rank's log)"
+        step_error, self._post_step_error = self._post_step_error, None
+        if step_error is None:  # a rank about to raise loads no further batch
+            try:
+                batch = next(iterator)
+                prepared = self._prepare_step(batch)
+            except StopIteration:
+                exhausted = True
+            except Exception as exc:  # re-raised below, after the peers know
+                error = exc
+                if _is_oom(exc):
+                    # Preparing runs outside _train_one_step's handler; an OOM in
+                    # .to(device) gets the same rescue (review round 2).
+                    self._rescue_oom(batch)
+        with self.dist.keeping(step_error if step_error is not None else error):
+            n_failed, n_exhausted, n_step_failed = self.dist.sum_ints(
+                [error is not None, exhausted, step_error is not None]
             )
+        # The previous step's failure first: it happened before this batch.
+        if n_step_failed and error is not None:
+            # a rare double failure: this rank's own preparing error is only logged
+            logger.error("preparing training step %d failed too", self.global_step, exc_info=error)
+        self.dist.raise_agreed_failure(step_error, n_step_failed > 0, self._held_what())
+        self.dist.raise_agreed_failure(error, n_failed > 0, f"preparing training step {self.global_step}")
         if n_exhausted == self.dist.world_size:
             return None
         if n_exhausted:
@@ -945,7 +955,8 @@ class HexTrainingRunner:
         raised in its forward. All ranks take the same branch: a rank that
         skips backward or leaves the step while its peers enter DDP's gradient
         all-reduce deadlocks them. The failing rank re-raises its exception
-        (an OOM still reaches the rescue path), the others raise PeerRankError.
+        (an OOM still reaches the rescue path), the others raise PeerRankError
+        naming the failing ranks.
         The agreement is one int64 all-reduce per step; an agreed skip runs no
         backward on any rank (checked with default DDP, find_unused_parameters
         and static_graph, spec/DDP_RUNNER_v1.md section 3).
@@ -957,13 +968,9 @@ class HexTrainingRunner:
         except Exception as exc:  # re-raised below, after the peers know
             error = exc
         local = 2 if error is not None else (1 if result[3] else 0)
-        status = self.dist.max_int(local)
-        if error is not None:
-            raise error
-        if status == 2:
-            raise PeerRankError(
-                f"training step {self.global_step} failed on a peer rank (see that rank's log)"
-            )
+        with self.dist.keeping(error):
+            status = self.dist.max_int(local)
+        self.dist.raise_agreed_failure(error, status == 2, f"training step {self.global_step} (forward or loss)")
         pred, loss, loss_val, skip_update = result
         if status == 1 and not skip_update:
             logger.error(
@@ -997,31 +1004,33 @@ class HexTrainingRunner:
                 # Do NOT backward or step — protect optimizer
                 return loss_val, False, None
 
-            # Backward
+            # Backward (DDP's gradient all-reduce runs inside it)
             if self.grad_scaler is not None:
                 self.grad_scaler.scale(loss).backward()
-                # Unscale BEFORE clipping (PyTorch AMP requirement)
-                self.grad_scaler.unscale_(self.optimizer)
             else:
                 loss.backward()
 
-            # Gradient clipping
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(),
-                max_norm=self.config.grad_clip_max_norm,
-            )
-            grad_norm_val = float(grad_norm.item()) if torch.is_tensor(grad_norm) else float(grad_norm)
-
-            # Optimizer step
-            if self.grad_scaler is not None:
-                self.grad_scaler.step(self.optimizer)
-                self.grad_scaler.update()
+            if self.dist is None:
+                grad_norm_val = self._apply_update()
             else:
-                self.optimizer.step()
-
-            # EMA update
-            if self.ema_model is not None:
-                self.ema_model.update_parameters(self.raw_model)
+                try:
+                    grad_norm_val = self._apply_update()
+                except Exception as exc:
+                    # After the gradient all-reduce: the peers have finished
+                    # backward and head for the next agreement point. Raising
+                    # here alone would leave them waiting there (or, worse, let
+                    # a mid-epoch save run without this rank). Hold the error;
+                    # _agreed_next / _save_mid_epoch raise it on every rank.
+                    if _is_oom(exc):
+                        del pred
+                        del loss
+                        self._rescue_oom(batch)
+                    # one line now (the traceback comes with the agreement): if the
+                    # agreement never completes, this rank's log still names the cause
+                    logger.error("step %d failed after backward on this rank (%s: %s); held until the next "
+                                 "agreement point", self.global_step, type(exc).__name__, exc)
+                    self._post_step_error = exc
+                    return loss_val, False, None
 
             return loss_val, True, grad_norm_val
 
@@ -1033,6 +1042,38 @@ class HexTrainingRunner:
                 self._rescue_oom(batch)
                 raise
             raise
+
+    def _apply_update(self) -> float:
+        """Unscale (AMP), clip, optimizer (or scaler) step and EMA update after backward.
+
+        Returns the gradient norm before clipping. Distributed, every call
+        site runs after DDP's gradient all-reduce, so nothing here is a
+        collective; an error is held by _train_one_step and agreed later.
+        """
+        if self.grad_scaler is not None:
+            # Unscale BEFORE clipping (PyTorch AMP requirement)
+            self.grad_scaler.unscale_(self.optimizer)
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.model.parameters(),
+            max_norm=self.config.grad_clip_max_norm,
+        )
+        grad_norm_val = float(grad_norm.item()) if torch.is_tensor(grad_norm) else float(grad_norm)
+
+        if self.grad_scaler is not None:
+            self.grad_scaler.step(self.optimizer)
+            self.grad_scaler.update()
+        else:
+            self.optimizer.step()
+
+        if self.ema_model is not None:
+            self.ema_model.update_parameters(self.raw_model)
+        return grad_norm_val
+
+    def _held_what(self, before: str = "") -> str:
+        """What a held step error (spec section 3.6) is reported as; the step is the one just taken."""
+        before = before or f"step {self.global_step}"
+        return (f"training step {self.global_step - 1} after backward (unscale, clipping, optimizer step or "
+                f"EMA update; stopped before {before})")
 
     def _rescue_oom(self, batch: Optional[Dict[str, Any]]) -> None:
         """OOM rescue: GC + CUDA cache (order matters), then capsule + FailureSignature.
@@ -1541,7 +1582,17 @@ class HexTrainingRunner:
         gradient norms so far (the epoch means come out as without the
         interruption) and the step count. The current RNG states are the
         payload's own (rank 0) plus, distributed, every rank's.
+
+        Distributed, a step error held since the step just taken is agreed
+        first (one int64 all-reduce): no rank writes a checkpoint of a step
+        that failed on a peer, and the gathers below never run with a rank
+        missing.
         """
+        if self.dist is not None:
+            step_error, self._post_step_error = self._post_step_error, None
+            with self.dist.keeping(step_error):
+                (n_step_failed,) = self.dist.sum_ints([step_error is not None])
+            self.dist.raise_agreed_failure(step_error, n_step_failed > 0, self._held_what("the mid-epoch save"))
         start = self._epoch_start_state
         rank_buffers = None
         if self.dist is None:

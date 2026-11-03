@@ -8,13 +8,20 @@ agreed, step count agreed per step, buffers synchronised from rank 0, config dig
 per-rank loader generators; third round after the review of 205f293: buffer
 signatures include dtype and shape, OOM rescue while preparing, effective AMP mode
 agreed, RNG/generator states moved to the CPU before restore)
+**Version 1.1** (2026-11-02): errors after the gradient all-reduce (clipping,
+optimizer/scaler step, EMA update) are held and agreed at the next agreement point
+(section 3.6); evidence extended to a 3-rank gloo job with an uneven validation
+partition (section 8). Review round the same day: `GradScaler.unscale_` belongs to
+the held region too; every agreed failure names the failing ranks and is logged
+on them; a failed agreement collective no longer hides the rank's own exception
+(section 5). No change to what a healthy run computes.
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
 **Implementation:** `src/toolkit/runner_hex_v3.py` (runner),
 `src/toolkit/ddp_hex_v3.py` (`ExactDistributedEvalSampler`, `DistributedRunContext`).
 **Tests:** `src/toolkit/test_ddp_hex_v3.py` — no process group, an in-process gloo
-group of world size 1, and a real 2-rank gloo job; mutants in `scripts/mutation_probe.py`.
+group of world size 1, a real 2-rank gloo job and a 3-rank gloo job; mutants in `scripts/mutation_probe.py`.
 **Origin:** ROADMAP "DDP-Integration des Runners" (only an `is_main_process` guard,
 no `set_epoch`, no barrier after the checkpoint write, metrics not reduced);
 cross-family GPT-6 R89 (2026-10-24, sidecar prototype, counterexamples D1-D4) and
@@ -93,13 +100,36 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    backward on every rank was checked with default DDP, `find_unused_parameters=True`
    and `static_graph=True` (torch 2.6.0, 2 gloo ranks; also a test scenario).
    Loss-spike detection only logs and needs no agreement. An exception inside
-   backward or the optimizer step (e.g. an OOM there) is not covered: the peers are
-   already inside the gradient all-reduce (section 8).
-   A step therefore costs two 1-element all-reduces besides DDP's own.
+   backward (e.g. an OOM there) is not covered: the peers are already inside the
+   gradient all-reduce (section 8). An exception after it is agreed (item 6).
+   A step therefore costs two small all-reduces besides DDP's own.
 5. **Training metrics.** `mean_loss` and `mean_grad_norm` are sums over all
    ranks' healthy steps divided by their count. `n_batches` (healthy steps) and
    `n_anomalies` (skipped steps) are per rank and equal on every rank because the
    skips are agreed.
+6. **After backward (v1.1).** `GradScaler.unscale_` (AMP), clipping, the optimizer
+   (or `GradScaler`) step and the EMA update run per rank after DDP's gradient
+   all-reduce has completed; none of them is a collective. A rank that raised there used to leave alone: its peers
+   waited in the next step's agreement until the process-group timeout (or, with
+   `save_every_n_steps`, a peer could start the mid-epoch save's gathers without
+   it). Now the failing rank holds the exception (an OOM gets the rescue first),
+   logs one line naming it (if the agreement never completes, the cause is still in
+   that rank's log) and returns from the step; the next agreement point raises it
+   on every rank:
+   - `_agreed_next` (item 3) carries a third count, ranks holding a step error,
+     in the same all-reduce, so no extra collective per step. A held error is
+     raised before the batch-preparation errors and before the end of the epoch
+     is accepted (a failure in the epoch's last step does not end the epoch
+     cleanly). The holding rank loads no further batch.
+   - `_save_mid_epoch` (`spec/MID_EPOCH_RESUME_v1.md`) starts with one int64
+     all-reduce of the same flag, before any gather or write: no rank writes a
+     checkpoint of a step that failed on a peer.
+   The holding rank re-raises its own exception, the others raise `PeerRankError`
+   naming the failed step. Between the failure and the agreement the holding
+   rank's parameters may be partially updated; nothing reads them before the
+   raise (no collective, no save). Every step is followed by one of these two
+   points, so a held error never outlives its epoch. Without DDP the exception is
+   raised where it happens, as before.
 
 ## 4. Validation: exact partition, sufficient statistics
 
@@ -155,6 +185,21 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
 a failure flag: the failing rank re-raises its own exception, the others raise
 `PeerRankError`. The closing all-reduce is also the barrier.
 
+**Every agreed failure** (construction, batch preparation, forward/loss, a held
+step error, `run_agreed`) goes through `raise_agreed_failure` (v1.1 review round):
+once an agreement found a failure, the failing rank logs its exception with
+traceback, then every rank takes part in one more int64 all-reduce of
+`world_size` one-hot entries (`failed_ranks`, error path only, itself under
+`keeping`: a peer lost during this diagnostic step must not replace the root cause,
+Codex P2 on #97), so every rank knows *which* ranks failed. The failing rank adds a note (`[rank r] <what>: agreed failure on rank(s) [..]`) and
+re-raises it; the others raise `PeerRankError("<what> failed on rank(s) [..] (see
+their logs)")`. Before, the message said "see that rank's log" without naming the
+rank, and nothing had been logged there. If the agreement collective itself fails
+(a peer process died, the process-group timeout), `keeping` re-raises this rank's
+own exception with a note naming the failed agreement (the transport error stays
+attached as `__context__`): the root cause is no longer replaced by
+"Connection closed by peer".
+
 - **Saves.** Rank 0 writes `best.pt`, `last.pt`, `resume_last.pt`
   (`CheckpointIntegrationManager(is_main_process=...)`); every rank runs the same
   best-policy update. The whole save step is one `run_agreed`: no rank continues
@@ -197,7 +242,10 @@ Only tensor collectives (`all_reduce`, `broadcast`, `all_gather`), never the
 `*_object` variants, which unpickle peer data. Tensors live on the CPU; on the
 NCCL backend on the runner's CUDA device (`device="cuda:k"`), else on the current
 CUDA device (`torch.cuda.set_device(local_rank)` first). Only the default process
-group is used. Cost per training step: a 2-element and a 1-element all-reduce. Per validation:
+group is used. Cost per training step: a 3-element and a 1-element all-reduce (v1.0: 2 + 1;
+the third element is the held-step-error count, section 3.6). Per mid-epoch save: one
+more 1-element all-reduce before the gathers. Per agreed failure (error path only): one
+all-reduce of `world_size` int64 to name the failing ranks. Per validation:
 broadcast of every buffer of the model and the EMA copy;
 one all-reduce of `len(dataset)` int64 counts (8 bytes per sample), a few
 1-element flags, one all-reduce + broadcast of 4 float64. Per resume save: three
@@ -207,7 +255,27 @@ timeout (gloo default 30 min, NCCL 10 min) ends the job.
 
 ## 8. Evidence and limits
 
-Evidence (2-rank gloo, CPU, float64; `src/toolkit/test_ddp_hex_v3.py`): the DDP run (global batch 2 x 2,
+Evidence v1.1 (2026-11-02, Linux container, Python 3.12, torch 2.6.0, CPU): an
+optimizer step that raises on rank 1 in the last step of an epoch, and one that
+raises right before a mid-epoch save, end on both ranks with the injected exception
+(rank 1) and `PeerRankError` (rank 0), and rank 0 writes no checkpoint of the failed
+step; an EMA update that raises on rank 0 ends the same way. Before the fix the same
+scenarios desynchronised the ranks (test red against main f414a98, gate log
+`results/2026-11-02_ddp-post-step_local-gate.log`). A **3-rank** gloo job (train
+12 samples, global batch 3 x 2; validation 5 samples split 2/2/1 by
+`ExactDistributedEvalSampler`) reproduces a single-process run with batch 6 within
+1e-12 (weights, EMA, `val_nrmse`, `mean_loss`), all three ranks agree bitwise, and
+the forward-error, NaN-skip and post-step-error agreements end on all three ranks.
+Review round (same day): with 2 and 3 ranks every peer's `PeerRankError` names the
+failing rank (`[1]`, also the middle rank of three, which pins the one-hot index),
+the failing rank's own exception carries the note; with world size 1 an injected
+`unscale_` error is held, and an agreement collective that raises leaves the own
+exception (with note) as what the caller sees. These tests were red against PR
+head 8448003 (22 failures, 5 errors) and are green now. Codex P2 on d2e7e9e: the
+rank-identification all-reduce ran outside `keeping`; a test injecting a failure
+there was red (the transport error replaced the `KeyError`) and is green now.
+
+Evidence v1.0 (2-rank gloo, CPU, float64; `src/toolkit/test_ddp_hex_v3.py`): the DDP run (global batch 2 x 2,
 `ExactDistributedEvalSampler` on 5 validation samples) reproduces a single-process
 run with batch 4 for weights, EMA, `val_nrmse` and `mean_loss` within 1e-12, and
 the two ranks agree bitwise; a 2 + 2 epoch resume with a shuffling
@@ -231,16 +299,19 @@ Not covered (open):
 - **CUDA RNG per rank** (`torch_cuda_random_state_all` of rank 0 is restored on
   every rank's devices); DataLoader worker RNG; a custom (non-legacy) NumPy
   `Generator` held by user code.
-- **NCCL/CUDA, more than 2 ranks, more than one host, AMP under DDP**: not run.
-- **Mid-epoch resume** (separate ROADMAP item): resume stays at epoch boundaries.
+- **NCCL/CUDA, more than 3 ranks, more than one host, AMP under DDP**: not run
+  (2 and 3 gloo ranks on one host are).
+- ~~**Mid-epoch resume**: resume stays at epoch boundaries.~~ Done 2026-10-30,
+  `spec/MID_EPOCH_RESUME_v1.md` (this line had not been updated, v1.1).
 - **Errors before the forward are agreed (section 3.3), errors inside DDP's forward
   before the module runs are not** (none known besides the buffer broadcast itself).
 - **SyncBatchNorm / models with collectives of their own in forward** are untested;
   a rank that fails inside such a forward hangs its peers like an error in backward.
-- **A rank that raises inside backward or the optimizer step** (e.g. an OOM in
-  backward) still leaves its peers in the gradient all-reduce until the
-  process-group timeout; the NCCL watchdog / the gloo timeout govern that case.
-  Forward and loss errors are agreed (section 3).
+- **A rank that raises inside backward** (e.g. an OOM in backward) still leaves its
+  peers in the gradient all-reduce until the process-group timeout; the NCCL
+  watchdog (`TORCH_NCCL_ASYNC_ERROR_HANDLING`) / the gloo timeout govern that case.
+  Forward and loss errors (section 3.4) and errors after backward (section 3.6,
+  v1.1) are agreed. A `KeyboardInterrupt` or other non-`Exception` is never held.
 - **Old DDP checkpoints** written by the runner before this contract with a
   DDP-wrapped model carry `module.`-prefixed keys and do not load strictly into the
   unwrapped module (no such run exists in this repo).

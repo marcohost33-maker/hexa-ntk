@@ -1,0 +1,125 @@
+# Local gate 2026-11-02 -- DDP v1.1: errors after backward agreed + 3-rank gloo evidence
+# Branch claude/hexa-ntk-development-fvhfyq; base origin/main f414a98
+# Linux cloud container, Python 3.12.3 (venv), torch 2.6.0+cu124 (PyPI wheel, CPU execution, no CUDA device;
+# the CPU index download.pytorch.org is blocked from the container), numpy 2.5.3, coverage 7.17.0, ruff 0.17.2
+# Code under test: the working tree committed together with this log (src/, scripts/, spec/ unchanged by that commit's docs)
+
+## Red before the fix: new tests against the old runner (main f414a98 runner_hex_v3.py, new test_ddp_hex_v3.py)
+# python -m unittest test_ddp_hex_v3.TestWorldSizeOne test_ddp_hex_v3.TestTwoRanks test_ddp_hex_v3.TestThreeRanks
+Ran 57 tests in 72.851s
+FAILED (failures=7)
+# all 7 failures are the new post-step tests:
+#   TestWorldSizeOne: held-error test (error escapes the step), mid-epoch-save test (ValueError not raised by run)
+#   TestTwoRanks / TestThreeRanks step_error_last_step_rank1: rank 0 'RuntimeError' != 'PeerRankError'
+#     (gloo: "Application timeout caused pair closure" after 30 s -- rank 0 waited in the next agreement)
+#   then the job desynchronised: "barrier after step_error_last_step_rank1: RuntimeError: Application timeout
+#     caused pair closure", later scenarios had no result on rank 0
+# every pre-existing DDP test stayed green against the old runner
+
+## Green after the fix: DDP module alone
+# python -m unittest test_ddp_hex_v3
+Ran 66 tests in 14.072s
+OK
+
+## End run (working tree of this commit)
+# ruff check src scripts
+All checks passed!
+ruffexit=0
+# python scripts/engine_gate.py
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+engexit=0
+# python scripts/verify_sources.py
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+vsexit=0
+# python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+Ran 1083 tests in 49.912s
+OK (skipped=7)
+exit=0
+# skips: 6 x 'optional neuraloperator backend not installed' (GINO lane runs in CI), 1 x 'needs CUDA'
+# python -m coverage report
+src/toolkit/ddp_hex_v3.py                        162      9     44      7    91%
+src/toolkit/runner_hex_v3.py                     758     39    290     30    92%
+TOTAL                                           6035    249   2286    193    94%
+covexit=0
+
+# After this run runner_hex_v3.py changed in three comments/docstrings only ("spec section 3.4" -> "3.6",
+# found in the self-review of the diff); SOURCES row re-pinned, then re-run on the final tree:
+# verify_sources PASS; ruff 0 findings; full suite: Ran 1083 tests in 49.172s, OK (skipped=7), exit=0;
+# coverage TOTAL 94 %, covexit=0; engine gate PASS; every mutant site still applies exactly once.
+
+## Mutation probe (python scripts/mutation_probe.py; run before the comment-only change above)
+# first two attempts stopped with exit 2 (STALE): the re-indented _agreed_next moved the sites of two
+# existing mutants (prepare -> None, OOM rescue while preparing); both sites re-indented, nothing else changed,
+# then every site checked to apply exactly once before the third run
+[MUTATION-PROBE] baseline green | 154/154 killed | PASS
+exit=0
+# 4 new mutants (all killed): held error not raised in _agreed_next; not raised before the mid-epoch save;
+# post-step error raised alone instead of held (the old behaviour); OOM rescue skipped before holding
+
+## Not run here
+# NCCL/CUDA, more than 3 ranks, more than one host, AMP under DDP; an error inside backward (still governed by
+# the process-group timeout / NCCL watchdog, spec/DDP_RUNNER_v1.md section 8)
+
+## Review round 2026-11-03 (critical re-check of PR #97 head 8448003; same container and versions)
+# Gaps found: (1) GradScaler.unscale_ ran after the all-reduce but outside the held region;
+# (2) PeerRankError said "see that rank's log" without naming the rank, and nothing was logged there;
+# (3) a failing agreement collective (peer died, timeout) replaced the rank's own exception.
+# Red first: new/sharpened tests against the 8448003 runner_hex_v3.py + ddp_hex_v3.py
+# python -m unittest test_ddp_hex_v3
+Ran 70 tests in 14.955s
+FAILED (failures=22, errors=5)
+# all 27 are the new/sharpened checks (rank named in PeerRankError / note on own error with 2 and 3 ranks,
+# unscale_ held, own error survives a failed agreement, failed_ranks, failing-rank log)
+
+## Green after the fix (final tree of this commit)
+# python -m unittest test_ddp_hex_v3
+Ran 70 tests in 31.369s
+OK
+# ruff check src scripts
+All checks passed!
+ruffexit=0
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+engexit=0
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+vsexit=0
+# python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+Ran 1087 tests in 51.994s
+OK (skipped=7)
+exit=0
+src/toolkit/ddp_hex_v3.py                        185      9     46      7    92%
+src/toolkit/runner_hex_v3.py                     757     35    282     27    93%
+TOTAL                                           6057    245   2280    190    95%
+covexit=0
+# python scripts/mutation_probe.py (all 159 sites checked to apply exactly once before the run)
+[MUTATION-PROBE] baseline green | 159/159 killed | PASS
+exit=0
+# 5 new mutants: one-hot index flags[0], keeping always re-raises the transport error, the two error logs
+# demoted to debug, unscale_ back outside the held region; 5 existing sites moved (indent / new call)
+# Looked for and not adopted: an NCCL communicator abort that frees peers stuck in backward exists only as a
+# private API (ProcessGroupNCCL._abort / _shutdown) and not for gloo; errors inside backward stay with the
+# timeout / NCCL watchdog (spec section 8).
+
+## Codex P2 on PR #97 head d2e7e9e (2026-11-03): rank identification outside keeping
+# Finding: raise_agreed_failure ran failed_ranks() (the one-hot all-reduce) outside keeping(error) and logged
+# only afterwards; a peer lost during that all-reduce replaced the rank's own exception.
+# Red first: python -m unittest test_ddp_hex_v3.TestWorldSizeOne.test_own_error_survives_a_failed_rank_identification
+Ran 1 test in 0.023s
+FAILED (errors=1)
+# RuntimeError: Connection closed by peer during identification (injected) -- the KeyError was lost
+# Fix: log the own exception (with traceback) first, then failed_ranks under keeping(error)
+# python -m unittest test_ddp_hex_v3
+Ran 71 tests in 15.069s
+OK
+ruffexit=0
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+vsexit=0
+# python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+Ran 1088 tests in 46.955s
+OK (skipped=7)
+exit=0
+src/toolkit/ddp_hex_v3.py                        187      9     48      8    92%
+TOTAL                                           6059    245   2282    191    95%
+# python scripts/mutation_probe.py (all 160 sites checked first)
+[MUTATION-PROBE] baseline green | 160/160 killed | PASS
+exit=0

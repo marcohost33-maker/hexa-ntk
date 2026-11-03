@@ -18,7 +18,10 @@ primitives the runner needs for that:
 - DistributedRunContext: tensor-only collectives (no pickled objects) for
   float64 sums, integer agreement, an "any rank" flag, a rank-0 broadcast, an
   exact-partition check and run_agreed(), which turns a local exception into an
-  error on every rank instead of a hang.
+  error on every rank instead of a hang. An agreed failure names the failing
+  ranks on every rank and is logged on the failing one (raise_agreed_failure);
+  if the agreement itself fails, the local exception still reaches the caller
+  (keeping).
 
 Pooled metrics are reduced as sufficient statistics (sum of squared errors, sum
 of squared references, counts), never as a mean of per-rank ratios: for
@@ -42,7 +45,9 @@ __all__ = [
     "restore_rng_state_tensors",
 ]
 
+import contextlib
 import hashlib
+import logging
 import random
 import struct
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, TypeVar, Union
@@ -53,6 +58,8 @@ import torch.distributed as dist
 from torch.utils.data import Sampler
 
 T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
 
 
 class DistributedContractError(RuntimeError):
@@ -282,11 +289,68 @@ class DistributedRunContext:
 
     # -- agreement -------------------------------------------------------
 
+    def failed_ranks(self, failed_here: bool) -> List[int]:
+        """The ranks whose ``failed_here`` is true, the same list on every rank.
+
+        One int64 all-reduce of ``world_size`` one-hot entries. Called only on
+        the error path, after an agreement found a failure (so every rank
+        calls it): the per-step agreements stay one short all-reduce.
+        """
+        flags = [0] * self.world_size
+        flags[self.rank] = 1 if failed_here else 0
+        return [r for r, f in enumerate(self.sum_ints(flags)) if f]
+
+    def raise_agreed_failure(
+        self, error: Optional[BaseException], failed_somewhere: bool, what: str
+    ) -> None:
+        """After an agreement: return if no rank failed, else raise on every rank.
+
+        The failing rank logs its exception with traceback first (so "see
+        their logs" holds even if what follows fails). Then every rank learns
+        which ranks failed (failed_ranks, under ``keeping``: a peer lost during
+        this diagnostic all-reduce must not replace the root cause, Codex P2 on
+        #97). The failing rank adds a note naming the ranks and re-raises its
+        exception; the others raise PeerRankError naming them.
+        ``failed_somewhere`` must be the agreed value.
+        """
+        if not failed_somewhere:
+            return
+        if error is not None:
+            logger.error("rank %d: %s failed (agreed with every rank; every rank raises)",
+                         self.rank, what, exc_info=error)
+        with self.keeping(error):
+            ranks = self.failed_ranks(error is not None)
+        if error is not None:
+            error.add_note(f"[rank {self.rank}] {what}: agreed failure on rank(s) {ranks}; every rank raises")
+            raise error
+        raise PeerRankError(f"{what} failed on rank(s) {ranks} (see their logs)")
+
+    @contextlib.contextmanager
+    def keeping(self, error: Optional[BaseException]) -> Iterator[None]:
+        """Wrap the agreement collective of a rank that may hold ``error``.
+
+        If the collective itself fails (a peer process died, the process-group
+        timeout), the caller still gets this rank's own exception -- the root
+        cause -- with a note naming the failed agreement, not only the
+        transport error (which stays attached as ``__context__``).
+        """
+        try:
+            yield
+        except Exception as exc:
+            if error is None or exc is error:
+                raise
+            error.add_note(
+                f"[rank {self.rank}] the agreement on this error failed too "
+                f"({type(exc).__name__}: {exc}); the peers may not have been told"
+            )
+            raise error
+
     def run_agreed(self, fn: Callable[[], T], *, what: str) -> T:
         """Run ``fn`` on every rank; if it raised anywhere, raise everywhere.
 
         The rank that failed re-raises its own exception; the others raise
-        PeerRankError. The closing all-reduce is also the barrier: no rank
+        PeerRankError naming the failing ranks (raise_agreed_failure). The
+        closing all-reduce is also the barrier: no rank
         leaves before every rank finished ``fn`` (e.g. rank 0's checkpoint
         write is complete before any rank continues).
         """
@@ -296,11 +360,9 @@ class DistributedRunContext:
             result = fn()
         except Exception as exc:  # re-raised below, after the peers know
             error = exc
-        failed_somewhere = self.any_true(error is not None)
-        if error is not None:
-            raise error
-        if failed_somewhere:
-            raise PeerRankError(f"{what} failed on a peer rank (see that rank's log)")
+        with self.keeping(error):
+            failed_somewhere = self.any_true(error is not None)
+        self.raise_agreed_failure(error, failed_somewhere, what)
         return result
 
     def require_equal_int(self, value: int, *, what: str) -> int:
