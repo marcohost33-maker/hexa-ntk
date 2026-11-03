@@ -187,10 +187,11 @@ a failure flag: the failing rank re-raises its own exception, the others raise
 
 **Every agreed failure** (construction, batch preparation, forward/loss, a held
 step error, `run_agreed`) goes through `raise_agreed_failure` (v1.1 review round):
-once an agreement found a failure, every rank takes part in one more int64
-all-reduce of `world_size` one-hot entries (`failed_ranks`, error path only), so
-every rank knows *which* ranks failed. The failing rank logs its exception with
-traceback, adds a note (`[rank r] <what>: agreed failure on rank(s) [..]`) and
+once an agreement found a failure, the failing rank logs its exception with
+traceback, then every rank takes part in one more int64 all-reduce of
+`world_size` one-hot entries (`failed_ranks`, error path only, itself under
+`keeping`: a peer lost during this diagnostic step must not replace the root cause,
+Codex P2 on #97), so every rank knows *which* ranks failed. The failing rank adds a note (`[rank r] <what>: agreed failure on rank(s) [..]`) and
 re-raises it; the others raise `PeerRankError("<what> failed on rank(s) [..] (see
 their logs)")`. Before, the message said "see that rank's log" without naming the
 rank, and nothing had been logged there. If the agreement collective itself fails
@@ -270,7 +271,9 @@ failing rank (`[1]`, also the middle rank of three, which pins the one-hot index
 the failing rank's own exception carries the note; with world size 1 an injected
 `unscale_` error is held, and an agreement collective that raises leaves the own
 exception (with note) as what the caller sees. These tests were red against PR
-head 8448003 (22 failures, 5 errors) and are green now.
+head 8448003 (22 failures, 5 errors) and are green now. Codex P2 on d2e7e9e: the
+rank-identification all-reduce ran outside `keeping`; a test injecting a failure
+there was red (the transport error replaced the `KeyError`) and is green now.
 
 Evidence v1.0 (2-rank gloo, CPU, float64; `src/toolkit/test_ddp_hex_v3.py`): the DDP run (global batch 2 x 2,
 `ExactDistributedEvalSampler` on 5 validation samples) reproduces a single-process

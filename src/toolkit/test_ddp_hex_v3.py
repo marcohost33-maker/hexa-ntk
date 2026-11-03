@@ -485,6 +485,27 @@ class TestWorldSizeOne(unittest.TestCase):
                 runner._agreed_next(iter(runner.train_loader))
             self.assertIsNone(runner._post_step_error)  # raised once, not again
 
+    def test_own_error_survives_a_failed_rank_identification(self) -> None:
+        # Codex P2 on #97: the failure flag is agreed, then the one-hot
+        # all-reduce naming the failing ranks fails (a peer disconnects).
+        # The caller must still see this rank's exception, and its log must
+        # already hold the traceback.
+        original = self.ctx.sum_ints
+
+        def broken(values: Any) -> Any:
+            raise RuntimeError("Connection closed by peer during identification (injected)")
+
+        self.ctx.sum_ints = broken  # any_true (the flag agreement) still works
+        try:
+            with self.assertLogs("ddp_hex_v3", level="ERROR") as logs:
+                with self.assertRaisesRegex(KeyError, "boom") as caught:
+                    self.ctx.run_agreed(lambda: {}["boom"], what="t")
+        finally:
+            self.ctx.sum_ints = original
+        self.assertIn("the agreement on this error failed too (RuntimeError: Connection closed",
+                      " ".join(caught.exception.__notes__))
+        self.assertIn("Traceback", logs.output[0])
+
     def test_unscale_error_is_held_too(self) -> None:
         # GradScaler.unscale_ runs after DDP's gradient all-reduce as well.
         class _Scaler:

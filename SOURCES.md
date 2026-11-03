@@ -892,3 +892,7 @@
 | AC9470E46A9AE093 | 2026-11-03 00:01 | src/toolkit | Review of #97: named failing rank (2 and 3 ranks, own-error note), unscale_ held, own error survives a failed agreement (context and runner), failed_ranks, failing-rank log: test_ddp_hex_v3.py |
 | F6DA236D949BE8F1 | 2026-11-03 00:01 | spec | Review of #97: unscale_ in section 3.6, named failing ranks + logging + keeping in section 5, error-path cost in section 7, review-round evidence: DDP_RUNNER_v1.md |
 | C752C6BFBA019ED6 | 2026-11-03 00:01 | scripts | Review of #97: 5 mutants (one-hot index, keeping, two error logs, unscale_ outside the held region), 5 sites moved: mutation_probe.py |
+| 94F76C48EA26903E | 2026-11-03 00:31 | src/toolkit | Codex P2 on #97 (d2e7e9e): raise_agreed_failure logs the own exception first and runs failed_ranks under keeping(error), so a peer lost during rank identification no longer replaces the root cause: ddp_hex_v3.py |
+| 805E93768F3A9B4C | 2026-11-03 00:31 | src/toolkit | Codex P2 on #97: test_own_error_survives_a_failed_rank_identification: test_ddp_hex_v3.py |
+| D7E544EC73C1A3D7 | 2026-11-03 00:31 | spec | Codex P2 on #97: failed_ranks under keeping, log before identification: DDP_RUNNER_v1.md |
+| 67919D764E90C5A7 | 2026-11-03 00:31 | scripts | Codex P2 on #97: mutant for the rank identification outside keeping: mutation_probe.py |

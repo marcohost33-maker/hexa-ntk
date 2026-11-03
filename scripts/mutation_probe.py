@@ -317,6 +317,10 @@ MUTANTS = (
            "        flags[0] = 1 if failed_here else 0\n", T2),
     Mutant(DDP, "            if error is None or exc is error:\n", "            if True:\n",
            "test_ddp_hex_v3.TestWorldSizeOne"),
+    # Codex P2 on #97: the rank-identification all-reduce runs under keeping(error) too.
+    Mutant(DDP, "        with self.keeping(error):\n            ranks = self.failed_ranks(error is not None)\n",
+           "        if True:\n            ranks = self.failed_ranks(error is not None)\n",
+           "test_ddp_hex_v3.TestWorldSizeOne"),
     Mutant(DDP, '            logger.error("rank %d: %s failed', '            logger.debug("rank %d: %s failed',
            "test_ddp_hex_v3.TestWorldSizeOne"),
     Mutant(RU, '                    logger.error("step %d failed after backward on this rank',

@@ -98,3 +98,28 @@ exit=0
 # Looked for and not adopted: an NCCL communicator abort that frees peers stuck in backward exists only as a
 # private API (ProcessGroupNCCL._abort / _shutdown) and not for gloo; errors inside backward stay with the
 # timeout / NCCL watchdog (spec section 8).
+
+## Codex P2 on PR #97 head d2e7e9e (2026-11-03): rank identification outside keeping
+# Finding: raise_agreed_failure ran failed_ranks() (the one-hot all-reduce) outside keeping(error) and logged
+# only afterwards; a peer lost during that all-reduce replaced the rank's own exception.
+# Red first: python -m unittest test_ddp_hex_v3.TestWorldSizeOne.test_own_error_survives_a_failed_rank_identification
+Ran 1 test in 0.023s
+FAILED (errors=1)
+# RuntimeError: Connection closed by peer during identification (injected) -- the KeyError was lost
+# Fix: log the own exception (with traceback) first, then failed_ranks under keeping(error)
+# python -m unittest test_ddp_hex_v3
+Ran 71 tests in 15.069s
+OK
+ruffexit=0
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+vsexit=0
+# python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+Ran 1088 tests in 46.955s
+OK (skipped=7)
+exit=0
+src/toolkit/ddp_hex_v3.py                        187      9     48      8    92%
+TOTAL                                           6059    245   2282    191    95%
+# python scripts/mutation_probe.py (all 160 sites checked first)
+[MUTATION-PROBE] baseline green | 160/160 killed | PASS
+exit=0

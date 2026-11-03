@@ -305,17 +305,22 @@ class DistributedRunContext:
     ) -> None:
         """After an agreement: return if no rank failed, else raise on every rank.
 
-        Every rank first learns which ranks failed (failed_ranks). The failing
-        rank logs its exception with traceback (so "see their logs" holds),
-        adds a note naming the ranks and re-raises it; the others raise
-        PeerRankError naming them. ``failed_somewhere`` must be the agreed value.
+        The failing rank logs its exception with traceback first (so "see
+        their logs" holds even if what follows fails). Then every rank learns
+        which ranks failed (failed_ranks, under ``keeping``: a peer lost during
+        this diagnostic all-reduce must not replace the root cause, Codex P2 on
+        #97). The failing rank adds a note naming the ranks and re-raises its
+        exception; the others raise PeerRankError naming them.
+        ``failed_somewhere`` must be the agreed value.
         """
         if not failed_somewhere:
             return
-        ranks = self.failed_ranks(error is not None)
         if error is not None:
-            logger.error("rank %d: %s failed (agreed failure on rank(s) %s, every rank raises)",
-                         self.rank, what, ranks, exc_info=error)
+            logger.error("rank %d: %s failed (agreed with every rank; every rank raises)",
+                         self.rank, what, exc_info=error)
+        with self.keeping(error):
+            ranks = self.failed_ranks(error is not None)
+        if error is not None:
             error.add_note(f"[rank {self.rank}] {what}: agreed failure on rank(s) {ranks}; every rank raises")
             raise error
         raise PeerRankError(f"{what} failed on rank(s) {ranks} (see their logs)")
