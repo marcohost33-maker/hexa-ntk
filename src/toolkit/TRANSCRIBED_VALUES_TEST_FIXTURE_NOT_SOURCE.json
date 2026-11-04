@@ -1,0 +1,175 @@
+{
+  "configs": [
+    {
+      "epoch_seconds": [
+        140.0510689,
+        96.8989879,
+        116.7454365
+      ],
+      "epoch_seconds_median": 116.7454365,
+      "hidden_channels": 32,
+      "latent_resolution": 16,
+      "learning_rate": 0.001,
+      "n_modes": 6,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        2.0875956,
+        2.5743917,
+        1.6786124
+      ],
+      "val_pass_seconds_median": 2.0875956
+    },
+    {
+      "epoch_seconds": [
+        121.6922723,
+        82.1184399,
+        163.6932249
+      ],
+      "epoch_seconds_median": 121.6922723,
+      "hidden_channels": 32,
+      "latent_resolution": 16,
+      "learning_rate": 0.0003,
+      "n_modes": 6,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        2.2509176,
+        2.2806079,
+        1.9592339
+      ],
+      "val_pass_seconds_median": 2.2509176
+    },
+    {
+      "epoch_seconds": [
+        176.7709585,
+        190.5805331,
+        153.9892088
+      ],
+      "epoch_seconds_median": 176.7709585,
+      "hidden_channels": 32,
+      "latent_resolution": 24,
+      "learning_rate": 0.001,
+      "n_modes": 9,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        2.2119669,
+        2.072528,
+        2.0418393
+      ],
+      "val_pass_seconds_median": 2.072528
+    },
+    {
+      "epoch_seconds": [
+        143.6006271,
+        143.3071911,
+        144.6444171
+      ],
+      "epoch_seconds_median": 143.6006271,
+      "hidden_channels": 32,
+      "latent_resolution": 24,
+      "learning_rate": 0.0003,
+      "n_modes": 9,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        2.0806183,
+        2.1285641,
+        2.1642533
+      ],
+      "val_pass_seconds_median": 2.1285641
+    },
+    {
+      "epoch_seconds": [
+        155.2208342,
+        152.1394185,
+        141.6742947
+      ],
+      "epoch_seconds_median": 152.1394185,
+      "hidden_channels": 64,
+      "latent_resolution": 16,
+      "learning_rate": 0.001,
+      "n_modes": 6,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        1.2937631,
+        1.2804657,
+        1.2958012
+      ],
+      "val_pass_seconds_median": 1.2937631
+    },
+    {
+      "epoch_seconds": [
+        132.7519261,
+        133.0927062,
+        134.4273592
+      ],
+      "epoch_seconds_median": 133.0927062,
+      "hidden_channels": 64,
+      "latent_resolution": 16,
+      "learning_rate": 0.0003,
+      "n_modes": 6,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        1.3407439,
+        1.3264872,
+        1.3049701
+      ],
+      "val_pass_seconds_median": 1.3264872
+    },
+    {
+      "epoch_seconds": [
+        292.0969895,
+        314.4684043,
+        334.9752801
+      ],
+      "epoch_seconds_median": 314.4684043,
+      "hidden_channels": 64,
+      "latent_resolution": 24,
+      "learning_rate": 0.001,
+      "n_modes": 9,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        2.7918853,
+        2.7095247,
+        2.733618
+      ],
+      "val_pass_seconds_median": 2.733618
+    },
+    {
+      "epoch_seconds": [
+        331.2872989,
+        332.1334125,
+        329.2665466
+      ],
+      "epoch_seconds_median": 331.2872989,
+      "hidden_channels": 64,
+      "latent_resolution": 24,
+      "learning_rate": 0.0003,
+      "n_modes": 9,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        2.6872382,
+        2.7619987,
+        2.7137446
+      ],
+      "val_pass_seconds_median": 2.7137446
+    }
+  ],
+  "data": {
+    "kind": "synthetic standard-normal tensors, no T1 data"
+  },
+  "environment": {
+    "torch": "2.6.0+cpu"
+  },
+  "hardware": {
+    "cpu_name": "test fixture"
+  },
+  "passed": true,
+  "protocol": {
+    "measured_epochs": 3,
+    "statistic": "median"
+  },
+  "source": {
+    "bound": true,
+    "git_sha": "35f82dcff7821f41073537fdf514ec9ff3987774",
+    "worktree_dirty": false
+  }
+}
