@@ -927,3 +927,5 @@
 | D42E9A6766DDFD09 | 2026-11-04 19:48 | scripts | git replace swapped the pinned commit behind its name and the check passed (test red before): every Git read with --no-replace-objects: verify_r5_full_snapshot.py |
 | C61A09F83E73D0D0 | 2026-11-04 19:48 | spec | replace-ref rule and the object-store limit added: PHASE1_R5_FULL_TREE_INTEGRITY_CONTRACT.md |
 | D2045FE19281874C | 2026-11-04 19:48 | src/toolkit | TestReplaceRefsAreIgnored: test_r5_real_pr91_replay.py |
+| C9F0E68929F0564A | 2026-11-04 19:52 | scripts | line wrapped for the lint gate: extract_pr91_source_evidence_v1.py |
+| 029E8063D3C78923 | 2026-11-04 19:52 | scripts | line wrapped for the lint gate: verify_r5_full_snapshot.py |

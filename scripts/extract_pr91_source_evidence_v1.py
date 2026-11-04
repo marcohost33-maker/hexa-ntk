@@ -37,7 +37,12 @@ class ExtractError(ValueError):
 
 def git(repo: Path, *args: str) -> bytes:
     try:
-        p = subprocess.run(["git", "--no-replace-objects", "-C", str(repo), *args], capture_output=True, check=False, timeout=20)
+        p = subprocess.run(
+            ["git", "--no-replace-objects", "-C", str(repo), *args],
+            capture_output=True,
+            check=False,
+            timeout=20,
+        )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ExtractError(f"local Git object read failed: {type(exc).__name__}") from exc
     if p.returncode != 0 or len(p.stdout) > SOURCE_CAP_BYTES:

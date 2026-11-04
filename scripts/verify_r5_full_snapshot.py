@@ -98,7 +98,10 @@ def _complete_tree_blobs(repo: Path, revision: str, expected_dir: Path, archive_
     """
     try:
         p = subprocess.run(
-            ['git', '--no-replace-objects', '-C', str(repo), 'ls-tree', '-r', '-z', revision], capture_output=True, check=False, timeout=30
+            ['git', '--no-replace-objects', '-C', str(repo), 'ls-tree', '-r', '-z', revision],
+            capture_output=True,
+            check=False,
+            timeout=30,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise FullSnapshotError('cannot read complete canonical git tree') from exc
