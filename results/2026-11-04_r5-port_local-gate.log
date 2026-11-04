@@ -87,7 +87,7 @@ RC prepare=0
 RC verify=0
 {"owner_decision": "HOLD_NO_APPROVAL", "reason": "snapshot content differs from Git source/derived patch: ['src/toolkit/runner_hex_v3.py']", "schema_version": "HEXA_NTK_R5_FULL_SNAPSHOT_VERIFY/1", "st
 RC verify_tampered=2
-{"owner_decision": "HOLD_NO_APPROVAL", "reason": "[Errno 2] No such file or directory: 'C:\\\\Users\\\\marco\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\b9721fba9a6b718c\\\\281619d6-9919-421b-b0b5-017880
+{"owner_decision": "HOLD_NO_APPROVAL", "reason": "[Errno 2] No such file or directory: '<local path redacted>
 RC verify_missing_dir=2
 {"error": "two-source strict verification requires --radius-survey", "owner_verdict": "HOLD_INVALID_INPUT", "policy": "PHASE1_RUNTIME_ENVELOPE_v1"}
 RC envelope_without_survey=2
