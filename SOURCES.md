@@ -929,3 +929,5 @@
 | D2045FE19281874C | 2026-11-04 19:48 | src/toolkit | TestReplaceRefsAreIgnored: test_r5_real_pr91_replay.py |
 | C9F0E68929F0564A | 2026-11-04 19:52 | scripts | line wrapped for the lint gate: extract_pr91_source_evidence_v1.py |
 | 029E8063D3C78923 | 2026-11-04 19:52 | scripts | line wrapped for the lint gate: verify_r5_full_snapshot.py |
+| A68D1557620E1BCD | 2026-11-04 19:58 | src/toolkit | an escaping exception reports as assertion failure (classifiable red): test_r5_real_pr91_replay.py |
+| EB97860E06F04A0D | 2026-11-04 19:58 | spec | budget tools read the snapshot files under autocrlf: PHASE1_R5_FULL_TREE_INTEGRITY_CONTRACT.md |

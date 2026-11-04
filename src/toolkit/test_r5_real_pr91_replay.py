@@ -140,6 +140,17 @@ class TestContractRefusesMalformedRowsCleanly(unittest.TestCase):
     def setUp(self):
         self.record = _decode_evidence(COST_JSON.read_bytes().replace(b'\r\n', b'\n'))
 
+    def _assert_refused(self):
+        # An escaping TypeError/KeyError is the regression: report it as an
+        # assertion failure, not as a test error nobody can classify.
+        try:
+            verify_pr91_contract(self.record)
+        except EvidenceError:
+            return
+        except Exception as exc:
+            self.fail(f'escaped as {type(exc).__name__}: {exc}')
+        self.fail('malformed record accepted')
+
     def test_real_record_passes_the_contract(self):
         checked = verify_pr91_contract(self.record)
         self.assertEqual(checked['configuration_count'], 8)
@@ -147,13 +158,11 @@ class TestContractRefusesMalformedRowsCleanly(unittest.TestCase):
 
     def test_missing_epoch_seconds(self):
         del self.record['configs'][3]['epoch_seconds']
-        with self.assertRaises(EvidenceError):
-            verify_pr91_contract(self.record)
+        self._assert_refused()
 
     def test_unhashable_grid_value(self):
         self.record['configs'][0]['hidden_channels'] = [32]
-        with self.assertRaises(EvidenceError):
-            verify_pr91_contract(self.record)
+        self._assert_refused()
 
 
 @unittest.skipUnless(_has_commit(ROOT, prep.PR_HEAD),

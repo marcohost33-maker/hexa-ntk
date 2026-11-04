@@ -24,6 +24,8 @@ python scripts/verify_r5_full_snapshot.py --repo /local/repo --prepared /new/pre
 
 Leave the checkout unmodified. Run in a protected local directory; verification is not atomic under concurrent mutations. Do not execute the candidate by simply observing integrity PASS.
 
+The budget tools pin raw bytes. Under `core.autocrlf=true` a checked-out JSON carries CRLF and is refused (exit 2); point them at the files in `prepared/snapshot/results/`, which are the blob bytes.
+
 ## Scientific stop rules
 - PR #91 still DRAFT; Owner D4/D5 approval has not been granted.
 - D5 benchmark must first be executed with exact software pins, fully measured overheads, controlled system load and setup/validation/checkpoint/data costs. Separately report the expensive nonfinite-guard variant.
