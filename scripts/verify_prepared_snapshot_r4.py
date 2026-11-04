@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+import stat
 import sys
 
 HERE = Path(__file__).resolve().parent
@@ -36,7 +38,16 @@ def _safe_read(root: Path, relative: str, cap: int = 1_048_576) -> bytes:
         current = current / bit
         if current.is_symlink():
             raise VerificationError("symlink in evidence path")
-    with current.open("rb") as f:
+    # O_NONBLOCK: a FIFO must not hang the audit. The type check runs on the open
+    # descriptor, so swapping the path after a separate stat cannot pass it.
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(current, flags)
+    except OSError as exc:
+        raise VerificationError("verification input cannot be opened") from exc
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise VerificationError("special file in evidence path")
         raw = f.read(cap + 1)
     if len(raw) > cap:
         raise VerificationError("verification input exceeds byte budget")

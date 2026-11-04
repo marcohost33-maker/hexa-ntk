@@ -931,3 +931,5 @@
 | 029E8063D3C78923 | 2026-11-04 19:52 | scripts | line wrapped for the lint gate: verify_r5_full_snapshot.py |
 | A68D1557620E1BCD | 2026-11-04 19:58 | src/toolkit | an escaping exception reports as assertion failure (classifiable red): test_r5_real_pr91_replay.py |
 | EB97860E06F04A0D | 2026-11-04 19:58 | spec | budget tools read the snapshot files under autocrlf: PHASE1_R5_FULL_TREE_INTEGRITY_CONTRACT.md |
+| 5142B2A6F0437F3E | 2026-11-04 20:30 | scripts | evidence reads refuse non-regular files without blocking (Codex P2 on 24f9575, FIFO): verify_prepared_snapshot_r4.py |
+| E457F7DDA0698BC6 | 2026-11-04 20:30 | src/toolkit | FIFO as manifest rejected without hanging; regular file control: test_r5_full_snapshot.py |

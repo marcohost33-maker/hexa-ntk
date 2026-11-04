@@ -338,6 +338,31 @@ class TestRedGreen(unittest.TestCase):
                 with self.assertRaisesRegex(new.FullSnapshotError, 'special snapshot member'):
                     new._filetree(root)
 
+    @unittest.skipIf(sys.platform == 'win32', 'POSIX FIFO')
+    def test_fifo_as_manifest_or_pin_is_rejected_without_hanging(self):
+        import os
+        import signal
+
+        def expired(_signum, _frame):
+            raise AssertionError('verifier blocked on a FIFO')
+
+        previous = signal.signal(signal.SIGALRM, expired)
+        self.addCleanup(signal.signal, signal.SIGALRM, previous)
+        self.addCleanup(signal.alarm, 0)
+        with prepared_fixture() as (repo, output, _):
+            manifest = output / 'R4_PREPARATION_MANIFEST.json'
+            manifest.unlink()
+            os.mkfifo(manifest)
+            signal.alarm(20)
+            with self.assertRaisesRegex(old.VerificationError, 'special file'):
+                new.verify_full(output, repo)
+            signal.alarm(0)
+
+    def test_regular_evidence_file_still_reads(self):
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / 'ok.json').write_bytes(b'{}')
+            self.assertEqual(old._safe_read(Path(td), 'ok.json'), b'{}')
+
     def test_missing_local_repo_fails_closed(self):
         with prepared_fixture() as (repo, output, _):
             with self.assertRaises(new.FullSnapshotError):
