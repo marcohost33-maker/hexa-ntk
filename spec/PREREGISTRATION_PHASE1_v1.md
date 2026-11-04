@@ -286,6 +286,103 @@ summation orders, the other eight under none; it is therefore not recommended, l
 (latent 16 and 24). The D4 grid must name a tie-free and flip-free pair for every evaluation lattice. The required margin and a wider tie band in the adapter are open owner
 questions.
 
+2026-10-29 (approval candidate, no decision). Prepared so that the owner can approve D4 and D5 in
+one step; this paragraph decides nothing and the status line stays DRAFT. No model was fit, tuned or
+evaluated on T1 data: the cost numbers come from synthetic standard-normal tensors on the `N = 32`
+lattice geometry (line 14 allows this), measured by `scripts/oracles/gino_epoch_cost_synthetic.py`
+(`results/2026-10-29_gino_epoch_cost_synthetic.json`, source `35f82dc`, command
+`python scripts/oracles/gino_epoch_cost_synthetic.py --threads 4 --output results/2026-10-29_gino_epoch_cost_synthetic.json`).
+`src/toolkit/test_preregistration_candidate_hex_v3.py` recomputes every number of this paragraph from
+the two JSON files it cites.
+
+*Radius.* `radius_factor` is not a grid axis (lines 111-114), so one value serves both latent
+resolutions and counts with the smaller of its two margins. Values: field `margin_over_float32_error`
+of `results/2026-10-20_gino_radius_tie_survey_float32-graphs.json` (minimum over the five lattices),
+read from the file, not recomputed:
+
+| `radius_factor` | latent 16 | latent 24 | minimum |
+|---|---|---|---|
+| `1.5` | 3.53 | 1.14 | 1.14 |
+| `2.25` | 2.10 | 0.82 | 0.82 |
+| `2.5` | 1.11 | 1.32 | 1.11 |
+| `2.75` | 2.20 | 0.80 | 0.80 |
+
+Proposed: `radius_factor = 1.5` (largest minimum). For the owner: `2.5` is close (1.11);
+with `1.5` and latent 16 some node has only 1 latent point(s) within the radius (`2.5`: 3;
+`neighbourhoods` in the cost JSON, all five lattices); the cost numbers below hold for this radius only. Under
+the order-independent budget of `spec/PHASE1_PROTOCOL_v1.md` section 11 both pairs are
+`frozen_order_required` (margin over budget 0.32 for latent 16 and 0.14 for latent 24), so the D5
+machine below is the frozen hardware/kernel order the run manifest must pin.
+
+*D4 grid (proposal).* Width {32, 64} x latent resolution {16, 24} x learning rate {1e-3, 3e-4} = 8
+configurations, `n_layers = 4`, `n_modes` = 12/32 of the latent resolution as in the adapter default
+(6 and 9; the default 12 is refused for both, `n_modes < latent_resolution / 2`). Sources: width 64 is
+the adapter default and `fno_hidden_channels` of every GINO config of neuraloperator 2.0.0
+(`config/models.py`), 32 halves it (T1 spans 15 triangle modes, section 2); lr 1e-3 is
+`CarCFDOptConfig.learning_rate` of `config/gino_carcfd_config.py`, 3e-4 the library default
+`OptimizationConfig.learning_rate` of `config/opt.py` (both at tag 2.0.0). Fixed for all eight: Adam
+without weight decay, cosine schedule (`CosineAnnealingLR`, `T_max = E`, stepped once per epoch),
+relative-L2 loss, batch size `20`, `1800` training samples (the 90 % split of D3), seed 0, no early
+stopping; selected is the lowest mean validation `rel_l2` after the last epoch (lines 111-116).
+Measured cost (median of 3 timed epochs after 10 untimed warm-up steps; validation pass = 200 samples,
+no grad):
+
+| config | width | latent | n_modes | lr | s/epoch | s/val pass |
+|---|---|---|---|---|---|---|
+| G1 | 32 | 16 | 6 | 1e-3 | 116.7 | 2.1 |
+| G2 | 32 | 16 | 6 | 3e-4 | 121.7 | 2.3 |
+| G3 | 32 | 24 | 9 | 1e-3 | 176.8 | 2.1 |
+| G4 | 32 | 24 | 9 | 3e-4 | 143.6 | 2.1 |
+| G5 | 64 | 16 | 6 | 1e-3 | 152.1 | 1.3 |
+| G6 | 64 | 16 | 6 | 3e-4 | 133.1 | 1.3 |
+| G7 | 64 | 24 | 9 | 1e-3 | 314.5 | 2.7 |
+| G8 | 64 | 24 | 9 | 3e-4 | 331.3 | 2.7 |
+
+*Epoch budget (proposal).* `E = 50` epochs per configuration, the same for all eight. Cost:
+selection (8 runs, seed 0) plus the final 5 seeds of the selected configuration; that one is not known
+in advance, so the most expensive is counted: `E (sum t + 5 max t) + sum v + 5 max v` with `t` the
+seconds per epoch and `v` the validation pass above, worst case **43.7 h**, within the proposed D5
+budget of **48 h** wall-clock on the machine below. If the budget runs out, section 3 applies (stop, report
+incomplete).
+
+*D5 machine (proposal).* The machine of the measurement:
+
+| Field | Value |
+|---|---|
+| D5 cpu | Intel(R) Core(TM) i5-1035G1 CPU @ 1.00GHz |
+| D5 cores | 4 physical, 8 logical |
+| D5 ram | 7.69 GiB (8260374528 bytes) |
+| D5 os | Microsoft Windows 11 Home 10.0.26200 build 26200 |
+| D5 python | 3.12.10 |
+| D5 torch | 2.6.0+cpu |
+| D5 neuraloperator | 2.0.0 |
+| D5 numpy | 2.5.3 |
+| D5 threads | 4 (torch.set_num_threads) |
+| D5 gpu | none (CUDA available: False) |
+
+The machine is shared: whole-machine CPU load was 32 % at the start and 25 % at the end of the
+measurement, and single timed epochs ranged from 82.1 to 335.0 s; the seconds
+above are estimates under load, not latency results (section 4). The adapter builds GINO with
+`gno_use_torch_scatter=False`, so the neighbour reduction runs in the backend's pure-torch
+`segment_csr` (`neuralop/layers/segment_csr.py`); a faster scatter backend would change these numbers.
+
+*Margin and tie band (proposal; the open owner questions of 2026-10-20).* Margin: the chosen pair must
+clear the measured float32 distance error strictly, `margin_over_float32_error > 1`; with
+`radius_graph_stability(min_relative_margin, budget_relative = float32_error_near_radius,
+frozen_order_flips = 0)` both pairs are `stable`, on the frozen order of D5, which the run manifest
+pins. The survey records Windows 11 build 26200, Python 3.12.10 and torch 2.6.0+cpu but no CPU model, so
+that it ran on the D5 machine is not recorded: re-running `scripts/oracles/gino_radius_tie_survey.py` on
+the D5 machine before the first fit is proposed as a precondition (0 flips required for the chosen
+pairs). That error was measured on 2026-10-20, after the margins
+were visible; the owner should weigh this. A stricter factor of 2 leaves no `radius_factor` for both
+latent resolutions (largest minimum 1.14). Tie band: keep the adapter's `1e-6 r` unchanged; it is a
+refusal rule, not the D4 criterion, and is not widened after the fact
+(`spec/GINO_ADAPTER_PHASE1_v2.md`, amendment 2026-10-21).
+
+*Approval sentence.* The owner approves this candidate by saying, with the commit filled in:
+"Ich gebe spec/PREREGISTRATION_PHASE1_v1.md in der Fassung von Commit <SHA> frei, mit D4, D5, Marge
+und Tie-Band wie im Absatz 2026-10-29 vorgeschlagen." Then the status line changes as in the
+approval rules at the top of this file.
 The status line therefore stays DRAFT; nothing here allows a fit on T1 data.
 
 ## 9. Claim boundary
