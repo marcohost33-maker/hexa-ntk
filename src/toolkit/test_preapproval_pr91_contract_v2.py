@@ -133,7 +133,9 @@ def survey_like() -> dict:
 
 
 class TestPR91Contract(unittest.TestCase):
-    def assert_invalid(self, modify, pattern="PR91|invalid|mismatch|incomplete|finite|digest changed|integer in|duplicate"):
+    def assert_invalid(
+        self, modify, pattern="PR91|invalid|mismatch|incomplete|finite|digest changed|integer in|duplicate"
+    ):
         x = candidate_like()
         modify(x)
         with self.assertRaisesRegex(audit.EvidenceError, pattern):
