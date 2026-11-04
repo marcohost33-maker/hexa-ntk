@@ -1,0 +1,106 @@
+# 2026-11-04 Phase 1: port of cross-family GPT-6 R5 (full-tree integrity check) -- local gate
+# Windows 11, Python 3.12.10, torch 2.6.0+cpu, numpy 2.5.3, coverage 7.16.2 (CI pins 7.17.0); ruff 0.17.2 via uvx
+# Chain = .github/workflows/ci.yml jobs gate + tests (cpu), from the repo root, venv WITHOUT neuraloperator.
+# NOT run: GINO lane (neuraloperator 2.0.0), CI itself, SkylakeX kernel, mutation_probe.py.
+# PASS_FULL_TREE_INTEGRITY_ONLY is integrity only: no approval, no D5 attestation, no T1 data, prereg stays DRAFT.
+
+## Baseline @1d0268c (merge of main cd5f6dc into 1a54cd8, before the port)
+HEAD 1d0268c1da8e547324de93c4bfc114e1cc7e890b dirty=0
+python 3.12.10 torch 2.6.0+cpu numpy 2.5.3 coverage 7.16.2
+RC ruff=0
+RC compileall=0
+[VERIFY-SOURCES] 52 Toolkit-Eintraege + 18 Spec-Eintraege + 12 Script-Eintraege | Dateiliste: git (82 Dateien) | PASS
+RC verify_sources=0
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC engine_gate=0
+RC unittest=1
+TOTAL                                           6059    261   2282    194    94%
+RC coverage=0
+kernel=Prescott OK
+kernel=Sandybridge OK
+kernel=Haswell OK
+kernel=Zen OK
+Ran 1097 tests in 156.958s
+FAILED (failures=1, skipped=15)
+FAIL: test_readme_unit_test_count_current (test_hex_timestep_contract.TestDocsContract.test_readme_unit_test_count_curre
+# the one failure: README wording of this merge did not match the count pattern; fixed in the port commit
+
+## Measured before fixes (commit object 1a54cd8, this machine: core.autocrlf=true from the system gitconfig)
+# delivered archive call, scratch copy with only the per-call flags removed, against the real commit:
+{"error": "Git archive snapshot differs from canonical blob: results/2026-10-29_gino_epoch_cost_synthetic.json", "status": "HOLD_PREPARATION_REFUSED"} rc=2
+# git replace on a fabricated repo, before --no-replace-objects: AssertionError: b'evil = True\n' != b'answer = 41\n' (forged bytes in the archive)
+
+## End run @35cc486 (src/, scripts/, spec/ unchanged by the commit that adds this log)
+HEAD 35cc486d6a4cefc6a9387a932c34496464aab97b dirty=0
+python 3.12.10 torch 2.6.0+cpu numpy 2.5.3 coverage 7.16.2
+RC ruff=0
+RC compileall=0
+[VERIFY-SOURCES] 64 Toolkit-Eintraege + 20 Spec-Eintraege + 18 Script-Eintraege | Dateiliste: git (102 Dateien) | PASS
+RC verify_sources=0
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+RC engine_gate=0
+RC unittest=0
+TOTAL                                           6500    328   2424    209    94%
+RC coverage=0
+kernel=Prescott OK
+kernel=Sandybridge OK
+kernel=Haswell OK
+kernel=Zen OK
+Ran 1278 tests in 177.829s
+OK (skipped=17)
+
+## Discrimination run (guard removed: named test red, restored by hash)
+  R5 autocrlf: git archive ohne per-call core.autocrlf=false  DISKRIMINIERT
+  Replace-Ref: git archive ohne --no-replace-objects          DISKRIMINIERT
+  F05 Archiv-Frist weg                                        DISKRIMINIERT
+  F03 Inventar Baum gegen Archiv weg (export-ignore)          DISKRIMINIERT
+  F03 Rohblob-Vergleich weg (export-subst)                    DISKRIMINIERT
+  F02 Verzeichnismenge weg                                    DISKRIMINIERT
+  F02 Dateimenge weg, echter Commit                           DISKRIMINIERT
+  F01 Inhaltsvergleich weg, echter Commit                     DISKRIMINIERT
+  F04 D5-Behauptung nicht mehr geprueft                       DISKRIMINIERT
+  F04 Archiv-Metadaten nicht mehr geprueft                    DISKRIMINIERT
+  F04 Manifest-Schema nicht mehr geprueft                     DISKRIMINIERT
+  F06 Loss-Waechter im echten Oracle weg                      DISKRIMINIERT
+  F06 Gradient-Waechter im echten Oracle weg                  DISKRIMINIERT
+  F06 Parameter-Waechter im echten Oracle weg                 DISKRIMINIERT
+  Vertrag: Zeilen nicht mehr vorab geprueft                   DISKRIMINIERT
+
+15/15 diskriminieren.
+Beleg -> canonical ledger diskriminierung_runs.jsonl
+Lauf    -> run_id DK-20261104T190238-a250ebc8b203
+Stand   -> spec_sha256 26e2187dccda     head 35cc486d6a4c
+Stufe   -> provenienz_klasse VOLL
+RC dk=0
+
+## Real commit 1a54cd8: documented command pair, tampering, budget tools
+RC prepare=0
+  "checked_derived_files": 2,
+  "checked_directories": 6,
+  "checked_files": 79,
+  "checked_original_files": 77,
+  "checked_original_git_blobs": 77,
+  "git_head": "1a54cd8d9326e762ee493d3fc8d9a80202174304",
+  "owner_decision": "HOLD_NO_APPROVAL",
+  "snapshot_content_sha256": "125bbd6142a0ee2e16522c5c929f682bfb6dfda6c4ce4d2b8e781a5f55d75d2e",
+  "status": "PASS_FULL_TREE_INTEGRITY_ONLY"
+RC verify=0
+{"owner_decision": "HOLD_NO_APPROVAL", "reason": "snapshot content differs from Git source/derived patch: ['src/toolkit/runner_hex_v3.py']", "schema_version": "HEXA_NTK_R5_FULL_SNAPSHOT_VERIFY/1", "st
+RC verify_tampered=2
+{"owner_decision": "HOLD_NO_APPROVAL", "reason": "[Errno 2] No such file or directory: 'C:\\\\Users\\\\marco\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\b9721fba9a6b718c\\\\281619d6-9919-421b-b0b5-017880
+RC verify_missing_dir=2
+{"error": "two-source strict verification requires --radius-survey", "owner_verdict": "HOLD_INVALID_INPUT", "policy": "PHASE1_RUNTIME_ENVELOPE_v1"}
+RC envelope_without_survey=2
+{"error": "PR91 source bytes differ from pinned commit file", "owner_verdict": "HOLD_INVALID_INPUT",
+RC envelope_real_worktree_crlf=2
+  "evidence_tier": "PINNED_TWO_SOURCE_CANDIDATE",
+    "budget_fit_class": "ESTIMATE_WITHIN_CAP_NOT_CERTIFIED",
+    "total_hours": 43.706098930056015,
+    "budget_fit_class": "ESTIMATE_WITHIN_CAP_NOT_CERTIFIED",
+    "total_hours": 45.433752111222326,
+  "owner_verdict": "HOLD_PREREGISTRATION_DRAFT",
+RC envelope_real_snapshot=0
+test_symlink_to_external_source_refused_even_if_other_fields_intact (test_r5_full_snapshot.TestRedGreen.test_symlink_to_external_source_refused_even_if_other_fields_intac
+test_snapshot_verifier_rejects_symlink (test_phase1_r4_preparation.PreparationTests.test_snapshot_verifier_rejects_symlink) ... skipped "cannot create a symlink here: [Wi
+0
+35cc486d6a4cefc6a9387a932c34496464aab97b
