@@ -116,9 +116,11 @@ def _archive_bytes(
     # git archive applies the working-tree conversion: under core.autocrlf=true
     # (the Git for Windows default, and the named D5 machine is Windows) every
     # text member comes out CRLF and no longer equals its blob. Per call only,
-    # no configuration is written.
+    # no configuration is written. --no-replace-objects: a replace ref would swap
+    # the pinned commit behind its name, tree included.
     cmd = [
         "git",
+        "--no-replace-objects",
         "-c",
         "core.autocrlf=false",
         "-c",

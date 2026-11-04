@@ -10,6 +10,8 @@
 
 - `git archive` runs with per-call `-c core.autocrlf=false -c core.eol=lf`. Without them a checkout under `core.autocrlf=true` (Git for Windows default; the named D5 machine is Windows) rewrites every text member and the real commit can never pass.
 
+- Every Git read runs with `--no-replace-objects`: a replace ref would swap the pinned commit behind its name, tree included, and tree and archive would agree on the forgery.
+
 ## Operational output
 `PASS_FULL_TREE_INTEGRITY_ONLY` means only **local source-to-commit integrity** and patch reproducibility. It does **not** confirm the GitHub author, repository authentication, signed SLSA provenance, D5 identity, real GINO behavior, or T1 approval. No test has trained on T1.
 
@@ -33,6 +35,7 @@ Leave the checkout unmodified. Run in a protected local directory; verification 
 - `TRANSCRIBED_VALUES_TEST_FIXTURE_NOT_SOURCE.json` is a test fixture, never source evidence. The pinned source is `results/2026-10-29_gino_epoch_cost_synthetic.json`.
 
 ## Remaining limitations
+- Git does not re-hash a tree or commit object on read. Bytes changed directly in the local object store under the same name stay undetected for files outside the four pins; run `git fsck` on the clone, or use a fresh clone, when that matters.
 - Git SHA-1 and SHA-256 are **content identities, not signatures**. Additional authorization, key verification and signed attestation are separate tasks.
 - Archive verification stores a temporary copy and requires an accessible local exact Git object; when absent, exit nonzero.
 - The Git-rebuild verification re-reads files and is not race-free against a malicious concurrent writer; use a read-only staging area, or cryptographically validated executable artifact handoff.

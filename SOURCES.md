@@ -922,3 +922,8 @@
 | 91218AE88A915E9A | 2026-11-04 19:41 | src/toolkit | in-repo created: autocrlf and export-ignore on fabricated repositories, malformed contract rows, real PR #91 commit replay where its object exists (skip visible otherwise): test_r5_real_pr91_replay.py |
 | 8CE61994EB07225F | 2026-11-04 19:40 | src/toolkit | cross-family GPT-6 R5 delivery: test fixture of transcribed values, NOT source evidence; pinned source is results/2026-10-29_gino_epoch_cost_synthetic.json: TRANSCRIBED_VALUES_TEST_FIXTURE_NOT_SOURCE.json |
 | 129A727AC871AFBE | 2026-11-04 19:44 | src/toolkit | R5 port: signature wrapped for the lint gate: test_preapproval_pr91_contract_v2.py |
+| 18530AFC692BCD13 | 2026-11-04 19:48 | scripts | git replace swapped the pinned commit behind its name and the check passed (test red before): every Git read with --no-replace-objects: extract_pr91_source_evidence_v1.py |
+| AFFAB09252BD23BF | 2026-11-04 19:48 | scripts | git replace swapped the pinned commit behind its name and the check passed (test red before): every Git read with --no-replace-objects: prepare_phase1_synthetic_r4.py |
+| D42E9A6766DDFD09 | 2026-11-04 19:48 | scripts | git replace swapped the pinned commit behind its name and the check passed (test red before): every Git read with --no-replace-objects: verify_r5_full_snapshot.py |
+| C61A09F83E73D0D0 | 2026-11-04 19:48 | spec | replace-ref rule and the object-store limit added: PHASE1_R5_FULL_TREE_INTEGRITY_CONTRACT.md |
+| D2045FE19281874C | 2026-11-04 19:48 | src/toolkit | TestReplaceRefsAreIgnored: test_r5_real_pr91_replay.py |

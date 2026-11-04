@@ -104,6 +104,36 @@ class TestArchiveIsByteFaithful(unittest.TestCase):
                 new._complete_tree_blobs(repo, head, out, paths)
 
 
+class TestReplaceRefsAreIgnored(unittest.TestCase):
+    """`git replace` swaps a whole commit behind its name, tree and all.
+
+    The strongest local forger: the pinned name stays, ls-tree and archive agree
+    with each other on the replacement, so tree-against-archive sees nothing.
+    """
+
+    def test_replaced_commit_does_not_change_what_is_verified(self):
+        with tempfile.TemporaryDirectory() as td, patch.object(
+            prep, 'FILES', (('results/one.json', 'x', 'y'), ('results/two.json', 'x', 'y'))
+        ):
+            base = Path(td)
+            repo, honest = _small_repo(base)
+            (repo / 'src/a.py').write_bytes(b'evil = True\n')
+            _git(repo, 'add', '.')
+            _git(repo, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.org',
+                 'commit', '-q', '-m', 'forged')
+            forged = _git(repo, 'rev-parse', 'HEAD')
+            _git(repo, 'replace', honest, forged)
+            self.assertIn('evil', _git(repo, 'show', f'{honest}:src/a.py'))  # the forgery is live
+            out = base / 'extracted'
+            out.mkdir()
+            prep.unpack_checked(prep._archive_bytes(repo, revision=honest), out)
+            self.assertEqual((out / 'src/a.py').read_bytes(), b'answer = 41\n')
+            paths = {p.relative_to(out).as_posix() for p in out.rglob('*') if p.is_file()}
+            self.assertEqual(new._complete_tree_blobs(repo, honest, out, paths), 6)
+            blob = prep._sha1_blob(b'answer = 41\n')
+            self.assertEqual(prep.object_bytes(repo, honest, 'src/a.py', blob), b'answer = 41\n')
+
+
 class TestContractRefusesMalformedRowsCleanly(unittest.TestCase):
     """Malformed rows stay EvidenceError; the CLIs catch that and exit 2."""
 
