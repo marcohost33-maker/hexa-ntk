@@ -22,6 +22,151 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **DDP v1.1: Fehler nach `backward` abgestimmt + 3-Rank-Evidenz (2026-11-02, Linux-Container;
+  offen aus dem DDP-Eintrag unten: "Fehler in backward/optimizer.step", "> 2 Ranks").**
+  `spec/DDP_RUNNER_v1.md` Abschnitt 3.6: Clipping, Optimizer-/`GradScaler`-Schritt und EMA-Update
+  laufen nach DDPs Gradienten-All-Reduce; warf dort ein Rank, verliess er den Lauf allein, und die
+  Peers warteten in der naechsten Abstimmung bis zum Prozessgruppen-Timeout (rot reproduziert gegen
+  f414a98: Rank 0 bekam `RuntimeError: Application timeout caused pair closure` statt
+  `PeerRankError`, danach liefen die Ranks im Test-Job auseinander). Jetzt haelt der Rank den Fehler
+  (ein OOM bekommt zuerst die Rettung), und der naechste Abstimmungspunkt wirft ihn auf allen Ranks:
+  `_agreed_next` traegt dafuer einen dritten Zaehler im selben All-Reduce (kein zusaetzlicher
+  Kollektiv-Aufruf je Schritt; auch im letzten Schritt einer Epoche), `_save_mid_epoch` stimmt vor
+  jedem Gather/Write ab (kein Checkpoint eines auf einem Peer gescheiterten Schritts). Fehler
+  *innerhalb* von `backward` bleiben offen (Peers sind schon im All-Reduce; Timeout/NCCL-Watchdog).
+  Neu: 3-Rank-gloo-Job (12 Trainings-Samples, globaler Batch 3 x 2, Validierung 2/2/1 per
+  `ExactDistributedEvalSampler`) == Single-Process-Lauf mit Batch 6 bis 1e-12, alle drei Ranks
+  bitgleich; gepaddeter Val-Sampler, NaN-Skip, Forward-Fehler und die drei Post-Step-Szenarien
+  enden auf allen drei Ranks. 8 neue Tests, 4 neue Mutanten. Die Spec-Zeile "Mid-epoch resume:
+  resume stays at epoch boundaries" war seit #94 veraltet und ist korrigiert.
+  _Evidenz:_ `results/2026-11-02_ddp-post-step_local-gate.log`.
+  - [x] **Kritische Nachpruefung desselben PRs (#97, 2026-11-02).** Drei Luecken gefunden und
+    geschlossen, jede zuerst rot gegen den PR-Kopf 8448003: (1) `GradScaler.unscale_` lief nach dem
+    All-Reduce, aber ausserhalb des gehaltenen Bereichs -> jetzt in `_apply_update`; (2)
+    `PeerRankError` sagte "see that rank's log", nannte den Rank aber nicht, und dort war nichts
+    geloggt -> jede abgestimmte Ausnahme nennt die gescheiterten Ranks (`failed_ranks`, ein
+    One-Hot-All-Reduce nur im Fehlerpfad) und wird auf ihnen mit Traceback geloggt; (3) scheiterte
+    die Abstimmung selbst (Peer tot, Timeout), ersetzte der Transportfehler die eigentliche
+    Ursache -> `keeping` reicht die eigene Ausnahme mit Notiz weiter. 5 neue Mutanten.
+    Gesucht und nicht uebernommen: ein NCCL-Abort, der Peers aus einem haengenden `backward`
+    befreit, existiert nur als private API (`ProcessGroupNCCL._abort`/`_shutdown`), nicht fuer gloo
+    -> Fehler in `backward` bleiben beim Timeout/Watchdog.
+- [x] **Mid-Epoch-Resume (2026-10-30, Linux-Container; ROADMAP-Punkt unten, Cross-Family GPT-6
+  R89/R90 P1).** Vertrag `spec/MID_EPOCH_RESUME_v1.md`, `RunnerConfig(save_every_n_steps=n)`: alle
+  n globalen Schritte wird der Resume-Checkpoint mit der Position in der Epoche neu geschrieben
+  (Epochen-Startzustand von RNG und Loader-Generatoren je Rank, bisherige Losses/Gradnormen,
+  Skip-Zahl). Resume: Iterator aus dem Epochen-Startzustand neu erzeugen, die erledigten Batches
+  laden und verwerfen (reproduziert auch Worker-RNG), dann den RNG der Unterbrechung
+  wiederherstellen. Behauptung und Beleg: unterbrochen == ununterbrochen, bitgleich (Gewichte,
+  EMA, Epochen- und Val-Berichte, Anomalie-Historie) -- mit explizitem Generator und ohne, mit
+  2 DataLoader-Workern und Worker-RNG-Rauschen, mit Dropout und Python/NumPy-Stroemen, und als
+  echter 2-Rank-DDP-Lauf mit BatchNorm + Dropout + Rank-Seeds sowie mit
+  `broadcast_buffers=False` und einem Buffer, den der Trainings-Forward liest. Positivkontrolle:
+  ohne Mid-Epoch-Record weicht das Ergebnis ab. Unabhaengiges Review vor dem Merge (Sweep ueber
+  jeden Abbruchschritt, Scheduler, Warmup, NaN-Skips, Kadenzen, Worker: sauber) fand 4 Befunde,
+  alle rot reproduziert und behoben: (1) DDP mit `broadcast_buffers=False` setzte jeden Rank auf
+  Rank 0s Buffer -> rank-eigene Buffer im Record; (2) ein Resume mit anderer Batch-Groesse oder
+  Datensatzlaenge lief still durch (Batch-Groesse 4: Fast-Forward frisst die Epoche) -> Loader-Form
+  im Record, Abweichung abgelehnt; (3) unter DDP fehlte die Anomalie-Historie -> je Rank
+  gesichert; (4) zwei Waechter ohne Test (Skip-Zahl, abgestimmte Position) -> Tests. Codex fand
+  (1) und (3) ebenfalls und dazu (5): ein Generator, der nur dem Sampler gehoert
+  (`RandomSampler(ds, generator=g)`), fehlte im Epochen-Startzustand -> Fast-Forward ueber die
+  Permutation der ersten Epoche; rot reproduziert, jetzt erfasst (auch im Batch-Sampler und mit
+  `batch_size=None`), fremde Generator-Namen abgelehnt. Eigene
+  Gegenpruefung: die Spec-Behauptung, bei `persistent_workers=True` bleibe die Sample-Reihenfolge
+  erhalten, war falsch (mit und ohne Generator) -> die Kombination wird abgelehnt. 21 Mutanten
+  (je ein Waechter aus); einer davon zeigte einen ueberfluessigen Buffer-Sync vor dem Mid-Save
+  (aequivalenter Mutant) -> entfernt. Grenzen (Spec Abschnitt 4): CUDA-RNG, nicht-persistente
+  Buffer, gleiche Maschine/Software.
+- [x] **Issue #82: Restbefunde der Equalita-Runde f1b54bc (2026-10-30, Linux-Container).** Jeder
+  Punkt gegen main @a19c992 nachgemessen. Offen und jetzt behoben: F-E5 (Spec Abschnitt 8 "keine
+  Funktion liefert inf" war falsch: `IQM([1e308] * 3)`, der Median zweier Dauern von 1.5e308 s,
+  Bootstrap-Mittel und Quantile ueberliefen auf endlichen Eingaben) -> `_finite_stat` rechnet nur
+  im Ueberlauffall auf einer exakt mit einer Zweierpotenz skalierten Kopie nach, jedes endliche
+  Ergebnis bleibt bitgleich; F-E3 (`{**fields, **source_revision()}` -> "unknown manifest keys")
+  -> optionaler Manifest-Schluessel `worktree_dirty` (bool, mitgehasht); Break-even an die
+  Gleich-Genauigkeits-Regel gebunden (`break_even_at_equal_accuracy` rechnet die Baseline-Latenz
+  aus der Front nach statt sie anzunehmen); Zitat korrigiert: der Code resampelt Seeds und
+  Sample-IDs unabhaengig (gekreuztes Design) = Pigeonhole-Bootstrap (Owen 2007, AOAS 1(2):386-411,
+  konservativ), nicht das genestete Schema von Davison/Hinkley 3.8; Modul-Docstring "numpy only"
+  korrigiert. Schon vorher erledigt (nur Statuspflege): F-E2 Hardware-Werte, F-E4 `\Z`,
+  Break-even-Overflow (HNT-R86-04), AMP/Backend auf Entscheidungs-Ebene (R4-F3, D7),
+  `n_seeds == 5` (Equalita R2). 8 neue Tests rot gegen a19c992, gruen jetzt; eine Positivkontrolle
+  (normale Werte bitgleich). Codex-Review von #93: zwei echte Fehler im ersten Wurf (der
+  Ueberlauf-Rueckfall skalierte alle Zeilen neu, eine Zeile 5e-324 unterlief zu 0; Break-even warf bei
+  oberer Schranke 0 statt `None`) -> rot reproduziert, behoben. 5 neue Mutanten, volle Probe 125/125. _Evidenz:_
+  `results/2026-10-30_issue82_local-gate.log`. Offene Messung aus #82 nachgeholt: Radius-Tie-Survey unter Linux
+  (Container, Python 3.12.3, torch 2.6.0, numpy 2.5.3, neuraloperator 2.0.0, @a19c992 sauber):
+  Tie- und Flip-Zahlen aller 48 Kandidaten identisch zu Windows 2026-10-20, dieselben 9 tie- und
+  flip-freien Kandidaten, 960 Backend-Graphen ohne Abweichung; verschieden nur der gemessene
+  float32-Distanzfehler nahe dem Radius (BLAS-Rundung, 16/48 Kandidaten). Abstand >= 2x
+  float32-Fehler haben auch unter Linux nur drei (latent 16 mit 1.5 / 2.25 / 2.75).
+  _Evidenz:_ `results/2026-10-30_gino_radius_tie_survey_float32-graphs_linux.json` (exit 0).
+  Offen fuer den Owner: ob ein entscheidungsfaehiger Lauf `worktree_dirty == False` verlangen soll
+  (heute nur aufgezeichnet); D4/D5 unveraendert.
+- [x] **DDP-Integration des Runners (2026-10-30, Linux-Container; ROADMAP-Punkt unten, Cross-Family
+  GPT-6 R89 P1 / Antwort 2026-10-28 A6).** Vertrag `spec/DDP_RUNNER_v1.md`, Modul `ddp_hex_v3.py`,
+  `RunnerConfig(distributed=True)`. Vorher: nur `is_main_process`, kein `set_epoch`, Validierung
+  rank-lokal, keine Barriere nach dem Checkpoint-Write. Jetzt: `set_epoch` auf Train-/Val-Sampler;
+  gleiche Schrittzahl je Rank (sonst `DistributedContractError` statt Haenger); NaN-Skip als ODER
+  ueber alle Ranks vor `backward` (sonst Deadlock im Gradienten-All-Reduce); Validierung auf dem
+  ungewrappten Modul, exakte Partition geprueft (Index-Zaehlung per All-Reduce; der gepaddete
+  `DistributedSampler` n=5/W=2 aus R89 D1 wird abgelehnt, `ExactDistributedEvalSampler` neu),
+  `val_nrmse` aus float64-Summen `sqrt(sum e^2 / sum y^2)` (R89 D2); Checkpoint-Schritt und Resume
+  per `run_agreed` (Fehler auf einem Rank -> Fehler auf allen, das All-Reduce ist die Barriere);
+  Resume prueft Epoche/Schritt/Best-Wert/run_id und SHA-256 der geladenen Gewichte gegen Rank 0;
+  `run_id` von Rank 0; FailureSignatures je Rank in `failures/rank{r}/`; Checkpoints ohne
+  `module.`-Praefix. Nur Tensor-Collectives, kein Pickle.
+  _Kritische Selbstpruefung vor dem Merge (gleicher Tag), fuenf Luecken geschlossen:_
+  (1) ein `OperatorAdapterV3` um `model.module` haette den Trainings-Forward an DDP vorbei
+  gefuehrt (kein Gradienten-All-Reduce, Ranks divergieren still) -> `adapter.model is model`
+  Pflicht; (2) Konstruktions-Pruefungen waren selbst nicht abgestimmt (falsches
+  `is_main_process` nur auf Rank 1 -> Rank 0 haengt im run_id-Broadcast) -> Konstruktion in
+  `run_agreed`; (3) eine Exception im Forward/Loss eines Ranks liess die anderen haengen -> der
+  Schritt-Status traegt jetzt 0/1/2 (ok/Skip/Fehler) im selben All-Reduce; (4) die
+  Entscheidungswerte der Validierung sind rank-0-gebunden (Broadcast nach dem All-Reduce, keine
+  Annahme ueber Bitgleichheit der Backends); (5) rank-eigene RNG-Stroeme (torch/Python/NumPy)
+  werden vor jedem Resume-Save gesammelt und beim Resume je Rank restauriert (Dropout +
+  Rank-Seeds: Resume == ununterbrochen, bitgleich). Dazu: Val-Sampler muss deterministisch sein
+  (zweimal gelesen), NCCL-Tensoren auf dem Runner-Device. Gemessen statt angenommen: Forward ohne
+  Backward auf allen Ranks funktioniert mit default-DDP, `find_unused_parameters` und
+  `static_graph` (torch 2.6.0).
+  _Zweite Runde nach unabhaengigem Review von a875020 (gleicher Tag), sechs Befunde, alle mit
+  echtem 2-Rank-Lauf reproduziert und geschlossen:_ (1) ein Fehler VOR dem Forward (fehlender
+  `target`-Key, OOM in `.to(device)`, Adapter-Kontext) liess bei Modellen mit Buffern (BatchNorm,
+  `broadcast_buffers=True`) den Peer im Buffer-Broadcast haengen -> Vorbereitung + naechster Batch
+  werden vor dem DDP-Forward abgestimmt ([Fehler, erschoepft] je Schritt); (2) BatchNorm-/EMA-Buffer
+  divergierten je Rank, die gepoolte Metrik gehoerte zu keinem Modell (0.91806 vs. 0.92015 fuer
+  Rank 0s EMA) -> Buffer-Sync von Rank 0 vor Validierung und Save; (3) Konfiguration nicht
+  abgeglichen (`resume_from` nur auf Rank 0 -> Haenger) -> Config-Digest bei der Konstruktion;
+  (4) `len()` eines IterableDataset kann luegen -> Schrittzahl wird pro Schritt abgestimmt
+  (IterableDataset dadurch erlaubt); (5) Resume gab allen Ranks Rank 0s Loader-Generator ->
+  je Rank gesammelt/restauriert; (6) zwei blinde Tests (Python/NumPy-Stroeme, Rank-0-Bindung
+  unter gloo unbeobachtbar) -> Verlust haengt jetzt von beiden Stroemen ab, Fault-Injection
+  verschiebt Rank 1s All-Reduce-Ergebnisse um 1 ulp.
+  _Dritte Runde (Review von 205f293):_ alle fuenf Befunde der ersten Runde vom Reviewer erneut
+  reproduziert und als geschlossen bestaetigt; neu: (1) Regression des Buffer-Syncs -- der
+  Namensabgleich pruefte keine Shapes, ein je Rank anders geformter nicht-persistenter Buffer
+  (`broadcast_buffers=False`) brach gloo mit SIGABRT ab -> Signatur aus Name, dtype und Shape;
+  (2) OOM in der Batch-Vorbereitung unter DDP ohne Rettung -> gleiche Rettung wie im Schritt;
+  (3) RNG-/Generator-Zustaende kamen bei `map_location=<cuda>` als CUDA-Tensoren an -> `.cpu()`
+  (auch im bestehenden `resume_utils.restore_rng_states`; CUDA hier nicht gelaufen);
+  (4) der effektive AMP-Modus (bf16-Rueckfall je GPU) gehoert in den Konstruktions-Abgleich.
+  _Abschlusspruefung (Review von 0e86c52):_ keine Befunde; die vier Fixes aendern weder die
+  Reihenfolge der Collectives noch den Single-Process-Pfad. Mitgenommen: die OOM-Rettung wirft nie
+  (sie laeuft vor der Abstimmung), die bewusste Ablehnung rang-abhaengiger Buffer-Shapes steht in
+  der Spec.
+  Evidenz: echter 2-Rank-gloo-Lauf (CPU, float64) == Single-Process-Lauf (Gewichte, EMA,
+  `val_nrmse`, `mean_loss` <= 1e-12; beide Ranks bitgleich); Resume 2+2 == 4 Epochen bitgleich
+  mit mischendem `DistributedSampler` (auch mit Dropout und Rank-Seeds); jedes Fehlerszenario
+  (gepaddeter Val-Sampler, NaN auf einem Rank, Forward-Fehler, Konstruktionsfehler, Schreibfehler
+  Rank 0, ungleiche Batchzahl, Resume-Datei fehlt/abweichend auf einem Rank) endet auf beiden
+  Ranks mit der erwarteten Ausnahme statt Haenger; Welt 1 == ohne DDP bitgleich; BatchNorm: Buffer
+  beider Ranks bitgleich, Metrik == Rank 0s EMA-Modell auf dem ganzen Val-Satz, Resume bitgleich.
+  Mutationsprobe: 35 DDP-Mutanten (je ein Waechter aus). _Evidenz:_ `results/2026-10-30_ddp-runner_local-gate.log`.
+  Offen (Spec Abschnitt 8): NCCL/CUDA, > 2 Ranks, mehrere Hosts, AMP unter DDP; CUDA-RNG je Rank,
+  Worker-RNG; Fehler in backward/optimizer.step; Mid-Epoch-Resume.
+
 - [x] **Cross-Family GPT-6 R88..R98 gegen main triagiert und eingebaut (2026-10-26, Windows).**
   Die meisten Befunde R88..R98 betreffen ein externes Sidecar (DDP-/Trust-/Katalog-Module), das auf
   main nicht existiert; eingebaut sind die zwei, die `ntk_trajectory_hex_v3.py` treffen.
@@ -363,8 +508,13 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   (`_observed_order_from_finest_three`, `reference_spec_hex_v3.py`), verlangt konstantes
   Verfeinerungsverhaeltnis und monotone Differenzen und weist eine abweichende Angabe ab
   (`spec/REFERENCE_SPEC_v1.md`). Die Zeile war stehen geblieben.
-- [ ] **dt-Gruppierung als deklarierter Quantisierungsvertrag (#59).** `dt_round_ndigits=-1` wird
-  akzeptiert; Vertrag fuer zulaessige Werte und Semantik fehlt.
+- [x] ~~**dt-Gruppierung als deklarierter Quantisierungsvertrag (#59).** `dt_round_ndigits=-1` wird
+  akzeptiert; Vertrag fuer zulaessige Werte und Semantik fehlt.~~ Ueberholt (nachgemessen
+  2026-11-02): seit #58 (0a03436, 2026-10-05) verlangt `_validate_dt_round_ndigits`
+  (`dataset_split_hex_v3.py`) `None` oder ein nicht-negatives int (bool abgelehnt), der Modul-Docstring
+  nennt den Vertrag ("non-negative number of decimal places in dt's native unit"; negative Werte
+  wuerden 0.1 und 0.2 auf 0.0 zusammenlegen), `test_dt_round_ndigits_non_negative_contract` prueft
+  -1, -308 und `np.int64(-1)`. Die Zeile war stehen geblieben.
 
 - [x] ~~**Coverage-Ratchet Richtung 80–90%.**~~ Erledigt 2026-09-27: 89,6 % Branch-Coverage,
   `fail_under = 87` (siehe oben). Schwaechste Module jetzt `runner_hex_v3.py` / `stress_hex_v3.py`
@@ -385,11 +535,16 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   im Branch-Schutz aendern. Nachtrag 2026-10-07: ein Session-Handoff vom 2026-10-05 (Drive)
   meldet "Required gate + tests (cpu)" als gesetzt; aus dem Repo/der Agent-Sitzung nicht
   pruefbar (keine Branch-Protection-API) -> Owner bestaetigt, dann diesen Punkt schliessen.
-- [ ] **Mid-Epoch-Resume.** `dataloader_state_dict` wird gespeichert/geladen, der Runner nutzt es
+- [x] ~~**Mid-Epoch-Resume.** `dataloader_state_dict` wird gespeichert/geladen, der Runner nutzt es
   aber nicht (Resume nur an Epochengrenzen). Fuer lange Epochen auf Preemptible-Clustern relevant
-  (Muster: `torchdata.StatefulDataLoader`).
-- [ ] **DDP-Integration des Runners.** Nur `is_main_process`-Guard; kein `DistributedSampler.
-  set_epoch`, kein Barrier nach dem Checkpoint-Write, Metriken nicht ueber Ranks reduziert.
+  (Muster: `torchdata.StatefulDataLoader`).~~ Erledigt 2026-10-30 (`spec/MID_EPOCH_RESUME_v1.md`,
+  Eintrag unter Erledigt).
+- [x] ~~**DDP-Integration des Runners.** Nur `is_main_process`-Guard; kein `DistributedSampler.
+  set_epoch`, kein Barrier nach dem Checkpoint-Write, Metriken nicht ueber Ranks reduziert.~~
+  Erledigt 2026-10-30 (`spec/DDP_RUNNER_v1.md`, Eintrag unter Erledigt). Offen daraus: NCCL/CUDA,
+  > 2 Ranks, AMP unter DDP, CUDA-RNG je Rank, Fehler in backward/optimizer.step. Nachtrag
+  2026-11-02 (v1.1): 3 Ranks und Fehler nach backward (Optimizer-Schritt, EMA) erledigt; offen
+  bleiben NCCL/CUDA, > 3 Ranks, mehrere Hosts, AMP unter DDP, CUDA-RNG je Rank, Fehler in backward.
 - [x] ~~**CI-Reproduzierbarkeit:** `numpy` ist im Testjob ungepinnt.~~ Erledigt 2026-10-14
   (siehe oben): `numpy==2.5.3` im Testjob, wie in den Evidence-Lanes; inline wie `torch==2.6.0`,
   weil `requirements-dev.txt` laut Kopf nur Dev-Tools pinnt.

@@ -1,0 +1,34 @@
+# Local gate 2026-11-02 -- NR-03 / NR-R8-03 (best.pt generation pin)
+# Branch vero/hexa-nr03-best-generation; base origin/main b269947; Windows 11, Python 3.12.10, torch 2.6.0+cpu, numpy 2.5.3
+# Code under test: ae047a0 (src/scripts identical in the commit that adds this log; only README.md + this file differ)
+
+## Baseline @b269947 (before the change)
+Ran 1057 tests in 251.500s
+
+FAILED (errors=2, skipped=7)
+exit=1
+# the 2 baseline errors: test_mid_epoch_resume_hex_v3 DataLoader worker exited unexpectedly (Windows worker process), not reproduced in the end run
+TOTAL                                           5849    242   2226    183    94%
+covexit=0
+
+## End run @ae047a0 + README count update
+Ran 1071 tests in 122.483s
+
+OK (skipped=8)
+exit=0
+TOTAL                                           6005    262   2274    195    94%
+covexit=0
+
+## Engine gate @ae047a0
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+engexit=0
+
+## Mutation probe @ae047a0 (python scripts/mutation_probe.py)
+[MUTATION-PROBE] baseline green | 149/150 killed | FAIL
+exit=1
+# M02 survives on Windows only: TestDurabilityErrorAfterReplace is POSIX-only (skipped), as in the 2026-10-23 and 2026-10-26 Windows probes
+
+## Discrimination (G:/Meine Ablage/Vero/Tools/diskriminierung.py, ledger diskriminierung_runs.jsonl)
+# DK-20261102T000659-b51e3caed5c6 @0d22e44: 14/16 DISKRIMINIERT; W4/W5 red only by TypeError (no proof)
+# DK-20261102T000949-ffc5db53a6f8 @0d22e44: W4'/W5' as fail-open mutants (trust unpinned best.pt): 2/2 DISKRIMINIERT
+# Not provable on Windows: symlink guard (os.symlink needs privilege; test skipped) -> CI Linux

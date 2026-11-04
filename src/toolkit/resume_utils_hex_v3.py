@@ -305,11 +305,12 @@ def restore_rng_states(payload: Dict[str, Any]) -> Dict[str, bool]:
         restored["numpy_random_state"] = True
 
     if "torch_random_state" in payload:
-        torch.random.set_rng_state(payload["torch_random_state"])
+        # .cpu(): torch.load(map_location=<cuda>) moves the state to the GPU, set_rng_state needs a CPU ByteTensor
+        torch.random.set_rng_state(payload["torch_random_state"].cpu())
         restored["torch_random_state"] = True
 
     if "torch_cuda_random_state_all" in payload and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all(payload["torch_cuda_random_state_all"])
+        torch.cuda.set_rng_state_all([s.cpu() for s in payload["torch_cuda_random_state_all"]])
         restored["torch_cuda_random_state_all"] = True
 
     return restored

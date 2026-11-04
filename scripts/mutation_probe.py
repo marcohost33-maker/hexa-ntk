@@ -52,6 +52,10 @@ FV = "hex_fv_solver_hex_v3.py"
 T1 = "heat_operator_task_hex_v3.py"
 P1 = "phase1_protocol_hex_v3.py"
 NT = "ntk_trajectory_hex_v3.py"
+DDP = "ddp_hex_v3.py"
+T2 = "test_ddp_hex_v3.TestTwoRanks"
+I82 = "test_phase1_protocol_hex_v3.TestIssue82Residuals"
+ME = "test_mid_epoch_resume_hex_v3.TestMidEpochResume"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -62,12 +66,14 @@ MUTANTS = (
            "test_checkpoint_integration_hex_v3.TestNonMainRankStoresValidatedFloat"),
     # #40 P3-3: no commit when the file was replaced but dir-fsync failed.
     Mutant(CK, "            self.best_metric_value = metric\n            self.best_metric_name = metric_name\n"
-           "            raise\n", "            raise\n",
+           "            try:\n", "            try:\n",
            "test_checkpoint_integration_hex_v3.TestDurabilityErrorAfterReplace"),
     # Codex review on #46: run identity / metric identity / EMA decay.
+    # Since NR-03 the manifest run_id check fires first for a foreign writer;
+    # the payload run_id check is pinned by a correctly pinned foreign best.pt.
     Mutant(CK, '        if disk_run_id is None or disk_run_id != state.get("run_id"):\n',
            "        if False:\n",
-           "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
+           "test_checkpoint_integration_hex_v3.TestBestGenerationPin"),
     Mutant(CK, "        if disk_name != recorded_name:\n", "        if False:\n",
            "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
     Mutant("resume_utils_hex_v3.py", "        if recorded != current_decay:\n",
@@ -94,8 +100,20 @@ MUTANTS = (
     Mutant(CK, 'on_disk <= value if self.best_policy.mode == "min" else on_disk >= value',
            "on_disk <= value",
            "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
-    Mutant(CK, '        if not best_path.exists():\n            return False, "best_checkpoint_missing"\n', "",
+    Mutant(CK, '        if not os.path.lexists(best_path):\n            return False, "best_checkpoint_missing"\n', "",
            "test_checkpoint_integration_hex_v3.TestResumeRestoresBestMetric"),
+    # NR-03 / NR-R8-03: best.pt only from pinned, once-read bytes.
+    Mutant(CK, '        if len(data) != expected["size"] or hashlib.sha256(data).hexdigest() != expected["sha256"]:\n',
+           "        if False:\n",
+           "test_checkpoint_integration_hex_v3.TestBestGenerationPin"),
+    Mutant(CK, '        if manifest["run_id"] != state.get("run_id"):\n', "        if False:\n",
+           "test_checkpoint_integration_hex_v3.TestBestGenerationPin"),
+    Mutant(CK, 'torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)',
+           'torch.load(best_path, map_location="cpu", weights_only=True)',
+           "test_checkpoint_integration_hex_v3.TestBestGenerationPin"),
+    Mutant(CK, 'instead of trusting unverified bytes.\n        self._publish_generation("best.pt", pin)\n',
+           "instead of trusting unverified bytes.\n",
+           "test_checkpoint_integration_hex_v3.TestBestGenerationPin"),
     # #40 counters: accept non-integral / negative values.
     Mutant("resume_utils_hex_v3.py", "    if count != value or count < 0:\n", "    if count < 0:\n",
            "test_resume_utils_hex_v3.TestAsStepCount"),
@@ -289,6 +307,158 @@ MUTANTS = (
     Mutant(NT, "        if _loaded_digest(twin, reference) != state_digest:\n",
            "        if state_dict_sha256(twin.state_dict()) != state_digest:\n",
            "test_ntk_trajectory_hex_v3.TestCrossFamilyR88R98"),
+    # DDP runner (spec/DDP_RUNNER_v1.md, ROADMAP "DDP-Integration des Runners"): every
+    # rank decision is agreed. A mutant that makes ranks disagree ends in a gloo
+    # timeout (60 s) or a wrong result; both turn TestTwoRanks red.
+    Mutant(RU, "            status = self.dist.max_int(local)\n", "            status = local\n", T2),
+    # DDP_RUNNER v1.1 section 3.6: an error after backward is held and agreed.
+    # v1.1 review round: failing ranks named, own error logged and kept, unscale_ held.
+    Mutant(DDP, "        flags[self.rank] = 1 if failed_here else 0\n",
+           "        flags[0] = 1 if failed_here else 0\n", T2),
+    Mutant(DDP, "            if error is None or exc is error:\n", "            if True:\n",
+           "test_ddp_hex_v3.TestWorldSizeOne"),
+    # Codex P2 on #97: the rank-identification all-reduce runs under keeping(error) too.
+    Mutant(DDP, "        with self.keeping(error):\n            ranks = self.failed_ranks(error is not None)\n",
+           "        if True:\n            ranks = self.failed_ranks(error is not None)\n",
+           "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(DDP, '            logger.error("rank %d: %s failed', '            logger.debug("rank %d: %s failed',
+           "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, '                    logger.error("step %d failed after backward on this rank',
+           '                    logger.debug("step %d failed after backward on this rank',
+           "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, "                self.grad_scaler.scale(loss).backward()\n",
+           "                self.grad_scaler.scale(loss).backward()\n"
+           "                self.grad_scaler.unscale_(self.optimizer)\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, "        self.dist.raise_agreed_failure(step_error, n_step_failed > 0, self._held_what())\n", "", T2),
+    Mutant(RU, '            self.dist.raise_agreed_failure(step_error, n_step_failed > 0, '
+           'self._held_what("the mid-epoch save"))\n', "", T2),
+    Mutant(RU, "                    self._post_step_error = exc\n                    return loss_val, False, None\n",
+           "                    raise\n", T2),
+    Mutant(RU, "                    if _is_oom(exc):\n                        del pred\n",
+           "                    if False:\n                        del pred\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, 'status == 2, f"training step', 'False, f"training step', T2),
+    Mutant(RU, '        self.dist.run_agreed(self._build, what="runner construction")\n',
+           "        self._build()\n", T2),
+    Mutant(RU, "            loss_sum, n_batches, sq_err_sum, sq_ref_sum = self.dist.all_reduce_sum_rank0(local)\n",
+           "            loss_sum, n_batches, sq_err_sum, sq_ref_sum = local\n", T2),
+    Mutant(RU, "            self.dist.check_exact_partition(\n                indices,",
+           "            (lambda *a, **k: None)(\n                indices,", T2),
+    Mutant(RU, "        if self.dist is None:\n            return self._save_checkpoints_local(",
+           "        if True:\n            return self._save_checkpoints_local(", T2),
+    Mutant(RU, "        if self.dist is not None:\n            self._require_equal_batch_count()\n", "", T2),
+    Mutant(RU, "        if self.dist.any_true(ref != mine):\n"
+           "            raise DistributedContractError(\"resumed model",
+           "        if False:\n            raise DistributedContractError(\"resumed model", T2),
+    Mutant(RU, '        report = self.dist.run_agreed(self._resume_local, what="resume")\n',
+           "        report = self._resume_local()\n", T2),
+    Mutant(RU, "            loss_sum, loss_n, grad_sum, grad_n = self.dist.all_reduce_sum(\n"
+           "                [loss_sum, loss_n, grad_sum, grad_n]\n            )\n", "            pass\n", T2),
+    Mutant(RU, "        self.ckpt_mgr.run_id = self.dist.broadcast_bytes(\n"
+           "            bytes.fromhex(self.ckpt_mgr.run_id) if self.dist.rank == 0 else None, 16\n        ).hex()\n",
+           "", T2),
+    Mutant(DDP, "            failed_somewhere = self.any_true(error is not None)\n",
+           "            failed_somewhere = False\n", T2),
+    Mutant(DDP, "        if lo != hi:\n", "        if False:\n", T2),
+    # Independent review of #92 (2026-10-30): errors before the forward, buffers,
+    # config, lying len(), per-rank loader generators, rank-0-bound sums.
+    Mutant(RU, "                prepared = self._prepare_step(batch)\n            except StopIteration:",
+           "                prepared = None\n            except StopIteration:", T2),
+    Mutant(RU, "        if n_exhausted:\n", "        if False:\n", T2),
+    Mutant(RU, "            self._sync_buffers()\n", "            pass\n", T2),
+    Mutant(RU, "        if self.dist.any_true(ref != mine):\n            raise DistributedContractError(\n"
+           "                \"RunnerConfig", "        if False:\n            raise DistributedContractError(\n"
+           "                \"RunnerConfig", T2),
+    Mutant(RU, "                if per_rank is not None:\n"
+           "                    gen.set_state(per_rank[self.dist.rank].cpu())\n",
+           "                pass\n", T2),
+    Mutant(RU, '            restore_rng_state_tensors({key: states[key][self.dist.rank] for key in ("torch", "python", '
+           '"numpy")})\n', '            torch.random.set_rng_state(states["torch"][self.dist.rank])\n', T2),
+    Mutant(DDP, "        dist.all_reduce(t, op=dist.ReduceOp.SUM)\n        dist.broadcast(t, src=0)\n",
+           "        dist.all_reduce(t, op=dist.ReduceOp.SUM)\n", T2),
+    # Review round 2 on 205f293: buffer shapes, OOM while preparing, effective AMP.
+    Mutant(DDP, '            [f"{n}|{b.dtype}|{tuple(b.shape)}" for n, b in buffers],\n',
+           "            [n for n, _ in buffers],\n", T2),
+    Mutant(RU, "        mine = hashlib.sha256(_config_digest(config) + "
+           'self._effective_amp().encode("utf-8")).digest()\n',
+           "        mine = _config_digest(config)\n", T2),
+    Mutant(RU, "                if _is_oom(exc):\n                    # Preparing runs",
+           "                if False:\n                    # Preparing runs", "test_ddp_hex_v3.TestWorldSizeOne"),
+    # Review round 3: the OOM rescue never raises (it runs before the agreement).
+    Mutant(RU, "        except Exception:\n            logger.error(\"OOM rescue: freeing memory failed\")\n",
+           "        except ZeroDivisionError:\n            logger.error(\"OOM rescue: freeing memory failed\")\n",
+           "test_ddp_hex_v3.TestWorldSizeOne"),
+    # Per-rank RNG streams across a resume (dropout + rank seeds must continue).
+    Mutant(RU, "        if self.dist is not None:\n            self._restore_rank_rng(report)\n",
+           "        pass\n", T2),
+    Mutant(RU, "        rank_rng = self._gather_rank_rng_states() if save_state else None\n",
+           "        rank_rng = None\n", T2),
+    # Mid-epoch resume (spec/MID_EPOCH_RESUME_v1.md): interrupted == uninterrupted.
+    Mutant(RU, "        if mid is not None:\n            restore_rng_state_tensors(self._resume_rng_at_step)\n",
+           "        if False:\n            restore_rng_state_tensors(self._resume_rng_at_step)\n", ME),
+    Mutant(RU, '            torch.random.set_rng_state(mid["epoch_start"]["torch_rng"].cpu())\n', "", ME),
+    Mutant(RU, "                if state is not None:\n                    gen.set_state(state.cpu())\n",
+           "                pass\n", ME),
+    Mutant(RU, '        epoch_losses: List[float] = list(mid["losses"]) if mid is not None else []\n',
+           "        epoch_losses: List[float] = []\n", ME),
+    Mutant(RU, '            self.anomaly_detector.loss_history.extend(_float_list(history, "anomaly_history"))\n',
+           "            pass\n", ME),
+    Mutant(RU, "            for done in range(skip):\n", "            for done in range(0):\n", ME),
+    # A persistent-worker iterator breaks the replay: refused at construction and at resume.
+    Mutant(RU, "        if config.save_every_n_steps > 0:\n            _refuse_persistent_workers(",
+           "        if False:\n            _refuse_persistent_workers(", ME),
+    Mutant(RU, "            _refuse_persistent_workers(\n                self.train_loader, f\"resume checkpoint",
+           "            (\n                self.train_loader, f\"resume checkpoint", ME),
+    # Review of #94: skips carried, loader shape pinned, rank buffers under
+    # broadcast_buffers=False, per-rank anomaly history, agreed position.
+    Mutant(RU, '        n_anomalies = mid["n_anomalies"] if mid is not None else 0\n',
+           "        n_anomalies = 0\n", ME),
+    Mutant(RU, "    if shape != list(loader_shape):\n", "    if False:\n", ME),
+    Mutant(RU, '            if not getattr(self.model, "broadcast_buffers", True):\n',
+           "            if False:\n", T2),
+    Mutant(RU, '            if mid["buffers"] is not None:\n', "            if False:\n", T2),
+    Mutant(RU, "                if got != have:\n", "                if False:\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, '            history = states.get("anomaly_history")\n', "            history = None\n", T2),
+    Mutant(RU, "             -1 if done is None else done],\n", "             -1 if done is None else 0],\n", T2),
+    # Codex #94: generators owned by the sampler or a batch sampler, each once.
+    Mutant(RU, '                (f"{name}.sampler", getattr(loader, "sampler", None)),\n', "", ME),
+    Mutant(RU, '                 getattr(getattr(loader, "batch_sampler", None), "sampler", None)),\n',
+           "                 None),\n", ME),
+    Mutant(RU, "                if isinstance(gen, torch.Generator) and id(gen) not in seen:\n",
+           "                if isinstance(gen, torch.Generator):\n",
+           "test_runner_hex_v3.TestLoaderGeneratorResume"),
+    Mutant(RU, "            if recorded != current:\n", "            if False:\n", ME),
+    Mutant(RU, "    if len(losses) + n_anomalies != done or len(grad_norms) > len(losses):\n", "    if False:\n",
+           "test_mid_epoch_resume_hex_v3.TestMidEpochRecord"),
+    Mutant(RU, '    if record.get("world_size") != world_size:\n', "    if False:\n",
+           "test_mid_epoch_resume_hex_v3.TestMidEpochRecord"),
+    # The same contract, pinned in-process (world size 1 and no process group).
+    Mutant(RU, "            best_report = self.ckpt_mgr.save_best_model_checkpoint(\n"
+           "                model=self.raw_model,",
+           "            best_report = self.ckpt_mgr.save_best_model_checkpoint(\n"
+           "                model=self.model,", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, "        if self.adapter is not None and self.adapter.model is not self.model:\n",
+           "        if False:\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, "        if first != second:\n", "        if False:\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(DDP, "    gauss = _bits_float(py[-1]) if py[-2] else None\n", "    gauss = None\n",
+           "test_ddp_hex_v3.TestRunnerWithoutProcessGroup"),
+    Mutant(RU, '            self.failure_dir = self.failure_dir / f"rank{self.dist.rank}"\n', "            pass\n",
+           "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, "            if callable(set_epoch):\n                set_epoch(epoch)\n",
+           "            if False:\n                set_epoch(epoch)\n",
+           "test_ddp_hex_v3.TestRunnerWithoutProcessGroup"),
+    Mutant(DDP, "        if duplicated or missing:\n", "        if missing:\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(DDP, "        if self.any_true(out_of_range):\n", "        if False:\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(DDP, "        return iter(range(self.rank, self.dataset_len, self.num_replicas))\n",
+           "        padded = -(-self.dataset_len // self.num_replicas) * self.num_replicas\n"
+           "        return iter([i % max(self.dataset_len, 1) for i in range(self.rank, padded, self.num_replicas)])\n",
+           "test_ddp_hex_v3.TestExactDistributedEvalSampler"),
+    # Issue #82 residuals (2026-10-30): no inf from finite data, dirty-tree slot,
+    # break-even bound to the equal-accuracy rule.
+    Mutant(P1, "    if np.all(np.isfinite(out)):\n        return out\n", "    return out\n", I82),
+    Mutant(P1, "    scale = 2.0 ** -(max(1, int(n)).bit_length() + 1)\n", "    scale = 0.5\n", I82),
+    Mutant(P1, "        if not isinstance(dirty, bool):\n", "        if False:\n", I82),
+    Mutant(P1, "    if upper < float(fe[-1]) or upper > float(fe[0]):\n        return None\n", "", I82),
+    Mutant(P1, "    return np.where(np.isfinite(out), out, fallback)\n", "    return fallback\n", I82),
 )
 
 

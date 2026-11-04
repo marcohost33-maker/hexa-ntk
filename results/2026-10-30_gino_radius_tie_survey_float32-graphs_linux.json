@@ -1,0 +1,2469 @@
+{
+  "environment": {
+    "neuraloperator": "2.0.0",
+    "numpy": "2.5.3",
+    "platform": "Linux-6.18.44-fc-v185-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.6.0+cu124"
+  },
+  "source": {
+    "bound": true,
+    "git_sha": "a19c9922dc9716af65d8cbf50c2df63155bd6467",
+    "github_sha": null,
+    "worktree_dirty": false
+  },
+  "survey": {
+    "backend_crosscheck": {
+      "backend": "neuraloperator 2.0.0",
+      "graphs_checked": 960,
+      "mismatches": 0
+    },
+    "candidates": [
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 4.227837488827527e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 3,
+            "out": 3
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 3,
+            "out": 3
+          }
+        },
+        "float32_flips_total": 12,
+        "latent_resolution": 8,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.003395595509783078,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.00790526135793801,
+          "triangle_dirichlet/n=32": 0.003395595509783522,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.046875,
+        "radius_factor": 1.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 8
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 2.189490126391913e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 5,
+            "out": 5
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 10,
+        "latent_resolution": 8,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.0,
+          "triangle_dirichlet/n=32": 0.0,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.0625,
+        "radius_factor": 2.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 18,
+          "triangle_dirichlet/n=128": 6,
+          "triangle_dirichlet/n=16": 6,
+          "triangle_dirichlet/n=32": 6,
+          "triangle_dirichlet/n=64": 6
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 2.0437022226834262e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 3,
+            "out": 3
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 6,
+        "latent_resolution": 8,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0021438955237002627,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.007905261357938502,
+          "triangle_dirichlet/n=32": 0.0021438955237002627,
+          "triangle_dirichlet/n=64": 0.0006300800827177729
+        },
+        "radius": 0.0703125,
+        "radius_factor": 2.25,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.480594499376764e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 2,
+            "out": 2
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 2,
+            "out": 2
+          }
+        },
+        "float32_flips_total": 8,
+        "latent_resolution": 8,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.001223741024869085,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.0036802414764169457,
+          "triangle_dirichlet/n=32": 0.0012237410248696178,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.078125,
+        "radius_factor": 2.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 8
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.3476249480539401e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 3,
+            "out": 3
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 6,
+        "latent_resolution": 8,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.001937741401865009,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.0019377414018651703,
+          "triangle_dirichlet/n=32": 0.0019377414018651703,
+          "triangle_dirichlet/n=64": 0.0002529617646600131
+        },
+        "radius": 0.0859375,
+        "radius_factor": 2.75,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.2353228690494452e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 3,
+            "out": 4
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 2,
+            "out": 2
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 2,
+            "out": 2
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 2,
+            "out": 2
+          }
+        },
+        "float32_flips_total": 19,
+        "latent_resolution": 8,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.003395595509784114,
+          "triangle_dirichlet/n=32": 0.0,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.09375,
+        "radius_factor": 3.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 18,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 8,
+          "triangle_dirichlet/n=64": 8
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.0027448948766806e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 1
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "float32_flips_total": 2,
+        "latent_resolution": 8,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0006245446637759754,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.0031188348934289172,
+          "triangle_dirichlet/n=32": 0.0006245446637759754,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.109375,
+        "radius_factor": 3.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 12,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 12
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 7.392967772856807e-06,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 5,
+            "out": 5
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 1,
+            "out": 1
+          }
+        },
+        "float32_flips_total": 18,
+        "latent_resolution": 8,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 2.220446049250313e-16,
+          "triangle_dirichlet/n=16": 2.220446049250313e-16,
+          "triangle_dirichlet/n=32": 2.220446049250313e-16,
+          "triangle_dirichlet/n=64": 2.220446049250313e-16
+        },
+        "radius": 0.125,
+        "radius_factor": 4.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 16,
+          "triangle_dirichlet/n=128": 2,
+          "triangle_dirichlet/n=16": 2,
+          "triangle_dirichlet/n=32": 2,
+          "triangle_dirichlet/n=64": 2
+        }
+      },
+      {
+        "flip_free_on_all": true,
+        "float32_error_near_radius": 5.245255327664585e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 16,
+        "margin_over_float32_error": 3.5302007245683766,
+        "min_relative_margin": 0.00018516804158267655,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.00074046659535106,
+          "triangle_dirichlet/n=128": 0.00018516804158267655,
+          "triangle_dirichlet/n=16": 0.0017269039630787297,
+          "triangle_dirichlet/n=32": 0.00074046659535106,
+          "triangle_dirichlet/n=64": 0.0004939491533759721
+        },
+        "radius": 0.046875,
+        "radius_factor": 1.5,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 2.9339086818458426e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 2,
+        "latent_resolution": 16,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 3.472161942630336e-05,
+          "triangle_dirichlet/n=16": 0.00445436512879438,
+          "triangle_dirichlet/n=32": 0.0016652800877805518,
+          "triangle_dirichlet/n=64": 0.00013887924516620131
+        },
+        "radius": 0.0625,
+        "radius_factor": 2.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": true,
+        "float32_error_near_radius": 2.6079188283074155e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 16,
+        "margin_over_float32_error": 2.104022154640171,
+        "min_relative_margin": 5.4871189922620386e-05,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0008501187587861065,
+          "triangle_dirichlet/n=128": 5.4871189922620386e-05,
+          "triangle_dirichlet/n=16": 0.0031049575549197466,
+          "triangle_dirichlet/n=32": 0.0008501187587866986,
+          "triangle_dirichlet/n=64": 8.23011400095355e-05
+        },
+        "radius": 0.0703125,
+        "radius_factor": 2.25,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": true,
+        "float32_error_near_radius": 1.9934684215350273e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 16,
+        "margin_over_float32_error": 1.1147392692072164,
+        "min_relative_margin": 2.22219753140962e-05,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0002666311205889116,
+          "triangle_dirichlet/n=128": 2.22219753140962e-05,
+          "triangle_dirichlet/n=16": 0.0008003202562557376,
+          "triangle_dirichlet/n=32": 0.0002666311205889116,
+          "triangle_dirichlet/n=64": 0.00017779358305674008
+        },
+        "radius": 0.078125,
+        "radius_factor": 2.5,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": true,
+        "float32_error_near_radius": 1.7738342269944177e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 16,
+        "margin_over_float32_error": 2.0707470781466104,
+        "min_relative_margin": 3.673162042665142e-05,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0001653029187256294,
+          "triangle_dirichlet/n=128": 3.673162042665142e-05,
+          "triangle_dirichlet/n=16": 0.0018898579283303267,
+          "triangle_dirichlet/n=32": 0.0001653029187256294,
+          "triangle_dirichlet/n=64": 5.509490100844258e-05
+        },
+        "radius": 0.0859375,
+        "radius_factor": 2.75,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.5156955142388758e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 16,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 1.543197969189336e-05,
+          "triangle_dirichlet/n=16": 0.0007404665953509119,
+          "triangle_dirichlet/n=32": 0.0004939491533767123,
+          "triangle_dirichlet/n=64": 6.172648998174306e-05
+        },
+        "radius": 0.09375,
+        "radius_factor": 3.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.1262940183292308e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 16,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0001360451676241579,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.0007712724873141548,
+          "triangle_dirichlet/n=32": 0.0001360451676241579,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.109375,
+        "radius_factor": 3.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 4,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 4
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 7.977837840900115e-06,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 2,
+        "latent_resolution": 16,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 8.680517879389171e-06,
+          "triangle_dirichlet/n=16": 0.001665280087780996,
+          "triangle_dirichlet/n=32": 0.00013887924516620131,
+          "triangle_dirichlet/n=64": 3.472161942674745e-05
+        },
+        "radius": 0.125,
+        "radius_factor": 4.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": true,
+        "float32_error_near_radius": 5.650696714143422e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 24,
+        "margin_over_float32_error": 1.3938434074909016,
+        "min_relative_margin": 7.876186362739308e-05,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0003150102456454344,
+          "triangle_dirichlet/n=128": 7.876186362739308e-05,
+          "triangle_dirichlet/n=16": 0.004087424677610733,
+          "triangle_dirichlet/n=32": 0.002831529971372889,
+          "triangle_dirichlet/n=64": 0.0002100619705969938
+        },
+        "radius": 0.046875,
+        "radius_factor": 1.5,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 3.3655743353677714e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 2,
+        "latent_resolution": 24,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 4.4304311569209887e-05,
+          "triangle_dirichlet/n=16": 0.002831529971373259,
+          "triangle_dirichlet/n=32": 0.0007086336072950061,
+          "triangle_dirichlet/n=64": 5.9075468962555e-05
+        },
+        "radius": 0.0625,
+        "radius_factor": 2.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": true,
+        "float32_error_near_radius": 2.8602204975630092e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 24,
+        "margin_over_float32_error": 0.8159524715141899,
+        "min_relative_margin": 2.3338039840620832e-05,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.00019839070326356357,
+          "triangle_dirichlet/n=128": 2.3338039840620832e-05,
+          "triangle_dirichlet/n=16": 0.0003851473331351545,
+          "triangle_dirichlet/n=32": 0.00019839070326356357,
+          "triangle_dirichlet/n=64": 5.834612090775219e-05
+        },
+        "radius": 0.0703125,
+        "radius_factor": 2.25,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": true,
+        "float32_error_near_radius": 2.2029184225402788e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 24,
+        "margin_over_float32_error": 1.2871919930520304,
+        "min_relative_margin": 2.8355789548406563e-05,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.00011341511859903619,
+          "triangle_dirichlet/n=128": 2.8355789548406563e-05,
+          "triangle_dirichlet/n=16": 0.0014733947052501862,
+          "triangle_dirichlet/n=32": 0.0004916142260162459,
+          "triangle_dirichlet/n=64": 0.00022686883492237798
+        },
+        "radius": 0.078125,
+        "radius_factor": 2.5,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": true,
+        "float32_error_near_radius": 1.872689476847065e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 24,
+        "margin_over_float32_error": 0.8342376673699897,
+        "min_relative_margin": 1.562268100873222e-05,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.00019530410988818662,
+          "triangle_dirichlet/n=128": 1.562268100873222e-05,
+          "triangle_dirichlet/n=16": 0.0005703949863011815,
+          "triangle_dirichlet/n=32": 0.00019530410988818662,
+          "triangle_dirichlet/n=64": 2.3433929990026378e-05
+        },
+        "radius": 0.0859375,
+        "radius_factor": 2.75,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.716632020443143e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 24,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 1.9691047467240708e-05,
+          "triangle_dirichlet/n=16": 0.0003150102456460265,
+          "triangle_dirichlet/n=32": 0.00021006197059817802,
+          "triangle_dirichlet/n=64": 7.876186362754112e-05
+        },
+        "radius": 0.09375,
+        "radius_factor": 3.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.0564836600985522e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 24,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 5.786646353911351e-05,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.00028929884210653664,
+          "triangle_dirichlet/n=32": 0.00021216066587127967,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.109375,
+        "radius_factor": 3.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 4,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 4
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 9.244232025862331e-06,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 2,
+        "latent_resolution": 24,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 2.5845088237441693e-05,
+          "triangle_dirichlet/n=16": 0.0007086336072956723,
+          "triangle_dirichlet/n=32": 5.9075468962777045e-05,
+          "triangle_dirichlet/n=64": 4.430431156943193e-05
+        },
+        "radius": 0.125,
+        "radius_factor": 4.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 4.805330338131242e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 2,
+            "out": 3
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 2,
+            "out": 3
+          }
+        },
+        "float32_flips_total": 10,
+        "latent_resolution": 32,
+        "margin_over_float32_error": 3.0805319551507716e-12,
+        "min_relative_margin": 1.4802973661668753e-16,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.00017341541793284657,
+          "triangle_dirichlet/n=128": 1.4802973661668753e-16,
+          "triangle_dirichlet/n=16": 0.0004045892140223846,
+          "triangle_dirichlet/n=32": 0.00017341541793373474,
+          "triangle_dirichlet/n=64": 1.4802973661668753e-16
+        },
+        "radius": 0.046875,
+        "radius_factor": 1.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 4,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 4
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 3.2609815610484816e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 5,
+            "out": 5
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 3,
+            "out": 3
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 3,
+            "out": 3
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 3,
+            "out": 3
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 3,
+            "out": 3
+          }
+        },
+        "float32_flips_total": 34,
+        "latent_resolution": 32,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.0,
+          "triangle_dirichlet/n=32": 0.0,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.0625,
+        "radius_factor": 2.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 18,
+          "triangle_dirichlet/n=128": 6,
+          "triangle_dirichlet/n=16": 6,
+          "triangle_dirichlet/n=32": 6,
+          "triangle_dirichlet/n=64": 6
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 2.571252924058835e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 32,
+        "margin_over_float32_error": 1.535228061843263e-11,
+        "min_relative_margin": 3.9474596431116675e-16,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.00010920291540076714,
+          "triangle_dirichlet/n=128": 3.9474596431116675e-16,
+          "triangle_dirichlet/n=16": 0.0013433825222652412,
+          "triangle_dirichlet/n=32": 0.0001991040338293399,
+          "triangle_dirichlet/n=64": 1.9269864823614727e-05
+        },
+        "radius": 0.0703125,
+        "radius_factor": 2.25,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 2.1348427881129338e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 4,
+            "out": 4
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 4,
+            "out": 4
+          }
+        },
+        "float32_flips_total": 16,
+        "latent_resolution": 32,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 6.243301463868534e-05,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.0001873224355856351,
+          "triangle_dirichlet/n=32": 6.243301463886297e-05,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.078125,
+        "radius_factor": 2.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 4,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 4
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.940766171011758e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 2,
+        "latent_resolution": 32,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 3.8700106439067255e-05,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.0010712560214065031,
+          "triangle_dirichlet/n=32": 3.8700106439067255e-05,
+          "triangle_dirichlet/n=64": 1.2899702661525483e-05
+        },
+        "radius": 0.0859375,
+        "radius_factor": 2.75,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.460005938769271e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 8,
+            "out": 8
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 3,
+            "out": 4
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 3,
+            "out": 4
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 3,
+            "out": 4
+          }
+        },
+        "float32_flips_total": 37,
+        "latent_resolution": 32,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.00017341541793358672,
+          "triangle_dirichlet/n=32": 0.0,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.09375,
+        "radius_factor": 3.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 18,
+          "triangle_dirichlet/n=128": 4,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 4,
+          "triangle_dirichlet/n=64": 4
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.0645344767848794e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 7,
+            "out": 7
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 7,
+            "out": 7
+          }
+        },
+        "float32_flips_total": 28,
+        "latent_resolution": 32,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 1.0618247458309732e-05,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 1.0618247458309732e-05,
+          "triangle_dirichlet/n=32": 1.0618247458309732e-05,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.109375,
+        "radius_factor": 3.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 20,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 20
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 9.17328091565306e-06,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 6,
+            "out": 6
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 1,
+            "out": 1
+          }
+        },
+        "float32_flips_total": 20,
+        "latent_resolution": 32,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 1.1102230246251565e-16,
+          "triangle_dirichlet/n=16": 1.1102230246251565e-16,
+          "triangle_dirichlet/n=32": 1.1102230246251565e-16,
+          "triangle_dirichlet/n=64": 1.1102230246251565e-16
+        },
+        "radius": 0.125,
+        "radius_factor": 4.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 16,
+          "triangle_dirichlet/n=128": 2,
+          "triangle_dirichlet/n=16": 2,
+          "triangle_dirichlet/n=32": 2,
+          "triangle_dirichlet/n=64": 2
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 6.410215333977713e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 4,
+            "out": 4
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 8,
+        "latent_resolution": 48,
+        "margin_over_float32_error": 0.09808391756062888,
+        "min_relative_margin": 6.287390323637491e-06,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 7.5446075023707e-05,
+          "triangle_dirichlet/n=128": 6.287390323637491e-06,
+          "triangle_dirichlet/n=16": 0.002240828648567709,
+          "triangle_dirichlet/n=32": 7.544607502474321e-05,
+          "triangle_dirichlet/n=64": 5.030054579124865e-05
+        },
+        "radius": 0.046875,
+        "radius_factor": 1.5,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 3.546262973475045e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 4,
+        "latent_resolution": 48,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 1.0609948240203337e-05,
+          "triangle_dirichlet/n=16": 0.0006788098982841717,
+          "triangle_dirichlet/n=32": 0.00016974566563510152,
+          "triangle_dirichlet/n=64": 4.2439117567960594e-05
+        },
+        "radius": 0.0625,
+        "radius_factor": 2.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 2.6703637796603947e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 2,
+            "out": 2
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 2,
+            "out": 2
+          }
+        },
+        "float32_flips_total": 8,
+        "latent_resolution": 48,
+        "margin_over_float32_error": 0.20929075764512098,
+        "min_relative_margin": 5.588824586332129e-06,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 9.221960021340199e-05,
+          "triangle_dirichlet/n=128": 5.588824586332129e-06,
+          "triangle_dirichlet/n=16": 0.00022073359261278982,
+          "triangle_dirichlet/n=32": 9.221960021379673e-05,
+          "triangle_dirichlet/n=64": 8.38317831350663e-06
+        },
+        "radius": 0.0703125,
+        "radius_factor": 2.25,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 2.3249198025077077e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 3,
+            "out": 2
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 5,
+        "latent_resolution": 48,
+        "margin_over_float32_error": 0.09735691490998705,
+        "min_relative_margin": 2.263470193852868e-06,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 2.7161242721085445e-05,
+          "triangle_dirichlet/n=128": 2.263470193852868e-06,
+          "triangle_dirichlet/n=16": 0.0007873767550021782,
+          "triangle_dirichlet/n=32": 2.7161242722328893e-05,
+          "triangle_dirichlet/n=64": 2.7161242722328893e-05
+        },
+        "radius": 0.078125,
+        "radius_factor": 2.5,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": true,
+        "float32_error_near_radius": 2.0044485963730743e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 48,
+        "margin_over_float32_error": 0.2799716332712659,
+        "min_relative_margin": 5.61188747334866e-06,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 4.302366584079726e-05,
+          "triangle_dirichlet/n=128": 5.61188747334866e-06,
+          "triangle_dirichlet/n=16": 7.295208086785269e-05,
+          "triangle_dirichlet/n=32": 4.302366584079726e-05,
+          "triangle_dirichlet/n=64": 5.61188747334866e-06
+        },
+        "radius": 0.0859375,
+        "radius_factor": 2.75,
+        "tie_free_on_all": true,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.8374112133419846e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 2,
+        "latent_resolution": 48,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 1.5718512869078438e-06,
+          "triangle_dirichlet/n=16": 7.544607502474321e-05,
+          "triangle_dirichlet/n=32": 5.030054579228486e-05,
+          "triangle_dirichlet/n=64": 6.2873903240815805e-06
+        },
+        "radius": 0.09375,
+        "radius_factor": 3.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.2889630784813327e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 0,
+        "latent_resolution": 48,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 1.3857869075753878e-05,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.00029097493381792717,
+          "triangle_dirichlet/n=32": 1.3857869076007643e-05,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.109375,
+        "radius_factor": 3.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 4,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 4
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.0300133795326794e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 4,
+        "latent_resolution": 48,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 2.6524976135533507e-06,
+          "triangle_dirichlet/n=16": 0.00016974566563510152,
+          "triangle_dirichlet/n=32": 4.2439117567960594e-05,
+          "triangle_dirichlet/n=64": 1.0609948240869471e-05
+        },
+        "radius": 0.125,
+        "radius_factor": 4.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 6,
+          "triangle_dirichlet/n=128": 0,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 6.496020529741149e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 4,
+            "out": 4
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 3,
+            "out": 3
+          }
+        },
+        "float32_flips_total": 16,
+        "latent_resolution": 64,
+        "margin_over_float32_error": 2.2787756895002633e-12,
+        "min_relative_margin": 1.4802973661668753e-16,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 4.19912238511048e-05,
+          "triangle_dirichlet/n=128": 1.4802973661668753e-16,
+          "triangle_dirichlet/n=16": 0.0007695591565604806,
+          "triangle_dirichlet/n=32": 4.19912238511048e-05,
+          "triangle_dirichlet/n=64": 1.4802973661668753e-16
+        },
+        "radius": 0.046875,
+        "radius_factor": 1.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 8
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 3.538961664573126e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 7,
+            "out": 7
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 3,
+            "out": 3
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 2,
+            "out": 2
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 2,
+            "out": 2
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 2,
+            "out": 2
+          }
+        },
+        "float32_flips_total": 32,
+        "latent_resolution": 64,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.0,
+          "triangle_dirichlet/n=32": 0.0,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.0625,
+        "radius_factor": 2.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 18,
+          "triangle_dirichlet/n=128": 6,
+          "triangle_dirichlet/n=16": 6,
+          "triangle_dirichlet/n=32": 6,
+          "triangle_dirichlet/n=64": 6
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 2.9085186679643647e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 7,
+            "out": 7
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 2,
+            "out": 2
+          }
+        },
+        "float32_flips_total": 18,
+        "latent_resolution": 64,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 2.643982335411484e-05,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 2.643982335411484e-05,
+          "triangle_dirichlet/n=32": 2.643982335411484e-05,
+          "triangle_dirichlet/n=64": 4.665778612060005e-06
+        },
+        "radius": 0.0703125,
+        "radius_factor": 2.25,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 2.3236505650814364e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 1,
+            "out": 1
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 11,
+            "out": 11
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 2,
+            "out": 2
+          }
+        },
+        "float32_flips_total": 28,
+        "latent_resolution": 64,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 1.5117043711221357e-05,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.00020662250541132466,
+          "triangle_dirichlet/n=32": 1.5117043711221357e-05,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.078125,
+        "radius_factor": 2.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 8
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.873548747190832e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 8,
+            "out": 9
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 4,
+            "out": 4
+          }
+        },
+        "float32_flips_total": 25,
+        "latent_resolution": 64,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 7.28785951877662e-06,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 7.28785951877662e-06,
+          "triangle_dirichlet/n=32": 7.28785951877662e-06,
+          "triangle_dirichlet/n=64": 3.1233748681555342e-06
+        },
+        "radius": 0.0859375,
+        "radius_factor": 2.75,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 0
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.7174196849249295e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 3,
+            "out": 4
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 6,
+            "out": 6
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 2,
+            "out": 2
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 2,
+            "out": 2
+          }
+        },
+        "float32_flips_total": 27,
+        "latent_resolution": 64,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 1.4802973661668753e-16,
+          "triangle_dirichlet/n=16": 4.19912238525851e-05,
+          "triangle_dirichlet/n=32": 1.4802973661668753e-16,
+          "triangle_dirichlet/n=64": 1.4802973661668753e-16
+        },
+        "radius": 0.09375,
+        "radius_factor": 3.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 18,
+          "triangle_dirichlet/n=128": 8,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 8,
+          "triangle_dirichlet/n=64": 8
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.1769243455869319e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 2,
+            "out": 2
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 4,
+            "out": 5
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 2,
+            "out": 3
+          }
+        },
+        "float32_flips_total": 18,
+        "latent_resolution": 64,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 7.712805956826077e-06,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 7.9696126508187e-05,
+          "triangle_dirichlet/n=32": 7.712805956826077e-06,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.109375,
+        "radius_factor": 3.5,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 0,
+          "triangle_dirichlet/n=128": 12,
+          "triangle_dirichlet/n=16": 0,
+          "triangle_dirichlet/n=32": 0,
+          "triangle_dirichlet/n=64": 12
+        }
+      },
+      {
+        "flip_free_on_all": false,
+        "float32_error_near_radius": 1.0057601552371231e-05,
+        "float32_flips": {
+          "torus_periodic/n=32": {
+            "in": 4,
+            "out": 4
+          },
+          "triangle_dirichlet/n=128": {
+            "in": 3,
+            "out": 3
+          },
+          "triangle_dirichlet/n=16": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=32": {
+            "in": 0,
+            "out": 0
+          },
+          "triangle_dirichlet/n=64": {
+            "in": 0,
+            "out": 0
+          }
+        },
+        "float32_flips_total": 14,
+        "latent_resolution": 64,
+        "margin_over_float32_error": 0.0,
+        "min_relative_margin": 0.0,
+        "min_relative_margin_per_lattice": {
+          "torus_periodic/n=32": 0.0,
+          "triangle_dirichlet/n=128": 0.0,
+          "triangle_dirichlet/n=16": 0.0,
+          "triangle_dirichlet/n=32": 0.0,
+          "triangle_dirichlet/n=64": 0.0
+        },
+        "radius": 0.125,
+        "radius_factor": 4.0,
+        "tie_free_on_all": false,
+        "ties": {
+          "torus_periodic/n=32": 16,
+          "triangle_dirichlet/n=128": 2,
+          "triangle_dirichlet/n=16": 2,
+          "triangle_dirichlet/n=32": 2,
+          "triangle_dirichlet/n=64": 2
+        }
+      }
+    ],
+    "default": {
+      "float32_flips": {
+        "torus_periodic/n=32": {
+          "in": 0,
+          "out": 0
+        },
+        "triangle_dirichlet/n=128": {
+          "in": 4,
+          "out": 4
+        },
+        "triangle_dirichlet/n=16": {
+          "in": 0,
+          "out": 0
+        },
+        "triangle_dirichlet/n=32": {
+          "in": 0,
+          "out": 0
+        },
+        "triangle_dirichlet/n=64": {
+          "in": 4,
+          "out": 4
+        }
+      },
+      "latent_resolution": 32,
+      "radius_factor": 2.5,
+      "ties": {
+        "torus_periodic/n=32": 0,
+        "triangle_dirichlet/n=128": 4,
+        "triangle_dirichlet/n=16": 0,
+        "triangle_dirichlet/n=32": 0,
+        "triangle_dirichlet/n=64": 4
+      }
+    },
+    "flip_free_candidates": [
+      {
+        "float32_error_near_radius": 5.245255327664585e-05,
+        "latent_resolution": 16,
+        "margin_over_float32_error": 3.5302007245683766,
+        "min_relative_margin": 0.00018516804158267655,
+        "radius_factor": 1.5
+      },
+      {
+        "float32_error_near_radius": 2.6079188283074155e-05,
+        "latent_resolution": 16,
+        "margin_over_float32_error": 2.104022154640171,
+        "min_relative_margin": 5.4871189922620386e-05,
+        "radius_factor": 2.25
+      },
+      {
+        "float32_error_near_radius": 1.9934684215350273e-05,
+        "latent_resolution": 16,
+        "margin_over_float32_error": 1.1147392692072164,
+        "min_relative_margin": 2.22219753140962e-05,
+        "radius_factor": 2.5
+      },
+      {
+        "float32_error_near_radius": 1.7738342269944177e-05,
+        "latent_resolution": 16,
+        "margin_over_float32_error": 2.0707470781466104,
+        "min_relative_margin": 3.673162042665142e-05,
+        "radius_factor": 2.75
+      },
+      {
+        "float32_error_near_radius": 5.650696714143422e-05,
+        "latent_resolution": 24,
+        "margin_over_float32_error": 1.3938434074909016,
+        "min_relative_margin": 7.876186362739308e-05,
+        "radius_factor": 1.5
+      },
+      {
+        "float32_error_near_radius": 2.8602204975630092e-05,
+        "latent_resolution": 24,
+        "margin_over_float32_error": 0.8159524715141899,
+        "min_relative_margin": 2.3338039840620832e-05,
+        "radius_factor": 2.25
+      },
+      {
+        "float32_error_near_radius": 2.2029184225402788e-05,
+        "latent_resolution": 24,
+        "margin_over_float32_error": 1.2871919930520304,
+        "min_relative_margin": 2.8355789548406563e-05,
+        "radius_factor": 2.5
+      },
+      {
+        "float32_error_near_radius": 1.872689476847065e-05,
+        "latent_resolution": 24,
+        "margin_over_float32_error": 0.8342376673699897,
+        "min_relative_margin": 1.562268100873222e-05,
+        "radius_factor": 2.75
+      },
+      {
+        "float32_error_near_radius": 2.0044485963730743e-05,
+        "latent_resolution": 48,
+        "margin_over_float32_error": 0.2799716332712659,
+        "min_relative_margin": 5.61188747334866e-06,
+        "radius_factor": 2.75
+      }
+    ],
+    "lattices": [
+      {
+        "domain": "triangle_dirichlet",
+        "n": 16,
+        "num_nodes": 105
+      },
+      {
+        "domain": "triangle_dirichlet",
+        "n": 32,
+        "num_nodes": 465
+      },
+      {
+        "domain": "triangle_dirichlet",
+        "n": 64,
+        "num_nodes": 1953
+      },
+      {
+        "domain": "triangle_dirichlet",
+        "n": 128,
+        "num_nodes": 8001
+      },
+      {
+        "domain": "torus_periodic",
+        "n": 32,
+        "num_nodes": 1024
+      }
+    ],
+    "passed": true,
+    "positive_control": {
+      "default_flips_total": 16,
+      "flip_detector_saw_a_flip": true
+    },
+    "rule": {
+      "flips": "edges present in exactly one of the float32 and float64 graphs (both GNO directions)",
+      "float32_error_near_radius": "max |d32 - d64| / r over pairs with |d64 - r| <= 0.1 r",
+      "graph": "neuraloperator 2.0.0 native_neighbor_search (gno_use_open3d=False): torch.cdist(queries, data), 0 -> 1e-7, edge iff <= radius; input GNO queries=latent grid, data=nodes; output GNO queries=nodes, data=latent grid",
+      "latent_grid": "linspace(0, 1, R) x linspace(0, sqrt(3)/2, R), as prepare_gino_batch",
+      "margin": "min |d - r| / r over all node-latent pairs, float64",
+      "source": "gino_adapter_hex_v3._radius_ties (spec/GINO_ADAPTER_PHASE1_v2.md, amendment 2026-10-15)",
+      "tie": "|d - r| <= 1e-06 r in float64, r = radius_factor / 32"
+    },
+    "tie_free_candidates": [
+      {
+        "latent_resolution": 16,
+        "radius_factor": 1.5
+      },
+      {
+        "latent_resolution": 16,
+        "radius_factor": 2.25
+      },
+      {
+        "latent_resolution": 16,
+        "radius_factor": 2.5
+      },
+      {
+        "latent_resolution": 16,
+        "radius_factor": 2.75
+      },
+      {
+        "latent_resolution": 24,
+        "radius_factor": 1.5
+      },
+      {
+        "latent_resolution": 24,
+        "radius_factor": 2.25
+      },
+      {
+        "latent_resolution": 24,
+        "radius_factor": 2.5
+      },
+      {
+        "latent_resolution": 24,
+        "radius_factor": 2.75
+      },
+      {
+        "latent_resolution": 48,
+        "radius_factor": 1.5
+      },
+      {
+        "latent_resolution": 48,
+        "radius_factor": 2.25
+      },
+      {
+        "latent_resolution": 48,
+        "radius_factor": 2.5
+      },
+      {
+        "latent_resolution": 48,
+        "radius_factor": 2.75
+      }
+    ]
+  }
+}
