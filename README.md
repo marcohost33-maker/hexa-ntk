@@ -240,13 +240,17 @@ Vor jedem Training festgelegt, ohne Modell und ohne Lern-Claim:
   (ohne Trimmen, Paarung gebrochen, lineare Interpolation, Extrapolation, `<=` statt `<`, ...) rot.
   Seit 2026-11-05 (D-T1-2, D-T1-1; `spec/PHASE1_PROTOCOL_v1.md` §2a/§2b, Entscheidungsvorlage
   `docs/ADR/ADR-003-Phase1-baseline-refinement-and-linear-comparator.md`): die Baseline kann auf `k N`
-  loesen (`k` Zweierpotenz, Injektion per `nested_node_index` auf bitgleiche Knoten, Fehler auf `N`),
-  und eine lineare Abbildung (exaktes T1-Orakel oder POD-Ridge) bekommt Latenz und Fehler unter demselben
-  Protokoll. Die Entscheidung akzeptiert bis zum Owner-Entscheid nur `k = 1` (DRAFT-Vorregistrierung).
-  Pilot auf IDs `900100..900149` (`results/2026-11-05_t1-baseline-refinement-pilot.json`, kein Modell):
-  `k = 1, 2, 4` senkt den Boden der Kurve auf `N = 32` um den Faktor 16 (Dreieck 3.47e-3 -> 2.15e-4,
-  Torus 2.09e-3 -> 1.30e-4) und nimmt auf einem Gitter hypothetischer Ausgaenge keinen `k = 1`-Claim weg,
-  macht aber 782 (Dreieck) bzw. 874 (Torus) von 1886 Gleich-Laufzeit-Vergleichen erst auswertbar.
+  loesen (`k` Zweierpotenz, Injektion per `nested_node_index` auf bitgleiche Knoten, Fehler auf `N`), mit der
+  Anfangsbedingung aus `prolongate_linear` (fair, im getimten Aufruf; kennt keine Basis der Aufgabe) oder aus den
+  exakten Modenkoeffizienten (Orakel-Obergrenze, nicht registrierbar), optional mit Richardson-Extrapolation in `h`
+  (`scheme="cn_richardson_h"`, nur berichtet); eine lineare Abbildung (exaktes T1-Orakel oder POD-Ridge) bekommt
+  Latenz und Fehler unter demselben Protokoll. Die Entscheidung akzeptiert bis zum Owner-Entscheid nur `k = 1`
+  (DRAFT-Vorregistrierung). Pilot r2 auf IDs `900100..900149`, `N = 32`, kein Modell
+  (`results/2026-11-05_t1-baseline-refinement-pilot_r2_{triangle_dirichlet,torus_periodic}.json`): **fair** senkt der Boden der Kurve nur um den Faktor
+  1.54 (Dreieck) / 1.09 (Torus) — der O(h_N^2)-Interpolationsfehler der Anfangsbedingung ersetzt den
+  Diskretisierungsfehler, Richardson hilft dann nicht; mit **Orakel**-Anfangsbedingung Faktor 16.17 / 16.11,
+  mit Richardson 95.77 / 116.83. Die erste Fassung vom selben Tag (`..._pilot.json`) mass nur das Orakel
+  und ist durch r2 eingeordnet, nicht ersetzt.
 - **D4-Entscheidungshilfe Radius-Ties** (`scripts/oracles/gino_radius_tie_survey.py`,
   `results/2026-10-19_gino_radius_tie_survey.json`): mit der Adapter-Regel aus
   `spec/GINO_ADAPTER_PHASE1_v2.md` gemessen, dass der Phase-1-Default (latent 32, `radius_factor` 2.5) auf

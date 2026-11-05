@@ -49,26 +49,26 @@ Stufe), nicht einer Kurve aus `u0` auf `N`.
 ## Messung r2 (Pilot, Linux-Container, 4 Threads gepinnt, Zeiten dieser Maschine, nicht D5)
 
 Registrierte Aufgabe [D1], registriertes Timing (3 + 10), `steps` 1..64, `N = 32`, 50
-Pilot-Samples, davon 10 getimt. Evidenz: `results/2026-11-05_t1-baseline-refinement-pilot_r2.json`
-(gebunden an Commit {{CODE_SHA}}, Exit 0) und `results/2026-11-05_d-t1-fair-prolongation_local-gate.log`.
+Pilot-Samples, davon 10 getimt. Evidenz: `results/2026-11-05_t1-baseline-refinement-pilot_r2_{triangle_dirichlet,torus_periodic}.json`
+(gebunden an Commit b92b53c, Exit 0) und `results/2026-11-05_d-t1-fair-prolongation_local-gate.log`.
 Die Fehler sind deterministisch; die Zeiten sind Medianwerte dieses Containers.
 
 ### Boden der Kosten-Genauigkeits-Kurve (bester Punkt der Pareto-Front, `mean rel_l2`)
 
 | Fall | registriert (`k = 1`) | fair (`linear`, `k = 1, 2, 4`) | fair + Richardson | Orakel (`exact`) | Orakel + Richardson | exakte lineare Abbildung |
 |---|---|---|---|---|---|---|
-| Dreieck `N = 32` | {{TRI_K1}} | {{TRI_FAIR}} (x{{TRI_FAIR_G}}) | {{TRI_FAIR_R}} (x{{TRI_FAIR_R_G}}) | {{TRI_EX}} (x{{TRI_EX_G}}) | {{TRI_EX_R}} (x{{TRI_EX_R_G}}) | {{TRI_MAP}} in {{TRI_MAP_T}} |
-| Torus `N = 32` | {{TOR_K1}} | {{TOR_FAIR}} (x{{TOR_FAIR_G}}) | {{TOR_FAIR_R}} (x{{TOR_FAIR_R_G}}) | {{TOR_EX}} (x{{TOR_EX_G}}) | {{TOR_EX_R}} (x{{TOR_EX_R_G}}) | {{TOR_MAP}} in {{TOR_MAP_T}} |
+| Dreieck `N = 32` | 3.47e-03 | 2.25e-03 (x1.54) | 2.25e-03 (x1.54) | 2.15e-04 (x16.17) | 3.62e-05 (x95.77) | 4.1e-16 in 4.8 µs |
+| Torus `N = 32` | 2.09e-03 | 1.91e-03 (x1.09) | 1.91e-03 (x1.09) | 1.30e-04 (x16.11) | 1.79e-05 (x116.83) | 6.3e-16 in 11.9 µs |
 
 Fehlerbudget der linearen Prolongation allein (`u0` von `N` auf `2N` / `4N`, relativer
-L2-Fehler gegen das exakte feine Feld): Dreieck {{TRI_BUD2}} / {{TRI_BUD4}}, Torus {{TOR_BUD2}} /
-{{TOR_BUD4}}; Ordnung `N -> 2N` gegen `2N -> 4N`: Verhaeltnis {{TRI_ORD}} (Dreieck), {{TOR_ORD}}
-(Torus). Zweite Ordnung des Orakels im Raum bei `steps = 64`: Faktoren {{TRI_O2}} (Dreieck),
-{{TOR_O2}} (Torus).
+L2-Fehler gegen das exakte feine Feld): Dreieck 1.08e-02 / 1.12e-02, Torus 8.02e-03 /
+8.27e-03; Ordnung `N -> 2N` gegen `2N -> 4N`: Verhaeltnis 3.98 (Dreieck), 3.99
+(Torus). Zweite Ordnung des Orakels im Raum bei `steps = 64`: Faktoren 4.10 / 4.32 (Dreieck),
+4.08 / 4.27 (Torus).
 
 ### Befund (Falsifikation der ersten Fassung)
 
-- **Fair** bringt die Verfeinerung {{FAIR_SUMMARY}}. Der Mechanismus: der Interpolationsfehler
+- **Fair** bringt die Verfeinerung nur den Faktor 1.54 (Dreieck) bzw. 1.09 (Torus) am Boden der Front; bei `steps = 64` Dreieck 5.39e-03 -> 2.25e-03 -> 3.91e-03, Torus 2.99e-03 -> 1.91e-03 -> 2.97e-03 fuer `N_solve = 32, 64, 128`. Der Mechanismus: der Interpolationsfehler
   der Anfangsbedingung ist `O(h_N^2)`, unabhaengig vom Loesungsgitter, und ersetzt den
   Diskretisierungsfehler `O(h_N^2)`, statt ihn zu beseitigen. Richardson hebt den
   Diskretisierungsterm auf und laesst genau den Interpolationsfehler stehen.
@@ -85,23 +85,41 @@ registrierte Kurve:
 
 | Fall | Kandidat | gleiches Urteil | undecidable/H0 -> advantage | advantage -> H0 | "baseline floor" wird ausgewertet | Gleich-Laufzeit wird auswertbar |
 |---|---|---|---|---|---|---|
-{{MAP_ROWS}}
+| Dreieck | `linear_k124` | 1569 | 317 | 0 | 82 | 552 |
+| Dreieck | `linear_k124_richardson` | 1569 | 317 | 0 | 82 | 552 |
+| Dreieck | `exact_k124` | 1432 | 452 | 2 | 492 | 782 |
+| Dreieck | `exact_k124_richardson` | 1400 | 484 | 2 | 820 | 920 |
+| Torus | `linear_k124` | 1591 | 295 | 0 | 41 | 552 |
+| Torus | `linear_k124_richardson` | 1591 | 295 | 0 | 41 | 552 |
+| Torus | `exact_k124` | 1425 | 455 | 6 | 492 | 828 |
+| Torus | `exact_k124_richardson` | 1387 | 493 | 6 | 861 | 920 |
 
 - Die registrierte Kurve ist **nicht GINO-beguenstigend, sondern strukturell H0-lastig**: ihre
   Front endet nach wenigen Millisekunden, und ausserhalb gibt es keine Gleich-Laufzeit-Aussage
   (keine Extrapolation, Abschnitt 6). Das Beispiel des Gesamtberichts ("1e-3 bei 20 ms gewinnt")
   ergibt mit `k = 1` **H0** mit der Begruendung "baseline floor" — formal kein Claim, aber eine
   Formulierung, die wie ein Genauigkeitsvorsprung gelesen wird.
-- Die faire Verfeinerung {{FAIR_MAP_SUMMARY}}.
+- Die faire Verfeinerung nimmt 0 / 0 `k = 1`-Claims weg und macht 552 / 552 Gleich-Laufzeit-Zellen auswertbar (317 / 295 davon fuer das Modell); das Orakel (`exact_k124`) dagegen 782 / 828.
+- Das Beispiel des Gesamtberichts (`1e-3` bei 20 ms) lautet registriert **H0** ("baseline
+  floor"), fair **advantage** auf beiden Gittern, Orakel **advantage** (Dreieck) / **H0** (Torus). Zwischen r1 (Threads
+  ungepinnt) und r2 (4 Threads gepinnt) kippte das Orakel-Urteil auf dem Dreieck von H0 zu
+  advantage, weil die Zeiten der `N_solve = 64`-Punkte um ~10-20 % wanderten; das faire Urteil
+  kippte nicht. Zeiten von ±20 % bewegen Urteile nahe der Front: ein Grund, die Kurve auf der
+  D5-Maschine mit gepinnten Threads zu messen und Urteile nahe der Front als solche zu
+  berichten.
 - Befund dieser Maschine: auf D5 ist die Karte neu zu rechnen.
 
 ## Entscheidungsvorschlag
 
-**E1 (D-T1-2), empfohlen: {{E1_REC}}.**
+**E1 (D-T1-2), empfohlen: A, wegen der Entscheidbarkeit (der Boden allein wuerde A nicht tragen).**
 - **A** Registrieren mit der fairen Prolongation: die Kurve laeuft fuer jedes Auswertungsgitter
   mit `N_solve = k N`, `k in (1, 2)`, Anfangsbedingung per `prolongate_linear` im getimten
-  Aufruf, Fehler auf `N` nach Injektion (`spec/PHASE1_PROTOCOL_v1.md` §2a). `k = 4` bringt fair
-  nichts mehr (Messung) und wuerde fuer `N_eval = 128` (`N_solve = 512`) nur Kosten erzeugen.
+  Aufruf, Fehler auf `N` nach Injektion (`spec/PHASE1_PROTOCOL_v1.md` §2a). Der Grund ist
+  **Entscheidbarkeit, nicht der Boden**: der Boden sinkt fair nur um x1.54 / x1.09,
+  aber die Pareto-Front reicht von 3.9 / 7.0 ms (registriert) bis
+  57.3 / 103.9 ms (fair, `k = 2`) — in den Latenzbereich, in dem ein CPU-GINO
+  liegen wird; ohne Verfeinerung ist dort keine Gleich-Laufzeit-Aussage moeglich. `k = 4` bringt
+  fair nichts mehr (Messung) und wuerde fuer `N_eval = 128` (`N_solve = 512`) nur Kosten erzeugen.
   Code-Folge: `_REGISTERED_REFINEMENTS` und der Text aendern sich zusammen, in einem PR mit
   Abweichungsvermerk.
 - **B** Nicht registrieren (Stand heute). Dann muss der Bericht jedes "baseline floor" als
@@ -166,5 +184,5 @@ Fairness-Entscheid; das Instrument ist nicht gebaut.
 - Tests, Mutationsprobe und Gate: `results/2026-11-05_d-t1-fair-prolongation_local-gate.log`
   (erste Runde: `results/2026-11-05_d-t1-instruments_local-gate.log`).
 - Pilotmessung r2 (gebunden an den Commit, Exit 0):
-  `results/2026-11-05_t1-baseline-refinement-pilot_r2.json`; erste Runde (Orakel allein):
+  `results/2026-11-05_t1-baseline-refinement-pilot_r2_{triangle_dirichlet,torus_periodic}.json`; erste Runde (Orakel allein):
   `results/2026-11-05_t1-baseline-refinement-pilot.json`.

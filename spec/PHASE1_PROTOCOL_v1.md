@@ -135,7 +135,7 @@ coarse start prolongated, test), so the extrapolation converges to the
 semigroup of the interpolant, not of `u0`. Reported only; never registered.
 
 **What the measurement shows (2026-11-05, `N = 16` in the tests, `N = 32` in
-`results/2026-11-05_t1-baseline-refinement-pilot_r2.json`).** The fair
+`results/2026-11-05_t1-baseline-refinement-pilot_r2_{triangle_dirichlet,torus_periodic}.json`).** The fair
 refinement gains little: the interpolation error of the initial condition is
 `O(h_N^2)` whatever the solve lattice, so it replaces the `O(h_N^2)`
 discretisation error instead of removing it; one level still helps, the

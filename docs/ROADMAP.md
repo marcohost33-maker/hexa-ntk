@@ -66,7 +66,7 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
     Mutanten, 2 Mutationsstellen nachgezogen; Oracle v2 mit CLI (`--threads` pinnt BLAS/torch vor
     dem numpy-Import, Stichproben, Gitter, Modi).
     _Evidenz:_ `results/2026-11-05_d-t1-fair-prolongation_local-gate.log`,
-    `results/2026-11-05_t1-baseline-refinement-pilot_r2.json`.
+    `results/2026-11-05_t1-baseline-refinement-pilot_r2_{triangle_dirichlet,torus_periodic}.json`.
 - [x] **DDP v1.1: Fehler nach `backward` abgestimmt + 3-Rank-Evidenz (2026-11-02, Linux-Container;
   offen aus dem DDP-Eintrag unten: "Fehler in backward/optimizer.step", "> 2 Ranks").**
   `spec/DDP_RUNNER_v1.md` Abschnitt 3.6: Clipping, Optimizer-/`GradScaler`-Schritt und EMA-Update
