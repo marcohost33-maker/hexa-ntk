@@ -1,0 +1,90 @@
+# Local gate 2026-11-05 -- D-T1-2 (baseline spatial refinement) and D-T1-1 (linear comparator) as instruments
+# Branch claude/hexa-ntk-neural-operator-2rwqdx; base origin/main cd5f6dc; code commit 85225ae
+# Linux cloud container (4 CPUs), Python 3.13.18 (CI runs 3.12), torch 2.6.0+cu124 (PyPI wheel, CPU execution,
+# no CUDA device; download.pytorch.org is blocked from the container, the 15 wheels were fetched from PyPI with
+# their published SHA-256 checked; triton not installed, only torch.compile needs it), numpy 2.5.3,
+# coverage 7.17.0, ruff 0.17.2; neuraloperator not installed (optional GINO lane, runs in CI)
+# Source of the open item: Gesamtbericht 2026-11-05 (Drive), chapters 9/11/18/20, gates G2/G3, red blind spot
+# "PR #91 freezes a T1 baseline without spatial refinement and without a linear comparator"
+
+## Red against the old code (main cd5f6dc modules, new test files copied into a temporary worktree)
+# python -m unittest test_hex_fv_solver_hex_v3
+ImportError: cannot import name 'nested_node_index' from 'hex_fv_solver_hex_v3'
+FAILED (errors=1)
+# python -m unittest test_phase1_protocol_hex_v3
+ImportError: cannot import name 'nested_node_index' from 'hex_fv_solver_hex_v3'
+FAILED (errors=1)
+# python -m unittest test_linear_baseline_hex_v3
+Ran 22 tests
+FAILED (errors=1)   # test_factors_are_the_matrix: 'PODRidgeBaseline' object has no attribute 'factors'
+# (the new behaviour does not exist on main; the discriminating evidence for each guard is the mutation probe below)
+
+## End run (working tree of code commit 85225ae)
+# ruff check src scripts
+All checks passed!
+ruffexit=0
+# python -m compileall src
+compileexit=0
+# python scripts/engine_gate.py
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+engexit=0
+# python scripts/verify_sources.py
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 12 Script-Eintraege | Dateiliste: git (81 Dateien) | PASS
+vsexit=0
+# python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+Ran 1115 tests in 44.435s
+OK (skipped=7)
+exit=0
+# skips: 6 x 'optional neuraloperator backend not installed' (GINO lane runs in CI), 1 x 'needs CUDA'
+# 27 new tests: TestNestedNodeIndex (4), TestRefinedBaselineCurve (10), TestRefinedCurveInTheDecision (4),
+#   TestExactLinearMap (3), TestLinearComparatorPoint (5), test_factors_are_the_matrix (1)
+# python -m coverage report
+src/toolkit/hex_fv_solver_hex_v3.py              432      8    172      6    98%
+src/toolkit/linear_baseline_hex_v3.py            151      1     64      1    99%
+src/toolkit/phase1_protocol_hex_v3.py            980     10    392      8    99%
+TOTAL                                           6225    246   2342    192    95%
+covexit=0
+
+## Mutation probe (python scripts/mutation_probe.py)
+# full run before the fail-fast test existed (169 mutants, 9 new):
+[MUTATION-PROBE] baseline green | 168/169 killed | FAIL
+exit=1
+# M163 SURVIVED  phase1_protocol_hex_v3.py -> TestRefinedBaselineCurve
+#   (the protocol's own power-of-two check disabled: nested_node_index refuses k = 3 later, so the
+#    validation test still saw ValueError; the check's real job is to refuse BEFORE the k = 1 block is
+#    solved and timed). New test test_an_invalid_refinement_fails_before_anything_is_solved_or_timed:
+#    refinements (1, 3) must raise "refinement 3 is not a power of two" with zero clock readings;
+#    green on the code, red under the mutant (checked by hand), then the 9 new mutants re-run:
+M161 KILLED    hex_fv_solver_hex_v3.py -> TestNestedNodeIndex          (power-of-two check off)
+M162 KILLED    hex_fv_solver_hex_v3.py -> TestNestedNodeIndex          (nesting without the factor k)
+M163 KILLED    phase1_protocol_hex_v3.py -> TestRefinedBaselineCurve   (protocol power-of-two check off)
+M164 KILLED    phase1_protocol_hex_v3.py -> TestRefinedBaselineCurve   (input identity check off)
+M165 KILLED    phase1_protocol_hex_v3.py -> TestRefinedBaselineCurve   (first M nodes instead of the injection)
+M166 KILLED    phase1_protocol_hex_v3.py -> TestRefinedCurveInTheDecision (n_solve binding off)
+M167 KILLED    phase1_protocol_hex_v3.py -> TestExactLinearMap         (rank refusal off)
+M168 KILLED    phase1_protocol_hex_v3.py -> TestLinearComparatorPoint  (leakage guard off)
+M169 KILLED    linear_baseline_hex_v3.py -> TestViewsAndInvariance     (factors with b instead of b^T)
+# 9/9; since the full run only that one test was added (a new test cannot revive a killed mutant), so the
+# 160 older mutants stand as killed in the full run above. README states 169/169.
+
+## Pilot measurement (bound): python scripts/oracles/t1_baseline_refinement_pilot.py
+#   --output results/2026-11-05_t1-baseline-refinement-pilot.json
+# run on the clean tree of 85225ae (source.bound = true, worktree_dirty = false), 10 min 7 s wall, threads
+# not pinned (user time 28 min: numpy uses several cores); no other load during the run
+[T1-REFINEMENT] triangle_dirichlet N=32: floor k=1 3.471e-03, k=1,2,4 2.147e-04 (x16.17); exact map 4.1e-16 at 3.25e-06 s; checks {'k1_equals_unrefined_errors': True, 'second_order_in_h_at_steps64': True, 'exact_map_reproduces_truth': True}
+[T1-REFINEMENT] torus_periodic N=32: floor k=1 2.093e-03, k=1,2,4 1.299e-04 (x16.11); exact map 6.3e-16 at 9.49e-06 s; checks {'k1_equals_unrefined_errors': True, 'second_order_in_h_at_steps64': True, 'exact_map_reproduces_truth': True}
+[T1-REFINEMENT] passed=True bound=True | PASS
+exit=0
+# results/2026-11-05_t1-baseline-refinement-pilot.json sha256 8ab3d287c05ebdfa20c405c4c32c0930de33905b3210fe328c4ce330315357a8
+# registered frontier (k = 1): triangle 0.68-3.46 ms, torus 1.39-5.24 ms; proposed (k = 1, 2, 4) to 195 / 468 ms
+# decision map of hypothetical outcomes (no model; 41 latencies x 46 upper bounds; rules of section 6):
+#   triangle: same 1442, H0->advantage 444, advantage->H0 0, baseline floor now evaluated 492, equal runtime now evaluable 782
+#   torus:    same 1412, H0->advantage 474, advantage->H0 0, baseline floor now evaluated 492, equal runtime now evaluable 874
+# an earlier unbound dry run on the dirty tree gave the same errors bit for bit (deterministic) and other times
+# (e.g. map counts 461/443 and 828/828); only the bound run is evidence
+
+## Not run here
+# the D5 machine (all times are this container's); N_eval = 16, 64, 128 (only the ID lattice N = 32 of both
+# domains); N_solve = 256 / 512 (cost for N_eval = 128 is an owner question, ADR-003); POD-ridge on T1 data
+# (no model on T1 before approval: the fitted comparator is tested on synthetic linear data only);
+# the neuraloperator lane (unchanged code, CI)

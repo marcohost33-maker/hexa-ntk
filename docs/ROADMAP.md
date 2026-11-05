@@ -39,8 +39,10 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   (Dreieck 3.47e-3 -> 2.15e-4, Torus 2.09e-3 -> 1.30e-4), zweite Ordnung im Raum (Faktoren
   4.1/4.3), exakte lineare Abbildung ~5e-16 in Mikrosekunden. **Korrektur der Begruendung:** die
   registrierte Kurve ist wegen "keine Extrapolation" H0-lastig, nicht GINO-beguenstigend; die
-  Verfeinerung nahm auf einem Gitter hypothetischer Ausgaenge keinen `k = 1`-Claim weg und macht
-  den Vergleich im realistischen GINO-Bereich erst entscheidbar (Zahlen: ADR-003). 27 neue Tests,
+  Verfeinerung nahm auf einem Gitter hypothetischer Ausgaenge (1886 Zellen je Fall) keinen
+  `k = 1`-Claim weg und macht den Vergleich im realistischen GINO-Bereich erst entscheidbar
+  (782 / 874 Gleich-Laufzeit-Zellen neu auswertbar, 444 / 474 H0 -> advantage gegen die 16-mal
+  staerkere Baseline; ADR-003). Befund dieser Maschine, auf D5 neu zu rechnen. 27 neue Tests,
   9 neue Mutanten (M163 ueberlebte zuerst: Fail-fast-Test ergaenzt). Die Vorregistrierung ist **nicht** geaendert (kein Konflikt mit PR #91); der
   Owner-Entscheid steht in `docs/ADR/ADR-003-Phase1-baseline-refinement-and-linear-comparator.md`.
   _Evidenz:_ `results/2026-11-05_d-t1-instruments_local-gate.log`,

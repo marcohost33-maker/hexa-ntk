@@ -246,7 +246,7 @@ Vor jedem Training festgelegt, ohne Modell und ohne Lern-Claim:
   Pilot auf IDs `900100..900149` (`results/2026-11-05_t1-baseline-refinement-pilot.json`, kein Modell):
   `k = 1, 2, 4` senkt den Boden der Kurve auf `N = 32` um den Faktor 16 (Dreieck 3.47e-3 -> 2.15e-4,
   Torus 2.09e-3 -> 1.30e-4) und nimmt auf einem Gitter hypothetischer Ausgaenge keinen `k = 1`-Claim weg,
-  macht aber 828 von 1886 Gleich-Laufzeit-Vergleichen erst auswertbar.
+  macht aber 782 (Dreieck) bzw. 874 (Torus) von 1886 Gleich-Laufzeit-Vergleichen erst auswertbar.
 - **D4-Entscheidungshilfe Radius-Ties** (`scripts/oracles/gino_radius_tie_survey.py`,
   `results/2026-10-19_gino_radius_tie_survey.json`): mit der Adapter-Regel aus
   `spec/GINO_ADAPTER_PHASE1_v2.md` gemessen, dass der Phase-1-Default (latent 32, `radius_factor` 2.5) auf
