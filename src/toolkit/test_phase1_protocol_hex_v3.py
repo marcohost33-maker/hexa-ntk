@@ -555,7 +555,8 @@ _REGISTERED_STEPS = (1, 2, 4, 8, 16, 32, 64)
 
 
 def _curve_points(times, errors, *, steps=_REGISTERED_STEPS, n=32, domain="triangle_dirichlet", sample_count=500,
-                  timed_samples=5, config=None, protocol=None, rtol=1e-12, clock="time.perf_counter", n_solve=None):
+                  timed_samples=5, config=None, protocol=None, rtol=1e-12, clock="time.perf_counter", n_solve=None,
+                  prolongation=None, scheme="cn"):
     """Baseline points with explicit measurement coordinates, as ``baseline_cost_accuracy_curve`` writes them.
 
     The coordinates are the ones under test (Equalita R4-F1); the values are given. Hand-built
@@ -573,7 +574,10 @@ def _curve_points(times, errors, *, steps=_REGISTERED_STEPS, n=32, domain="trian
         median_wall_time_s=float(t), wall_time_ci_s=(float(t), float(t)), cg_iterations_mean=1.0, domain=domain,
         kappa=float(config.kappa), t_final=float(config.t_final), task_config_sha256=config.digest(), rtol=rtol,
         warmup=protocol.warmup, repeats=protocol.repeats, timing_protocol_sha256=protocol.digest(), clock=clock,
-        n_solve=n if n_solve is None else n_solve)
+        n_solve=n if n_solve is None else n_solve,
+        prolongation=(("none" if (n_solve is None or n_solve == n) else "linear") if prolongation is None
+                      else prolongation),
+        scheme=scheme)
         for s, t, e in zip(steps, times, errors))
 
 
@@ -1586,14 +1590,15 @@ class TestRefinedBaselineCurve(unittest.TestCase):
         cls.protocol = pp.TimingProtocol(warmup=1, repeats=3, bootstrap_resamples=200)
         cls.points = pp.baseline_cost_accuracy_curve(
             cls.config, cls.data["u0"], cls.data["uT"], cls.lattice, steps_grid=(16, 64),
-            protocol=cls.protocol, clock=_fake_clock(), refinements=(1, 2, 4),
+            protocol=cls.protocol, clock=_fake_clock(), refinements=(1, 2, 4), prolongation="exact",
             coefficients=cls.data["coefficients"])
 
     def test_points_are_refinement_major_and_carry_n_solve(self):
         self.assertEqual([(p.n, p.n_solve, p.steps) for p in self.points],
                          [(8, 8, 16), (8, 8, 64), (8, 16, 16), (8, 16, 64), (8, 32, 16), (8, 32, 64)])
+        self.assertEqual([p.prolongation for p in self.points], ["none", "none", "exact", "exact", "exact", "exact"])
         for p in self.points:
-            self.assertEqual((p.sample_count, p.timed_samples, p.domain), (3, 3, "triangle_dirichlet"))
+            self.assertEqual((p.sample_count, p.timed_samples, p.domain, p.scheme), (3, 3, "triangle_dirichlet", "cn"))
             self.assertEqual(p.to_dict()["n_solve"], p.n_solve)
             json.dumps(p.to_dict(), allow_nan=False)
 
@@ -1612,7 +1617,12 @@ class TestRefinedBaselineCurve(unittest.TestCase):
         plain = pp.baseline_cost_accuracy_curve(self.config, self.data["u0"], self.data["uT"], self.lattice,
                                                 steps_grid=(16, 64), protocol=self.protocol, clock=_fake_clock())
         self.assertEqual([p.to_dict() for p in plain], [p.to_dict() for p in self.points[:2]])
-        self.assertEqual([p.n_solve for p in plain], [8, 8])
+        self.assertEqual([(p.n_solve, p.prolongation, p.scheme) for p in plain], [(8, "none", "cn")] * 2)
+        # The k = 1 block does not depend on the prolongation mode either (it uses u0 as given).
+        linear = pp.baseline_cost_accuracy_curve(self.config, self.data["u0"], self.data["uT"], self.lattice,
+                                                 steps_grid=(16, 64), protocol=self.protocol, clock=_fake_clock(),
+                                                 refinements=(1, 2), prolongation="linear")
+        self.assertEqual([p.to_dict() for p in linear[:2]], [p.to_dict() for p in plain])
 
     def test_the_refined_prediction_is_the_injected_fine_solution(self):
         # Oracle by construction: the fine solve of the exact fine initial condition, injected.
@@ -1632,7 +1642,8 @@ class TestRefinedBaselineCurve(unittest.TestCase):
         data = generate_dataset(config, n=8, sample_ids=[0, 1], dataset_seed=1)
         points = pp.baseline_cost_accuracy_curve(config, data["u0"], data["uT"], torus_hex_lattice(8),
                                                  steps_grid=(64,), protocol=self.protocol, clock=_fake_clock(),
-                                                 refinements=(1, 2), coefficients=data["coefficients"])
+                                                 refinements=(1, 2), prolongation="exact",
+                                                 coefficients=data["coefficients"])
         self.assertEqual([p.n_solve for p in points], [8, 16])
         self.assertGreater(points[0].mean_rel_l2 / points[1].mean_rel_l2, 3.0)
 
@@ -1643,14 +1654,20 @@ class TestRefinedBaselineCurve(unittest.TestCase):
             readings.append(None)
             return float(len(readings))
 
-        pp.baseline_cost_accuracy_curve(self.config, self.data["u0"], self.data["uT"], self.lattice,
-                                        steps_grid=(1,), protocol=self.protocol, timed_samples=2, clock=clock,
-                                        refinements=(1, 2), coefficients=self.data["coefficients"])
-        # refinements x steps x timed samples x repeats x 2 readings; building the fine inputs is untimed.
-        self.assertEqual(len(readings), 2 * 1 * 2 * self.protocol.repeats * 2)
+        for mode in ("exact", "linear"):
+            readings.clear()
+            pp.baseline_cost_accuracy_curve(self.config, self.data["u0"], self.data["uT"], self.lattice,
+                                            steps_grid=(1,), protocol=self.protocol, timed_samples=2, clock=clock,
+                                            refinements=(1, 2), prolongation=mode,
+                                            coefficients=self.data["coefficients"])
+            # refinements x steps x timed samples x repeats x 2 readings; the exact fine inputs are built
+            # untimed, the linear prolongation runs inside the timed call (no extra readings either way).
+            with self.subTest(mode=mode):
+                self.assertEqual(len(readings), 2 * 1 * 2 * self.protocol.repeats * 2)
 
     def test_coefficients_must_reproduce_u0(self):
-        kwargs = dict(steps_grid=(1,), protocol=self.protocol, clock=_fake_clock(), refinements=(1, 2))
+        kwargs = dict(steps_grid=(1,), protocol=self.protocol, clock=_fake_clock(), refinements=(1, 2),
+                      prolongation="exact")
         swapped = self.data["coefficients"][[1, 0, 2]]           # negative control: another sample's modes
         with self.assertRaisesRegex(ValueError, "does not reproduce u0"):
             pp.baseline_cost_accuracy_curve(self.config, self.data["u0"], self.data["uT"], self.lattice,
@@ -1669,17 +1686,25 @@ class TestRefinedBaselineCurve(unittest.TestCase):
                                    ("12", TypeError), (2, TypeError), ((True,), TypeError), ((1.0,), TypeError)):
             with self.subTest(refinements=refinements), self.assertRaises(error):
                 pp.baseline_cost_accuracy_curve(*base, refinements=refinements, coefficients=coeffs, **kwargs)
+        exact = dict(kwargs, prolongation="exact")
         with self.assertRaisesRegex(ValueError, "needs the mode coefficients"):
-            pp.baseline_cost_accuracy_curve(*base, refinements=(1, 2), **kwargs)
+            pp.baseline_cost_accuracy_curve(*base, refinements=(1, 2), **exact)
         with self.assertRaisesRegex(ValueError, "one row per input"):
-            pp.baseline_cost_accuracy_curve(*base, refinements=(2,), coefficients=coeffs[:2], **kwargs)
+            pp.baseline_cost_accuracy_curve(*base, refinements=(2,), coefficients=coeffs[:2], **exact)
         with self.assertRaises(TypeError):
-            pp.baseline_cost_accuracy_curve(*base, refinements=(2,), coefficients=coeffs.astype(complex), **kwargs)
+            pp.baseline_cost_accuracy_curve(*base, refinements=(2,), coefficients=coeffs.astype(complex), **exact)
         with self.assertRaises(ValueError):                       # wrong K: evaluate_sample refuses
-            pp.baseline_cost_accuracy_curve(*base, refinements=(2,), coefficients=coeffs[:, :5], **kwargs)
-        # Without a k > 1 the coefficients are not needed and not read.
+            pp.baseline_cost_accuracy_curve(*base, refinements=(2,), coefficients=coeffs[:, :5], **exact)
+        for bad in ("spectral", "", None, 1):
+            with self.subTest(prolongation=bad), self.assertRaises(ValueError):
+                pp.baseline_cost_accuracy_curve(*base, refinements=(1, 2), prolongation=bad, **kwargs)
+        with self.assertRaises(TypeError):
+            pp.baseline_cost_accuracy_curve(*base, refinements=(1, 2), richardson=1, **kwargs)
+        # Without a k > 1 the coefficients are not needed and not read; "linear" never reads them.
         self.assertEqual(len(pp.baseline_cost_accuracy_curve(*base, refinements=(1,), coefficients="ignored",
-                                                             **kwargs)), 1)
+                                                             **exact)), 1)
+        self.assertEqual(len(pp.baseline_cost_accuracy_curve(*base, refinements=(1, 2), coefficients="ignored",
+                                                             **kwargs)), 2)
 
     def test_an_invalid_refinement_fails_before_anything_is_solved_or_timed(self):
         # Fail fast: (1, 3) must not solve and time the k = 1 block before nested_node_index refuses k = 3.
@@ -1698,6 +1723,119 @@ class TestRefinedBaselineCurve(unittest.TestCase):
     def test_proposed_refinements_are_powers_of_two_and_not_registered(self):
         self.assertEqual(pp.PROPOSED_REFINEMENTS, (1, 2, 4))
         self.assertEqual(pp._REGISTERED_REFINEMENTS, (1,))
+        self.assertEqual((pp._REGISTERED_PROLONGATION, pp._REGISTERED_SCHEME), ("linear", "cn"))
+
+
+class TestFairRefinementAndRichardson(unittest.TestCase):
+    """Section 2a: the timed linear prolongation (what a practitioner has) against the exact oracle field,
+    and Richardson extrapolation in h. Measured 2026-11-05 on N = 16: the fair refinement gains little
+    (its O(h^2) interpolation error replaces the O(h^2) discretisation error), the oracle gains 4x per
+    level and Richardson far more. The tests pin that mechanism, not the numbers."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.protocol = pp.TimingProtocol(warmup=1, repeats=3, bootstrap_resamples=200)
+        cls.config = HeatOperatorTaskConfig()
+        cls.lattice = triangle_hex_lattice(16)
+        cls.data = generate_dataset(cls.config, n=16, sample_ids=[0, 1, 2], dataset_seed=1)
+        common = dict(steps_grid=(64,), protocol=cls.protocol, refinements=(1, 2, 4), richardson=True)
+        cls.linear = pp.baseline_cost_accuracy_curve(cls.config, cls.data["u0"], cls.data["uT"], cls.lattice,
+                                                     clock=_fake_clock(), prolongation="linear", **common)
+        cls.exact = pp.baseline_cost_accuracy_curve(cls.config, cls.data["u0"], cls.data["uT"], cls.lattice,
+                                                    clock=_fake_clock(), prolongation="exact",
+                                                    coefficients=cls.data["coefficients"], **common)
+
+    @staticmethod
+    def _by(points, scheme, n_solve):
+        return next(p for p in points if (p.scheme, p.n_solve) == (scheme, n_solve))
+
+    def test_layout(self):
+        for points, mode in ((self.linear, "linear"), (self.exact, "exact")):
+            with self.subTest(mode=mode):
+                self.assertEqual([(p.scheme, p.n_solve, p.prolongation) for p in points],
+                                 [("cn", 16, "none"), ("cn", 32, mode), ("cn", 64, mode),
+                                  ("cn_richardson_h", 32, mode), ("cn_richardson_h", 64, mode)])
+                for p in points:
+                    json.dumps(p.to_dict(), allow_nan=False)
+
+    def test_the_oracle_field_is_never_worse_than_the_fair_prolongation(self):
+        for scheme, n_solve in (("cn", 32), ("cn", 64), ("cn_richardson_h", 32), ("cn_richardson_h", 64)):
+            with self.subTest(scheme=scheme, n_solve=n_solve):
+                self.assertLess(self._by(self.exact, scheme, n_solve).mean_rel_l2,
+                                self._by(self.linear, scheme, n_solve).mean_rel_l2)
+        self.assertEqual(self._by(self.exact, "cn", 16).to_dict(), self._by(self.linear, "cn", 16).to_dict())
+
+    def test_the_fair_refinement_does_not_converge_at_second_order(self):
+        # Linear prolongation: the interpolation error of the initial condition is O(h_N^2) whatever
+        # the solve lattice, so the error cannot fall by 4 per level; the oracle field's can.
+        fair = [self._by(self.linear, "cn", n).mean_rel_l2 for n in (16, 32, 64)]
+        oracle = [self._by(self.exact, "cn", n).mean_rel_l2 for n in (16, 32, 64)]
+        self.assertLess(fair[1], fair[0])                      # one level still helps
+        self.assertLess(fair[1] / fair[2], 2.0)                # the second does not (ratio 0.6 measured)
+        self.assertGreater(oracle[0] / oracle[1], 3.0)
+        self.assertGreater(oracle[1] / oracle[2], 3.0)
+
+    def test_richardson_cancels_the_discretisation_error_of_the_oracle_only(self):
+        # Oracle: the (32, 64) extrapolation beats plain CN on 64 by far; (16, 32) beats CN on 32.
+        self.assertLess(self._by(self.exact, "cn_richardson_h", 64).mean_rel_l2,
+                        0.1 * self._by(self.exact, "cn", 64).mean_rel_l2)
+        self.assertLess(self._by(self.exact, "cn_richardson_h", 32).mean_rel_l2,
+                        self._by(self.exact, "cn", 32).mean_rel_l2)
+        # Fair: what remains is the interpolation error of the initial condition, no gain.
+        self.assertGreater(self._by(self.linear, "cn_richardson_h", 64).mean_rel_l2,
+                           self._by(self.linear, "cn", 32).mean_rel_l2)
+
+    def test_richardson_point_is_the_combination_of_its_two_solves(self):
+        from heat_operator_task_hex_v3 import evaluate_predictions, evaluate_sample, mechanistic_baseline
+        mid, fine = triangle_hex_lattice(32), triangle_hex_lattice(64)
+        inject_mid, inject_fine = nested_node_index(self.lattice, mid), nested_node_index(self.lattice, fine)
+        combined = []
+        for a in self.data["coefficients"]:
+            u_mid, info_mid = mechanistic_baseline(self.config, evaluate_sample(self.config, a, mid)[0], mid, steps=64)
+            u_fine, info_fine = mechanistic_baseline(self.config, evaluate_sample(self.config, a, fine)[0], fine,
+                                                     steps=64)
+            combined.append((4.0 * u_fine[inject_fine] - u_mid[inject_mid]) / 3.0)
+        expected = float(np.mean(evaluate_predictions(np.stack(combined), self.data["uT"], self.lattice)["rel_l2"]))
+        point = self._by(self.exact, "cn_richardson_h", 64)
+        self.assertEqual(point.mean_rel_l2, expected)
+        # Its CG count is the sum of the two plain solves' counts (the same solves).
+        plain = self._by(self.exact, "cn", 32).cg_iterations_mean + self._by(self.exact, "cn", 64).cg_iterations_mean
+        self.assertAlmostEqual(point.cg_iterations_mean, plain, delta=1e-9 * plain)   # mean of sums vs sum of means
+
+    def test_linear_richardson_uses_the_same_interpolant_on_both_levels(self):
+        # Linear of linear is linear: the fine start is the coarse start interpolated, so the pair solves the
+        # same continuous initial condition; the point equals a manual pipeline built that way.
+        from heat_operator_task_hex_v3 import evaluate_predictions, mechanistic_baseline
+        from hex_fv_solver_hex_v3 import prolongate_linear
+        mid, fine = triangle_hex_lattice(32), triangle_hex_lattice(64)
+        inject_mid, inject_fine = nested_node_index(self.lattice, mid), nested_node_index(self.lattice, fine)
+        combined = []
+        for u0 in self.data["u0"]:
+            start_mid = prolongate_linear(u0, self.lattice, mid)
+            u_mid, _ = mechanistic_baseline(self.config, start_mid, mid, steps=64)
+            u_fine, _ = mechanistic_baseline(self.config, prolongate_linear(u0, self.lattice, fine), fine, steps=64)
+            combined.append((4.0 * u_fine[inject_fine] - u_mid[inject_mid]) / 3.0)
+        expected = float(np.mean(evaluate_predictions(np.stack(combined), self.data["uT"], self.lattice)["rel_l2"]))
+        self.assertEqual(self._by(self.linear, "cn_richardson_h", 64).mean_rel_l2, expected)
+
+    def test_richardson_needs_both_levels_and_the_clock_counts_one_call(self):
+        readings = []
+
+        def clock():
+            readings.append(None)
+            return float(len(readings))
+
+        points = pp.baseline_cost_accuracy_curve(self.config, self.data["u0"], self.data["uT"], self.lattice,
+                                                 steps_grid=(1,), protocol=self.protocol, timed_samples=1,
+                                                 clock=clock, refinements=(1, 4), richardson=True)
+        self.assertEqual([(p.scheme, p.n_solve) for p in points], [("cn", 16), ("cn", 64)])   # no (k, 2k) pair
+        self.assertEqual(len(readings), 2 * 1 * self.protocol.repeats * 2)
+        readings.clear()
+        points = pp.baseline_cost_accuracy_curve(self.config, self.data["u0"], self.data["uT"], self.lattice,
+                                                 steps_grid=(1,), protocol=self.protocol, timed_samples=1,
+                                                 clock=clock, refinements=(1, 2), richardson=True)
+        self.assertEqual([(p.scheme, p.n_solve) for p in points], [("cn", 16), ("cn", 32), ("cn_richardson_h", 32)])
+        self.assertEqual(len(readings), 3 * 1 * self.protocol.repeats * 2)   # the pair is one timed call
 
 
 class TestRefinedCurveInTheDecision(unittest.TestCase):
@@ -1733,6 +1871,22 @@ class TestRefinedCurveInTheDecision(unittest.TestCase):
         with self.assertRaisesRegex(pp.DecisionInputError, "are not the registered steps"):
             pp.decide_preregistered(**self.kwargs(curve))
 
+    def test_scheme_and_prolongation_are_bound(self):
+        forged = [dataclasses.replace(p, scheme="cn_richardson_h") for p in _curve_points(self.times, self.curve, n=32)]
+        with self.assertRaisesRegex(pp.DecisionInputError, "carries scheme 'cn_richardson_h'; the registered baseline"):
+            pp.decide_preregistered(**self.kwargs(forged))
+        for label in ("linear", "exact"):
+            mislabelled = [dataclasses.replace(p, prolongation=label)
+                           for p in _curve_points(self.times, self.curve, n=32)]
+            with self.subTest(label=label), self.assertRaisesRegex(
+                    pp.DecisionInputError,
+                    f"carries prolongation '{label}'; a registered point on n_solve = 32 carries 'none'"):
+                pp.decide_preregistered(**self.kwargs(mislabelled))
+        for field in ("scheme", "prolongation"):
+            bad = [dataclasses.replace(p, **{field: 7}) for p in _curve_points(self.times, self.curve, n=32)]
+            with self.subTest(field=field), self.assertRaisesRegex(pp.DecisionInputError, f"{field} must be a str"):
+                pp.decide_preregistered(**self.kwargs(bad))
+
     def test_n_solve_is_read_as_a_plain_int(self):
         for value in (32.0, True, "32", None):
             curve = [dataclasses.replace(p, n_solve=value) for p in _curve_points(self.times, self.curve, n=32)]
@@ -1743,7 +1897,10 @@ class TestRefinedCurveInTheDecision(unittest.TestCase):
         d = pp.decide_preregistered(**self.kwargs(_curve_points(self.times, self.curve, n=32)))
         provenance = d.provenance
         self.assertEqual(provenance["baseline_n_solve"], [32] * 7)
-        self.assertEqual([p["n_solve"] for p in provenance["baseline_points"]], [32] * 7)
+        self.assertEqual(provenance["baseline_prolongation"], ["none"] * 7)
+        self.assertEqual(provenance["baseline_scheme"], ["cn"] * 7)
+        self.assertEqual([(p["n_solve"], p["prolongation"], p["scheme"]) for p in provenance["baseline_points"]],
+                         [(32, "none", "cn")] * 7)
         record = d.to_dict()
         again = pp.verify_preregistered_decision(record, **self.kwargs(_curve_points(self.times, self.curve, n=32)))
         self.assertEqual(again.record_sha256, record["record_sha256"])

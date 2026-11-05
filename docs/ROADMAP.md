@@ -35,18 +35,38 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   bis der Owner registriert (`PROPOSED_REFINEMENTS = (1, 2, 4)`). §2b: `exact_linear_map` (T1-Orakel
   aus der Basis, kein Fit), `PODRidgeBaseline.factors()`, `linear_comparator_point` (gleiches
   Timing, Leakage-Guard vor jeder Messung, von keiner Regel gelesen). Pilot auf IDs
-  `900100..900149` ohne Modell: Boden der Kurve auf `N = 32` mit `k = 1, 2, 4` 16-mal tiefer
-  (Dreieck 3.47e-3 -> 2.15e-4, Torus 2.09e-3 -> 1.30e-4), zweite Ordnung im Raum (Faktoren
-  4.1/4.3), exakte lineare Abbildung ~5e-16 in Mikrosekunden. **Korrektur der Begruendung:** die
-  registrierte Kurve ist wegen "keine Extrapolation" H0-lastig, nicht GINO-beguenstigend; die
-  Verfeinerung nahm auf einem Gitter hypothetischer Ausgaenge (1886 Zellen je Fall) keinen
-  `k = 1`-Claim weg und macht den Vergleich im realistischen GINO-Bereich erst entscheidbar
-  (782 / 874 Gleich-Laufzeit-Zellen neu auswertbar, 444 / 474 H0 -> advantage gegen die 16-mal
-  staerkere Baseline; ADR-003). Befund dieser Maschine, auf D5 neu zu rechnen. 27 neue Tests,
-  9 neue Mutanten (M163 ueberlebte zuerst: Fail-fast-Test ergaenzt). Die Vorregistrierung ist **nicht** geaendert (kein Konflikt mit PR #91); der
-  Owner-Entscheid steht in `docs/ADR/ADR-003-Phase1-baseline-refinement-and-linear-comparator.md`.
-  _Evidenz:_ `results/2026-11-05_d-t1-instruments_local-gate.log`,
+  `900100..900149` ohne Modell (erste Runde, Orakel-Anfangsbedingung): Boden der Kurve auf
+  `N = 32` mit `k = 1, 2, 4` 16-mal tiefer (Dreieck 3.47e-3 -> 2.15e-4, Torus 2.09e-3 -> 1.30e-4),
+  zweite Ordnung im Raum (Faktoren 4.1/4.3), exakte lineare Abbildung ~5e-16 in Mikrosekunden.
+  **Korrektur der Begruendung:** die registrierte Kurve ist wegen "keine Extrapolation" H0-lastig,
+  nicht GINO-beguenstigend; die Verfeinerung nahm auf einem Gitter hypothetischer Ausgaenge
+  (1886 Zellen je Fall) keinen `k = 1`-Claim weg und macht den Vergleich im realistischen
+  GINO-Bereich erst entscheidbar (ADR-003). Die Vorregistrierung ist **nicht** geaendert (kein
+  Konflikt mit PR #91); der Owner-Entscheid steht in
+  `docs/ADR/ADR-003-Phase1-baseline-refinement-and-linear-comparator.md`. 27 neue Tests, 9 neue
+  Mutanten (M163 ueberlebte zuerst: Fail-fast-Test ergaenzt).
+  _Evidenz (erste Runde):_ `results/2026-11-05_d-t1-instruments_local-gate.log`,
   `results/2026-11-05_t1-baseline-refinement-pilot.json`.
+  - [x] **Selbstpruefung der ersten Runde: blinder Fleck Anfangsbedingung, faire Prolongation und
+    Richardson (2026-11-05, zweite Runde).** Die erste Runde startete den verfeinerten Loeser von
+    der **exakten** feinen Anfangsbedingung aus den Modenkoeffizienten, ungetimt — Information, die
+    das Modell nie sieht. Jetzt `prolongation="linear"` (Default, fair): `prolongate_linear`
+    (`spec/HEX_FV_SOLVER_v1.md` §2, P1-Interpolant auf der groben Triangulation, bitgleich mit einem
+    unabhaengigen Paritaets-Orakel, zweite Ordnung) **im getimten Aufruf**; `"exact"` bleibt als
+    Orakel-Obergrenze, ungetimt, nicht registrierbar. Dazu `richardson=True`
+    (`scheme="cn_richardson_h"`, `(4 u_2k - u_k)/3`, beide Loesungen in einem getimten Aufruf, nur
+    berichtet). Punktfelder `prolongation`, `scheme`; Entscheidung bindet `scheme = cn` und die
+    Prolongation (`none` fuer `k = 1`, registriert `linear` darueber). **Falsifikation:** mit der
+    fairen Prolongation bringt die Verfeinerung wenig — der Interpolationsfehler der
+    Anfangsbedingung ist selbst O(h_N^2), eine Stufe hilft noch, die zweite nicht mehr, Richardson
+    laesst genau diesen Fehler stehen; der Faktor 16 (und Richardson >100) gilt nur fuer das
+    Orakel (`N = 16` in den Tests; `N = 32` in der r2-Pilotmessung, Zahlen in ADR-003). Die
+    Differenz ist die Information in der Anfangsbedingung; eine generische Prolongation hoeherer
+    Ordnung (spektral, Gitter-Eigenbasis) ist als offenes Instrument benannt. 13 neue Tests, 6 neue
+    Mutanten, 2 Mutationsstellen nachgezogen; Oracle v2 mit CLI (`--threads` pinnt BLAS/torch vor
+    dem numpy-Import, Stichproben, Gitter, Modi).
+    _Evidenz:_ `results/2026-11-05_d-t1-fair-prolongation_local-gate.log`,
+    `results/2026-11-05_t1-baseline-refinement-pilot_r2.json`.
 - [x] **DDP v1.1: Fehler nach `backward` abgestimmt + 3-Rank-Evidenz (2026-11-02, Linux-Container;
   offen aus dem DDP-Eintrag unten: "Fehler in backward/optimizer.step", "> 2 Ranks").**
   `spec/DDP_RUNNER_v1.md` Abschnitt 3.6: Clipping, Optimizer-/`GradScaler`-Schritt und EMA-Update

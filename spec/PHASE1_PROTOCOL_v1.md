@@ -81,58 +81,93 @@ Section 2a.)
 Its error then stops at the spatial error of `N`, whatever the `steps`
 (committed R4 values, `N = 32`, ids `100000..100049`: the best point is
 `mean rel_l2 = 3.46e-3` at `steps = 8`; more steps make it worse, because the
-time and space errors cancel there). A model with a lower error at any time
-above that point would be "more accurate at equal runtime" against a solver
-that was never allowed to refine its grid: the weak baseline of McGreivy &
-Hakim (Nat. Mach. Intell. 6:1256 (2024), rule 2). The efficient numerical
-method chooses its resolution. Finding D-T1-2 (Gesamtbericht 2026-10-28, again
-2026-11-05) asks for `N_solve in {N, 2N, 4N}` with restriction onto the
-evaluation nodes.
+time and space errors cancel there). The efficient numerical method chooses
+its resolution (McGreivy & Hakim, Nat. Mach. Intell. 6:1256 (2024), rule 2).
+Finding D-T1-2 (Gesamtbericht 2026-10-28, again 2026-11-05) asks for
+`N_solve in {N, 2N, 4N}` with restriction onto the evaluation nodes.
 
 **What.** `baseline_cost_accuracy_curve(..., refinements=(1, 2, 4),
-coefficients=...)` runs, for every refinement `k` and every `steps`:
+prolongation=..., coefficients=..., richardson=...)` runs, for every
+refinement `k` and every `steps`:
 
 1. the solve lattice `k N` of the same domain (`triangle_hex_lattice` /
    `torus_hex_lattice`), `k` a power of two;
-2. the initial condition on it: the task's exact field of the sample's mode
-   coefficients (`evaluate_sample`), which must reproduce `u0` on the
-   evaluation nodes within `64 eps max|u0|` per sample, else `ValueError`
-   (negative control in the tests: the coefficients of another sample, and a
-   relative change of `1e-9` in one coefficient, are refused);
+2. the initial condition on it, by `prolongation`:
+   - `"linear"` (default, **the fair baseline**): the piecewise-linear
+     prolongation of `u0` from `N` (`prolongate_linear`,
+     `spec/HEX_FV_SOLVER_v1.md` section 2: the P1 interpolant on the coarse
+     triangulation), computed **inside the timed call**. This is what a
+     practitioner who has `u0` on `N` alone can do; it knows no basis of the
+     task. Needs no `coefficients`.
+   - `"exact"` (**an oracle upper bound**): the task's exact field of the
+     sample's mode coefficients (`evaluate_sample`, `coefficients` of shape
+     `[S, K]` required), built **outside the timed call** per sample, and
+     checked to reproduce `u0` on the evaluation nodes within
+     `64 eps max|u0|` (measured 2026-11-05: bitwise equal on both domains;
+     negative controls in the tests: the coefficients of another sample and a
+     relative change of `1e-9` in one coefficient are refused). The model
+     never sees this field: a point with `"exact"` cannot be registered.
 3. `mechanistic_baseline` on `k N` (same `dt = T / steps`, same `rtol`);
 4. the injection of the fine solution onto the evaluation nodes,
-   `u_fine[nested_node_index(lattice, fine)]` (`spec/HEX_FV_SOLVER_v1.md`
-   section 2, nesting: node `(i, j)` of `N` is node `(k i, k j)` of `k N`, at
-   bitwise the same coordinates);
+   `u_fine[nested_node_index(lattice, fine)]` (section 2 of the solver spec,
+   nesting: node `(i, j)` of `N` is node `(k i, k j)` of `k N`, at bitwise
+   the same coordinates);
 5. the metrics against `truth` on the evaluation lattice, as for `k = 1`.
 
-Steps 3 and 4 are the timed call. Step 2 is not timed: the fine initial
-condition is the problem data, as `u0` is for the model. `k = 1` uses `u0`
-as given and is bitwise the unrefined curve (test). Points come in the order
-`for k in refinements: for steps in steps_grid`. `refinements` must be a
-non-empty sequence of distinct powers of two; `coefficients` (shape `[S, K]`)
-is required as soon as one `k > 1` and is not read otherwise.
+Steps 3 and 4 are always timed; step 2 is timed for `"linear"` and not for
+`"exact"`. `k = 1` uses `u0` as given, carries `prolongation = "none"`, and is
+bitwise the unrefined curve under either mode (test). Points come in the
+order `for k in refinements: for steps in steps_grid` for the plain scheme.
+`refinements` must be a non-empty sequence of distinct powers of two (an
+invalid one is refused before anything is solved or timed).
 
-**Asymmetry, stated.** The refined solve starts from the initial condition on
-its own lattice; the model sees `u0` on `N` only. For T1 this is no extra
-information: the inputs lie in the span of `K = 15` (triangle) or `40`
-(torus) known modes, which `u0` on `N` determines exactly (section 2b).
+**Richardson extrapolation in `h`** (`richardson=True`, `scheme =
+"cn_richardson_h"`): for every `k` whose double is in `refinements`, one more
+point at `n_solve = 2 k N` whose timed call runs both solves at the same
+`steps` (hence the same `dt`) and combines `(4 u_{2k} - u_k) / 3` on the
+evaluation nodes; `cg_iterations_mean` sums both solves. For the second-order
+scheme on nested regular lattices this cancels the `h^2` term of the spatial
+error (Roache, Verification and Validation in Computational Science and
+Engineering, 1998; measured fourth order for second-order schemes on uniform
+grids). Under `"linear"` both levels start from the same interpolant (linear
+interpolation of a linear function changes nothing: the fine start is the
+coarse start prolongated, test), so the extrapolation converges to the
+semigroup of the interpolant, not of `u0`. Reported only; never registered.
+
+**What the measurement shows (2026-11-05, `N = 16` in the tests, `N = 32` in
+`results/2026-11-05_t1-baseline-refinement-pilot_r2.json`).** The fair
+refinement gains little: the interpolation error of the initial condition is
+`O(h_N^2)` whatever the solve lattice, so it replaces the `O(h_N^2)`
+discretisation error instead of removing it; one level still helps, the
+second does not, and Richardson leaves exactly that interpolation error. The
+oracle gains a factor of about 4 per level and Richardson far more. The
+difference between the two is the information in the initial condition that
+the model does not have; a higher-order generic prolongation (spectral
+zero-padding in the lattice eigenbasis, standard on the torus; a Lamé-mode
+sine transform on the triangle) would narrow it for band-limited inputs and is
+an open instrument, not built here. The tests pin the mechanism, not the
+numbers.
 
 **Decision.** `decide_preregistered` accepts only the registered refinements
-`_REGISTERED_REFINEMENTS`. The DRAFT preregistration runs the curve on the
-evaluation lattice (:134-137), so today that is `(1,)`: a point with
-`n_solve != n` raises `DecisionInputError` (section 5a). `PROPOSED_REFINEMENTS
-= (1, 2, 4)` is the D-T1-2 proposal for the owner
+`_REGISTERED_REFINEMENTS`, scheme `"cn"` (`_REGISTERED_SCHEME`) and, for a
+refined point, the prolongation `_REGISTERED_PROLONGATION = "linear"`; the
+`k = 1` block carries `"none"`. The DRAFT preregistration runs the curve on
+the evaluation lattice (:134-137), so today `_REGISTERED_REFINEMENTS = (1,)`:
+a point with `n_solve != n`, with scheme `"cn_richardson_h"` or with
+prolongation `"exact"` raises `DecisionInputError` (section 5a).
+`PROPOSED_REFINEMENTS = (1, 2, 4)` is the D-T1-2 proposal for the owner
 (`docs/ADR/ADR-003-Phase1-baseline-refinement-and-linear-comparator.md`);
-registering it changes the preregistration text and `_REGISTERED_REFINEMENTS`
-together, and the decision then requires one block of the seven `steps` per
-`k`, in that order. Which refinements form the curve is registered, never
-chosen per run (a free choice would be a forking path).
+registering it changes the preregistration text and these constants together,
+and the decision then requires one block of the seven `steps` per `k`, in that
+order, each refined point `"linear"`. Which refinements and which prolongation
+form the curve is registered, never chosen per run (a free choice would be a
+forking path).
 
 **Cost.** The solve on `k N` has about `k^2` times the nodes and more CG
-iterations per step. For `N_eval = 128` and `k = 4` (`N_solve = 512`) that is
-a large run on the D5 machine; the owner's amendment fixes the refinements
-per evaluation lattice. Measured cost on `N = 32`: section 9a.
+iterations per step; a Richardson pair costs the sum of its two solves. For
+`N_eval = 128` and `k = 4` (`N_solve = 512`) that is a large run on the D5
+machine; the owner's amendment fixes the refinements per evaluation lattice.
+Measured cost on `N = 32`: the pilot results above.
 
 ## 2b. Linear comparator beside the curve (amendment 2026-11-05, D-T1-1)
 
@@ -376,7 +411,10 @@ recomputed (claim boundary).
   the seven `steps` per `k` in that order (amendment 2026-11-05, D-T1-2,
   section 2a; the DRAFT preregistration solves on the evaluation lattice, so
   today `k = 1` and `n_solve = n`: a refined point is refused until the owner
-  registers the refinements); its `domain` is
+  registers the refinements); its `scheme` is `"cn"` (a Richardson point is
+  reported, never decided) and its `prolongation` is `"none"` for `k = 1`, else
+  the registered `"linear"` (an `"exact"` oracle initial condition is refused:
+  the model never sees it); its `domain` is
   the test set's domain in the lattice's spelling; the settings it was
   computed with are the registered ones (Equalita R5-F1: the genuine curve
   solved with `kappa = 2` or `T = 0.02` against the registered truth reached
@@ -399,8 +437,9 @@ recomputed (claim boundary).
   checked points, never from the registered grid or the `n` argument:
   `baseline_points` (every point with all its fields), and derived from them
   `baseline_times_s`, `baseline_errors`, `baseline_steps` and `baseline_n`
-  (the sorted list of the points' lattices) and `baseline_n_solve` (the solve
-  lattice of every point, in order; amendment 2026-11-05).
+  (the sorted list of the points' lattices), `baseline_n_solve`,
+  `baseline_prolongation` and `baseline_scheme` (per point, in order;
+  amendment 2026-11-05).
 - `gino_latency_times_s` are the timed calls, exactly the preregistered 10
   measured repeats per sample (`TimingProtocol().repeats`, section 1): shape
   `(10,)` for one sample or `(samples, 10)`; any other count, including a flat
@@ -509,13 +548,16 @@ record's `baseline_points` entries gain the eight fields, so a record written be
 against the new code. `decide_test_set` is unchanged.
 
 **API and format change (2026-11-05, D-T1-2, breaking):** `CostAccuracyPoint`
-has the new field `n_solve` (no default, so a construction from before fails
-loudly); its `to_dict`, the decision record's `baseline_points` and the new
-`provenance["baseline_n_solve"]` carry it, so a record computed before this
-change does not verify against the new code (no Phase 1 record exists yet).
-`baseline_cost_accuracy_curve` takes `refinements` (default `(1,)`, the former
-behaviour) and `coefficients`; for the default the values of every former
-field are unchanged (test: `k = 1` is the unrefined curve bitwise).
+has the new fields `n_solve`, `prolongation` and `scheme` (no defaults, so a
+construction from before fails loudly); its `to_dict`, the decision record's
+`baseline_points` and the new `provenance["baseline_n_solve"]`,
+`["baseline_prolongation"]`, `["baseline_scheme"]` carry them, so a record
+computed before this change does not verify against the new code (no Phase 1
+record exists yet). `baseline_cost_accuracy_curve` takes `refinements`
+(default `(1,)`, the former behaviour), `prolongation` (default `"linear"`),
+`coefficients` (only read for `"exact"`) and `richardson` (default `False`);
+for the defaults the values of every former field are unchanged (test: `k = 1`
+is the unrefined curve bitwise).
 
 ## 6. Break-even (preregistration section 4)
 

@@ -57,6 +57,7 @@ DDP = "ddp_hex_v3.py"
 T2 = "test_ddp_hex_v3.TestTwoRanks"
 I82 = "test_phase1_protocol_hex_v3.TestIssue82Residuals"
 RBC = "test_phase1_protocol_hex_v3.TestRefinedBaselineCurve"
+FRR = "test_phase1_protocol_hex_v3.TestFairRefinementAndRichardson"
 ME = "test_mid_epoch_resume_hex_v3.TestMidEpochResume"
 
 MUTANTS = (
@@ -467,10 +468,25 @@ MUTANTS = (
     Mutant(FV, "    index = table[k * ci, k * cj]\n", "    index = table[ci, cj]\n",
            "test_hex_fv_solver_hex_v3.TestNestedNodeIndex"),
     Mutant(P1, "        if k & (k - 1):\n", "        if False:\n", RBC),
-    Mutant(P1, "    if bad.size:\n", "    if False:\n", RBC),
-    Mutant(P1, '                    holder["out"] = (out if inject is None else out[inject], info)\n',
-           '                    holder["out"] = (out if inject is None else out[:len(inject)], info)\n', RBC),
+    Mutant(P1, "    if deviation > _REFINED_INPUT_ULPS * np.finfo(np.float64).eps * scale:\n", "    if False:\n", RBC),
+    Mutant(P1, '        return (out if inject is None else out[inject]), int(info["cg_iterations"])\n',
+           '        return (out if inject is None else out[:len(inject)]), int(info["cg_iterations"])\n', RBC),
     Mutant(P1, '        if p["n_solve"] != k * n:\n', "        if False:\n",
+           "test_phase1_protocol_hex_v3.TestRefinedCurveInTheDecision"),
+    # 2026-11-05 fair prolongation and Richardson (section 2a, second round): the P1 interpolant's
+    # midpoint rule and its boundary value, the extrapolation formula, the k = 1 label, and the
+    # scheme / prolongation binding of the decision.
+    Mutant(FV, "        out[fine.neighbors[index, slot]] = 0.5 * (u + partner_value)\n",
+           "        out[fine.neighbors[index, slot]] = u\n", "test_hex_fv_solver_hex_v3.TestProlongateLinear"),
+    Mutant(FV, "        partner_value = np.where(partner >= 0, u[np.maximum(partner, 0)], 0.0)\n",
+           "        partner_value = u[np.maximum(partner, 0)]\n", "test_hex_fv_solver_hex_v3.TestProlongateLinear"),
+    Mutant(P1, '                holder["out"] = ((4.0 * out_f - out_c) / 3.0, it_c + it_f)\n',
+           '                holder["out"] = (out_f, it_c + it_f)\n', FRR),
+    Mutant(P1, '            n_solve=n_solve, prolongation="none" if k == 1 and scheme == _REGISTERED_SCHEME else '
+           'prolongation,\n', '            n_solve=n_solve, prolongation=prolongation,\n', FRR),
+    Mutant(P1, '        if p["scheme"] != _REGISTERED_SCHEME:\n', "        if False:\n",
+           "test_phase1_protocol_hex_v3.TestRefinedCurveInTheDecision"),
+    Mutant(P1, '        if p["prolongation"] != expected_prolongation:\n', "        if False:\n",
            "test_phase1_protocol_hex_v3.TestRefinedCurveInTheDecision"),
     # 2026-11-05 D-T1-1 (section 2b): the oracle's rank refusal and the comparator's leakage guard.
     Mutant(P1, "    if rank < len(basis):\n", "    if False:\n", "test_phase1_protocol_hex_v3.TestExactLinearMap"),

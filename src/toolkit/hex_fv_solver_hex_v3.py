@@ -9,7 +9,8 @@ spec/HEX_FV_SOLVER_v1.md). Verified by the Reality Anchor reference cases
 Lattices: the unit equilateral triangle with homogeneous Dirichlet boundary
 nodes (slot -1 = boundary node with value 0) and the doubly periodic hex torus.
 ``nested_node_index`` maps the nodes of N into the lattice k N (k a power of
-two, bitwise equal coordinates; amendment 2026-11-05).
+two, bitwise equal coordinates) and ``prolongate_linear`` interpolates a field
+of N onto k N piecewise linearly (amendment 2026-11-05).
 Operator: two-point-flux FV Laplacian
 
     (L_c u)_i = w * sum_s c_{i,s} (u_{n(i,s)} - u_i),   w = 2 / (3 h^2)
@@ -32,6 +33,7 @@ __all__ = [
     "triangle_hex_lattice",
     "torus_hex_lattice",
     "nested_node_index",
+    "prolongate_linear",
     "edge_conductances",
     "apply_hex_laplacian",
     "assemble_hex_operator",
@@ -327,6 +329,50 @@ def nested_node_index(coarse: HexLattice, fine: HexLattice) -> np.ndarray:
             f"nested_node_index: the refinement ratio {k} is not a power of two; only 1, 2, 4, ... keep the "
             "nested coordinates bitwise equal")
     return _nested_node_index(coarse.domain, coarse.n, fine.n)
+
+
+def _prolongate_once(u: np.ndarray, coarse: HexLattice, fine: HexLattice) -> np.ndarray:
+    """Piecewise-linear prolongation N -> 2N on the nested triangulation (section 2, prolongation)."""
+    index = _nested_node_index(coarse.domain, coarse.n, fine.n)
+    out = np.zeros(fine.num_nodes, dtype=np.float64)
+    out[index] = u
+    # Every other fine node is the midpoint of one coarse edge: half a step along a slot from a
+    # nested node. All six slots: an edge whose other end is a Dirichlet boundary node (value 0,
+    # not a coarse unknown) is reached from its interior end only. An edge between two interior
+    # nodes is written from both ends with the same value (0.5 * (a + b) == 0.5 * (b + a)).
+    # Fine nodes on an edge between two boundary nodes (the three corner-adjacent nodes of the
+    # triangle) keep the interpolant's value 0.
+    for slot in range(6):
+        partner = coarse.neighbors[:, slot]
+        partner_value = np.where(partner >= 0, u[np.maximum(partner, 0)], 0.0)
+        out[fine.neighbors[index, slot]] = 0.5 * (u + partner_value)
+    return out
+
+
+def prolongate_linear(u: Any, coarse: HexLattice, fine: HexLattice) -> np.ndarray:
+    """Piecewise-linear interpolation of a ``coarse`` field onto the nested ``fine`` lattice (section 2).
+
+    The P1 interpolant on the coarse triangulation (Dirichlet boundary nodes at value 0),
+    evaluated at the fine nodes: a nested node keeps its value, the midpoint of a coarse edge
+    gets the mean of the two ends. ``fine.n = k coarse.n`` with ``k`` a power of two; ``k > 2``
+    iterates the halving steps, which is the same interpolant evaluated on finer nodes (linear
+    interpolation of a linear function changes nothing). Exact for the coarse data at the nested
+    nodes, second order in ``h`` for a smooth field (test). The generic prolongation a practitioner
+    with ``u`` on ``N`` alone can use; it knows no basis of the task. Consumer:
+    ``spec/PHASE1_PROTOCOL_v1.md`` section 2a (``prolongation="linear"``).
+    """
+    coarse = _check_lattice(coarse)
+    fine = _check_lattice(fine)
+    index = nested_node_index(coarse, fine)   # validates the ratio and the domains
+    del index
+    values = _check_field(u, coarse, name="u")
+    current = coarse
+    out = values
+    while current.n < fine.n:
+        nxt = _canonical_lattice(current.domain, 2 * current.n)
+        out = _prolongate_once(out, current, nxt)
+        current = nxt
+    return out
 
 
 def _check_field(u: Any, lattice: HexLattice, *, name: str = "u") -> np.ndarray:

@@ -107,6 +107,7 @@ from hex_fv_solver_hex_v3 import (
     HexLattice,
     _check_lattice,
     nested_node_index,
+    prolongate_linear,
     torus_hex_lattice,
     triangle_hex_lattice,
 )
@@ -123,6 +124,17 @@ _DEFAULT_STEPS_GRID = (1, 2, 4, 8, 16, 32, 64)
 _REGISTERED_REFINEMENTS = (1,)
 #: The refinement set D-T1-2 proposes for the owner's decision (not registered, see above).
 PROPOSED_REFINEMENTS = (1, 2, 4)
+# How a refined solve gets its initial condition on k N (spec section 2a): "linear" is the
+# piecewise-linear prolongation of u0 from N, inside the timed call (what a practitioner with u0
+# on N can do); "exact" is the task's exact field of the mode coefficients, untimed (an oracle
+# upper bound, information the model never sees). Only "linear" can be registered; the k = 1
+# block carries "none".
+_REGISTERED_PROLONGATION = "linear"
+_PROLONGATIONS = ("linear", "exact")
+# The scheme of a registered point: plain Crank-Nicolson. "cn_richardson_h" (section 2a,
+# Richardson extrapolation in h between the levels n_solve / 2 and n_solve) is reported only.
+_REGISTERED_SCHEME = "cn"
+_SCHEMES = ("cn", "cn_richardson_h")
 # The CG tolerance of the baseline. The preregistration names the method (:128-133,
 # ``mechanistic_baseline`` as verified in Phase 0) but writes out no tolerance; this is
 # the verified default, and decide_preregistered requires it (Equalita R5-F1; whether
@@ -411,10 +423,15 @@ class CostAccuracyPoint:
     The fields after ``cg_iterations_mean`` have
     no default, so a construction from before they were added fails loudly.
     Since 2026-11-05 (D-T1-2, spec section 2a) the point also carries
-    ``n_solve``, the lattice the solver ran on: ``n_solve = k * n`` for the
-    refinement ``k``; the errors are always measured on the evaluation lattice
-    ``n``, after injection of the fine solution onto its nodes
-    (``nested_node_index``). ``n_solve == n`` is the unrefined curve.
+    ``n_solve``, the lattice the solver ran on (``k * n`` for the refinement
+    ``k``; the errors are always measured on the evaluation lattice ``n``,
+    after injection of the fine solution onto its nodes, ``nested_node_index``),
+    ``prolongation`` (how the initial condition reached ``n_solve``: ``"none"``
+    for ``n_solve == n``, ``"linear"`` for the timed piecewise-linear
+    prolongation from ``n``, ``"exact"`` for the untimed oracle field of the
+    mode coefficients) and ``scheme`` (``"cn"``, or ``"cn_richardson_h"`` for
+    the Richardson extrapolation in ``h`` of the levels ``n_solve / 2`` and
+    ``n_solve`` at the same ``dt``, both solves and the combination timed).
     """
 
     n: int
@@ -439,6 +456,8 @@ class CostAccuracyPoint:
     timing_protocol_sha256: str
     clock: str
     n_solve: int
+    prolongation: str
+    scheme: str
 
     def to_dict(self) -> Dict[str, Any]:
         out = asdict(self)
@@ -487,27 +506,41 @@ def _refinement_set(value: Any) -> Tuple[int, ...]:
     return ks
 
 
-# Identity of a refined input (spec section 2a): the solve-lattice initial condition restricted to the
-# evaluation nodes must be the given u0 up to rounding of the mode sum (a different sample differs by O(1)).
+# Identity of an exact refined input (spec section 2a): the oracle initial condition restricted to
+# the evaluation nodes must be the given u0 up to rounding of the mode sum (a different sample
+# differs by O(1)). Measured 2026-11-05: bitwise equal on both domains (the nested coordinates are
+# bitwise the coarse ones); the band is a guard against another SIMD path, not a tolerance in use.
 _REFINED_INPUT_ULPS = 64.0
 
 
-def _refined_inputs(config: HeatOperatorTaskConfig, coefficients: np.ndarray, inputs: np.ndarray,
-                    lattice: HexLattice, k: int) -> Tuple[HexLattice, np.ndarray, np.ndarray]:
-    """(solve lattice, its initial conditions [S, M_k], injection index) for refinement ``k``."""
+def _check_exact_input(fine_u0: np.ndarray, u0: np.ndarray, inject: np.ndarray, *, row: int) -> None:
+    deviation = float(np.max(np.abs(fine_u0[inject] - u0)))
+    scale = max(float(np.max(np.abs(u0))), np.finfo(np.float64).tiny)
+    if deviation > _REFINED_INPUT_ULPS * np.finfo(np.float64).eps * scale:
+        raise ValueError(
+            f"coefficients row {row} does not reproduce u0 on the evaluation nodes "
+            f"(max deviation {deviation:.3e}): the refined solve would start from another initial condition")
+
+
+def _coefficients(coefficients: Any, samples: int) -> np.ndarray:
+    if coefficients is None:
+        raise ValueError('prolongation="exact" needs the mode coefficients of the inputs (coefficients=...)')
+    coeffs = np.asarray(coefficients)
+    if coeffs.dtype == np.bool_ or np.iscomplexobj(coeffs) or not np.issubdtype(coeffs.dtype, np.number):
+        raise TypeError("coefficients must be a real numeric array")
+    coeffs = np.asarray(coeffs, dtype=np.float64)
+    if coeffs.ndim != 2 or coeffs.shape[0] != samples:
+        raise ValueError(f"coefficients must have shape [{samples}, K] (one row per input), got {coeffs.shape}")
+    return coeffs
+
+
+def _level(lattice: HexLattice, k: int) -> Tuple[HexLattice, Optional[np.ndarray]]:
+    """The solve lattice of refinement ``k`` and the injection index onto the evaluation nodes (None for k = 1)."""
+    if k == 1:
+        return lattice, None
     factory = triangle_hex_lattice if lattice.domain == "triangle_dirichlet" else torus_hex_lattice
     fine = factory(k * int(lattice.n))
-    index = nested_node_index(lattice, fine)
-    fine_u0 = np.stack([evaluate_sample(config, a, fine)[0] for a in coefficients])
-    deviation = np.max(np.abs(fine_u0[:, index] - inputs), axis=1)
-    scale = np.maximum(np.max(np.abs(inputs), axis=1), np.finfo(np.float64).tiny)
-    bad = np.flatnonzero(deviation > _REFINED_INPUT_ULPS * np.finfo(np.float64).eps * scale)
-    if bad.size:
-        raise ValueError(
-            f"coefficients row {int(bad[0])} does not reproduce u0 on the evaluation nodes "
-            f"(max deviation {float(deviation[bad[0]]):.3e}): the refined solve would start from another "
-            "initial condition")
-    return fine, fine_u0, index
+    return fine, nested_node_index(lattice, fine)
 
 
 def baseline_cost_accuracy_curve(
@@ -522,21 +555,30 @@ def baseline_cost_accuracy_curve(
     rtol: float = _REGISTERED_BASELINE_RTOL,
     clock: Callable[[], float] = time.perf_counter,
     refinements: Sequence[int] = (1,),
+    prolongation: str = _REGISTERED_PROLONGATION,
     coefficients: Any = None,
+    richardson: bool = False,
 ) -> Tuple[CostAccuracyPoint, ...]:
-    """The mechanistic baseline on every input, for every ``(refinement, steps)``: accuracy and latency per point.
+    """The mechanistic baseline on every input, per ``(refinement, steps)``: accuracy and latency per point.
 
     ``refinements`` (spec section 2a, D-T1-2): the solver runs on the lattice
     ``k * lattice.n`` for every ``k`` (powers of two), and its solution is
     injected onto the evaluation nodes before the errors against ``truth`` are
     taken. ``k = 1`` is the evaluation lattice itself and uses ``u0`` as given.
-    A ``k > 1`` needs ``coefficients`` (the ``[S, K]`` mode coefficients of the
-    task, e.g. ``generate_dataset(...)["coefficients"]``): the initial condition
-    on the solve lattice is the task's exact field of those coefficients, and
-    it must reproduce ``u0`` on the evaluation nodes. The injection is inside
-    the timed call; building the fine initial condition is not (it is the
-    problem data, like ``u0`` for the model). Points come in the order
-    ``for k in refinements: for steps in steps_grid``.
+    For ``k > 1`` the initial condition on the solve lattice comes from
+    ``prolongation``: ``"linear"`` (default) interpolates ``u0`` piecewise
+    linearly from ``lattice`` (``prolongate_linear``) inside the timed call, as a
+    practitioner who has ``u0`` on ``N`` alone would; ``"exact"`` takes the
+    task's exact field of the sample's mode ``coefficients`` (``[S, K]``, e.g.
+    ``generate_dataset(...)["coefficients"]``), built outside the timed call, and
+    checks that it reproduces ``u0`` on the evaluation nodes: an oracle upper
+    bound, since the model never sees that field. ``richardson=True`` adds, for
+    every ``k`` whose double is also in ``refinements``, the point
+    ``scheme="cn_richardson_h"`` at ``n_solve = 2 k N``: both solves (same
+    ``steps``, ``dt``) and ``(4 u_2k - u_k) / 3`` on the evaluation nodes in one
+    timed call; its ``cg_iterations_mean`` sums both solves. Points come in the
+    order ``for k in refinements: for steps in steps_grid`` for the plain
+    scheme, then the Richardson pairs in the same order.
     """
     if not isinstance(config, HeatOperatorTaskConfig):
         raise TypeError("config must be a HeatOperatorTaskConfig")
@@ -550,65 +592,93 @@ def baseline_cost_accuracy_curve(
         raise ValueError("u0 and truth must have the same shape")
     grid = _steps_grid(steps_grid)
     ks = _refinement_set(refinements)
+    if not isinstance(prolongation, str) or prolongation not in _PROLONGATIONS:
+        raise ValueError(f"prolongation must be one of {_PROLONGATIONS}, got {prolongation!r}")
+    if not isinstance(richardson, bool):
+        raise TypeError("richardson must be a bool")
     samples = inputs.shape[0]
     timed = samples if timed_samples is None else _int_at_least(timed_samples, name="timed_samples", minimum=1)
     if timed > samples:
         raise ValueError(f"timed_samples={timed} exceeds the {samples} samples")
     rtol = _positive_float(rtol, name="rtol")
-    if any(k > 1 for k in ks):
-        if coefficients is None:
-            raise ValueError("a refinement k > 1 needs the mode coefficients of the inputs (coefficients=...)")
-        coeffs = np.asarray(coefficients)
-        if coeffs.dtype == np.bool_ or np.iscomplexobj(coeffs) or not np.issubdtype(coeffs.dtype, np.number):
-            raise TypeError("coefficients must be a real numeric array")
-        coeffs = np.asarray(coeffs, dtype=np.float64)
-        if coeffs.ndim != 2 or coeffs.shape[0] != samples:
-            raise ValueError(f"coefficients must have shape [{samples}, K] (one row per input), got {coeffs.shape}")
+    exact = prolongation == "exact" and any(k > 1 for k in ks)
+    coeffs = _coefficients(coefficients, samples) if exact else None
+    levels = {k: _level(lattice, k) for k in ks}
     # Equalita R5-F1: the settings the values depend on travel with every point, read once here.
     settings = {
         "kappa": float(config.kappa), "t_final": float(config.t_final), "task_config_sha256": config.digest(),
         "rtol": rtol, "warmup": int(protocol.warmup), "repeats": int(protocol.repeats),
         "timing_protocol_sha256": protocol.digest(), "clock": _clock_name(clock),
     }
-    points = []
-    for k in ks:
+
+    def exact_input(index: int, k: int) -> np.ndarray:
+        """The oracle initial condition of sample ``index`` on level ``k`` (untimed; identity checked)."""
+        fine, inject = levels[k]
         if k == 1:
-            solve_lattice, solve_inputs, inject = lattice, inputs, None
-        else:
-            solve_lattice, solve_inputs, inject = _refined_inputs(config, coeffs, inputs, lattice, k)
-        for steps in grid:
-            predictions = np.empty_like(inputs)
-            iterations = np.empty(samples, dtype=np.float64)
-            rows = np.empty((timed, protocol.repeats), dtype=np.float64)
-            for i in range(samples):
-                holder: Dict[str, Any] = {}
+            return inputs[index]
+        field = evaluate_sample(config, coeffs[index], fine)[0]
+        _check_exact_input(field, inputs[index], inject, row=index)
+        return field
 
-                def run(index: int = i, holder: Dict[str, Any] = holder) -> None:
-                    out, info = mechanistic_baseline(config, solve_inputs[index], solve_lattice, steps=steps,
-                                                     rtol=rtol)
-                    holder["out"] = (out if inject is None else out[inject], info)
+    def solve(start: np.ndarray, k: int, steps: int) -> Tuple[np.ndarray, int]:
+        fine, inject = levels[k]
+        out, info = mechanistic_baseline(config, start, fine, steps=steps, rtol=rtol)
+        return (out if inject is None else out[inject]), int(info["cg_iterations"])
 
-                if i < timed:
-                    rows[i] = measure_latency(run, protocol, clock=clock).times_s
+    def measure(steps: int, k: int, scheme: str) -> CostAccuracyPoint:
+        predictions = np.empty_like(inputs)
+        iterations = np.empty(samples, dtype=np.float64)
+        rows = np.empty((timed, protocol.repeats), dtype=np.float64)
+        n_solve = int(levels[k][0].n)
+        for i in range(samples):
+            holder: Dict[str, Any] = {}
+            # "exact": the fine initial conditions are problem data, built before the clock runs.
+            prepared = {} if not exact else (
+                {k: exact_input(i, k)} if scheme == _REGISTERED_SCHEME else {k // 2: exact_input(i, k // 2),
+                                                                              k: exact_input(i, k)})
+
+            def run(index: int = i, holder: Dict[str, Any] = holder, prepared: Dict[int, np.ndarray] = prepared
+                    ) -> None:
+                if scheme == _REGISTERED_SCHEME:
+                    start = prepared[k] if exact else (
+                        inputs[index] if k == 1 else prolongate_linear(inputs[index], lattice, levels[k][0]))
+                    holder["out"] = solve(start, k, steps)
+                    return
+                coarse_k = k // 2
+                if exact:
+                    start_c, start_f = prepared[coarse_k], prepared[k]
                 else:
-                    run()
-                prediction, info = holder["out"]
-                predictions[i] = prediction
-                iterations[i] = float(info["cg_iterations"])
-            metrics = evaluate_predictions(predictions, targets, lattice)
-            rel_l2 = np.asarray(metrics["rel_l2"], dtype=np.float64)
-            low, high = _bootstrap_median_rows(rows, protocol)
-            points.append(CostAccuracyPoint(
-                n=int(lattice.n), steps=int(steps), dt=settings["t_final"] / steps,
-                sample_count=int(samples), timed_samples=int(timed),
-                mean_rel_l2=float(_finite_stat(np.mean, np.asarray(rel_l2, dtype=np.float64))),
-                median_rel_l2=float(_finite_stat(np.median, np.asarray(rel_l2, dtype=np.float64))),
-                mean_rel_h1=float(_finite_stat(np.mean, np.asarray(metrics["rel_h1"], dtype=np.float64))),
-                mean_rel_max=float(_finite_stat(np.mean, np.asarray(metrics["rel_max"], dtype=np.float64))),
-                median_wall_time_s=float(_finite_stat(np.median, rows)), wall_time_ci_s=(low, high),
-                cg_iterations_mean=float(np.mean(iterations)), domain=str(lattice.domain), **settings,
-                n_solve=int(solve_lattice.n),
-            ))
+                    start_c = inputs[index] if coarse_k == 1 else prolongate_linear(inputs[index], lattice,
+                                                                                    levels[coarse_k][0])
+                    # The same interpolant evaluated on the finer nodes (linear of linear is linear).
+                    start_f = prolongate_linear(start_c, levels[coarse_k][0], levels[k][0])
+                out_c, it_c = solve(start_c, coarse_k, steps)
+                out_f, it_f = solve(start_f, k, steps)
+                holder["out"] = ((4.0 * out_f - out_c) / 3.0, it_c + it_f)
+
+            if i < timed:
+                rows[i] = measure_latency(run, protocol, clock=clock).times_s
+            else:
+                run()
+            predictions[i], iterations[i] = holder["out"][0], float(holder["out"][1])
+        metrics = evaluate_predictions(predictions, targets, lattice)
+        rel_l2 = np.asarray(metrics["rel_l2"], dtype=np.float64)
+        low, high = _bootstrap_median_rows(rows, protocol)
+        return CostAccuracyPoint(
+            n=int(lattice.n), steps=int(steps), dt=settings["t_final"] / steps,
+            sample_count=int(samples), timed_samples=int(timed),
+            mean_rel_l2=float(_finite_stat(np.mean, rel_l2)), median_rel_l2=float(_finite_stat(np.median, rel_l2)),
+            mean_rel_h1=float(_finite_stat(np.mean, np.asarray(metrics["rel_h1"], dtype=np.float64))),
+            mean_rel_max=float(_finite_stat(np.mean, np.asarray(metrics["rel_max"], dtype=np.float64))),
+            median_wall_time_s=float(_finite_stat(np.median, rows)), wall_time_ci_s=(low, high),
+            cg_iterations_mean=float(np.mean(iterations)), domain=str(lattice.domain), **settings,
+            n_solve=n_solve, prolongation="none" if k == 1 and scheme == _REGISTERED_SCHEME else prolongation,
+            scheme=scheme,
+        )
+
+    points = [measure(steps, k, _REGISTERED_SCHEME) for k in ks for steps in grid]
+    if richardson:
+        points += [measure(steps, 2 * k, "cn_richardson_h") for k in ks if 2 * k in ks for steps in grid]
     return tuple(points)
 
 
@@ -1334,7 +1404,7 @@ def _point_str(value: Any, *, name: str) -> str:
 
 # Read order of one point: every field exactly once, converted to a plain value (Equalita R5-F3).
 _POINT_INTS = ("n", "steps", "sample_count", "timed_samples", "warmup", "repeats", "n_solve")
-_POINT_STRS = ("domain", "task_config_sha256", "timing_protocol_sha256", "clock")
+_POINT_STRS = ("domain", "task_config_sha256", "timing_protocol_sha256", "clock", "prolongation", "scheme")
 # (field, lower bound, strict): R5-F4 plausibility of the fields that only enter the record.
 _POINT_FLOATS = (
     ("dt", 0.0, True), ("kappa", 0.0, True), ("t_final", 0.0, True), ("rtol", 0.0, True),
@@ -1432,6 +1502,19 @@ def _registered_baseline_points(curve: Any, *, test_set: str, n: int) -> List[Di
                 f"{at} was solved on lattice n_solve = {p['n_solve']}; the registered curve solves on "
                 f"n_solve = {k * n} (refinements {list(_REGISTERED_REFINEMENTS)}; preregistration :134-135 "
                 "solves on the evaluation lattice, the D-T1-2 refinement is an owner amendment)")
+        if p["scheme"] != _REGISTERED_SCHEME:
+            # Richardson extrapolation (section 2a) is reported beside the curve; the registered
+            # baseline is plain Crank-Nicolson (preregistration :128-133, mechanistic_baseline).
+            raise DecisionInputError(
+                f"{at} carries scheme {p['scheme']!r}; the registered baseline is {_REGISTERED_SCHEME!r} "
+                "(preregistration :128-133; cn_richardson_h is reported only, spec section 2a)")
+        expected_prolongation = "none" if k == 1 else _REGISTERED_PROLONGATION
+        if p["prolongation"] != expected_prolongation:
+            # The oracle initial condition ("exact") is information the model never sees; a
+            # registered refined point starts from the timed prolongation of u0 on n.
+            raise DecisionInputError(
+                f"{at} carries prolongation {p['prolongation']!r}; a registered point on n_solve = {k * n} "
+                f"carries {expected_prolongation!r} (spec section 2a)")
         if p["domain"] != domain:
             raise DecisionInputError(
                 f"{at} was measured on domain {p['domain']!r}, test set "
@@ -1662,6 +1745,8 @@ def decide_preregistered(
         "baseline_steps": [p["steps"] for p in points],
         "baseline_n": sorted({p["n"] for p in points}),
         "baseline_n_solve": [p["n_solve"] for p in points],
+        "baseline_prolongation": [p["prolongation"] for p in points],
+        "baseline_scheme": [p["scheme"] for p in points],
         "run_manifest_sha256": manifest["manifest_sha256"],
         "git_sha": manifest["git_sha"],
         "preregistration": manifest["preregistration"],

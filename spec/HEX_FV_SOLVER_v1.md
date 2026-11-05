@@ -68,6 +68,26 @@ domains, or a non-factory lattice (lattice contract) raise `ValueError` /
 `TypeError`. Consumer: the refined baseline curve of
 `spec/PHASE1_PROTOCOL_v1.md` section 2a.
 
+**Prolongation (amendment 2026-11-05, D-T1-2).** `prolongate_linear(u, coarse,
+fine)` is the piecewise-linear (P1) interpolant of a coarse field on the coarse
+triangulation, evaluated at the fine nodes: a nested node keeps its value, the
+midpoint of a coarse edge gets the mean of the two ends, a Dirichlet boundary
+node counts as value 0 (so the three corner-adjacent fine nodes of the
+triangle, whose coarse edge joins two boundary nodes, get 0). Each halving step
+reaches every fine node as a nested node or as half a step along one of the
+six slots from a nested node (an edge whose other end is a boundary node is
+reached from its interior end only; an edge between two interior nodes is
+written from both ends with the same value, `0.5 (a + b) == 0.5 (b + a)`).
+`k > 2` iterates the halving steps; that is the same interpolant evaluated on
+finer nodes (linear interpolation of a linear function changes nothing), so
+the restriction of the `4N` prolongation to the `2N` nodes is the `2N`
+prolongation bitwise (test). Verified bitwise against an independent
+index-parity implementation on both domains and second order in `h` on a
+smooth field (ratios 3.95 to 4.00, test). It is the generic prolongation a
+practitioner with a field on `N` alone can use: it knows no basis of the task.
+Consumer: `prolongation="linear"` of the refined baseline curve
+(`spec/PHASE1_PROTOCOL_v1.md` section 2a).
+
 ## 3. Operator
 
 Two-point-flux FV Laplacian with symmetric edge conductances `c`:
