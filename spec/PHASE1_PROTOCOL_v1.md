@@ -7,7 +7,8 @@ cost-accuracy curve, the latency, the aggregation statistic, its confidence
 interval, the decision rules, the break-even count and the run manifest are
 computed. It changes no decision rule, no metric and no owner decision
 D1-D8. It trains no model and scores no model on T1 data.
-**Implementation:** `src/toolkit/phase1_protocol_hex_v3.py` (numpy only).
+**Implementation:** `src/toolkit/phase1_protocol_hex_v3.py` (numpy, plus the
+T1 task, FV solver and linear-baseline modules of this repository).
 **Tests:** `src/toolkit/test_phase1_protocol_hex_v3.py` (closed-form oracles,
 negative controls, metamorphic relations, fail-closed paths).
 
@@ -70,7 +71,110 @@ The first `timed_samples` inputs are timed with the protocol of section 1;
 the others are solved once (the solver is deterministic, the prediction does
 not depend on timing). The default times every sample. The solver runs on
 the input lattice: the preregistration's evaluation lattices `N = 16, 32,
-64, 128` are four separate curves.
+64, 128` are four separate curves. (Since 2026-11-05 the point also carries
+`n_solve`, the lattice the solver ran on; without a refinement `n_solve = n`.
+Section 2a.)
+
+## 2a. Spatial refinement of the baseline solve (amendment 2026-11-05, D-T1-2)
+
+**Why.** On the evaluation lattice alone the curve varies only the time step.
+Its error then stops at the spatial error of `N`, whatever the `steps`
+(committed R4 values, `N = 32`, ids `100000..100049`: the best point is
+`mean rel_l2 = 3.46e-3` at `steps = 8`; more steps make it worse, because the
+time and space errors cancel there). A model with a lower error at any time
+above that point would be "more accurate at equal runtime" against a solver
+that was never allowed to refine its grid: the weak baseline of McGreivy &
+Hakim (Nat. Mach. Intell. 6:1256 (2024), rule 2). The efficient numerical
+method chooses its resolution. Finding D-T1-2 (Gesamtbericht 2026-10-28, again
+2026-11-05) asks for `N_solve in {N, 2N, 4N}` with restriction onto the
+evaluation nodes.
+
+**What.** `baseline_cost_accuracy_curve(..., refinements=(1, 2, 4),
+coefficients=...)` runs, for every refinement `k` and every `steps`:
+
+1. the solve lattice `k N` of the same domain (`triangle_hex_lattice` /
+   `torus_hex_lattice`), `k` a power of two;
+2. the initial condition on it: the task's exact field of the sample's mode
+   coefficients (`evaluate_sample`), which must reproduce `u0` on the
+   evaluation nodes within `64 eps max|u0|` per sample, else `ValueError`
+   (negative control in the tests: the coefficients of another sample, and a
+   relative change of `1e-9` in one coefficient, are refused);
+3. `mechanistic_baseline` on `k N` (same `dt = T / steps`, same `rtol`);
+4. the injection of the fine solution onto the evaluation nodes,
+   `u_fine[nested_node_index(lattice, fine)]` (`spec/HEX_FV_SOLVER_v1.md`
+   section 2, nesting: node `(i, j)` of `N` is node `(k i, k j)` of `k N`, at
+   bitwise the same coordinates);
+5. the metrics against `truth` on the evaluation lattice, as for `k = 1`.
+
+Steps 3 and 4 are the timed call. Step 2 is not timed: the fine initial
+condition is the problem data, as `u0` is for the model. `k = 1` uses `u0`
+as given and is bitwise the unrefined curve (test). Points come in the order
+`for k in refinements: for steps in steps_grid`. `refinements` must be a
+non-empty sequence of distinct powers of two; `coefficients` (shape `[S, K]`)
+is required as soon as one `k > 1` and is not read otherwise.
+
+**Asymmetry, stated.** The refined solve starts from the initial condition on
+its own lattice; the model sees `u0` on `N` only. For T1 this is no extra
+information: the inputs lie in the span of `K = 15` (triangle) or `40`
+(torus) known modes, which `u0` on `N` determines exactly (section 2b).
+
+**Decision.** `decide_preregistered` accepts only the registered refinements
+`_REGISTERED_REFINEMENTS`. The DRAFT preregistration runs the curve on the
+evaluation lattice (:134-137), so today that is `(1,)`: a point with
+`n_solve != n` raises `DecisionInputError` (section 5a). `PROPOSED_REFINEMENTS
+= (1, 2, 4)` is the D-T1-2 proposal for the owner
+(`docs/ADR/ADR-003-Phase1-baseline-refinement-and-linear-comparator.md`);
+registering it changes the preregistration text and `_REGISTERED_REFINEMENTS`
+together, and the decision then requires one block of the seven `steps` per
+`k`, in that order. Which refinements form the curve is registered, never
+chosen per run (a free choice would be a forking path).
+
+**Cost.** The solve on `k N` has about `k^2` times the nodes and more CG
+iterations per step. For `N_eval = 128` and `k = 4` (`N_solve = 512`) that is
+a large run on the D5 machine; the owner's amendment fixes the refinements
+per evaluation lattice. Measured cost on `N = 32`: section 9a.
+
+## 2b. Linear comparator beside the curve (amendment 2026-11-05, D-T1-1)
+
+**Why.** T1 is exactly linear: `u(T) = E u0` with `E` of rank `K` on the
+span of the task modes. Any learner that represents a linear map of rank `K`
+recovers `E` from `K` generic training pairs. A GINO "advantage" over the
+Crank-Nicolson curve therefore says little about neural operators unless it
+is reported next to the linear map learned from the same training split
+(finding D-T1-1, Gesamtbericht 2026-10-28 / 2026-11-05). Section 5 of the
+preregistration already names the POD-ridge baseline as an additional
+baseline; this section gives it a latency and an accuracy under the same
+protocol, so it can stand in the same cost-accuracy plane.
+
+**What.**
+- `exact_linear_map(config, lattice)` returns factors `(L, R)` with
+  `u(T) = L (R u0)`: `R = pinv(Phi)`, `L = Phi diag(exp(-kappa lambda_k T))`,
+  `Phi` the `(M, K)` matrix of the task's exact eigenfunctions at the nodes.
+  An oracle from the basis, fitted to no data. A lattice on which the modes
+  have numerical rank below `K` (`numpy.linalg.matrix_rank` rule) is refused.
+- `PODRidgeBaseline.factors()` (`spec/SPECTRAL_AUDIT_v1.md` section 6) gives
+  the learned map in the same form, `G = L @ R` (bitwise `matrix()`).
+- `linear_comparator_point(config, u0, truth, lattice, comparator=...,
+  sample_ids=..., protocol, timed_samples, clock)` times `L @ (R @ u0[i])`
+  at batch size 1 with the protocol of section 1 and takes the metrics of the
+  task spec from the outputs of that timed call. `comparator` is
+  `"exact_linear_map"` or a fitted `PODRidgeBaseline`; a fitted one needs
+  `sample_ids` and runs its leakage guard (`predict`, `LeakageError` on a
+  trained id or a training row under a new id) before anything is timed.
+
+`LinearComparatorPoint` carries `kind`, `n`, `domain`, `sample_count`,
+`timed_samples`, the four error statistics, `median_wall_time_s`,
+`wall_time_ci_s`, `rank` (inner dimension of the factors), `num_train`,
+`operator_sha256` (SHA-256 of the canonical bytes of both factors),
+`train_ids_sha256` (canonical JSON of the sorted training ids; `None` for the
+oracle) and the settings `kappa`, `t_final`, `task_config_sha256`, `warmup`,
+`repeats`, `timing_protocol_sha256`, `clock`.
+
+**Not a decision rule.** No rule of section 5 reads this point; whether a
+claim against CN must also beat the learned linear map is the owner's
+amendment (ADR-003). Until approval the POD-ridge comparator is fitted on no
+T1 data (preregistration: no model on T1 before approval); its tests use
+synthetic linear data. The oracle is not a fit and may run on T1 inputs.
 
 ## 3. Pareto-efficient frontier and log-log interpolation (section 6)
 
@@ -267,7 +371,12 @@ recomputed (claim boundary).
   another frontier: R3 F1 found the genuine points for steps `{1, 64}`, R4-F1
   the genuine curve on steps `(1, 8, 16, 24, 32, 48, 64)` reaching
   `advantage`); every point's `n` is the decided lattice (:134-135; R4-F1: the
-  genuine `n = 64` curve under `n = 32` reached `advantage`); its `domain` is
+  genuine `n = 64` curve under `n = 32` reached `advantage`); its `n_solve` is
+  `k n` for the registered refinements `_REGISTERED_REFINEMENTS`, one block of
+  the seven `steps` per `k` in that order (amendment 2026-11-05, D-T1-2,
+  section 2a; the DRAFT preregistration solves on the evaluation lattice, so
+  today `k = 1` and `n_solve = n`: a refined point is refused until the owner
+  registers the refinements); its `domain` is
   the test set's domain in the lattice's spelling; the settings it was
   computed with are the registered ones (Equalita R5-F1: the genuine curve
   solved with `kappa = 2` or `T = 0.02` against the registered truth reached
@@ -290,7 +399,8 @@ recomputed (claim boundary).
   checked points, never from the registered grid or the `n` argument:
   `baseline_points` (every point with all its fields), and derived from them
   `baseline_times_s`, `baseline_errors`, `baseline_steps` and `baseline_n`
-  (the sorted list of the points' lattices).
+  (the sorted list of the points' lattices) and `baseline_n_solve` (the solve
+  lattice of every point, in order; amendment 2026-11-05).
 - `gino_latency_times_s` are the timed calls, exactly the preregistered 10
   measured repeats per sample (`TimingProtocol().repeats`, section 1): shape
   `(10,)` for one sample or `(samples, 10)`; any other count, including a flat
@@ -397,6 +507,15 @@ configuration, `rtol != 1e-12`, a timing protocol other than
 not `t_final / steps`, negative record fields and an inverted interval. The
 record's `baseline_points` entries gain the eight fields, so a record written before this change does not verify
 against the new code. `decide_test_set` is unchanged.
+
+**API and format change (2026-11-05, D-T1-2, breaking):** `CostAccuracyPoint`
+has the new field `n_solve` (no default, so a construction from before fails
+loudly); its `to_dict`, the decision record's `baseline_points` and the new
+`provenance["baseline_n_solve"]` carry it, so a record computed before this
+change does not verify against the new code (no Phase 1 record exists yet).
+`baseline_cost_accuracy_curve` takes `refinements` (default `(1,)`, the former
+behaviour) and `coefficients`; for the default the values of every former
+field are unchanged (test: `k = 1` is the unrefined curve bitwise).
 
 ## 6. Break-even (preregistration section 4)
 

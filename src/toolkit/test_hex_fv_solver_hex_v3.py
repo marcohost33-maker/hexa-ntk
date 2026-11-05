@@ -24,6 +24,7 @@ from hex_fv_solver_hex_v3 import (
     crank_nicolson_heat,
     edge_conductances,
     explicit_euler_heat,
+    nested_node_index,
     positivity_max_dt,
     solve_steady_diffusion,
     torus_hex_lattice,
@@ -131,6 +132,77 @@ class TestTorusLattice(unittest.TestCase):
         for bad, exc in ((5, ValueError), (2, ValueError), (7, ValueError), (8.0, TypeError)):
             with self.subTest(n=bad), self.assertRaises(exc):
                 torus_hex_lattice(bad)
+
+
+class TestNestedNodeIndex(unittest.TestCase):
+    """Section 2, nesting (amendment 2026-11-05, D-T1-2): node (i, j) of N is node (k i, k j) of k N."""
+
+    FACTORIES = (("triangle_dirichlet", triangle_hex_lattice, (3, 5, 8, 16)),
+                 ("torus_periodic", torus_hex_lattice, (4, 6, 8, 16)))
+
+    def test_bitwise_nested_coordinates_for_powers_of_two(self):
+        for domain, factory, sizes in self.FACTORIES:
+            for n in sizes:
+                coarse = factory(n)
+                for k in (1, 2, 4, 8):
+                    with self.subTest(domain=domain, n=n, k=k):
+                        fine = factory(k * n)
+                        index = nested_node_index(coarse, fine)
+                        self.assertEqual(index.dtype, np.int64)
+                        self.assertEqual(index.shape, (coarse.num_nodes,))
+                        self.assertEqual(len(np.unique(index)), coarse.num_nodes)
+                        # Bitwise, not close: h_f = h_c / 2^m and k (i + j/2) are exact.
+                        np.testing.assert_array_equal(fine.coords[index], coarse.coords)
+                        self.assertFalse(index.flags.writeable)
+                        if k == 1:
+                            np.testing.assert_array_equal(index, np.arange(coarse.num_nodes))
+
+    def test_injection_of_a_fine_field_is_its_value_at_the_coarse_nodes(self):
+        # Metamorphic: a field evaluated on the fine nodes and injected equals the field on the coarse nodes.
+        for domain, factory, _ in self.FACTORIES:
+            coarse, fine = factory(8), factory(32)
+
+            def field(xy):
+                return np.sin(2 * math.pi * xy[:, 0]) * np.cos(4 * math.pi * xy[:, 1] / _SQRT3) + xy[:, 1]
+
+            with self.subTest(domain=domain):
+                np.testing.assert_array_equal(field(fine.coords)[nested_node_index(coarse, fine)],
+                                              field(coarse.coords))
+
+    def test_neighbours_of_a_coarse_node_are_k_fine_steps_away(self):
+        # The fine node k slots along slot s of a nested node is the nested image of its coarse neighbour.
+        for domain, factory, _ in self.FACTORIES:
+            coarse, fine, k = factory(8), factory(32), 4
+            index = nested_node_index(coarse, fine)
+            for slot in range(6):
+                walk = index.copy()
+                for _ in range(k):
+                    walk = np.where(walk >= 0, fine.neighbors[np.maximum(walk, 0), slot], -1)
+                expected = np.where(coarse.neighbors[:, slot] >= 0, index[np.maximum(coarse.neighbors[:, slot], 0)], -1)
+                with self.subTest(domain=domain, slot=slot):
+                    # A boundary neighbour on the coarse lattice is a boundary node of the fine walk too.
+                    np.testing.assert_array_equal(walk >= 0, expected >= 0)
+                    np.testing.assert_array_equal(walk[walk >= 0], expected[expected >= 0])
+
+    def test_refusals(self):
+        tri8 = triangle_hex_lattice(8)
+        with self.assertRaisesRegex(ValueError, "not a power of two"):
+            nested_node_index(tri8, triangle_hex_lattice(24))
+        with self.assertRaisesRegex(ValueError, "not a power of two"):
+            nested_node_index(torus_hex_lattice(4), torus_hex_lattice(12))
+        with self.assertRaisesRegex(ValueError, "not a multiple"):
+            nested_node_index(tri8, triangle_hex_lattice(12))
+        with self.assertRaisesRegex(ValueError, "not a multiple"):
+            nested_node_index(tri8, triangle_hex_lattice(4))      # coarser "fine" lattice
+        with self.assertRaisesRegex(ValueError, "different domains"):
+            nested_node_index(tri8, torus_hex_lattice(16))
+        with self.assertRaises(TypeError):
+            nested_node_index(tri8, "triangle_dirichlet")
+        forged = HexLattice(n=16, h=1.0 / 16, domain="triangle_dirichlet",
+                            coords=np.zeros_like(triangle_hex_lattice(16).coords),
+                            neighbors=triangle_hex_lattice(16).neighbors)
+        with self.assertRaisesRegex(ValueError, "canonical"):          # lattice contract (W9-F01)
+            nested_node_index(tri8, forged)
 
 
 class TestOperator(unittest.TestCase):

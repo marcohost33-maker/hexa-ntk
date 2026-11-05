@@ -6,7 +6,13 @@ for sections 4-7 of spec/PREREGISTRATION_PHASE1_v1.md:
 
 - the timing protocol (warm-up, repeats, median, percentile bootstrap);
 - the mechanistic cost-accuracy curve (Crank-Nicolson baseline over a
-  ``steps`` grid, accuracy and latency per point);
+  ``steps`` grid, accuracy and latency per point), since 2026-11-05 also with
+  a spatial refinement of the solve (``N_solve = k N``, injection onto the
+  evaluation nodes; spec section 2a, D-T1-2; a decision accepts only the
+  registered refinements, today ``k = 1``);
+- the linear comparator beside the curve (spec section 2b, D-T1-1): the exact
+  T1 linear map (an oracle from the basis) or a fitted POD-ridge map, timed
+  with the same protocol; reported, read by no decision rule;
 - the Pareto-efficient frontier with log-log interpolation and NO
   extrapolation;
 - the IQM (trimmed mean, Agarwal et al. 2021) with its two-stage paired
@@ -19,8 +25,9 @@ for sections 4-7 of spec/PREREGISTRATION_PHASE1_v1.md:
 - the run manifest with its SHA-256.
 
 Dependencies: numpy, plus the T1 task module ``heat_operator_task_hex_v3``
-(which imports torch for its dataset types) and the FV solver's lattice type;
-earlier versions claimed numpy alone (issue #82). Instruments only: nothing
+(which imports torch for its dataset types), the FV solver's lattices and
+``nested_node_index``, and ``linear_baseline_hex_v3`` (POD-ridge); earlier
+versions claimed numpy alone (issue #82). Instruments only: nothing
 here trains, tunes or scores a model on T1 data. Every result of these functions is a measurement of the instrument
 on the numbers it was given, never a scientific claim.
 """
@@ -36,7 +43,11 @@ __all__ = [
     "LatencyMeasurement",
     "measure_latency",
     "CostAccuracyPoint",
+    "PROPOSED_REFINEMENTS",
     "baseline_cost_accuracy_curve",
+    "exact_linear_map",
+    "LinearComparatorPoint",
+    "linear_comparator_point",
     "pareto_frontier",
     "error_at_time",
     "time_at_error",
@@ -88,13 +99,30 @@ import numpy as np
 from heat_operator_task_hex_v3 import (
     HeatOperatorTaskConfig,
     evaluate_predictions,
+    evaluate_sample,
     mechanistic_baseline,
+    mode_basis,
 )
-from hex_fv_solver_hex_v3 import HexLattice
+from hex_fv_solver_hex_v3 import (
+    HexLattice,
+    _check_lattice,
+    nested_node_index,
+    torus_hex_lattice,
+    triangle_hex_lattice,
+)
+from linear_baseline_hex_v3 import PODRidgeBaseline
 
 PROTOCOL_ID = "PHASE1_PROTOCOL_v1"
 _MANIFEST_SCHEMA = "hexantk_phase1_run_manifest_v1"
 _DEFAULT_STEPS_GRID = (1, 2, 4, 8, 16, 32, 64)
+# Spatial refinement of the baseline solve, N_solve = k * N_eval (spec section 2a, D-T1-2). The
+# DRAFT preregistration (:134-137) runs the curve on the evaluation lattice only, so a
+# decision accepts k = 1 alone. D-T1-2 (Gesamtbericht 2026-10-28 / 2026-11-05) proposes
+# k in (1, 2, 4); registering it is the owner's amendment of the preregistration text, and
+# this tuple changes with that text, never on its own.
+_REGISTERED_REFINEMENTS = (1,)
+#: The refinement set D-T1-2 proposes for the owner's decision (not registered, see above).
+PROPOSED_REFINEMENTS = (1, 2, 4)
 # The CG tolerance of the baseline. The preregistration names the method (:128-133,
 # ``mechanistic_baseline`` as verified in Phase 0) but writes out no tolerance; this is
 # the verified default, and decide_preregistered requires it (Equalita R5-F1; whether
@@ -382,6 +410,11 @@ class CostAccuracyPoint:
     calls were read with: ``"time.perf_counter"`` or ``"custom:<name>"``).
     The fields after ``cg_iterations_mean`` have
     no default, so a construction from before they were added fails loudly.
+    Since 2026-11-05 (D-T1-2, spec section 2a) the point also carries
+    ``n_solve``, the lattice the solver ran on: ``n_solve = k * n`` for the
+    refinement ``k``; the errors are always measured on the evaluation lattice
+    ``n``, after injection of the fine solution onto its nodes
+    (``nested_node_index``). ``n_solve == n`` is the unrefined curve.
     """
 
     n: int
@@ -405,6 +438,7 @@ class CostAccuracyPoint:
     repeats: int
     timing_protocol_sha256: str
     clock: str
+    n_solve: int
 
     def to_dict(self) -> Dict[str, Any]:
         out = asdict(self)
@@ -440,6 +474,42 @@ def _clock_name(clock: Callable[[], float]) -> str:
     return f"custom:{getattr(clock, '__qualname__', type(clock).__qualname__)}"
 
 
+def _refinement_set(value: Any) -> Tuple[int, ...]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence) or len(value) == 0:
+        raise TypeError("refinements must be a non-empty sequence of ints")
+    ks = tuple(_int_at_least(k, name="refinement", minimum=1) for k in value)
+    if len(set(ks)) != len(ks):
+        raise ValueError("refinements must not repeat a value")
+    for k in ks:
+        if k & (k - 1):
+            raise ValueError(f"refinement {k} is not a power of two (1, 2, 4, ...): only those nest the "
+                             "evaluation nodes bitwise into the solve lattice (nested_node_index)")
+    return ks
+
+
+# Identity of a refined input (spec section 2a): the solve-lattice initial condition restricted to the
+# evaluation nodes must be the given u0 up to rounding of the mode sum (a different sample differs by O(1)).
+_REFINED_INPUT_ULPS = 64.0
+
+
+def _refined_inputs(config: HeatOperatorTaskConfig, coefficients: np.ndarray, inputs: np.ndarray,
+                    lattice: HexLattice, k: int) -> Tuple[HexLattice, np.ndarray, np.ndarray]:
+    """(solve lattice, its initial conditions [S, M_k], injection index) for refinement ``k``."""
+    factory = triangle_hex_lattice if lattice.domain == "triangle_dirichlet" else torus_hex_lattice
+    fine = factory(k * int(lattice.n))
+    index = nested_node_index(lattice, fine)
+    fine_u0 = np.stack([evaluate_sample(config, a, fine)[0] for a in coefficients])
+    deviation = np.max(np.abs(fine_u0[:, index] - inputs), axis=1)
+    scale = np.maximum(np.max(np.abs(inputs), axis=1), np.finfo(np.float64).tiny)
+    bad = np.flatnonzero(deviation > _REFINED_INPUT_ULPS * np.finfo(np.float64).eps * scale)
+    if bad.size:
+        raise ValueError(
+            f"coefficients row {int(bad[0])} does not reproduce u0 on the evaluation nodes "
+            f"(max deviation {float(deviation[bad[0]]):.3e}): the refined solve would start from another "
+            "initial condition")
+    return fine, fine_u0, index
+
+
 def baseline_cost_accuracy_curve(
     config: HeatOperatorTaskConfig,
     u0: Any,
@@ -451,8 +521,23 @@ def baseline_cost_accuracy_curve(
     timed_samples: Optional[int] = None,
     rtol: float = _REGISTERED_BASELINE_RTOL,
     clock: Callable[[], float] = time.perf_counter,
+    refinements: Sequence[int] = (1,),
+    coefficients: Any = None,
 ) -> Tuple[CostAccuracyPoint, ...]:
-    """The mechanistic baseline on every input, for every ``steps``: accuracy and latency per point."""
+    """The mechanistic baseline on every input, for every ``(refinement, steps)``: accuracy and latency per point.
+
+    ``refinements`` (spec section 2a, D-T1-2): the solver runs on the lattice
+    ``k * lattice.n`` for every ``k`` (powers of two), and its solution is
+    injected onto the evaluation nodes before the errors against ``truth`` are
+    taken. ``k = 1`` is the evaluation lattice itself and uses ``u0`` as given.
+    A ``k > 1`` needs ``coefficients`` (the ``[S, K]`` mode coefficients of the
+    task, e.g. ``generate_dataset(...)["coefficients"]``): the initial condition
+    on the solve lattice is the task's exact field of those coefficients, and
+    it must reproduce ``u0`` on the evaluation nodes. The injection is inside
+    the timed call; building the fine initial condition is not (it is the
+    problem data, like ``u0`` for the model). Points come in the order
+    ``for k in refinements: for steps in steps_grid``.
+    """
     if not isinstance(config, HeatOperatorTaskConfig):
         raise TypeError("config must be a HeatOperatorTaskConfig")
     if not isinstance(lattice, HexLattice) or lattice.domain != config.domain:
@@ -464,11 +549,21 @@ def baseline_cost_accuracy_curve(
     if inputs.shape != targets.shape:
         raise ValueError("u0 and truth must have the same shape")
     grid = _steps_grid(steps_grid)
+    ks = _refinement_set(refinements)
     samples = inputs.shape[0]
     timed = samples if timed_samples is None else _int_at_least(timed_samples, name="timed_samples", minimum=1)
     if timed > samples:
         raise ValueError(f"timed_samples={timed} exceeds the {samples} samples")
     rtol = _positive_float(rtol, name="rtol")
+    if any(k > 1 for k in ks):
+        if coefficients is None:
+            raise ValueError("a refinement k > 1 needs the mode coefficients of the inputs (coefficients=...)")
+        coeffs = np.asarray(coefficients)
+        if coeffs.dtype == np.bool_ or np.iscomplexobj(coeffs) or not np.issubdtype(coeffs.dtype, np.number):
+            raise TypeError("coefficients must be a real numeric array")
+        coeffs = np.asarray(coeffs, dtype=np.float64)
+        if coeffs.ndim != 2 or coeffs.shape[0] != samples:
+            raise ValueError(f"coefficients must have shape [{samples}, K] (one row per input), got {coeffs.shape}")
     # Equalita R5-F1: the settings the values depend on travel with every point, read once here.
     settings = {
         "kappa": float(config.kappa), "t_final": float(config.t_final), "task_config_sha256": config.digest(),
@@ -476,37 +571,203 @@ def baseline_cost_accuracy_curve(
         "timing_protocol_sha256": protocol.digest(), "clock": _clock_name(clock),
     }
     points = []
-    for steps in grid:
-        predictions = np.empty_like(inputs)
-        iterations = np.empty(samples, dtype=np.float64)
-        rows = np.empty((timed, protocol.repeats), dtype=np.float64)
-        for i in range(samples):
-            holder: Dict[str, Any] = {}
+    for k in ks:
+        if k == 1:
+            solve_lattice, solve_inputs, inject = lattice, inputs, None
+        else:
+            solve_lattice, solve_inputs, inject = _refined_inputs(config, coeffs, inputs, lattice, k)
+        for steps in grid:
+            predictions = np.empty_like(inputs)
+            iterations = np.empty(samples, dtype=np.float64)
+            rows = np.empty((timed, protocol.repeats), dtype=np.float64)
+            for i in range(samples):
+                holder: Dict[str, Any] = {}
 
-            def run(index: int = i, holder: Dict[str, Any] = holder) -> None:
-                holder["out"] = mechanistic_baseline(config, inputs[index], lattice, steps=steps, rtol=rtol)
+                def run(index: int = i, holder: Dict[str, Any] = holder) -> None:
+                    out, info = mechanistic_baseline(config, solve_inputs[index], solve_lattice, steps=steps,
+                                                     rtol=rtol)
+                    holder["out"] = (out if inject is None else out[inject], info)
 
-            if i < timed:
-                rows[i] = measure_latency(run, protocol, clock=clock).times_s
-            else:
-                run()
-            prediction, info = holder["out"]
-            predictions[i] = prediction
-            iterations[i] = float(info["cg_iterations"])
-        metrics = evaluate_predictions(predictions, targets, lattice)
-        rel_l2 = np.asarray(metrics["rel_l2"], dtype=np.float64)
-        low, high = _bootstrap_median_rows(rows, protocol)
-        points.append(CostAccuracyPoint(
-            n=int(lattice.n), steps=int(steps), dt=settings["t_final"] / steps,
-            sample_count=int(samples), timed_samples=int(timed),
-            mean_rel_l2=float(_finite_stat(np.mean, np.asarray(rel_l2, dtype=np.float64))),
-            median_rel_l2=float(_finite_stat(np.median, np.asarray(rel_l2, dtype=np.float64))),
-            mean_rel_h1=float(_finite_stat(np.mean, np.asarray(metrics["rel_h1"], dtype=np.float64))),
-            mean_rel_max=float(_finite_stat(np.mean, np.asarray(metrics["rel_max"], dtype=np.float64))),
-            median_wall_time_s=float(_finite_stat(np.median, rows)), wall_time_ci_s=(low, high),
-            cg_iterations_mean=float(np.mean(iterations)), domain=str(lattice.domain), **settings,
-        ))
+                if i < timed:
+                    rows[i] = measure_latency(run, protocol, clock=clock).times_s
+                else:
+                    run()
+                prediction, info = holder["out"]
+                predictions[i] = prediction
+                iterations[i] = float(info["cg_iterations"])
+            metrics = evaluate_predictions(predictions, targets, lattice)
+            rel_l2 = np.asarray(metrics["rel_l2"], dtype=np.float64)
+            low, high = _bootstrap_median_rows(rows, protocol)
+            points.append(CostAccuracyPoint(
+                n=int(lattice.n), steps=int(steps), dt=settings["t_final"] / steps,
+                sample_count=int(samples), timed_samples=int(timed),
+                mean_rel_l2=float(_finite_stat(np.mean, np.asarray(rel_l2, dtype=np.float64))),
+                median_rel_l2=float(_finite_stat(np.median, np.asarray(rel_l2, dtype=np.float64))),
+                mean_rel_h1=float(_finite_stat(np.mean, np.asarray(metrics["rel_h1"], dtype=np.float64))),
+                mean_rel_max=float(_finite_stat(np.mean, np.asarray(metrics["rel_max"], dtype=np.float64))),
+                median_wall_time_s=float(_finite_stat(np.median, rows)), wall_time_ci_s=(low, high),
+                cg_iterations_mean=float(np.mean(iterations)), domain=str(lattice.domain), **settings,
+                n_solve=int(solve_lattice.n),
+            ))
     return tuple(points)
+
+
+# ------------------------------------------------------------------
+# Section 2b: linear comparator beside the curve (D-T1-1)
+# ------------------------------------------------------------------
+
+
+def exact_linear_map(config: HeatOperatorTaskConfig, lattice: HexLattice) -> Tuple[np.ndarray, np.ndarray]:
+    """The T1 truth operator on the lattice nodes as factors ``(L, R)``: ``u(T) = L @ (R @ u0)`` (section 2b).
+
+    With ``Phi`` the ``(M, K)`` matrix of the task's exact eigenfunctions at the nodes
+    (``mode_basis``) and ``g_k = exp(-kappa lambda_k T)``: ``R = pinv(Phi)`` recovers the
+    mode coefficients of any ``u0`` in the span of the basis (every task input is one),
+    ``L = Phi diag(g)`` applies the exact semigroup. An oracle, not a learner: it uses the
+    basis and no data. A learned linear map (``PODRidgeBaseline`` on the training split)
+    reaches it when its training inputs span the ``K`` modes. A lattice on which the modes
+    are not linearly independent (aliasing, numerical rank below ``K`` by the
+    ``numpy.linalg.matrix_rank`` rule) is refused: nodal values do not determine the
+    coefficients there.
+    """
+    if not isinstance(config, HeatOperatorTaskConfig):
+        raise TypeError("config must be a HeatOperatorTaskConfig")
+    if not isinstance(lattice, HexLattice) or lattice.domain != config.domain:
+        raise ValueError(f"lattice must be a {config.domain} HexLattice")
+    lattice = _check_lattice(lattice)
+    basis = mode_basis(config)
+    phi = np.stack([mode.evaluate(lattice.coords) for mode in basis], axis=1)
+    singular = np.linalg.svd(phi, compute_uv=False)
+    rank = int(np.sum(singular > max(phi.shape) * np.finfo(np.float64).eps * singular[0]))
+    if rank < len(basis):
+        raise ValueError(
+            f"the {len(basis)} task modes have numerical rank {rank} on the n={lattice.n} {lattice.domain} "
+            "nodes: nodal values do not determine the mode coefficients, no exact linear map")
+    decay = np.array([math.exp(-float(config.kappa) * mode.eigenvalue * float(config.t_final)) for mode in basis])
+    return np.ascontiguousarray(phi * decay[None, :]), np.ascontiguousarray(np.linalg.pinv(phi))
+
+
+@dataclass(frozen=True)
+class LinearComparatorPoint:
+    """A linear map on the curve's test inputs, timed like the baseline (spec section 2b, D-T1-1).
+
+    ``kind`` is ``"exact_linear_map"`` (the oracle ``exact_linear_map``, no data) or
+    ``"pod_ridge"`` (a ``PODRidgeBaseline`` fitted on the training split). The timed
+    call is the factorised application ``L @ (R @ u0)`` at batch size 1; ``rank`` is
+    the inner dimension of the factors, ``operator_sha256`` binds both factors,
+    ``num_train`` and ``train_ids_sha256`` the training ids (``0`` and ``None`` for
+    the oracle). The other fields are those of ``CostAccuracyPoint``. A reported
+    point beside the curve: no decision rule reads it (DRAFT preregistration).
+    """
+
+    kind: str
+    n: int
+    domain: str
+    sample_count: int
+    timed_samples: int
+    mean_rel_l2: float
+    median_rel_l2: float
+    mean_rel_h1: float
+    mean_rel_max: float
+    median_wall_time_s: float
+    wall_time_ci_s: Tuple[float, float]
+    rank: int
+    num_train: int
+    operator_sha256: str
+    train_ids_sha256: Optional[str]
+    kappa: float
+    t_final: float
+    task_config_sha256: str
+    warmup: int
+    repeats: int
+    timing_protocol_sha256: str
+    clock: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = asdict(self)
+        out["wall_time_ci_s"] = list(self.wall_time_ci_s)
+        return out
+
+
+def linear_comparator_point(
+    config: HeatOperatorTaskConfig,
+    u0: Any,
+    truth: Any,
+    lattice: HexLattice,
+    *,
+    comparator: Any = "exact_linear_map",
+    sample_ids: Optional[Sequence[int]] = None,
+    protocol: TimingProtocol = TimingProtocol(),
+    timed_samples: Optional[int] = None,
+    clock: Callable[[], float] = time.perf_counter,
+) -> LinearComparatorPoint:
+    """Accuracy and latency of a linear map on the given inputs (spec section 2b, D-T1-1).
+
+    ``comparator`` is ``"exact_linear_map"`` or a fitted ``PODRidgeBaseline``. A fitted
+    map scores samples, so it needs ``sample_ids`` and runs its leakage guard
+    (``predict`` raises ``LeakageError`` if a scored id or input row was trained on)
+    before anything is timed. Predictions are the outputs of the timed call itself.
+    """
+    if not isinstance(config, HeatOperatorTaskConfig):
+        raise TypeError("config must be a HeatOperatorTaskConfig")
+    if not isinstance(lattice, HexLattice) or lattice.domain != config.domain:
+        raise ValueError(f"lattice must be a {config.domain} HexLattice")
+    if not isinstance(protocol, TimingProtocol):
+        raise TypeError("protocol must be a TimingProtocol")
+    inputs = _fields(u0, lattice, name="u0")
+    targets = _fields(truth, lattice, name="truth")
+    if inputs.shape != targets.shape:
+        raise ValueError("u0 and truth must have the same shape")
+    samples = inputs.shape[0]
+    timed = samples if timed_samples is None else _int_at_least(timed_samples, name="timed_samples", minimum=1)
+    if timed > samples:
+        raise ValueError(f"timed_samples={timed} exceeds the {samples} samples")
+    if isinstance(comparator, str) and comparator == "exact_linear_map":
+        left, right = exact_linear_map(config, lattice)
+        kind, num_train, train_digest = "exact_linear_map", 0, None
+    elif isinstance(comparator, PODRidgeBaseline):
+        if comparator.num_nodes != lattice.num_nodes:
+            raise ValueError(f"the comparator maps {comparator.num_nodes} nodes, the lattice has {lattice.num_nodes}")
+        if sample_ids is None:
+            raise ValueError("a fitted comparator scores samples: sample_ids are needed for its leakage guard")
+        comparator.predict(inputs, sample_ids)
+        left, right = comparator.factors()
+        train_ids = sorted(comparator.train_ids)
+        kind, num_train = "pod_ridge", len(train_ids)
+        train_digest = hashlib.sha256(_canonical_json(train_ids)).hexdigest()
+    else:
+        raise TypeError('comparator must be "exact_linear_map" or a fitted PODRidgeBaseline')
+    left = np.ascontiguousarray(left, dtype=np.float64)
+    right = np.ascontiguousarray(right, dtype=np.float64)
+    operator_digest = hashlib.sha256(_canonical_json(
+        {"left": _array_sha256(left), "right": _array_sha256(right)})).hexdigest()
+    predictions = np.empty_like(inputs)
+    rows = np.empty((timed, protocol.repeats), dtype=np.float64)
+    for i in range(samples):
+        holder: Dict[str, Any] = {}
+
+        def run(index: int = i, holder: Dict[str, Any] = holder) -> None:
+            holder["out"] = left @ (right @ inputs[index])
+
+        if i < timed:
+            rows[i] = measure_latency(run, protocol, clock=clock).times_s
+        else:
+            run()
+        predictions[i] = holder["out"]
+    metrics = evaluate_predictions(predictions, targets, lattice)
+    rel_l2 = np.asarray(metrics["rel_l2"], dtype=np.float64)
+    low, high = _bootstrap_median_rows(rows, protocol)
+    return LinearComparatorPoint(
+        kind=kind, n=int(lattice.n), domain=str(lattice.domain), sample_count=int(samples), timed_samples=int(timed),
+        mean_rel_l2=float(_finite_stat(np.mean, rel_l2)), median_rel_l2=float(_finite_stat(np.median, rel_l2)),
+        mean_rel_h1=float(_finite_stat(np.mean, np.asarray(metrics["rel_h1"], dtype=np.float64))),
+        mean_rel_max=float(_finite_stat(np.mean, np.asarray(metrics["rel_max"], dtype=np.float64))),
+        median_wall_time_s=float(_finite_stat(np.median, rows)), wall_time_ci_s=(low, high),
+        rank=int(right.shape[0]), num_train=int(num_train), operator_sha256=operator_digest,
+        train_ids_sha256=train_digest, kappa=float(config.kappa), t_final=float(config.t_final),
+        task_config_sha256=config.digest(), warmup=int(protocol.warmup), repeats=int(protocol.repeats),
+        timing_protocol_sha256=protocol.digest(), clock=_clock_name(clock),
+    )
 
 
 # ------------------------------------------------------------------
@@ -1072,7 +1333,7 @@ def _point_str(value: Any, *, name: str) -> str:
 
 
 # Read order of one point: every field exactly once, converted to a plain value (Equalita R5-F3).
-_POINT_INTS = ("n", "steps", "sample_count", "timed_samples", "warmup", "repeats")
+_POINT_INTS = ("n", "steps", "sample_count", "timed_samples", "warmup", "repeats", "n_solve")
 _POINT_STRS = ("domain", "task_config_sha256", "timing_protocol_sha256", "clock")
 # (field, lower bound, strict): R5-F4 plausibility of the fields that only enter the record.
 _POINT_FLOATS = (
@@ -1122,9 +1383,12 @@ def _registered_baseline_points(curve: Any, *, test_set: str, n: int) -> List[Di
     solved with kappa = 2 or T = 0.02 reached "advantage" too; the point now also carries the
     task configuration, the tolerance and the timing protocol, checked here. Each point is read
     once into plain values (R5-F3); the checks and the record use only that copy. Types and
-    plausibility come first (R5-F4), then the coordinates in a fixed order (steps, n, domain,
-    kappa, t_final, dt, task configuration digest, rtol, warm-ups, repeats, timing protocol
-    digest, clock, sample count, timed samples), so each refusal names the first one that differs.
+    plausibility come first (R5-F4), then the coordinates in a fixed order (steps, n, n_solve,
+    domain, kappa, t_final, dt, task configuration digest, rtol, warm-ups, repeats, timing
+    protocol digest, clock, sample count, timed samples), so each refusal names the first one
+    that differs. ``n_solve`` (D-T1-2, spec section 2a) must be ``k * n`` for the registered
+    refinements ``_REGISTERED_REFINEMENTS``, one block of the steps grid per ``k`` in that order;
+    the DRAFT preregistration registers ``k = 1`` only.
     """
     if isinstance(curve, (str, bytes, Mapping, np.ndarray)) or not isinstance(curve, Sequence):
         curve = None
@@ -1137,7 +1401,8 @@ def _registered_baseline_points(curve: Any, *, test_set: str, n: int) -> List[Di
             "baseline_curve must be the tuple of CostAccuracyPoint returned by baseline_cost_accuracy_curve; "
             "bare time/error lists carry no steps, lattice or sample count and are not accepted "
             "(API change 2026-10-21, Equalita R4-F1)")
-    grid = _DEFAULT_STEPS_GRID
+    grid = _DEFAULT_STEPS_GRID * len(_REGISTERED_REFINEMENTS)
+    refinement_of_point = tuple(k for k in _REGISTERED_REFINEMENTS for _ in _DEFAULT_STEPS_GRID)
     domain = _LATTICE_DOMAIN[PREREGISTERED_TEST_SETS[test_set][0]]
     # Equalita R5-F1: the settings a point must have been computed with. [D1] task configuration
     # of the test set's domain (preregistration :51-55), timing protocol 3 warm-ups / 10 measured
@@ -1153,13 +1418,20 @@ def _registered_baseline_points(curve: Any, *, test_set: str, n: int) -> List[Di
         raise DecisionInputError(
             f"baseline_curve steps {list(steps)} are not the registered steps {list(grid)}, one point "
             "each in that order (preregistration :134-137)")
-    for p in points:
+    for p, k in zip(points, refinement_of_point):
         at = f"baseline_curve point steps={p['steps']}"
         if p["n"] != n:
             # :134-135 the curve runs on the evaluation lattice N_eval itself.
             raise DecisionInputError(
                 f"{at} was measured on lattice n = {p['n']}, the decision is "
                 f"for n = {n} (preregistration :134-135, the evaluation lattice)")
+        if p["n_solve"] != k * n:
+            # D-T1-2: a refined solve (n_solve = 2n, 4n) is a stronger baseline, but which
+            # refinements form the curve is registered, not chosen per run (forking paths).
+            raise DecisionInputError(
+                f"{at} was solved on lattice n_solve = {p['n_solve']}; the registered curve solves on "
+                f"n_solve = {k * n} (refinements {list(_REGISTERED_REFINEMENTS)}; preregistration :134-135 "
+                "solves on the evaluation lattice, the D-T1-2 refinement is an owner amendment)")
         if p["domain"] != domain:
             raise DecisionInputError(
                 f"{at} was measured on domain {p['domain']!r}, test set "
@@ -1389,6 +1661,7 @@ def decide_preregistered(
         "baseline_errors": [p["mean_rel_l2"] for p in points],
         "baseline_steps": [p["steps"] for p in points],
         "baseline_n": sorted({p["n"] for p in points}),
+        "baseline_n_solve": [p["n_solve"] for p in points],
         "run_manifest_sha256": manifest["manifest_sha256"],
         "git_sha": manifest["git_sha"],
         "preregistration": manifest["preregistration"],

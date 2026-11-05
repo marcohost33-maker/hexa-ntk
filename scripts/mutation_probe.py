@@ -51,10 +51,12 @@ RC = "reference_case_hex_v3.py"
 FV = "hex_fv_solver_hex_v3.py"
 T1 = "heat_operator_task_hex_v3.py"
 P1 = "phase1_protocol_hex_v3.py"
+LB = "linear_baseline_hex_v3.py"
 NT = "ntk_trajectory_hex_v3.py"
 DDP = "ddp_hex_v3.py"
 T2 = "test_ddp_hex_v3.TestTwoRanks"
 I82 = "test_phase1_protocol_hex_v3.TestIssue82Residuals"
+RBC = "test_phase1_protocol_hex_v3.TestRefinedBaselineCurve"
 ME = "test_mid_epoch_resume_hex_v3.TestMidEpochResume"
 
 MUTANTS = (
@@ -459,6 +461,24 @@ MUTANTS = (
     Mutant(P1, "        if not isinstance(dirty, bool):\n", "        if False:\n", I82),
     Mutant(P1, "    if upper < float(fe[-1]) or upper > float(fe[0]):\n        return None\n", "", I82),
     Mutant(P1, "    return np.where(np.isfinite(out), out, fallback)\n", "    return fallback\n", I82),
+    # 2026-11-05 D-T1-2 (spec/PHASE1_PROTOCOL_v1.md section 2a, HEX_FV_SOLVER_v1.md nesting): the refined
+    # baseline solve, its injection, the input identity and the registered-refinement binding.
+    Mutant(FV, "    if k & (k - 1):\n", "    if False:\n", "test_hex_fv_solver_hex_v3.TestNestedNodeIndex"),
+    Mutant(FV, "    index = table[k * ci, k * cj]\n", "    index = table[ci, cj]\n",
+           "test_hex_fv_solver_hex_v3.TestNestedNodeIndex"),
+    Mutant(P1, "        if k & (k - 1):\n", "        if False:\n", RBC),
+    Mutant(P1, "    if bad.size:\n", "    if False:\n", RBC),
+    Mutant(P1, '                    holder["out"] = (out if inject is None else out[inject], info)\n',
+           '                    holder["out"] = (out if inject is None else out[:len(inject)], info)\n', RBC),
+    Mutant(P1, '        if p["n_solve"] != k * n:\n', "        if False:\n",
+           "test_phase1_protocol_hex_v3.TestRefinedCurveInTheDecision"),
+    # 2026-11-05 D-T1-1 (section 2b): the oracle's rank refusal and the comparator's leakage guard.
+    Mutant(P1, "    if rank < len(basis):\n", "    if False:\n", "test_phase1_protocol_hex_v3.TestExactLinearMap"),
+    Mutant(P1, "        comparator.predict(inputs, sample_ids)\n", "        pass\n",
+           "test_phase1_protocol_hex_v3.TestLinearComparatorPoint"),
+    Mutant(LB, '        return fit["p_out"] @ fit["b"].T, (fit["p_in"].T * self.weights[None, :])\n',
+           '        return fit["p_out"] @ fit["b"], (fit["p_in"].T * self.weights[None, :])\n',
+           "test_linear_baseline_hex_v3.TestViewsAndInvariance"),
 )
 
 

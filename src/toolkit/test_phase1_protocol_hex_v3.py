@@ -26,7 +26,7 @@ import numpy as np
 
 import phase1_protocol_hex_v3 as pp
 from heat_operator_task_hex_v3 import HeatOperatorTaskConfig, generate_dataset
-from hex_fv_solver_hex_v3 import assemble_hex_operator, torus_hex_lattice, triangle_hex_lattice
+from hex_fv_solver_hex_v3 import assemble_hex_operator, nested_node_index, torus_hex_lattice, triangle_hex_lattice
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -555,7 +555,7 @@ _REGISTERED_STEPS = (1, 2, 4, 8, 16, 32, 64)
 
 
 def _curve_points(times, errors, *, steps=_REGISTERED_STEPS, n=32, domain="triangle_dirichlet", sample_count=500,
-                  timed_samples=5, config=None, protocol=None, rtol=1e-12, clock="time.perf_counter"):
+                  timed_samples=5, config=None, protocol=None, rtol=1e-12, clock="time.perf_counter", n_solve=None):
     """Baseline points with explicit measurement coordinates, as ``baseline_cost_accuracy_curve`` writes them.
 
     The coordinates are the ones under test (Equalita R4-F1); the values are given. Hand-built
@@ -572,7 +572,8 @@ def _curve_points(times, errors, *, steps=_REGISTERED_STEPS, n=32, domain="trian
         mean_rel_l2=float(e), median_rel_l2=float(e), mean_rel_h1=float(e), mean_rel_max=float(e),
         median_wall_time_s=float(t), wall_time_ci_s=(float(t), float(t)), cg_iterations_mean=1.0, domain=domain,
         kappa=float(config.kappa), t_final=float(config.t_final), task_config_sha256=config.digest(), rtol=rtol,
-        warmup=protocol.warmup, repeats=protocol.repeats, timing_protocol_sha256=protocol.digest(), clock=clock)
+        warmup=protocol.warmup, repeats=protocol.repeats, timing_protocol_sha256=protocol.digest(), clock=clock,
+        n_solve=n if n_solve is None else n_solve)
         for s, t, e in zip(steps, times, errors))
 
 
@@ -1571,6 +1572,319 @@ class TestCostAccuracyCurve(unittest.TestCase):
         with self.assertRaises(TypeError):
             pp.baseline_cost_accuracy_curve(self.config, self.u0, self.truth, self.lattice,
                                             **{**kwargs, "protocol": None})
+
+
+class TestRefinedBaselineCurve(unittest.TestCase):
+    """Section 2a (D-T1-2): the solve runs on k N, the error is taken on the N nodes after injection."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.config = HeatOperatorTaskConfig()
+        cls.n = 8
+        cls.lattice = triangle_hex_lattice(cls.n)
+        cls.data = generate_dataset(cls.config, n=cls.n, sample_ids=[0, 1, 2], dataset_seed=1)
+        cls.protocol = pp.TimingProtocol(warmup=1, repeats=3, bootstrap_resamples=200)
+        cls.points = pp.baseline_cost_accuracy_curve(
+            cls.config, cls.data["u0"], cls.data["uT"], cls.lattice, steps_grid=(16, 64),
+            protocol=cls.protocol, clock=_fake_clock(), refinements=(1, 2, 4),
+            coefficients=cls.data["coefficients"])
+
+    def test_points_are_refinement_major_and_carry_n_solve(self):
+        self.assertEqual([(p.n, p.n_solve, p.steps) for p in self.points],
+                         [(8, 8, 16), (8, 8, 64), (8, 16, 16), (8, 16, 64), (8, 32, 16), (8, 32, 64)])
+        for p in self.points:
+            self.assertEqual((p.sample_count, p.timed_samples, p.domain), (3, 3, "triangle_dirichlet"))
+            self.assertEqual(p.to_dict()["n_solve"], p.n_solve)
+            json.dumps(p.to_dict(), allow_nan=False)
+
+    def test_spatial_refinement_lowers_the_floor_at_second_order(self):
+        # At steps = 64 the spatial error dominates (dt = 1.6e-4): halving h divides it by about 4.
+        floor = {p.n_solve: p.mean_rel_l2 for p in self.points if p.steps == 64}
+        self.assertGreater(floor[8] / floor[16], 3.0)
+        self.assertLess(floor[8] / floor[16], 5.0)
+        self.assertGreater(floor[16] / floor[32], 3.0)
+        self.assertLess(floor[16] / floor[32], 5.0)
+        # The finer solve costs more CG iterations per sample.
+        iterations = [p.cg_iterations_mean for p in self.points if p.steps == 64]
+        self.assertEqual(iterations, sorted(iterations))
+
+    def test_k1_is_the_unrefined_curve_bitwise(self):
+        plain = pp.baseline_cost_accuracy_curve(self.config, self.data["u0"], self.data["uT"], self.lattice,
+                                                steps_grid=(16, 64), protocol=self.protocol, clock=_fake_clock())
+        self.assertEqual([p.to_dict() for p in plain], [p.to_dict() for p in self.points[:2]])
+        self.assertEqual([p.n_solve for p in plain], [8, 8])
+
+    def test_the_refined_prediction_is_the_injected_fine_solution(self):
+        # Oracle by construction: the fine solve of the exact fine initial condition, injected.
+        from heat_operator_task_hex_v3 import evaluate_predictions, evaluate_sample, mechanistic_baseline
+        fine = triangle_hex_lattice(16)
+        index = nested_node_index(self.lattice, fine)
+        preds = []
+        for a in self.data["coefficients"]:
+            out, _ = mechanistic_baseline(self.config, evaluate_sample(self.config, a, fine)[0], fine, steps=64)
+            preds.append(out[index])
+        expected = float(np.mean(evaluate_predictions(np.stack(preds), self.data["uT"], self.lattice)["rel_l2"]))
+        point = next(p for p in self.points if (p.n_solve, p.steps) == (16, 64))
+        self.assertEqual(point.mean_rel_l2, expected)
+
+    def test_torus_refinement(self):
+        config = HeatOperatorTaskConfig(domain="torus_periodic")
+        data = generate_dataset(config, n=8, sample_ids=[0, 1], dataset_seed=1)
+        points = pp.baseline_cost_accuracy_curve(config, data["u0"], data["uT"], torus_hex_lattice(8),
+                                                 steps_grid=(64,), protocol=self.protocol, clock=_fake_clock(),
+                                                 refinements=(1, 2), coefficients=data["coefficients"])
+        self.assertEqual([p.n_solve for p in points], [8, 16])
+        self.assertGreater(points[0].mean_rel_l2 / points[1].mean_rel_l2, 3.0)
+
+    def test_the_clock_reads_only_the_timed_calls(self):
+        readings = []
+
+        def clock():
+            readings.append(None)
+            return float(len(readings))
+
+        pp.baseline_cost_accuracy_curve(self.config, self.data["u0"], self.data["uT"], self.lattice,
+                                        steps_grid=(1,), protocol=self.protocol, timed_samples=2, clock=clock,
+                                        refinements=(1, 2), coefficients=self.data["coefficients"])
+        # refinements x steps x timed samples x repeats x 2 readings; building the fine inputs is untimed.
+        self.assertEqual(len(readings), 2 * 1 * 2 * self.protocol.repeats * 2)
+
+    def test_coefficients_must_reproduce_u0(self):
+        kwargs = dict(steps_grid=(1,), protocol=self.protocol, clock=_fake_clock(), refinements=(1, 2))
+        swapped = self.data["coefficients"][[1, 0, 2]]           # negative control: another sample's modes
+        with self.assertRaisesRegex(ValueError, "does not reproduce u0"):
+            pp.baseline_cost_accuracy_curve(self.config, self.data["u0"], self.data["uT"], self.lattice,
+                                            coefficients=swapped, **kwargs)
+        nudged = self.data["coefficients"].copy()
+        nudged[2, 0] *= 1.0 + 1e-9                               # a near-identical but different input
+        with self.assertRaisesRegex(ValueError, "row 2 does not reproduce u0"):
+            pp.baseline_cost_accuracy_curve(self.config, self.data["u0"], self.data["uT"], self.lattice,
+                                            coefficients=nudged, **kwargs)
+
+    def test_validation(self):
+        base = (self.config, self.data["u0"], self.data["uT"], self.lattice)
+        kwargs = dict(steps_grid=(1,), protocol=self.protocol, clock=_fake_clock())
+        coeffs = self.data["coefficients"]
+        for refinements, error in (((3,), ValueError), ((1, 1), ValueError), ((0,), ValueError), ((), TypeError),
+                                   ("12", TypeError), (2, TypeError), ((True,), TypeError), ((1.0,), TypeError)):
+            with self.subTest(refinements=refinements), self.assertRaises(error):
+                pp.baseline_cost_accuracy_curve(*base, refinements=refinements, coefficients=coeffs, **kwargs)
+        with self.assertRaisesRegex(ValueError, "needs the mode coefficients"):
+            pp.baseline_cost_accuracy_curve(*base, refinements=(1, 2), **kwargs)
+        with self.assertRaisesRegex(ValueError, "one row per input"):
+            pp.baseline_cost_accuracy_curve(*base, refinements=(2,), coefficients=coeffs[:2], **kwargs)
+        with self.assertRaises(TypeError):
+            pp.baseline_cost_accuracy_curve(*base, refinements=(2,), coefficients=coeffs.astype(complex), **kwargs)
+        with self.assertRaises(ValueError):                       # wrong K: evaluate_sample refuses
+            pp.baseline_cost_accuracy_curve(*base, refinements=(2,), coefficients=coeffs[:, :5], **kwargs)
+        # Without a k > 1 the coefficients are not needed and not read.
+        self.assertEqual(len(pp.baseline_cost_accuracy_curve(*base, refinements=(1,), coefficients="ignored",
+                                                             **kwargs)), 1)
+
+    def test_an_invalid_refinement_fails_before_anything_is_solved_or_timed(self):
+        # Fail fast: (1, 3) must not solve and time the k = 1 block before nested_node_index refuses k = 3.
+        readings = []
+
+        def clock():
+            readings.append(None)
+            return float(len(readings))
+
+        with self.assertRaisesRegex(ValueError, "refinement 3 is not a power of two"):
+            pp.baseline_cost_accuracy_curve(self.config, self.data["u0"], self.data["uT"], self.lattice,
+                                            steps_grid=(1,), protocol=self.protocol, clock=clock,
+                                            refinements=(1, 3), coefficients=self.data["coefficients"])
+        self.assertEqual(readings, [])
+
+    def test_proposed_refinements_are_powers_of_two_and_not_registered(self):
+        self.assertEqual(pp.PROPOSED_REFINEMENTS, (1, 2, 4))
+        self.assertEqual(pp._REGISTERED_REFINEMENTS, (1,))
+
+
+class TestRefinedCurveInTheDecision(unittest.TestCase):
+    """The DRAFT preregistration solves on the evaluation lattice: a refined point is not registered."""
+
+    def setUp(self):
+        self.errors = _raw_errors()
+        self.times = [float(s) for s in _REGISTERED_STEPS]
+        self.curve = [0.4 / t for t in self.times]
+
+    def kwargs(self, curve):
+        return {"test_set": "id", "n": 32, "errors": self.errors, "sample_ids": _IDS,
+                "seeds": list(pp.PREREGISTERED_TRAINING_SEEDS),
+                "run_manifest": pp.build_run_manifest(_manifest_fields()),
+                "gino_latency_times_s": [4.0] * 10, "baseline_curve": curve}
+
+    def test_a_refined_curve_is_refused_until_the_owner_registers_it(self):
+        refined = _curve_points(self.times, self.curve, n=32, n_solve=64)
+        with self.assertRaisesRegex(pp.DecisionInputError,
+                                    r"n_solve = 64; the registered curve solves on n_solve = 32"):
+            pp.decide_preregistered(**self.kwargs(refined))
+        mixed = list(_curve_points(self.times, self.curve, n=32))
+        mixed[3] = dataclasses.replace(mixed[3], n_solve=128)
+        with self.assertRaisesRegex(pp.DecisionInputError, "steps=8 was solved on lattice n_solve = 128"):
+            pp.decide_preregistered(**self.kwargs(mixed))
+
+    def test_the_proposed_three_block_curve_is_another_grid(self):
+        curve = []
+        for block, k in enumerate(pp.PROPOSED_REFINEMENTS):
+            times = [t * (1.0 + 0.1 * block) for t in self.times]          # distinct times and errors
+            curve.extend(_curve_points(times, [0.4 / t for t in times], n=32, n_solve=32 * k))
+        self.assertEqual(len(curve), 21)
+        with self.assertRaisesRegex(pp.DecisionInputError, "are not the registered steps"):
+            pp.decide_preregistered(**self.kwargs(curve))
+
+    def test_n_solve_is_read_as_a_plain_int(self):
+        for value in (32.0, True, "32", None):
+            curve = [dataclasses.replace(p, n_solve=value) for p in _curve_points(self.times, self.curve, n=32)]
+            with self.subTest(value=value), self.assertRaisesRegex(pp.DecisionInputError, "n_solve must be an int"):
+                pp.decide_preregistered(**self.kwargs(curve))
+
+    def test_the_record_names_the_solve_lattices(self):
+        d = pp.decide_preregistered(**self.kwargs(_curve_points(self.times, self.curve, n=32)))
+        provenance = d.provenance
+        self.assertEqual(provenance["baseline_n_solve"], [32] * 7)
+        self.assertEqual([p["n_solve"] for p in provenance["baseline_points"]], [32] * 7)
+        record = d.to_dict()
+        again = pp.verify_preregistered_decision(record, **self.kwargs(_curve_points(self.times, self.curve, n=32)))
+        self.assertEqual(again.record_sha256, record["record_sha256"])
+
+
+class TestExactLinearMap(unittest.TestCase):
+    """Section 2b (D-T1-1): the T1 truth operator as factors. An oracle from the basis, fitted to no data."""
+
+    def test_the_exact_map_reproduces_the_truth(self):
+        for domain, factory, n, modes in (("triangle_dirichlet", triangle_hex_lattice, 16, 15),
+                                          ("torus_periodic", torus_hex_lattice, 16, 40)):
+            config = HeatOperatorTaskConfig(domain=domain)
+            lattice = factory(n)
+            left, right = pp.exact_linear_map(config, lattice)
+            self.assertEqual((left.shape, right.shape), ((lattice.num_nodes, modes), (modes, lattice.num_nodes)))
+            data = generate_dataset(config, n=n, sample_ids=[0, 1, 2, 3], dataset_seed=1)
+            pred = (left @ (right @ data["u0"].T)).T
+            rel = np.linalg.norm(pred - data["uT"], axis=1) / np.linalg.norm(data["uT"], axis=1)
+            with self.subTest(domain=domain):
+                self.assertLess(float(np.max(rel)), 1e-13)
+
+    def test_the_semigroup_property_holds_on_the_span(self):
+        # Metamorphic: E(T1) E(T2) = E(T1 + T2) on the mode span.
+        lattice = triangle_hex_lattice(16)
+        l1, r1 = pp.exact_linear_map(HeatOperatorTaskConfig(t_final=0.004), lattice)
+        l2, r2 = pp.exact_linear_map(HeatOperatorTaskConfig(t_final=0.006), lattice)
+        l3, r3 = pp.exact_linear_map(HeatOperatorTaskConfig(t_final=0.010), lattice)
+        np.testing.assert_allclose(l1 @ (r1 @ l2 @ r2), l3 @ r3, atol=1e-13)
+
+    def test_aliased_modes_are_refused(self):
+        with self.assertRaisesRegex(ValueError, "numerical rank"):
+            pp.exact_linear_map(HeatOperatorTaskConfig(), triangle_hex_lattice(5))        # 6 nodes, 15 modes
+        with self.assertRaisesRegex(ValueError, "numerical rank"):
+            pp.exact_linear_map(HeatOperatorTaskConfig(domain="torus_periodic"), torus_hex_lattice(6))
+        with self.assertRaises(ValueError):
+            pp.exact_linear_map(HeatOperatorTaskConfig(), torus_hex_lattice(16))
+        with self.assertRaises(TypeError):
+            pp.exact_linear_map({"domain": "triangle_dirichlet"}, triangle_hex_lattice(16))
+
+
+class TestLinearComparatorPoint(unittest.TestCase):
+    """Section 2b (D-T1-1). The exact map runs on T1 inputs (no fit); POD-ridge only on synthetic data."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.protocol = pp.TimingProtocol(warmup=1, repeats=3, bootstrap_resamples=200)
+        cls.config = HeatOperatorTaskConfig()
+        cls.lattice = triangle_hex_lattice(16)
+        cls.data = generate_dataset(cls.config, n=16, sample_ids=[0, 1, 2], dataset_seed=1)
+        # Synthetic linear data for the fitted comparator (as test_linear_baseline_hex_v3: t = 0.005, private RNG).
+        from linear_baseline_hex_v3 import PODRidgeBaseline
+        cls.synthetic = HeatOperatorTaskConfig(t_final=0.005)
+        semigroup = _semigroup_matrix(cls.lattice, 0.005)
+        mu, vec = np.linalg.eigh(semigroup)
+        basis = vec[:, -15:]                                     # 15 smooth discrete modes
+        rng = np.random.default_rng(321)
+        cls.train_u0 = rng.standard_normal((40, 15)) @ basis.T
+        cls.test_u0 = rng.standard_normal((6, 15)) @ basis.T
+        cls.test_truth = cls.test_u0 @ semigroup.T
+        weights = np.full(cls.lattice.num_nodes, cls.lattice.cell_area)
+        cls.model = PODRidgeBaseline(weights).fit(cls.train_u0, cls.train_u0 @ semigroup.T, range(40))
+
+    def test_exact_map_point(self):
+        point = pp.linear_comparator_point(self.config, self.data["u0"], self.data["uT"], self.lattice,
+                                           protocol=self.protocol, clock=_fake_clock())
+        self.assertEqual((point.kind, point.n, point.rank, point.num_train, point.train_ids_sha256),
+                         ("exact_linear_map", 16, 15, 0, None))
+        self.assertLess(point.mean_rel_l2, 1e-13)
+        self.assertEqual((point.median_wall_time_s, point.wall_time_ci_s), (0.5, (0.5, 0.5)))
+        self.assertEqual((point.warmup, point.repeats, point.clock), (1, 3, "custom:count.__next__"))
+        self.assertEqual(point.task_config_sha256, self.config.digest())
+        again = pp.linear_comparator_point(self.config, self.data["u0"], self.data["uT"], self.lattice,
+                                           protocol=self.protocol, clock=_fake_clock())
+        self.assertEqual(again.to_dict(), point.to_dict())       # deterministic, operator digest included
+        json.dumps(point.to_dict(), allow_nan=False)
+
+    def test_pod_ridge_point_on_synthetic_data(self):
+        ids = list(range(1000, 1006))
+        point = pp.linear_comparator_point(self.synthetic, self.test_u0, self.test_truth, self.lattice,
+                                           comparator=self.model, sample_ids=ids, protocol=self.protocol,
+                                           clock=_fake_clock())
+        self.assertEqual((point.kind, point.num_train, point.rank), ("pod_ridge", 40, self.model.info["rank_in"]))
+        self.assertEqual(point.train_ids_sha256,
+                         hashlib.sha256(json.dumps(list(range(40)), separators=(",", ":")).encode()).hexdigest())
+        self.assertLess(point.mean_rel_l2, 1e-8)
+        self.assertNotEqual(point.operator_sha256, pp.linear_comparator_point(
+            self.synthetic, self.test_u0, self.test_truth, self.lattice, protocol=self.protocol,
+            clock=_fake_clock()).operator_sha256)
+
+    def test_the_leakage_guard_runs_before_timing(self):
+        from linear_baseline_hex_v3 import LeakageError
+        readings = []
+
+        def clock():
+            readings.append(None)
+            return float(len(readings))
+
+        with self.assertRaises(LeakageError):
+            pp.linear_comparator_point(self.synthetic, self.train_u0[:3], self.train_u0[:3], self.lattice,
+                                       comparator=self.model, sample_ids=[0, 1, 2], protocol=self.protocol,
+                                       clock=clock)
+        with self.assertRaises(LeakageError):                     # a training row under a fresh id
+            pp.linear_comparator_point(self.synthetic, self.train_u0[:3], self.train_u0[:3], self.lattice,
+                                       comparator=self.model, sample_ids=[7000, 7001, 7002],
+                                       protocol=self.protocol, clock=clock)
+        self.assertEqual(readings, [])
+        with self.assertRaisesRegex(ValueError, "sample_ids are needed"):
+            pp.linear_comparator_point(self.synthetic, self.test_u0, self.test_truth, self.lattice,
+                                       comparator=self.model, protocol=self.protocol, clock=clock)
+
+    def test_predictions_come_from_the_timed_call(self):
+        readings = []
+
+        def clock():
+            readings.append(None)
+            return float(len(readings))
+
+        point = pp.linear_comparator_point(self.config, self.data["u0"], self.data["uT"], self.lattice,
+                                           protocol=self.protocol, timed_samples=2, clock=clock)
+        self.assertEqual(len(readings), 2 * self.protocol.repeats * 2)
+        self.assertEqual(point.timed_samples, 2)
+
+    def test_validation(self):
+        args = (self.config, self.data["u0"], self.data["uT"], self.lattice)
+        kwargs = dict(protocol=self.protocol, clock=_fake_clock())
+        with self.assertRaises(TypeError):
+            pp.linear_comparator_point(*args, comparator="exact", **kwargs)
+        with self.assertRaises(TypeError):
+            pp.linear_comparator_point(*args, comparator=np.eye(self.lattice.num_nodes), **kwargs)
+        with self.assertRaises(ValueError):
+            pp.linear_comparator_point(*args, timed_samples=4, **kwargs)
+        with self.assertRaises(ValueError):
+            pp.linear_comparator_point(self.config, self.data["u0"], self.data["uT"][:2], self.lattice, **kwargs)
+        with self.assertRaises(ValueError):
+            pp.linear_comparator_point(self.config, self.data["u0"], self.data["uT"], torus_hex_lattice(16), **kwargs)
+        from linear_baseline_hex_v3 import PODRidgeBaseline
+        small = PODRidgeBaseline(np.ones(3)).fit(np.eye(3), np.eye(3), [0, 1, 2])
+        with self.assertRaisesRegex(ValueError, "maps 3 nodes"):
+            pp.linear_comparator_point(*args, comparator=small, sample_ids=[5, 6, 7], **kwargs)
+        with self.assertRaises(TypeError):
+            pp.linear_comparator_point(*args, protocol=None, clock=_fake_clock())
 
 
 # ------------------------------------------------------------------
