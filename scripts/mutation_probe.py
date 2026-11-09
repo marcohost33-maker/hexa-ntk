@@ -56,6 +56,7 @@ DDP = "ddp_hex_v3.py"
 T2 = "test_ddp_hex_v3.TestTwoRanks"
 I82 = "test_phase1_protocol_hex_v3.TestIssue82Residuals"
 ME = "test_mid_epoch_resume_hex_v3.TestMidEpochResume"
+NF = "test_runner_hex_v3.TestNonFiniteGradient"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -452,6 +453,16 @@ MUTANTS = (
            "        padded = -(-self.dataset_len // self.num_replicas) * self.num_replicas\n"
            "        return iter([i % max(self.dataset_len, 1) for i in range(self.rank, padded, self.num_replicas)])\n",
            "test_ddp_hex_v3.TestExactDistributedEvalSampler"),
+    # DDP_RUNNER v1.2 section 3.7 / NTK-R5-NR03: a non-finite gradient norm skips the
+    # update (no NaN weights, EMA or checkpoints), a non-finite parameter after the
+    # step stops the run, and the ranks must agree that all or none skipped.
+    Mutant(RU, "            if not math.isfinite(grad_norm_val):\n", "            if False:\n", NF),
+    Mutant(RU, "        self._check_parameters_finite()\n", "", NF),
+    Mutant(RU, "                self._record_non_finite_gradient(batch, loss_val, grad_norm_val)\n", "", NF),
+    Mutant(RU, "            self._grad_skip_pending = True\n", "            pass\n", T2),
+    Mutant(RU, "        if 0 < n_grad_skipped < self.dist.world_size:\n", "        if False:\n", T2),
+    Mutant(RU, '        self._agreed_grad_skip(n_grad_skipped, f"step {self.global_step}")\n', "", T2),
+    Mutant(RU, '            self._agreed_grad_skip(n_grad_skipped, "the mid-epoch save")\n', "", T2),
     # Issue #82 residuals (2026-10-30): no inf from finite data, dirty-tree slot,
     # break-even bound to the equal-accuracy rule.
     Mutant(P1, "    if np.all(np.isfinite(out)):\n        return out\n", "    return out\n", I82),

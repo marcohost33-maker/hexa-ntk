@@ -27,6 +27,7 @@ from operator_adapter_hex_v3 import OperatorAdapterV3, OperatorBatchContext
 from resume_utils_hex_v3 import EMADecayError, save_resume_checkpoint
 from runner_hex_v3 import (
     HexTrainingRunner,
+    NonFiniteParameterError,
     RunnerConfig,
     TrainingAnomalyDetector,
     dump_replay_capsule_safe,
@@ -1314,6 +1315,153 @@ class TestValidationNrmse(unittest.TestCase):
             with torch.no_grad():
                 runner.model.lin.bias.fill_(1.0)
             self.assertEqual(runner._validate(epoch=0)["val_nrmse"], float("inf"))
+
+
+# ------------------------------------------------------------------
+# Tests: non-finite gradient / parameter after the step
+# ------------------------------------------------------------------
+
+
+class _PoisonGrad(torch.autograd.Function):
+    """Identity forward; backward multiplies the incoming gradient by ``factor``."""
+
+    @staticmethod
+    def forward(ctx, x, factor):  # type: ignore[override]
+        ctx.factor = factor
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad):  # type: ignore[override]
+        return grad * ctx.factor, None
+
+
+def _poisoned_loss(poison_steps, factor=float("nan")):
+    """MSE whose gradient is multiplied by ``factor`` on the listed training steps (0-based).
+
+    The loss value itself stays finite: only the gradient is non-finite, the
+    case the loss check before backward cannot see.
+    """
+    mse = nn.MSELoss()
+    calls = {"n": 0}
+
+    def loss_fn(pred, target):
+        if pred.requires_grad:
+            step = calls["n"]
+            calls["n"] += 1
+            if step in poison_steps:
+                pred = _PoisonGrad.apply(pred, factor)
+        return mse(pred, target)
+
+    return loss_fn
+
+
+def _non_finite_tensors(path: Path):
+    """Names of floating tensors in a saved checkpoint that hold NaN/Inf."""
+    bad = []
+
+    def walk(obj, where):
+        if torch.is_tensor(obj):
+            if obj.is_floating_point() and not bool(torch.isfinite(obj).all()):
+                bad.append(where)
+        elif isinstance(obj, dict):
+            for k, v in obj.items():
+                walk(v, f"{where}/{k}")
+        elif isinstance(obj, (list, tuple)):
+            for i, v in enumerate(obj):
+                walk(v, f"{where}/{i}")
+
+    walk(torch.load(path, weights_only=False), path.name)
+    return bad
+
+
+class _OverflowingSGD(torch.optim.SGD):
+    """SGD whose update overflows the weight (finite gradients, divergent optimizer)."""
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        out = super().step(closure)
+        self.param_groups[0]["params"][0].mul_(float("inf"))
+        return out
+
+
+class TestNonFiniteGradient(unittest.TestCase):
+    """A finite loss with a NaN/Inf gradient used to write NaN into every
+    parameter (clip_grad_norm_ scales by the NaN norm, then optimizer.step),
+    from there into the EMA copy, last.pt and resume_last.pt; the failure was
+    reported one step late as a NaN loss. Measured red against cd5f6dc."""
+
+    def _run(self, out: Path, loss_fn, **cfg):
+        torch.manual_seed(0)
+        model = _TinyModel()
+        start = [p.detach().clone() for p in model.parameters()]
+        runner = HexTrainingRunner(
+            RunnerConfig(output_dir=str(out), num_epochs=1, **cfg), model,
+            torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9), *_make_loaders(n=4, batch_size=2),
+            device="cpu", loss_fn=loss_fn,
+        )
+        return runner, model, start, runner.run()
+
+    def _assert_no_non_finite_checkpoint(self, out: Path) -> None:
+        saved = sorted(out.rglob("*.pt"))
+        self.assertTrue(saved)
+        for path in saved:
+            self.assertEqual(_non_finite_tensors(path), [], path.name)
+
+    def test_nan_gradient_skips_step_and_keeps_weights(self) -> None:
+        for factor in (float("nan"), float("inf")):
+            with self.subTest(factor=factor), tempfile.TemporaryDirectory() as tmpdir:
+                out = Path(tmpdir)
+                runner, model, start, result = self._run(out, _poisoned_loss({0, 1}, factor))
+                for p, p0 in zip(model.parameters(), start):
+                    self.assertTrue(torch.equal(p.detach(), p0))  # no step was applied
+                for p, p0 in zip(runner.ema_model.module.parameters(), start):
+                    self.assertTrue(torch.equal(p.detach(), p0))  # no EMA update either
+                train = result["history"]["train"][0]
+                self.assertEqual((train["n_batches"], train["n_anomalies"]), (0, 2))
+                self.assertTrue(math.isnan(train["mean_grad_norm"]))  # no healthy step: no measurement
+                self._assert_no_non_finite_checkpoint(out)
+                kinds = sorted(json.loads(f.read_text())["kind"] for f in runner.failure_dir.glob("failure_*.json"))
+                self.assertEqual(kinds, ["NaN_or_Inf_Grad", "NaN_or_Inf_Grad"])
+                step0 = json.loads((runner.failure_dir / "failure_step0_NaN_or_Inf_Grad.json").read_text())
+                self.assertEqual(step0["locus"], "train_step_grad_check")
+                capsule = torch.load(step0["replay_capsule"], weights_only=False)
+                self.assertTrue(torch.equal(capsule["model_state_dict"]["lin.weight"], start[0]))
+
+    def test_one_bad_step_is_skipped_the_others_train(self) -> None:
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            _, model, start, result = self._run(Path(a), _poisoned_loss({0}))
+            train = result["history"]["train"][0]
+            self.assertEqual((train["n_batches"], train["n_anomalies"]), (1, 1))
+            self.assertTrue(math.isfinite(train["mean_grad_norm"]))
+            self.assertFalse(torch.equal(model.lin.weight.detach(), start[0]))  # step 1 trained
+            self._assert_no_non_finite_checkpoint(Path(a))
+            # healthy reference: the poisoned run differs only by the missing step 0
+            _, clean, _, _ = self._run(Path(b), _poisoned_loss(set()))
+            self.assertFalse(torch.equal(clean.lin.weight.detach(), model.lin.weight.detach()))
+
+    def test_skip_with_mid_epoch_saves_keeps_the_record_consistent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            _, _, _, result = self._run(out, _poisoned_loss({0}), save_every_n_steps=1)
+            self.assertEqual(result["history"]["train"][0]["n_anomalies"], 1)
+            self._assert_no_non_finite_checkpoint(out)
+
+    def test_non_finite_parameter_after_step_stops_before_any_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            torch.manual_seed(0)
+            model = _TinyModel()
+            runner = HexTrainingRunner(
+                RunnerConfig(output_dir=str(out), num_epochs=1), model,
+                _OverflowingSGD(model.parameters(), lr=0.1), *_make_loaders(n=4, batch_size=2), device="cpu",
+            )
+            ema_before = [p.detach().clone() for p in runner.ema_model.module.parameters()]
+            with self.assertRaisesRegex(NonFiniteParameterError, r"step 0: \['lin\.weight'"):
+                runner.run()
+            self.assertEqual(sorted(out.rglob("*.pt")), [])
+            for p, p0 in zip(runner.ema_model.module.parameters(), ema_before):
+                self.assertTrue(torch.equal(p.detach(), p0))  # EMA not updated with the bad step
+
 
 
 if __name__ == "__main__":

@@ -15,6 +15,11 @@ partition (section 8). Review round the same day: `GradScaler.unscale_` belongs 
 the held region too; every agreed failure names the failing ranks and is logged
 on them; a failed agreement collective no longer hides the rank's own exception
 (section 5). No change to what a healthy run computes.
+**Version 1.2** (2026-11-09): a non-finite total gradient norm (finite loss) skips the
+update instead of writing NaN into every parameter, the EMA copy and the checkpoints;
+a parameter that is non-finite after the optimizer step stops the run; distributed,
+all ranks or none must skip (section 3.7). Applies with and without DDP. No change to
+what a healthy run computes (every finite-gradient step is taken as before).
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -130,6 +135,31 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    raise (no collective, no save). Every step is followed by one of these two
    points, so a held error never outlives its epoch. Without DDP the exception is
    raised where it happens, as before.
+7. **Non-finite gradient (v1.2; with and without DDP).** The loss check (item 4)
+   sees only the loss value. A finite loss can still give a NaN/Inf gradient (an
+   operation whose derivative is singular at the point, an overflow in backward);
+   `clip_grad_norm_` then returns a non-finite total norm and scales every gradient
+   by it, and the optimizer step wrote NaN into all parameters, from there into the
+   EMA copy, `last.pt`, `resume_last.pt` and every later checkpoint, while the run
+   went on and reported a NaN *loss* one step late (measured on main cd5f6dc,
+   NTK-R5-NR03 of the cross-family R5 round of 2026-11-04). Now, without a
+   `GradScaler`, a non-finite norm skips the optimizer step and the EMA update,
+   clears the gradients and counts the step as skipped (`n_anomalies`, no
+   `grad_norm` entry), with a replay capsule (weights *before* the skipped update)
+   and a `FailureSignature` of kind `NaN_or_Inf_Grad`, locus `train_step_grad_check`.
+   With a `GradScaler`, `scaler.step` already skips such a step and lowers the scale
+   (unchanged; not run here, it needs CUDA). After every applied step all parameters
+   must be finite, else `NonFiniteParameterError` (the step already wrote them:
+   no rollback) before the EMA update and before any checkpoint; distributed it is a
+   held error (item 6).
+   Distributed, the decision needs no extra collective: it is taken after DDP's
+   gradient all-reduce, and every rank reads the same reduced gradients, so a
+   NaN/Inf on one rank's local gradient is in every rank's reduced gradient and
+   every rank skips. That claim is checked, not assumed: the agreement points of
+   item 6 carry one more count (ranks that skipped the previous step's update), and
+   a count strictly between 0 and `world_size` raises `DistributedContractError` on
+   every rank before anything reads the now differing weights (no further batch,
+   no mid-epoch save; the epoch-end save comes after `_agreed_next` returned None).
 
 ## 4. Validation: exact partition, sufficient statistics
 
@@ -242,9 +272,10 @@ Only tensor collectives (`all_reduce`, `broadcast`, `all_gather`), never the
 `*_object` variants, which unpickle peer data. Tensors live on the CPU; on the
 NCCL backend on the runner's CUDA device (`device="cuda:k"`), else on the current
 CUDA device (`torch.cuda.set_device(local_rank)` first). Only the default process
-group is used. Cost per training step: a 3-element and a 1-element all-reduce (v1.0: 2 + 1;
-the third element is the held-step-error count, section 3.6). Per mid-epoch save: one
-more 1-element all-reduce before the gathers. Per agreed failure (error path only): one
+group is used. Cost per training step: a 4-element and a 1-element all-reduce (v1.0: 2 + 1;
+the third element is the held-step-error count, section 3.6, the fourth the
+skipped-update count, section 3.7). Per mid-epoch save: one more 2-element all-reduce
+before the gathers. Per agreed failure (error path only): one
 all-reduce of `world_size` int64 to name the failing ranks. Per validation:
 broadcast of every buffer of the model and the EMA copy;
 one all-reduce of `len(dataset)` int64 counts (8 bytes per sample), a few
@@ -254,6 +285,21 @@ peers wait in the closing all-reduce: a write longer than the process-group
 timeout (gloo default 30 min, NCCL 10 min) ends the job.
 
 ## 8. Evidence and limits
+
+Evidence v1.2 (2026-11-09, Linux container, Python 3.13, torch 2.6.0, CPU, gate log
+`results/2026-11-09_non-finite-gradient_local-gate.log`): without DDP a NaN and an
+Inf gradient (finite loss) leave weights and EMA bitwise at their start values, no
+saved checkpoint holds a non-finite tensor, the FailureSignature names step 0 and
+`NaN_or_Inf_Grad`, the capsule holds the pre-update weights; a single bad step is
+skipped and the others train; an optimizer that overflows a weight raises
+`NonFiniteParameterError` with no checkpoint written and the EMA untouched. With 2
+and 3 gloo ranks a NaN gradient from rank 1's batch is skipped on every rank
+(weights finite and bitwise equal, `n_anomalies` `[1, 0]`, mid-epoch saves every
+step); an injected split (rank 1 skips, the others step) raises
+`DistributedContractError` on every rank, with no checkpoint, also right before a
+mid-epoch save. All of these tests were red against cd5f6dc (5 single-process and 11 multi-rank
+failures; the job desynchronised and the 2-rank mid-save case had no result, which the
+test now reports instead of skipping); 7 new mutants, all killed (full probe 167/167).
 
 Evidence v1.1 (2026-11-02, Linux container, Python 3.12, torch 2.6.0, CPU): an
 optimizer step that raises on rank 1 in the last step of an epoch, and one that

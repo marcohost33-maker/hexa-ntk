@@ -1,0 +1,100 @@
+# Local gate 2026-11-09 -- DDP v1.2: non-finite gradient (finite loss) skipped, non-finite parameter stops the run
+# Branch claude/hexa-ntk-project-overview-6gq6rr; base origin/main cd5f6dc
+# Linux cloud container, Python 3.12.3 (venv), torch 2.6.0+cu124 (PyPI wheel, CPU execution, no CUDA device;
+# the CPU index download.pytorch.org is blocked from the container), numpy 2.5.3, coverage 7.17.0, ruff 0.17.2
+# Code under test: the working tree committed together with this log
+# Origin: Drive 007acc2 cross-family round R5 (2026-11-04_WISSEN_HexaNTK_R5_PRNR_CodeFactory_GPT6.md),
+#   NTK-R5-NR03 "parameter check after the optimizer step is no rollback" / NTK-R5-PR04 "grad.isfinite before step";
+#   never carried into this repo. Measured on main before writing any fix.
+
+## Finding on main cd5f6dc (reproduction, single process, CPU)
+# model: Linear(4,2) whose backward multiplies the gradient by NaN; loss finite; RunnerConfig(num_epochs=1, use_ema=True)
+# runner.run() returned normally; the log said "Anomaly at step 1: NaN_or_Inf_Loss" (step 0 was the cause)
+# params finite after run: False
+# non-finite tensors in saved files:
+#   last.pt            model_state_dict/lin.weight, lin.bias
+#   resume_last.pt     model_state_dict/lin.weight, lin.bias, ema_state_dict/module.lin.weight, module.lin.bias
+#   replay capsule     model_state_dict (already NaN at step 1)
+# Cause: clip_grad_norm_ returns a NaN total norm and scales every gradient by it; optimizer.step() writes NaN;
+#   EMA averages it in; the loss check before backward only sees the (finite) loss value.
+
+## Red before the fix: new tests against the old runner
+# (main cd5f6dc runner_hex_v3.py + a 3-line shim defining NonFiniteParameterError so the test module imports)
+# python -m unittest test_runner_hex_v3.TestNonFiniteGradient \
+#   test_ddp_hex_v3.TestTwoRanks.test_non_finite_gradient_skips_on_both_and_a_split_stops_both \
+#   test_ddp_hex_v3.TestThreeRanks.test_non_finite_gradient_skips_on_all_and_a_split_stops_all
+FAIL: test_nan_gradient_skips_step_and_keeps_weights [TestNonFiniteGradient] (factor=nan)
+FAIL: test_nan_gradient_skips_step_and_keeps_weights [TestNonFiniteGradient] (factor=inf)
+FAIL: test_non_finite_parameter_after_step_stops_before_any_checkpoint [TestNonFiniteGradient]
+FAIL: test_one_bad_step_is_skipped_the_others_train [TestNonFiniteGradient]
+FAIL: test_skip_with_mid_epoch_saves_keeps_the_record_consistent [TestNonFiniteGradient]
+FAIL: test_non_finite_gradient_skips_on_both_and_a_split_stops_both [TestTwoRanks] [nan_grad_on_rank1] (rank=0)
+FAIL: test_non_finite_gradient_skips_on_both_and_a_split_stops_both [TestTwoRanks] [nan_grad_on_rank1] (rank=1)
+FAIL: test_non_finite_gradient_skips_on_both_and_a_split_stops_both [TestTwoRanks] [grad_skip_split_rank1] (rank=0)
+FAIL: test_non_finite_gradient_skips_on_both_and_a_split_stops_both [TestTwoRanks] [grad_skip_split_rank1] (rank=1)
+FAIL: test_non_finite_gradient_skips_on_both_and_a_split_stops_both [TestTwoRanks]
+FAIL: test_non_finite_gradient_skips_on_all_and_a_split_stops_all [TestThreeRanks] [nan_grad_on_rank1] (rank=0)
+FAIL: test_non_finite_gradient_skips_on_all_and_a_split_stops_all [TestThreeRanks] [nan_grad_on_rank1] (rank=1)
+FAIL: test_non_finite_gradient_skips_on_all_and_a_split_stops_all [TestThreeRanks] [nan_grad_on_rank1] (rank=2)
+FAIL: test_non_finite_gradient_skips_on_all_and_a_split_stops_all [TestThreeRanks] [grad_skip_split_rank1] (rank=0)
+FAIL: test_non_finite_gradient_skips_on_all_and_a_split_stops_all [TestThreeRanks] [grad_skip_split_rank1] (rank=1)
+FAIL: test_non_finite_gradient_skips_on_all_and_a_split_stops_all [TestThreeRanks] [grad_skip_split_rank1] (rank=2)
+Ran 6 tests in 72.386s
+FAILED (failures=16)
+# single process: weights NaN after the run (nan and inf factor); 'NonFiniteParameterError not raised';
+#   one bad step: mean_grad_norm not finite; mid-epoch saves: last.pt holds NaN lin.weight / lin.bias
+# 2/3 ranks nan_grad_on_rank1: weights non-finite on every rank; grad_skip_split_rank1: no DistributedContractError,
+#   the ranks desynchronised (RuntimeError: Application timeout caused pair closure); the 2-rank mid-save case then
+#   had no result on rank 0 ("unexpectedly None").
+# Own review before commit: in the first version of the check that mid-save case was only examined when rank 0
+#   had a result, so the desynchronised old run skipped it silently (15 failures instead of 16). Bound to the
+#   suite now (_SUITES[self.SUITE]); the red run above is with that fix.
+
+## Green after the fix: focused
+# python -m unittest test_runner_hex_v3.TestNonFiniteGradient test_ddp_hex_v3   (Python 3.12.3)
+Ran 77 tests in 12.652s
+OK
+
+## New mutants (scripts/mutation_probe.py), run after the last test change
+7 new mutants
+KILLED if not math.isfinite(grad_norm_val): -> TestNonFiniteGradient
+KILLED self._check_parameters_finite() -> TestNonFiniteGradient
+KILLED self._record_non_finite_gradient(batch, loss_val, grad_norm_val) -> TestNonFiniteGradient
+KILLED self._grad_skip_pending = True -> TestTwoRanks
+KILLED if 0 < n_grad_skipped < self.dist.world_size: -> TestTwoRanks
+KILLED self._agreed_grad_skip(n_grad_skipped, f"step {self.global_step}") -> TestTwoRanks
+KILLED self._agreed_grad_skip(n_grad_skipped, "the mid-epoch save") -> TestTwoRanks
+# full probe (python scripts/mutation_probe.py, same session, before the suite-binding test fix; that fix only
+# makes a check stricter and the 7 mutants above were re-run after it):
+[MUTATION-PROBE] baseline green | 167/167 killed | PASS
+exit=0
+
+## End run (working tree of this commit)
+# ruff check src scripts
+All checks passed!
+ruffexit=0
+# python -m compileall -q src
+compileexit=0
+# python scripts/engine_gate.py
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+engexit=0
+# python scripts/verify_sources.py
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+vsexit=0
+# python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+exit=0
+Ran 1094 tests in 54.221s
+OK (skipped=7)
+# python -m coverage report
+src/toolkit/ddp_hex_v3.py                        187      9     48      8    92%
+src/toolkit/failure_signature_hex_v3.py           41      3      0      0    93%
+src/toolkit/runner_hex_v3.py                     788     38    294     30    93%
+TOTAL                                           6090    248   2294    194    95%
+covexit=0
+# skips: 6 x 'optional neuraloperator backend not installed' (GINO lane runs in CI), 1 x 'needs CUDA'
+
+## Limits
+# - GradScaler path (CUDA AMP) unchanged and not run here: scaler.step already skips inf/NaN steps; the EMA update
+#   after such a skipped scaler step and the inf entry in mean_grad_norm are pre-existing and stay open.
+# - A rank failing *inside* backward still leaves its peers in DDP's all-reduce (spec section 8, unchanged).
+# - CI (GitHub Actions, Python 3.12, torch CPU wheel) is the binding run; this log is the local evidence.
