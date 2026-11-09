@@ -282,6 +282,46 @@ class TestDocsContract(unittest.TestCase):
         self.assertEqual(self._readme_counts(r"\| \d+/(\d+) Mutanten getoetet"), [len(probe.MUTANTS)])
         self.assertEqual(self._readme_counts(r"optional: (\d+) Mutanten"), [len(probe.MUTANTS)])
 
+    def _probe(self):
+        path = _ROOT / "scripts" / "mutation_probe.py"
+        spec = importlib.util.spec_from_file_location("mutation_probe_static", path)
+        assert spec is not None and spec.loader is not None
+        probe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(probe)
+        return probe
+
+    def test_every_mutant_is_statically_valid(self):
+        # PR #102: 40ff255 removed _scaler_active() while a mutant still called it; the
+        # full probe counted that AttributeError as a kill. Checked here in the unit gate,
+        # without running a single mutant: each site occurs once, the mutated module
+        # parses, and every self.<name> of a replacement exists in its module.
+        probe = self._probe()
+        problems = []
+        for i, m in enumerate(probe.MUTANTS, 1):
+            path = (_ROOT if "/" in m.module else _ROOT / "src" / "toolkit") / m.module
+            text = path.read_text(encoding="utf-8")
+            if text.count(m.original) != 1:
+                problems.append(f"M{i:02d} {m.module}: site found {text.count(m.original)} times")
+                continue
+            reason = probe.static_invalid(text, m)
+            if reason is not None:
+                problems.append(f"M{i:02d} {m.module}: {reason}")
+        self.assertEqual(problems, [])
+
+    def test_static_invalid_catches_the_40ff255_case(self):
+        probe = self._probe()
+        module = "class R:\n    def _check(self):\n        if self._scaler_backoff:\n            return 1\n"
+        stale = probe.Mutant("runner_hex_v3.py", "        if self._scaler_backoff:\n",
+                             "        if self._scaler_active():\n", "t")
+        self.assertIn("self._scaler_active", probe.static_invalid(module, stale))
+        real = probe.Mutant("runner_hex_v3.py", "        if self._scaler_backoff:\n", "        if False:\n", "t")
+        self.assertIsNone(probe.static_invalid(module, real))
+        unparsable = probe.Mutant("runner_hex_v3.py", "            return 1\n", "", "t")
+        self.assertIn("does not parse", probe.static_invalid(module, unparsable))
+        defined = "class R:\n    def _a(self):\n        return self._b()\n    def _b(self):\n        return 0\n"
+        call = probe.Mutant("runner_hex_v3.py", "        return self._b()\n", "        return self._a()\n", "t")
+        self.assertIsNone(probe.static_invalid(defined, call))  # a def counts as defined
+
     def test_readme_engine_line_count_current(self):
         readme = (_ROOT / "README.md").read_text(encoding="utf-8")
         m = re.search(r"`src/hexantk_v3\.py` \((\d+) Zeilen;", readme)
