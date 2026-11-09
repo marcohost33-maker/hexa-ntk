@@ -20,6 +20,10 @@ update instead of writing NaN into every parameter, the EMA copy and the checkpo
 a parameter that is non-finite after the optimizer step stops the run; distributed,
 all ranks or none must skip (section 3.7). Applies with and without DDP. No change to
 what a healthy run computes (every finite-gradient step is taken as before).
+Third round the same day (independent review of cc9f73a): the record of a skipped
+update is held under DDP like the step itself (section 3.6, HX102-01); with an
+active `GradScaler` a non-finite norm that `unscale_` did not see (fp32 overflow of
+finite gradients, a zero scale) is skipped too (section 3.7, HX102-02/-04).
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -113,8 +117,12 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    `n_anomalies` (skipped steps) are per rank and equal on every rank because the
    skips are agreed.
 6. **After backward (v1.1).** `GradScaler.unscale_` (AMP), clipping, the optimizer
-   (or `GradScaler`) step and the EMA update run per rank after DDP's gradient
-   all-reduce has completed; none of them is a collective. A rank that raised there used to leave alone: its peers
+   (or `GradScaler`) step, the EMA update and, for a skipped update (item 7), its
+   replay capsule and `FailureSignature` run per rank after DDP's gradient
+   all-reduce has completed; none of them is a collective. (The skip record was
+   outside the held region until v1.2 third round, HX102-01: an `OSError` there on
+   one rank only, a full disk, left that rank alone, measured with a real 2-rank gloo
+   job: the peer waited in the next agreement until the collective timeout.) A rank that raised there used to leave alone: its peers
    waited in the next step's agreement until the process-group timeout (or, with
    `save_every_n_steps`, a peer could start the mid-epoch save's gathers without
    it). Now the failing rank holds the exception (an OOM gets the rescue first),
@@ -164,6 +172,22 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    would fill the disk), only a warning. A disabled scaler (`enabled=False`: scale
    fixed at 1.0, `step` is a plain `optimizer.step()` that never skips) takes the
    no-scaler path; without that guard its NaN update reached the weights.
+   Third round (same day, independent review of cc9f73a): `unscale_` checks the
+   gradients *before* it unscales them, so two non-finite norms passed its inf check
+   and the scaler stepped. HX102-02: finite gradients whose fp32 norm overflows
+   (elements around 1e25): clipping zeroed them, the step counted as healthy with
+   `grad_norm` inf and `mean_grad_norm` became inf. HX102-04: a scale of 0 (the scale
+   cannot drop below 0, so the backoff test never fires): `unscale_` multiplies the
+   zero gradients by 1/0, the NaN reached the weights and `NonFiniteParameterError`
+   stopped the run with a text that claims finite gradients (both measured with the
+   `_apply_update` of cc9f73a and `torch.amp.GradScaler("cpu")`, torch 2.12). Now, with an active
+   scaler too, a non-finite norm skips `scaler.step`; `update` still runs (a found
+   inf still lowers the scale). Only a skip with a lowered scale is the routine
+   backoff (warning, no capsule); a skip without one (overflowing norm, zero scale)
+   is a failure like the no-scaler case: replay capsule and `FailureSignature`
+   `NaN_or_Inf_Grad`. A zero scale stays 0 (growth multiplies it), so from then on
+   every step is skipped, each with a capsule: the open limit on endless skips
+   (section 8) applies.
    After every applied step all parameters must be finite, else
    `NonFiniteParameterError` (the step already wrote them: no rollback) before the
    EMA update and before any checkpoint; distributed it is a held error (item 6).
