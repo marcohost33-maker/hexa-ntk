@@ -471,7 +471,9 @@ MUTANTS = (
     # third round (HX102-02/-04): a non-finite norm unscale_ did not see skips scaler.step,
     # and only a scale backoff is routine (no capsule)
     Mutant(RU, "            take = math.isfinite(grad_norm_val)\n", "            take = True\n", NF),
-    Mutant(RU, "        if self._scaler_backoff:\n", "        if self._scaler_active():\n", NF),
+    # (the replacement called _scaler_active(), removed in 40ff255: the mutant then died of
+    # an AttributeError, not of a test; it now says what the removed helper said)
+    Mutant(RU, "        if self._scaler_backoff:\n", "        if self.grad_scaler is not None:\n", NF),
     # third round (HX102-01): an OSError recording a skipped update escapes the held region
     # (HX102-03 put the skip count between the record and the except: site moved with it)
     Mutant(RU, "                        self._count_skip(batch, loss_val, counts=not self._routine_backoff())\n"
