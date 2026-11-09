@@ -458,11 +458,26 @@ MUTANTS = (
     # step stops the run, and the ranks must agree that all or none skipped.
     Mutant(RU, "            if not math.isfinite(grad_norm_val):\n", "            if False:\n", NF),
     Mutant(RU, "            self._check_parameters_finite()\n", "            pass\n", NF),
-    Mutant(RU, "                self._record_skipped_update(batch, loss_val, grad_norm_val)\n", "", NF),
+    Mutant(RU, "                if not stepped:\n"
+               "                    self._record_skipped_update(batch, loss_val, grad_norm_val)\n",
+           "                if not stepped:\n                    pass\n", NF),
     # second round: the GradScaler's own skip (scale backoff) skips the EMA and counts as skipped
-    Mutant(RU, "            if self.grad_scaler.get_scale() < scale_before:\n", "            if False:\n", NF),
-    Mutant(RU, "            if self.grad_scaler.get_scale() < scale_before:\n",
-           "            if self.grad_scaler.get_scale() != scale_before:\n", NF),
+    # (third round: retargeted, the backoff test is now an assignment)
+    Mutant(RU, "            backoff = self.grad_scaler.get_scale() < scale_before\n",
+           "            backoff = False\n", NF),
+    Mutant(RU, "            backoff = self.grad_scaler.get_scale() < scale_before\n",
+           "            backoff = self.grad_scaler.get_scale() != scale_before\n", NF),
+    # third round (HX102-02/-04): a non-finite norm unscale_ did not see skips scaler.step,
+    # and only a scale backoff is routine (no capsule)
+    Mutant(RU, "            take = math.isfinite(grad_norm_val)\n", "            take = True\n", NF),
+    Mutant(RU, "        if self._scaler_backoff:\n", "        if self._scaler_active():\n", NF),
+    # third round (HX102-01): an OSError recording a skipped update escapes the held region
+    Mutant(RU, "                        self._record_skipped_update(batch, loss_val, grad_norm_val)\n"
+               "                except Exception as exc:\n",
+           "                        self._record_skipped_update(batch, loss_val, grad_norm_val)\n"
+           "                except Exception as exc:\n"
+           "                    if isinstance(exc, OSError):\n"
+           "                        raise\n", "test_ddp_hex_v3.TestWorldSizeOne"),
     Mutant(RU, "            if p.numel() and (p.is_floating_point() or p.is_complex()):\n",
            "            if p.is_floating_point() or p.is_complex():\n", NF),
     Mutant(RU, "        finite = [torch.isfinite(torch.stack(torch._foreach_norm(ts, float(\"inf\")))).all()\n",
