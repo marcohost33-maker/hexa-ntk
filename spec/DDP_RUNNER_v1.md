@@ -171,7 +171,11 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    FailureSignature (loss-scale backoff is routine in AMP, a capsule per overflow
    would fill the disk), only a warning. A disabled scaler (`enabled=False`: scale
    fixed at 1.0, `step` is a plain `optimizer.step()` that never skips) takes the
-   no-scaler path; without that guard its NaN update reached the weights.
+   no-scaler path; without that guard its NaN update reached the weights. (Since
+   the third round the guard is redundant and removed: every non-finite norm skips
+   before `scaler.step`, `unscale_`/`update` of a disabled scaler do nothing and its
+   scale never drops, so it behaves like no scaler. Its mutant survived the full
+   probe on 3ba3835 as an equivalent mutant; the test of the behaviour stays.)
    Third round (same day, independent review of cc9f73a): `unscale_` checks the
    gradients *before* it unscales them, so two non-finite norms passed its inf check
    and the scaler stepped. HX102-02: finite gradients whose fp32 norm overflows
@@ -187,7 +191,9 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    is a failure like the no-scaler case: replay capsule and `FailureSignature`
    `NaN_or_Inf_Grad`. A zero scale stays 0 (growth multiplies it), so from then on
    every step is skipped, each with a capsule: the open limit on endless skips
-   (section 8) applies.
+   (section 8) applies. Verified on 3ba3835 (Python 3.12.3, torch 2.6.0): with a
+   zero scale and with gradients of 3e19, `unscale_` reports `found_inf` 0 while the
+   norm is NaN resp. inf -- the premise of HX102-02/-04 holds on 2.6.0 too.
    After every applied step all parameters must be finite, else
    `NonFiniteParameterError` (the step already wrote them: no rollback) before the
    EMA update and before any checkpoint; distributed it is a held error (item 6).

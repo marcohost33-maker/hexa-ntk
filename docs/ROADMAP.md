@@ -54,10 +54,21 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   dazu Opt-out `RunnerConfig(check_finite_params=False)`. Neu belegt: Mid-Epoch-Resume ueber einen
   Gradienten-Skip ist bitgleich (rot gegen cd5f6dc); Randfaelle 3e38/1e308/leerer Parameter/gemischte
   dtypes; ein deaktivierter GradScaler (`enabled=False`, Skala fest 1.0, `step` ueberspringt nie)
-  nimmt den Pfad ohne Scaler (ohne den Guard: NaN-Gewichte). Ein Mutant der ersten Runde war nach der Umstellung INVALID (leerer `if`-Block) und ist
+  nimmt den Pfad ohne Scaler (ohne den Guard: NaN-Gewichte; seit der dritten Runde ist der Guard
+  ueberfluessig und entfernt, s. u.). Ein Mutant der ersten Runde war nach der Umstellung INVALID (leerer `if`-Block) und ist
   neu gezielt. Grenzen: ein Scaler, der endlos ueberspringt (NaN, den Reskalieren nicht entfernt),
   und endlose NaN-Loss-Skips stoppen den Lauf nicht -- eine Schranke fuer aufeinanderfolgende Skips
   ist ein Owner-Entscheid; ein Fehler *innerhalb* von `backward` bleibt wie in 3.6 offen.
+  _Dritte Runde (Owner, unabhaengiges Review von cc9f73a, HX102-01/-02/-04):_ das Protokollieren
+  eines Skips (Kapsel/FailureSignature) laeuft unter DDP in der gehaltenen Region (ein `OSError` auf
+  einem Rank liess die Peers haengen); `unscale_` prueft *vor* dem Unskalieren, daher liefen
+  Norm-Ueberlauf endlicher Gradienten und Skala 0 (1/0 -> NaN) am inf-Check vorbei -> jede
+  nicht-endliche Norm ueberspringt `scaler.step`, nur ein Skip mit gesenkter Skala ist Routine.
+  _Nachpruefung von 3ba3835 (Claude):_ Praemisse auf torch 2.6.0 bestaetigt (`found_inf` 0 bei Skala 0
+  und bei 3e19); CI und lokales Gate waren rot (README-Zaehlungen 1101 statt 1105 Tests nicht
+  nachgezogen), die volle Probe 175/176 -- M167 (`is_enabled()`-Guard aus Runde 2b) ueberlebte als
+  aequivalenter Mutant, weil der HX102-02-Fix einen deaktivierten Scaler bereits wie keinen behandelt
+  -> Guard und Mutant entfernt (Praezedenz #94), Verhaltenstest bleibt; Zaehlungen nachgezogen.
   _Evidenz:_ `results/2026-11-09_non-finite-gradient_local-gate.log`.
 - [x] **DDP v1.1: Fehler nach `backward` abgestimmt + 3-Rank-Evidenz (2026-11-02, Linux-Container;
   offen aus dem DDP-Eintrag unten: "Fehler in backward/optimizer.step", "> 2 Ranks").**

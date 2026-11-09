@@ -1122,7 +1122,7 @@ class HexTrainingRunner:
         grad_norm_val = float(grad_norm.item()) if torch.is_tensor(grad_norm) else float(grad_norm)
 
         self._scaler_backoff = False
-        if self._scaler_active():
+        if self.grad_scaler is not None:
             scale_before = self.grad_scaler.get_scale()
             # A non-finite norm is skipped here as well, before scaler.step: unscale_
             # checks the gradients BEFORE it unscales them, so finite gradients whose
@@ -1148,12 +1148,6 @@ class HexTrainingRunner:
         if self.ema_model is not None:
             self.ema_model.update_parameters(self.raw_model)
         return grad_norm_val, True
-
-    def _scaler_active(self) -> bool:
-        """A GradScaler that scales. A disabled one (``enabled=False``) keeps scale
-        1.0 and its ``step`` is a plain ``optimizer.step()`` that never skips, so
-        its updates take the no-scaler path and its own finiteness check."""
-        return self.grad_scaler is not None and self.grad_scaler.is_enabled()
 
     def _check_parameters_finite(self) -> None:
         """Raise NonFiniteParameterError if the step left a NaN/Inf parameter.

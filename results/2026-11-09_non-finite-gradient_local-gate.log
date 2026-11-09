@@ -198,3 +198,45 @@ exit=0
 # - CUDA itself (fused _foreach_norm kernel, a real fp16 autocast forward) is not run here; the CPU GradScaler
 #   exercises the same skip/update/backoff logic
 # - a rank failing inside backward stays open (spec section 8)
+
+########################################################################################################
+# Check of the owner's third round (head 3ba3835, HX102-01/-02/-04), 2026-11-09, by Claude
+########################################################################################################
+# Premise of HX102-02/-04 verified on torch 2.6.0 (CPU GradScaler): unscale_ reports found_inf 0 for a zero
+#   scale (norm nan) and for gradients of 3e19 (norm inf) -> the scaler alone would have stepped
+# GitHub CI on 3ba3835: tests (cpu) and stacked tests (cpu) FAILED (failures=4): TestDocsContract, README
+#   still said 1101 tests (1105 ran) -- reproduced locally, same 4 failures
+# Full probe on 3ba3835: 175/176 killed, FAIL
+#   M167 SURVIVED  runner_hex_v3.py -> TestNonFiniteGradient
+#   [MUTATION-PROBE] baseline green | 175/176 killed | FAIL
+#   exit=1
+#   M167 = the round-2b guard mutant (_scaler_active without is_enabled()); equivalent since HX102-02: every
+#   non-finite norm skips before scaler.step, a disabled scaler's unscale_/update do nothing and its scale stays
+#   1.0 (measured), so it behaves like no scaler -> guard and mutant removed (precedent #94), behaviour test kept
+# README counts brought to the measured values (1105 tests, 175 mutants)
+
+## End run (working tree of this commit)
+# ruff check src scripts
+All checks passed!
+ruffexit=0
+# python -m compileall -q src
+compileexit=0
+# python scripts/engine_gate.py
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+engexit=0
+# python scripts/verify_sources.py
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+vsexit=0
+# python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" -v
+exit=0
+Ran 1105 tests in 47.756s
+OK (skipped=7)
+#       1 skipped 'needs CUDA'
+#       6 skipped 'optional neuraloperator backend not installed'
+# python -m coverage report
+src/toolkit/runner_hex_v3.py                     812     35    312     28    94%
+TOTAL                                           6114    245   2312    192    95%
+covexit=0
+# python scripts/mutation_probe.py
+probeexit=0
+[MUTATION-PROBE] baseline green | 175/175 killed | PASS

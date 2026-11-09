@@ -911,3 +911,6 @@
 | B4E3ABF25837615A | 2026-11-09 16:05 | src/toolkit | DDP v1.2 third round: CPU GradScaler with an overflowing norm of finite gradients (skipped, capsule, scale unchanged, EMA n_averaged 1) and a zero loss scale (every step skipped, weights unchanged): test_runner_hex_v3.py |
 | B89BC35A93B8CFD1 | 2026-11-09 16:05 | spec | v1.2 third round: section 3.6 skip record in the held region, section 3.7 GradScaler skip on a non-finite norm unscale_ did not see (overflow, zero scale): DDP_RUNNER_v1.md |
 | 98DBDE5E3A1A5DF0 | 2026-11-09 16:40 | scripts | DDP v1.2 third round: mutants retargeted to the new skip code (record under not stepped, backoff assignment x2) + 3 new (take = True, capsule switch on _scaler_active, OSError escaping the held region); the 6 HX102 mutants killed, all 176 sites found exactly once: mutation_probe.py |
+| 8465DF533E7549F4 | 2026-11-09 15:40 | src/toolkit | check of 3ba3835: the round-2b is_enabled() guard (_scaler_active) removed, redundant since HX102-02 (equivalent mutant M167 survived the full probe): runner_hex_v3.py |
+| 9E17D53308A665E6 | 2026-11-09 15:40 | spec | check of 3ba3835: guard redundancy noted in 3.7, HX102-02/-04 premise verified on torch 2.6.0: DDP_RUNNER_v1.md |
+| 769E6B911AE334E2 | 2026-11-09 15:40 | scripts | check of 3ba3835: equivalent is_enabled() mutant removed (175 mutants): mutation_probe.py |

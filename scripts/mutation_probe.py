@@ -483,8 +483,10 @@ MUTANTS = (
     Mutant(RU, "        finite = [torch.isfinite(torch.stack(torch._foreach_norm(ts, float(\"inf\")))).all()\n",
            "        finite = [torch.isfinite(torch.stack(torch._foreach_norm(ts, 2.0))).all()\n", NF),
     Mutant(RU, "        if self.config.check_finite_params:\n", "        if True:\n", NF),
-    Mutant(RU, "        return self.grad_scaler is not None and self.grad_scaler.is_enabled()\n",
-           "        return self.grad_scaler is not None\n", NF),
+    # (the round-2b is_enabled() guard is gone: since HX102-02 a non-finite norm skips
+    # before scaler.step, so a disabled scaler behaves like none and its mutant was
+    # equivalent -- M167 survived the full probe on 3ba3835; the behaviour stays pinned by
+    # test_disabled_grad_scaler_takes_the_no_scaler_path)
     Mutant(RU, "            self._grad_skip_pending = True\n", "            pass\n", T2),
     Mutant(RU, "        if 0 < n_grad_skipped < self.dist.world_size:\n", "        if False:\n", T2),
     Mutant(RU, '        self._agreed_grad_skip(n_grad_skipped, f"step {self.global_step}")\n', "", T2),
