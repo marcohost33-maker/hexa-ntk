@@ -1478,6 +1478,44 @@ class TestNonFiniteGradient(unittest.TestCase):
             self.assertEqual(sorted(runner.failure_dir.glob("failure_*.json")), [])  # routine, no capsule
             self._assert_no_non_finite_checkpoint(out)
 
+    def test_overflowing_norm_of_finite_gradients_is_skipped_with_a_grad_scaler(self) -> None:
+        # HX102-02: every element finite after unscale_ (~1e25), so the scaler finds
+        # no inf, steps and keeps its scale; the fp32 norm overflows to inf, clipping
+        # zeroes the gradients, and the step counted as healthy with grad_norm=inf
+        # (mean_grad_norm=inf). It is no loss-scale backoff: capsule + signature.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            scaler = torch.amp.GradScaler("cpu", init_scale=1024.0)
+            runner, model, start, result = self._run(out, _poisoned_loss({0}, 1e25), scaler=scaler)
+            train = result["history"]["train"][0]
+            self.assertEqual((train["n_batches"], train["n_anomalies"]), (1, 1))
+            self.assertTrue(math.isfinite(train["mean_grad_norm"]))
+            self.assertEqual(scaler.get_scale(), 1024.0)  # no backoff, no growth (interval 2000)
+            self.assertEqual(int(runner.ema_model.n_averaged), 1)  # only the applied step
+            step0 = json.loads((runner.failure_dir / "failure_step0_NaN_or_Inf_Grad.json").read_text())
+            self.assertIn("grad_norm=inf", step0["observable"])
+            capsule = torch.load(step0["replay_capsule"], weights_only=False)
+            self.assertTrue(torch.equal(capsule["model_state_dict"]["lin.weight"], start[0]))
+            self._assert_no_non_finite_checkpoint(out)
+
+    def test_zero_loss_scale_is_a_skip(self) -> None:
+        # HX102-04: at scale 0 the scaled gradients are 0 and unscale_ multiplies them
+        # by 1/0 = inf (NaN, found after the check on the inputs); the scale cannot drop
+        # below 0, so the backoff test never saw a skip
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            scaler = torch.amp.GradScaler("cpu", init_scale=1024.0)
+            scaler._lazy_init_scale_growth_tracker(torch.device("cpu"))
+            scaler._scale.fill_(0.0)
+            runner, model, start, result = self._run(out, _poisoned_loss(set()), scaler=scaler)
+            train = result["history"]["train"][0]
+            self.assertEqual((train["n_batches"], train["n_anomalies"]), (0, 2))
+            self.assertTrue(math.isnan(train["mean_grad_norm"]))  # no healthy step: no measurement
+            for p, p0 in zip(model.parameters(), start):
+                self.assertTrue(torch.equal(p.detach(), p0))
+            self.assertEqual(int(runner.ema_model.n_averaged), 0)
+            self._assert_no_non_finite_checkpoint(out)
+
     def test_disabled_grad_scaler_takes_the_no_scaler_path(self) -> None:
         # GradScaler(enabled=False): scale stays 1.0 and scaler.step never skips, so
         # the scale-backoff test cannot see the NaN; the update must take the

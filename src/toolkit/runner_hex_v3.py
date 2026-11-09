@@ -633,6 +633,9 @@ class HexTrainingRunner:
         # gradient norm. Checked at the same agreement points (section 3.7):
         # every rank reads the same all-reduced gradients, so all or none skip.
         self._grad_skip_pending = False
+        # The last skip was the GradScaler's own loss-scale backoff (routine in
+        # AMP: warning only, no capsule); set by _apply_update.
+        self._scaler_backoff = False
 
     # ------------------------------------------------------------------
     # Resume
@@ -1098,8 +1101,12 @@ class HexTrainingRunner:
         weight decay. With a GradScaler the scaler decides, as in PyTorch AMP:
         ``scaler.step`` skips when ``unscale_`` found inf/NaN and ``update``
         then backs the scale off; a lower scale after ``update`` is that skip
-        (the scale only drops on a found inf). The EMA update is skipped with
-        it (an EMA step on unchanged weights still moves the average).
+        (the scale only drops on a found inf). ``unscale_`` checks the
+        gradients before it unscales them, so a non-finite norm it did not see
+        (an fp32 overflow of finite gradients; a zero scale, whose 1/0 turns
+        them into NaN) skips ``scaler.step`` here, ``update`` still runs.
+        The EMA update is skipped with any skip (an EMA step on unchanged
+        weights still moves the average).
         After a step every parameter must be finite, else NonFiniteParameterError
         (before the EMA update). Distributed, every call site runs after DDP's
         gradient all-reduce, so nothing here is a collective; an error is held
@@ -1114,11 +1121,20 @@ class HexTrainingRunner:
         )
         grad_norm_val = float(grad_norm.item()) if torch.is_tensor(grad_norm) else float(grad_norm)
 
+        self._scaler_backoff = False
         if self._scaler_active():
             scale_before = self.grad_scaler.get_scale()
-            self.grad_scaler.step(self.optimizer)
+            # A non-finite norm is skipped here as well, before scaler.step: unscale_
+            # checks the gradients BEFORE it unscales them, so finite gradients whose
+            # fp32 norm overflows (HX102-02) or that become NaN by the 1/0 of a zero
+            # scale (HX102-04) pass its inf check and the scaler would step.
+            take = math.isfinite(grad_norm_val)
+            if take:
+                self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()
-            if self.grad_scaler.get_scale() < scale_before:
+            backoff = self.grad_scaler.get_scale() < scale_before
+            if backoff or not take:
+                self._scaler_backoff = backoff
                 self.optimizer.zero_grad(set_to_none=True)
                 return grad_norm_val, False
         else:
@@ -1169,17 +1185,20 @@ class HexTrainingRunner:
         )
 
     def _record_skipped_update(self, batch: Dict[str, Any], loss_val: float, grad_norm_val: float) -> None:
-        """A skipped update: log it; without a GradScaler also capsule + FailureSignature.
+        """A skipped update: log it; unless a scale backoff also capsule + FailureSignature.
 
-        Without a GradScaler the cause is a non-finite gradient norm, a failure
-        worth replaying: the capsule holds the weights the gradient was taken at
-        (the step was not applied). With a GradScaler a skip is the routine
-        loss-scale backoff of AMP (frequent early in training): logged, counted
-        as skipped, no capsule (a capsule per overflow would fill the disk).
+        A non-finite gradient norm is a failure worth replaying: the capsule
+        holds the weights the gradient was taken at (the step was not applied).
+        A skip the GradScaler backed its scale off for is the routine loss-scale
+        backoff of AMP (frequent early in training): logged, counted as skipped,
+        no capsule (a capsule per overflow would fill the disk). A skip with an
+        active scaler but no backoff (norm overflow of finite gradients, zero
+        scale) is a failure like the no-scaler case. Distributed, this runs in
+        the held region of _train_one_step (spec section 3.6).
         """
         if self.dist is not None:
             self._grad_skip_pending = True
-        if self._scaler_active():
+        if self._scaler_backoff:
             logger.warning("Step %d skipped by the GradScaler (inf/NaN gradient at loss scale %s, grad_norm=%s)",
                            self.global_step, self.grad_scaler.get_scale(), grad_norm_val)
             return
