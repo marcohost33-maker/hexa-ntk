@@ -1,0 +1,531 @@
+{
+  "command": [
+    "python.exe",
+    "scripts/oracles/gino_epoch_cost_synthetic.py",
+    "--threads",
+    "4",
+    "--output",
+    "results/2026-10-29_gino_epoch_cost_synthetic.json"
+  ],
+  "configs": [
+    {
+      "config_digest": "6cca760ad3c806ce8daaf32d6a8958db45fb58585a8d9239c602bb971e562030",
+      "epoch_seconds": [
+        140.05106889999297,
+        96.89898790000007,
+        116.74543650000123
+      ],
+      "epoch_seconds_median": 116.74543650000123,
+      "hidden_channels": 32,
+      "last_batch_loss_per_epoch": [
+        0.9999979138374329,
+        1.0000942945480347,
+        1.0000016689300537
+      ],
+      "latent_resolution": 16,
+      "learning_rate": 0.001,
+      "losses_finite": true,
+      "n_layers": 4,
+      "n_modes": 6,
+      "n_parameters": 418532,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        2.087595600009081,
+        2.5743916999927023,
+        1.6786123999918345
+      ],
+      "val_pass_seconds_median": 2.087595600009081,
+      "warmup_steps_seconds": 10.88911580000422,
+      "warmup_val_pass_seconds": 1.7309144000028027
+    },
+    {
+      "config_digest": "6cca760ad3c806ce8daaf32d6a8958db45fb58585a8d9239c602bb971e562030",
+      "epoch_seconds": [
+        121.69227230000251,
+        82.11843989999034,
+        163.69322490000923
+      ],
+      "epoch_seconds_median": 121.69227230000251,
+      "hidden_channels": 32,
+      "last_batch_loss_per_epoch": [
+        0.9999707937240601,
+        1.0000823736190796,
+        1.0000026226043701
+      ],
+      "latent_resolution": 16,
+      "learning_rate": 0.0003,
+      "losses_finite": true,
+      "n_layers": 4,
+      "n_modes": 6,
+      "n_parameters": 418532,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        2.25091760000214,
+        2.2806079000001773,
+        1.9592339000082575
+      ],
+      "val_pass_seconds_median": 2.25091760000214,
+      "warmup_steps_seconds": 10.713352899998426,
+      "warmup_val_pass_seconds": 2.2410628000070574
+    },
+    {
+      "config_digest": "445108961c1b622b3425fa083c73bd543d788523c4b51afe75536cd3a4a02e44",
+      "epoch_seconds": [
+        176.7709584999975,
+        190.58053310000105,
+        153.98920880000514
+      ],
+      "epoch_seconds_median": 176.7709584999975,
+      "hidden_channels": 32,
+      "last_batch_loss_per_epoch": [
+        0.9999992251396179,
+        1.0001071691513062,
+        1.000006079673767
+      ],
+      "latent_resolution": 24,
+      "learning_rate": 0.001,
+      "losses_finite": true,
+      "n_layers": 4,
+      "n_modes": 9,
+      "n_parameters": 504548,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        2.211966899994877,
+        2.0725280000042403,
+        2.0418392999999924
+      ],
+      "val_pass_seconds_median": 2.0725280000042403,
+      "warmup_steps_seconds": 32.84236900000542,
+      "warmup_val_pass_seconds": 2.0853505000122823
+    },
+    {
+      "config_digest": "445108961c1b622b3425fa083c73bd543d788523c4b51afe75536cd3a4a02e44",
+      "epoch_seconds": [
+        143.60062710000784,
+        143.30719110000064,
+        144.64441710000392
+      ],
+      "epoch_seconds_median": 143.60062710000784,
+      "hidden_channels": 32,
+      "last_batch_loss_per_epoch": [
+        0.9999408721923828,
+        1.0000793933868408,
+        1.0000439882278442
+      ],
+      "latent_resolution": 24,
+      "learning_rate": 0.0003,
+      "losses_finite": true,
+      "n_layers": 4,
+      "n_modes": 9,
+      "n_parameters": 504548,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        2.080618299994967,
+        2.128564099999494,
+        2.164253299997654
+      ],
+      "val_pass_seconds_median": 2.128564099999494,
+      "warmup_steps_seconds": 15.74199859998771,
+      "warmup_val_pass_seconds": 2.153213399986271
+    },
+    {
+      "config_digest": "88dfcd0712946b198aff046a448f117b3f341bd5a85d37620f88f05eea8025c5",
+      "epoch_seconds": [
+        155.22083420000854,
+        152.13941850000992,
+        141.67429470000206
+      ],
+      "epoch_seconds_median": 152.13941850000992,
+      "hidden_channels": 64,
+      "last_batch_loss_per_epoch": [
+        1.0000184774398804,
+        1.0001161098480225,
+        1.0000001192092896
+      ],
+      "latent_resolution": 16,
+      "learning_rate": 0.001,
+      "losses_finite": true,
+      "n_layers": 4,
+      "n_modes": 6,
+      "n_parameters": 765668,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        1.293763100009528,
+        1.28046570000879,
+        1.2958012000017334
+      ],
+      "val_pass_seconds_median": 1.293763100009528,
+      "warmup_steps_seconds": 17.1348946000071,
+      "warmup_val_pass_seconds": 1.3000025999936042
+    },
+    {
+      "config_digest": "88dfcd0712946b198aff046a448f117b3f341bd5a85d37620f88f05eea8025c5",
+      "epoch_seconds": [
+        132.75192609999795,
+        133.09270619999734,
+        134.4273591999954
+      ],
+      "epoch_seconds_median": 133.09270619999734,
+      "hidden_channels": 64,
+      "last_batch_loss_per_epoch": [
+        1.0000073909759521,
+        1.0000656843185425,
+        1.0000046491622925
+      ],
+      "latent_resolution": 16,
+      "learning_rate": 0.0003,
+      "losses_finite": true,
+      "n_layers": 4,
+      "n_modes": 6,
+      "n_parameters": 765668,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        1.3407439000002341,
+        1.326487199999974,
+        1.3049701000127243
+      ],
+      "val_pass_seconds_median": 1.326487199999974,
+      "warmup_steps_seconds": 14.74390489999496,
+      "warmup_val_pass_seconds": 1.3167231999977957
+    },
+    {
+      "config_digest": "eb4268cd92e71fa01c437e8cdb3a34ccd7a5cf2dc678fe34815e672ad828f3b1",
+      "epoch_seconds": [
+        292.09698950000165,
+        314.46840430000157,
+        334.9752800999995
+      ],
+      "epoch_seconds_median": 314.46840430000157,
+      "hidden_channels": 64,
+      "last_batch_loss_per_epoch": [
+        1.000075101852417,
+        1.0001142024993896,
+        1.0000009536743164
+      ],
+      "latent_resolution": 24,
+      "learning_rate": 0.001,
+      "losses_finite": true,
+      "n_layers": 4,
+      "n_modes": 9,
+      "n_parameters": 1109732,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        2.791885300001013,
+        2.709524699996109,
+        2.733617999998387
+      ],
+      "val_pass_seconds_median": 2.733617999998387,
+      "warmup_steps_seconds": 26.27568209999299,
+      "warmup_val_pass_seconds": 2.7719338000024436
+    },
+    {
+      "config_digest": "eb4268cd92e71fa01c437e8cdb3a34ccd7a5cf2dc678fe34815e672ad828f3b1",
+      "epoch_seconds": [
+        331.2872989000025,
+        332.1334124999994,
+        329.26654659998894
+      ],
+      "epoch_seconds_median": 331.2872989000025,
+      "hidden_channels": 64,
+      "last_batch_loss_per_epoch": [
+        0.9999675750732422,
+        1.0000628232955933,
+        1.0000237226486206
+      ],
+      "latent_resolution": 24,
+      "learning_rate": 0.0003,
+      "losses_finite": true,
+      "n_layers": 4,
+      "n_modes": 9,
+      "n_parameters": 1109732,
+      "radius_factor": 1.5,
+      "val_pass_seconds": [
+        2.687238200000138,
+        2.761998700007098,
+        2.713744599997881
+      ],
+      "val_pass_seconds_median": 2.713744599997881,
+      "warmup_steps_seconds": 36.6434414999967,
+      "warmup_val_pass_seconds": 2.69781550001062
+    }
+  ],
+  "data": {
+    "batch_size": 20,
+    "data_seed": 20261029,
+    "geometry": "triangle_hex_lattice(32), 465 nodes",
+    "kind": "synthetic standard-normal tensors (torch.Generator), no T1 data",
+    "model_seed": 0,
+    "n_train": 1800,
+    "n_val": 200,
+    "shuffle_seed": 0,
+    "steps_per_epoch": 90
+  },
+  "environment": {
+    "amp": false,
+    "cuda_available": false,
+    "dtype": "float32",
+    "neuraloperator": "2.0.0",
+    "numpy": "2.5.3",
+    "python": "3.12.10",
+    "torch": "2.6.0+cpu",
+    "torch_num_interop_threads": 4,
+    "torch_num_threads": 4
+  },
+  "hardware": {
+    "cpu_name": "Intel(R) Core(TM) i5-1035G1 CPU @ 1.00GHz",
+    "logical_processors": 8,
+    "machine": "AMD64",
+    "max_clock_mhz": 1190,
+    "os": "Microsoft Windows 11 Home 10.0.26200 build 26200",
+    "os_cpu_count": 8,
+    "physical_cores": 4,
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 126 Stepping 5, GenuineIntel",
+    "ram_bytes": 8260374528
+  },
+  "machine_load_percent": {
+    "end": 25,
+    "note": "shared machine; other processes ran during the measurement",
+    "start": 32
+  },
+  "neighbourhoods": [
+    {
+      "latent_resolution": 16,
+      "min_latent_neighbours_per_node": 1,
+      "per_lattice": {
+        "torus_periodic/n=32": {
+          "mean": 1.7705078125,
+          "min": 1
+        },
+        "triangle_dirichlet/n=128": {
+          "mean": 1.7970253718285214,
+          "min": 1
+        },
+        "triangle_dirichlet/n=16": {
+          "mean": 1.7714285714285714,
+          "min": 1
+        },
+        "triangle_dirichlet/n=32": {
+          "mean": 1.7849462365591398,
+          "min": 1
+        },
+        "triangle_dirichlet/n=64": {
+          "mean": 1.8003072196620584,
+          "min": 1
+        }
+      },
+      "radius_factor": 1.5
+    },
+    {
+      "latent_resolution": 16,
+      "min_latent_neighbours_per_node": 2,
+      "per_lattice": {
+        "torus_periodic/n=32": {
+          "mean": 3.9697265625,
+          "min": 2
+        },
+        "triangle_dirichlet/n=128": {
+          "mean": 4.019747531558555,
+          "min": 2
+        },
+        "triangle_dirichlet/n=16": {
+          "mean": 4.038095238095238,
+          "min": 3
+        },
+        "triangle_dirichlet/n=32": {
+          "mean": 4.004301075268817,
+          "min": 2
+        },
+        "triangle_dirichlet/n=64": {
+          "mean": 4.018433179723503,
+          "min": 2
+        }
+      },
+      "radius_factor": 2.25
+    },
+    {
+      "latent_resolution": 16,
+      "min_latent_neighbours_per_node": 3,
+      "per_lattice": {
+        "torus_periodic/n=32": {
+          "mean": 4.9091796875,
+          "min": 3
+        },
+        "triangle_dirichlet/n=128": {
+          "mean": 4.943632045994251,
+          "min": 4
+        },
+        "triangle_dirichlet/n=16": {
+          "mean": 5.0285714285714285,
+          "min": 4
+        },
+        "triangle_dirichlet/n=32": {
+          "mean": 4.980645161290322,
+          "min": 4
+        },
+        "triangle_dirichlet/n=64": {
+          "mean": 4.94726062467998,
+          "min": 4
+        }
+      },
+      "radius_factor": 2.5
+    },
+    {
+      "latent_resolution": 16,
+      "min_latent_neighbours_per_node": 3,
+      "per_lattice": {
+        "torus_periodic/n=32": {
+          "mean": 5.8916015625,
+          "min": 3
+        },
+        "triangle_dirichlet/n=128": {
+          "mean": 5.959755030621173,
+          "min": 4
+        },
+        "triangle_dirichlet/n=16": {
+          "mean": 6.019047619047619,
+          "min": 4
+        },
+        "triangle_dirichlet/n=32": {
+          "mean": 6.025806451612903,
+          "min": 4
+        },
+        "triangle_dirichlet/n=64": {
+          "mean": 5.981566820276497,
+          "min": 4
+        }
+      },
+      "radius_factor": 2.75
+    },
+    {
+      "latent_resolution": 24,
+      "min_latent_neighbours_per_node": 2,
+      "per_lattice": {
+        "torus_periodic/n=32": {
+          "mean": 4.1474609375,
+          "min": 2
+        },
+        "triangle_dirichlet/n=128": {
+          "mean": 4.20347456567929,
+          "min": 2
+        },
+        "triangle_dirichlet/n=16": {
+          "mean": 4.095238095238095,
+          "min": 3
+        },
+        "triangle_dirichlet/n=32": {
+          "mean": 4.180645161290323,
+          "min": 3
+        },
+        "triangle_dirichlet/n=64": {
+          "mean": 4.2089093701996925,
+          "min": 3
+        }
+      },
+      "radius_factor": 1.5
+    },
+    {
+      "latent_resolution": 24,
+      "min_latent_neighbours_per_node": 4,
+      "per_lattice": {
+        "torus_periodic/n=32": {
+          "mean": 9.22265625,
+          "min": 4
+        },
+        "triangle_dirichlet/n=128": {
+          "mean": 9.373328333958256,
+          "min": 5
+        },
+        "triangle_dirichlet/n=16": {
+          "mean": 9.542857142857143,
+          "min": 8
+        },
+        "triangle_dirichlet/n=32": {
+          "mean": 9.479569892473119,
+          "min": 8
+        },
+        "triangle_dirichlet/n=64": {
+          "mean": 9.400921658986174,
+          "min": 7
+        }
+      },
+      "radius_factor": 2.25
+    },
+    {
+      "latent_resolution": 24,
+      "min_latent_neighbours_per_node": 5,
+      "per_lattice": {
+        "torus_periodic/n=32": {
+          "mean": 11.2900390625,
+          "min": 5
+        },
+        "triangle_dirichlet/n=128": {
+          "mean": 11.526559180102486,
+          "min": 7
+        },
+        "triangle_dirichlet/n=16": {
+          "mean": 11.695238095238095,
+          "min": 10
+        },
+        "triangle_dirichlet/n=32": {
+          "mean": 11.58279569892473,
+          "min": 9
+        },
+        "triangle_dirichlet/n=64": {
+          "mean": 11.551459293394776,
+          "min": 8
+        }
+      },
+      "radius_factor": 2.5
+    },
+    {
+      "latent_resolution": 24,
+      "min_latent_neighbours_per_node": 5,
+      "per_lattice": {
+        "torus_periodic/n=32": {
+          "mean": 13.6162109375,
+          "min": 5
+        },
+        "triangle_dirichlet/n=128": {
+          "mean": 13.876015498062742,
+          "min": 8
+        },
+        "triangle_dirichlet/n=16": {
+          "mean": 14.133333333333333,
+          "min": 12
+        },
+        "triangle_dirichlet/n=32": {
+          "mean": 13.965591397849462,
+          "min": 10
+        },
+        "triangle_dirichlet/n=64": {
+          "mean": 13.911930363543267,
+          "min": 8
+        }
+      },
+      "radius_factor": 2.75
+    }
+  ],
+  "passed": true,
+  "protocol": {
+    "clock": "time.perf_counter",
+    "loss": "relative L2 (mean over batch)",
+    "measured_epochs": 3,
+    "optimizer": "Adam",
+    "schedule": "CosineAnnealingLR",
+    "statistic": "median",
+    "warmup_steps": 10,
+    "warmup_val_passes": 1
+  },
+  "source": {
+    "bound": true,
+    "git_sha": "35f82dcff7821f41073537fdf514ec9ff3987774",
+    "github_sha": null,
+    "worktree_dirty": false
+  },
+  "summary": {
+    "epoch_seconds_median_max": 331.2872989000025,
+    "epoch_seconds_median_min": 116.74543650000123,
+    "epoch_seconds_median_sum": 1489.7971223000204
+  }
+}
