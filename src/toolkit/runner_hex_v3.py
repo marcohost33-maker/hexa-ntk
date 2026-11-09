@@ -21,8 +21,9 @@ Integrates:
 Best practices applied:
 - GradScaler.unscale_ BEFORE clip_grad_norm_ (PyTorch AMP requirement)
 - torch.isfinite check on loss BEFORE backward (skip update on NaN)
-- non-finite total gradient norm skips the optimizer step and the EMA update
-  (without a GradScaler; with one, GradScaler.step already skips); a parameter
+- non-finite total gradient norm skips the optimizer step and the EMA update;
+  with a GradScaler its own skip (inf/NaN found by unscale_, seen as a scale
+  backoff) skips the EMA update too and counts as a skipped step; a parameter
   that is non-finite after the step stops the run before any checkpoint
 - NaN/Inf validation metric never becomes the best checkpoint (skip + record)
 - Empty validation never becomes the best checkpoint (no measurement != 0.0)
@@ -396,6 +397,13 @@ class RunnerConfig:
     # Anomaly detection
     spike_multiplier: float = 3.0
     spike_window_size: int = 50
+    # After every applied optimizer step, every parameter must be finite, else
+    # NonFiniteParameterError before the EMA update and any checkpoint
+    # (spec/DDP_RUNNER_v1.md 3.7). Costs one read of all weights per step
+    # (measured on CPU: ~20% of a small-batch step of a 10.5M-parameter MLP;
+    # one fused kernel per device/dtype on CUDA). False skips the check: a
+    # non-finite weight is then only seen as a NaN loss on the next step.
+    check_finite_params: bool = True
 
     # DDP. distributed=True requires an initialized process group and a
     # DistributedDataParallel model; is_main_process must then be rank == 0.
@@ -437,6 +445,8 @@ class RunnerConfig:
             raise ValueError(f"ema_decay must be in [0, 1], got {self.ema_decay!r}")
         if not isinstance(self.distributed, bool):
             raise ValueError(f"distributed must be a bool, got {self.distributed!r}")
+        if not isinstance(self.check_finite_params, bool):
+            raise ValueError(f"check_finite_params must be a bool, got {self.check_finite_params!r}")
         if not isinstance(self.is_main_process, bool):
             raise ValueError(f"is_main_process must be a bool, got {self.is_main_process!r}")
         if self.amp_dtype not in ("float16", "bfloat16"):
@@ -1055,7 +1065,7 @@ class HexTrainingRunner:
                     return loss_val, False, None
 
             if not stepped:
-                self._record_non_finite_gradient(batch, loss_val, grad_norm_val)
+                self._record_skipped_update(batch, loss_val, grad_norm_val)
                 return loss_val, False, None
             return loss_val, True, grad_norm_val
 
@@ -1075,8 +1085,14 @@ class HexTrainingRunner:
         Without a GradScaler a non-finite norm skips the optimizer step and the
         EMA update: ``clip_grad_norm_`` would scale every gradient by NaN and
         the step would write NaN into all parameters (and from there into the
-        EMA copy and every later checkpoint). With a GradScaler, ``scaler.step``
-        already skips on inf/NaN and lowers the scale, as before.
+        EMA copy and every later checkpoint). That includes an fp32 overflow of
+        the norm of finite gradients (elements around 1e19): clipping by an inf
+        norm zeroes every gradient, and the step would apply only momentum and
+        weight decay. With a GradScaler the scaler decides, as in PyTorch AMP:
+        ``scaler.step`` skips when ``unscale_`` found inf/NaN and ``update``
+        then backs the scale off; a lower scale after ``update`` is that skip
+        (the scale only drops on a found inf). The EMA update is skipped with
+        it (an EMA step on unchanged weights still moves the average).
         After a step every parameter must be finite, else NonFiniteParameterError
         (before the EMA update). Distributed, every call site runs after DDP's
         gradient all-reduce, so nothing here is a collective; an error is held
@@ -1091,41 +1107,75 @@ class HexTrainingRunner:
         )
         grad_norm_val = float(grad_norm.item()) if torch.is_tensor(grad_norm) else float(grad_norm)
 
-        if self.grad_scaler is not None:
+        if self._scaler_active():
+            scale_before = self.grad_scaler.get_scale()
             self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()
+            if self.grad_scaler.get_scale() < scale_before:
+                self.optimizer.zero_grad(set_to_none=True)
+                return grad_norm_val, False
         else:
             if not math.isfinite(grad_norm_val):
                 self.optimizer.zero_grad(set_to_none=True)
                 return grad_norm_val, False
             self.optimizer.step()
-        self._check_parameters_finite()
+        if self.config.check_finite_params:
+            self._check_parameters_finite()
 
         if self.ema_model is not None:
             self.ema_model.update_parameters(self.raw_model)
         return grad_norm_val, True
 
+    def _scaler_active(self) -> bool:
+        """A GradScaler that scales. A disabled one (``enabled=False``) keeps scale
+        1.0 and its ``step`` is a plain ``optimizer.step()`` that never skips, so
+        its updates take the no-scaler path and its own finiteness check."""
+        return self.grad_scaler is not None and self.grad_scaler.is_enabled()
+
     def _check_parameters_finite(self) -> None:
-        """Raise NonFiniteParameterError if the step left a NaN/Inf parameter."""
-        params = [p.detach() for p in self.raw_model.parameters()]
-        if not params:
-            return
-        finite = torch.stack([torch.isfinite(p).all() for p in params]).all()
-        if not bool(finite.item()):
-            names = [n for n, p in self.raw_model.named_parameters() if not bool(torch.isfinite(p.detach()).all())]
-            raise NonFiniteParameterError(
-                f"non-finite parameter(s) after the optimizer step of training step {self.global_step}: "
-                f"{names[:5]}{' ...' if len(names) > 5 else ''} (finite gradients, so the optimizer itself "
-                "diverged, e.g. a learning rate or state overflow); the run stops before the EMA update "
-                "and before any checkpoint"
-            )
+        """Raise NonFiniteParameterError if the step left a NaN/Inf parameter.
 
-    def _record_non_finite_gradient(self, batch: Dict[str, Any], loss_val: float, grad_norm_val: float) -> None:
-        """A skipped update (non-finite gradient norm): log, replay capsule, FailureSignature.
-
-        The weights in the capsule are the ones the failing gradient was taken
-        at (the step was not applied), so the capsule replays the failure.
+        Exact and overflow-free: the max-abs norm (ord=inf) of a tensor is
+        finite iff every element is (no squaring, so 3e38 stays finite; NaN
+        and +-inf propagate), checked for fp16/bf16/fp32/fp64. One
+        ``torch._foreach_norm`` per (device, dtype) group, as in
+        ``clip_grad_norm_``: a single fused kernel per group on CUDA.
+        Empty tensors are left out (their inf norm is undefined).
         """
+        groups: Dict[Tuple[torch.device, torch.dtype], List[torch.Tensor]] = {}
+        for p in self.raw_model.parameters():
+            if p.numel() and (p.is_floating_point() or p.is_complex()):
+                groups.setdefault((p.device, p.dtype), []).append(p.detach())
+        if not groups:
+            return
+        finite = [torch.isfinite(torch.stack(torch._foreach_norm(ts, float("inf")))).all()
+                  for ts in groups.values()]
+        if all(bool(f.item()) for f in finite):
+            return
+        names = [n for n, p in self.raw_model.named_parameters()
+                 if p.numel() and not bool(torch.isfinite(p.detach()).all())]
+        raise NonFiniteParameterError(
+            f"non-finite parameter(s) after the optimizer step of training step {self.global_step}: "
+            f"{names[:5]}{' ...' if len(names) > 5 else ''} (finite gradients, so the optimizer itself "
+            "diverged, e.g. a learning rate or state overflow); the run stops before the EMA update "
+            "and before any checkpoint"
+        )
+
+    def _record_skipped_update(self, batch: Dict[str, Any], loss_val: float, grad_norm_val: float) -> None:
+        """A skipped update: log it; without a GradScaler also capsule + FailureSignature.
+
+        Without a GradScaler the cause is a non-finite gradient norm, a failure
+        worth replaying: the capsule holds the weights the gradient was taken at
+        (the step was not applied). With a GradScaler a skip is the routine
+        loss-scale backoff of AMP (frequent early in training): logged, counted
+        as skipped, no capsule (a capsule per overflow would fill the disk).
+        """
+        if self.dist is not None:
+            self._grad_skip_pending = True
+        if self._scaler_active():
+            logger.warning("Step %d skipped by the GradScaler (inf/NaN gradient at loss scale %s, grad_norm=%s)",
+                           self.global_step, self.grad_scaler.get_scale(), grad_norm_val)
+            return
         reason = "NaN_or_Inf_Grad"
         logger.error("Anomaly at step %d: %s (loss=%s finite, grad_norm=%s); update skipped",
                      self.global_step, reason, loss_val, grad_norm_val)
@@ -1137,8 +1187,6 @@ class HexTrainingRunner:
             observable=f"loss={loss_val} grad_norm={grad_norm_val}",
             replay_capsule=cap_path,
         ).register(self.failure_dir)
-        if self.dist is not None:
-            self._grad_skip_pending = True
 
     def _agreed_grad_skip(self, n_grad_skipped: int, before: str) -> None:
         """Distributed: all ranks or none skipped the last update (spec section 3.7).
@@ -1151,8 +1199,8 @@ class HexTrainingRunner:
         if 0 < n_grad_skipped < self.dist.world_size:
             raise DistributedContractError(
                 f"{n_grad_skipped} of {self.dist.world_size} ranks skipped training step "
-                f"{self.global_step - 1} for a non-finite gradient norm and the others applied it: the ranks' "
-                f"weights differ (stopped before {before})"
+                f"{self.global_step - 1} (non-finite gradient norm or GradScaler skip) and the others "
+                f"applied it: the ranks' weights differ (stopped before {before})"
             )
 
     def _held_what(self, before: str = "") -> str:

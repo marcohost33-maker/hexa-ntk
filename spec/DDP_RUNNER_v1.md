@@ -147,11 +147,36 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    clears the gradients and counts the step as skipped (`n_anomalies`, no
    `grad_norm` entry), with a replay capsule (weights *before* the skipped update)
    and a `FailureSignature` of kind `NaN_or_Inf_Grad`, locus `train_step_grad_check`.
-   With a `GradScaler`, `scaler.step` already skips such a step and lowers the scale
-   (unchanged; not run here, it needs CUDA). After every applied step all parameters
-   must be finite, else `NonFiniteParameterError` (the step already wrote them:
-   no rollback) before the EMA update and before any checkpoint; distributed it is a
-   held error (item 6).
+   This includes an fp32 overflow of the norm of *finite* gradients (elements around
+   1e19 and up): clipping by an inf norm zeroes every gradient and the step would
+   apply only momentum and weight decay; it is skipped too.
+   With a `GradScaler` the scaler decides, as in PyTorch AMP: `scaler.step` skips
+   when `unscale_` found inf/NaN, and `update` then lowers the scale. A scale lower
+   after `update` than before is that skip (the scale drops only on a found inf;
+   growth is no skip). v1.2 first round left this path unchanged and said so; the
+   second round (same day) measured it with `torch.amp.GradScaler("cpu")` (torch
+   2.6) and found two defects: the EMA was still updated after the skipped step (an
+   EMA update on unchanged weights still moves the average and counts in
+   `n_averaged`), and the step counted as healthy with `grad_norm` NaN/inf, which
+   made the epoch's `mean_grad_norm` non-finite. Now such a step skips the EMA
+   update and counts as skipped like the others; it writes no capsule and no
+   FailureSignature (loss-scale backoff is routine in AMP, a capsule per overflow
+   would fill the disk), only a warning. A disabled scaler (`enabled=False`: scale
+   fixed at 1.0, `step` is a plain `optimizer.step()` that never skips) takes the
+   no-scaler path; without that guard its NaN update reached the weights.
+   After every applied step all parameters must be finite, else
+   `NonFiniteParameterError` (the step already wrote them: no rollback) before the
+   EMA update and before any checkpoint; distributed it is a held error (item 6).
+   The check is exact and cannot overflow: the max-abs norm (`ord=inf`) of a tensor
+   is finite iff every element is (3e38 in float32 stays finite, NaN and +-inf
+   propagate; checked for fp16, bf16, fp32, fp64), one `torch._foreach_norm` per
+   (device, dtype) group as in `clip_grad_norm_`, empty tensors left out. Cost: one
+   read of all weights per step, measured on the CPU at about 20 % of a small-batch
+   step (batch 64) of a 10.5M-parameter MLP (a first version with `isfinite().all()`
+   per tensor: 23-29 %); one fused kernel per group on CUDA, not measured here.
+   `RunnerConfig(check_finite_params=False)` turns it off (a non-finite weight is
+   then only seen as a NaN loss on the next step, which is skipped, not stopped);
+   the field is part of the configuration digest (section 2).
    Distributed, the decision needs no extra collective: it is taken after DDP's
    gradient all-reduce, and every rank reads the same reduced gradients, so a
    NaN/Inf on one rank's local gradient is in every rank's reduced gradient and
@@ -300,6 +325,17 @@ step); an injected split (rank 1 skips, the others step) raises
 mid-epoch save. All of these tests were red against cd5f6dc (5 single-process and 11 multi-rank
 failures; the job desynchronised and the 2-rank mid-save case had no result, which the
 test now reports instead of skipping); 7 new mutants, all killed (full probe 167/167).
+Second round (same day, self-review of PR head 1f06120): with a CPU `GradScaler` a
+NaN gradient skips step and EMA (`n_averaged` 1 after one skipped and one applied
+step, scale 1024 -> 512, no FailureSignature), red against 1f06120; a scale that grows
+after every step (`growth_interval=1`) is no skip and a power-of-two scale reproduces
+the unscaled run bitwise (positive control, green on both heads); an overflowing norm
+of finite gradients (1e25) is skipped; a mid-epoch resume across a gradient skip
+equals the uninterrupted run bitwise (red against cd5f6dc); the parameter check has no
+false alarm at 3e38 (float32) / 1e308 (float64), ignores an empty parameter and names
+the NaN parameter in a mixed-dtype model; `check_finite_params=False` opts out; a
+disabled `GradScaler` skips like no scaler (without the guard: `NonFiniteParameterError`
+with NaN weights).
 
 Evidence v1.1 (2026-11-02, Linux container, Python 3.12, torch 2.6.0, CPU): an
 optimizer step that raises on rank 1 in the last step of an epoch, and one that
@@ -345,6 +381,10 @@ Not covered (open):
 - **CUDA RNG per rank** (`torch_cuda_random_state_all` of rank 0 is restored on
   every rank's devices); DataLoader worker RNG; a custom (non-legacy) NumPy
   `Generator` held by user code.
+- **A GradScaler that skips forever** (a NaN that rescaling cannot remove) shrinks the
+  scale towards 0 and skips every step without stopping; the NaN-loss path has the same
+  shape (every step skipped, the run ends with untrained weights). A bound on consecutive
+  skips is an owner decision (default and whether it stops the run), not part of v1.2.
 - **NCCL/CUDA, more than 3 ranks, more than one host, AMP under DDP**: not run
   (2 and 3 gloo ranks on one host are).
 - ~~**Mid-epoch resume**: resume stays at epoch boundaries.~~ Done 2026-10-30,

@@ -98,3 +98,103 @@ covexit=0
 #   after such a skipped scaler step and the inf entry in mean_grad_norm are pre-existing and stay open.
 # - A rank failing *inside* backward still leaves its peers in DDP's all-reduce (spec section 8, unchanged).
 # - CI (GitHub Actions, Python 3.12, torch CPU wheel) is the binding run; this log is the local evidence.
+
+########################################################################################################
+# Second round (2026-11-09, same day): critical self-review of PR #102 head 1f06120
+# Same container and versions (Python 3.12.3 venv, torch 2.6.0+cu124 on CPU, numpy 2.5.3, ruff 0.17.2)
+########################################################################################################
+
+## Hypotheses measured first (outside the repo, torch 2.6.0)
+# H1 torch.amp.GradScaler("cpu") exists and skips: NaN gradient -> param unchanged, scale 1024 -> 512   CONFIRMED
+#    -> the first round's "GradScaler path needs CUDA, not run" was wrong: it is testable on the CPU
+# H2 AveragedModel EMA moves on an update with unchanged weights, n_averaged counts                     CONFIRMED
+#    -> 1f06120 still updated the EMA after a scaler-skipped step and counted the step as healthy
+#       with grad_norm nan/inf (epoch mean_grad_norm non-finite)
+# H3 finite gradients (3e19, float32): clip_grad_norm_ returns inf, gradients after clipping 0.0        CONFIRMED
+#    -> 1f06120 skips that step (old main applied momentum only); undocumented until now
+# H4 cost of the per-step parameter check (CPU, 10.5M-parameter MLP, 80 tensors, batch 64, Adam):
+#    isfinite().all() per tensor 23-29 % of a step; torch._foreach_norm(inf) ~20 %; vector_norm(inf) ~19 %
+#    (noisy, 20 repetitions); all three exact on nan/+inf/-inf/3e38 for fp16/bf16/fp32/fp64;
+#    vector_norm(inf) raises on an empty tensor
+# H5 GradScaler(enabled=False): scale stays 1.0, scaler.step == optimizer.step -> NaN weights          CONFIRMED
+#    (latent: the runner builds an enabled scaler on CUDA only; fixed in round 2b below)
+
+## Red: new tests against PR head 1f06120 and against main cd5f6dc
+# against 1f06120 runner_hex_v3.py
+FAIL: test_grad_scaler_skip_skips_the_ema_and_counts_as_skipped [TestNonFiniteGradient]
+Ran 4 tests in 1.280s
+FAILED (failures=1)
+# against cd5f6dc runner_hex_v3.py
+FAIL: test_overflowing_norm_of_finite_gradients_is_skipped [TestNonFiniteGradient]
+FAIL: test_grad_scaler_skip_skips_the_ema_and_counts_as_skipped [TestNonFiniteGradient]
+FAIL: test_a_gradient_skip_before_the_save_is_carried [TestMidEpochResume]
+Ran 4 tests in 1.012s
+FAILED (failures=3)
+# test_grad_scaler_growth_is_not_a_skip (positive control) is green against both heads, as it must be
+
+## Fix (round 2)
+# - GradScaler skip = scale lower after update() than before -> EMA skipped, counted as skipped, warning, no capsule
+# - parameter check: max-abs norm via torch._foreach_norm(inf) per (device, dtype), empty tensors left out
+# - RunnerConfig.check_finite_params (default True, bool-checked, in the DDP config digest)
+# - new tests: overflowing norm of finite gradients, CPU GradScaler skip, growth control, parameter-check edges,
+#   opt-out, mid-epoch resume across a gradient skip (test_mid_epoch_resume_hex_v3)
+# - mutant "self._check_parameters_finite() -> ''" became INVALID (empty if-block) after the opt-out: retargeted
+
+## Mutants of both rounds after the round-2 tests (scripts/mutation_probe.py sites, run one by one)
+12 new mutants
+KILLED if not math.isfinite(grad_norm_val): -> TestNonFiniteGradient
+INVALID self._check_parameters_finite() -> TestNonFiniteGradient
+KILLED self._record_skipped_update(batch, loss_val, grad_norm_val) -> TestNonFiniteGradient
+KILLED if self.grad_scaler.get_scale() < scale_before: -> TestNonFiniteGradient
+KILLED if self.grad_scaler.get_scale() < scale_before: -> TestNonFiniteGradient
+KILLED if p.numel() and (p.is_floating_point() or p.is_complex()): -> TestNonFiniteGradient
+KILLED finite = [torch.isfinite(torch.stack(torch._foreach_norm(ts, float("inf" -> TestNonFiniteGradient
+KILLED if self.config.check_finite_params: -> TestNonFiniteGradient
+KILLED self._grad_skip_pending = True -> TestTwoRanks
+KILLED if 0 < n_grad_skipped < self.dist.world_size: -> TestTwoRanks
+KILLED self._agreed_grad_skip(n_grad_skipped, f"step {self.global_step}") -> TestTwoRanks
+KILLED self._agreed_grad_skip(n_grad_skipped, "the mid-epoch save") -> TestTwoRanks
+# retargeted: KILLED self._check_parameters_finite() -> pass
+
+## Round 2b: disabled GradScaler (H5)
+# Fix: _scaler_active() = grad_scaler is not None and grad_scaler.is_enabled(); a disabled scaler takes the
+#   no-scaler path. Red without the guard (is_enabled removed):
+#   test_disabled_grad_scaler_takes_the_no_scaler_path -> NonFiniteParameterError ... ['lin.weight', 'lin.bias']
+#   Ran 1 test, FAILED (errors=1); green with the guard. New mutant for the guard.
+# A full probe started before round 2b was stopped (it measured a tree about to change); verify_sources PASS
+#   right after the stop confirmed that no file was left mutated.
+
+## End run round 2 (working tree of this commit)
+# ruff check src scripts
+All checks passed!
+ruffexit=0
+# python -m compileall -q src
+compileexit=0
+# python scripts/engine_gate.py
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+engexit=0
+# python scripts/verify_sources.py
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+vsexit=0
+# python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py" -v
+exit=0
+Ran 1101 tests in 58.225s
+OK (skipped=7)
+#       1 skipped 'needs CUDA'
+#       6 skipped 'optional neuraloperator backend not installed'
+# python -m coverage report
+src/toolkit/ddp_hex_v3.py                        187      9     48      8    92%
+src/toolkit/failure_signature_hex_v3.py           41      3      0      0    93%
+src/toolkit/runner_hex_v3.py                     805     36    306     29    93%
+TOTAL                                           6107    246   2306    193    95%
+covexit=0
+# python scripts/mutation_probe.py (full probe on this tree, every site checked first)
+[MUTATION-PROBE] baseline green | 173/173 killed | PASS
+exit=0
+
+## Limits after round 2
+# - a GradScaler that skips forever (a NaN rescaling cannot remove) and endless NaN-loss skips do not stop the run;
+#   a bound on consecutive skips is an owner decision (spec section 8)
+# - CUDA itself (fused _foreach_norm kernel, a real fp16 autocast forward) is not run here; the CPU GradScaler
+#   exercises the same skip/update/backoff logic
+# - a rank failing inside backward stays open (spec section 8)

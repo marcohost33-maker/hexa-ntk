@@ -1390,7 +1390,7 @@ class TestNonFiniteGradient(unittest.TestCase):
     from there into the EMA copy, last.pt and resume_last.pt; the failure was
     reported one step late as a NaN loss. Measured red against cd5f6dc."""
 
-    def _run(self, out: Path, loss_fn, **cfg):
+    def _run(self, out: Path, loss_fn, scaler=None, **cfg):
         torch.manual_seed(0)
         model = _TinyModel()
         start = [p.detach().clone() for p in model.parameters()]
@@ -1399,6 +1399,10 @@ class TestNonFiniteGradient(unittest.TestCase):
             torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9), *_make_loaders(n=4, batch_size=2),
             device="cpu", loss_fn=loss_fn,
         )
+        if scaler is not None:
+            # the runner builds a GradScaler only on CUDA; torch >= 2.3 has the
+            # same scaler on the CPU, so the AMP skip path is testable here
+            runner.grad_scaler = scaler
         return runner, model, start, runner.run()
 
     def _assert_no_non_finite_checkpoint(self, out: Path) -> None:
@@ -1445,6 +1449,102 @@ class TestNonFiniteGradient(unittest.TestCase):
             _, _, _, result = self._run(out, _poisoned_loss({0}), save_every_n_steps=1)
             self.assertEqual(result["history"]["train"][0]["n_anomalies"], 1)
             self._assert_no_non_finite_checkpoint(out)
+
+    def test_overflowing_norm_of_finite_gradients_is_skipped(self) -> None:
+        # every gradient element finite (~1e25 in float32), the fp32 norm overflows
+        # to inf: clipping would zero the gradients and the step apply only momentum
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner, model, start, result = self._run(out, _poisoned_loss({0}, 1e25))
+            train = result["history"]["train"][0]
+            self.assertEqual((train["n_batches"], train["n_anomalies"]), (1, 1))
+            step0 = json.loads((runner.failure_dir / "failure_step0_NaN_or_Inf_Grad.json").read_text())
+            self.assertIn("grad_norm=inf", step0["observable"])
+            self._assert_no_non_finite_checkpoint(out)
+
+    def test_grad_scaler_skip_skips_the_ema_and_counts_as_skipped(self) -> None:
+        # AMP: the scaler skips optimizer.step on an inf/NaN gradient and halves
+        # the scale; the EMA must not move and the step must not count as a
+        # healthy one with grad_norm=nan (mean_grad_norm used to become NaN/inf)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            scaler = torch.amp.GradScaler("cpu", init_scale=1024.0)
+            runner, model, start, result = self._run(out, _poisoned_loss({0}), scaler=scaler)
+            train = result["history"]["train"][0]
+            self.assertEqual((train["n_batches"], train["n_anomalies"]), (1, 1))
+            self.assertTrue(math.isfinite(train["mean_grad_norm"]))
+            self.assertEqual(scaler.get_scale(), 512.0)  # one backoff, no growth
+            self.assertEqual(int(runner.ema_model.n_averaged), 1)  # only the applied step
+            self.assertEqual(sorted(runner.failure_dir.glob("failure_*.json")), [])  # routine, no capsule
+            self._assert_no_non_finite_checkpoint(out)
+
+    def test_disabled_grad_scaler_takes_the_no_scaler_path(self) -> None:
+        # GradScaler(enabled=False): scale stays 1.0 and scaler.step never skips, so
+        # the scale-backoff test cannot see the NaN; the update must take the
+        # no-scaler path (skip + FailureSignature), not stop with NaN weights
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            scaler = torch.amp.GradScaler("cpu", enabled=False)
+            runner, model, start, result = self._run(out, _poisoned_loss({0}), scaler=scaler)
+            train = result["history"]["train"][0]
+            self.assertEqual((train["n_batches"], train["n_anomalies"]), (1, 1))
+            self.assertTrue((runner.failure_dir / "failure_step0_NaN_or_Inf_Grad.json").is_file())
+            self._assert_no_non_finite_checkpoint(out)
+
+    def test_grad_scaler_growth_is_not_a_skip(self) -> None:
+        # positive control: a scale that grows after every clean step (growth_interval=1)
+        # is no skip, and a power-of-two scale reproduces the unscaled run bitwise
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            scaler = torch.amp.GradScaler("cpu", init_scale=1024.0, growth_interval=1)
+            runner, scaled, _, result = self._run(Path(a), _poisoned_loss(set()), scaler=scaler)
+            self.assertEqual(result["history"]["train"][0]["n_anomalies"], 0)
+            self.assertEqual(scaler.get_scale(), 4096.0)  # grew twice
+            self.assertEqual(int(runner.ema_model.n_averaged), 2)
+            _, plain, _, _ = self._run(Path(b), _poisoned_loss(set()))
+            for p, q in zip(scaled.parameters(), plain.parameters()):
+                self.assertTrue(torch.equal(p.detach(), q.detach()))
+
+    def test_parameter_check_is_exact_at_the_edges(self) -> None:
+        # max-abs norm: 3e38 (float32) and 1e308 (float64) are finite, no overflow
+        # false alarm; an empty parameter is ignored; NaN in a float64 group of a
+        # mixed-dtype model is found and named
+        class Mixed(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = nn.Parameter(torch.full((3,), 3e38))
+                self.b = nn.Parameter(torch.full((2,), 1e308, dtype=torch.float64))
+                self.empty = nn.Parameter(torch.zeros(0))
+
+            def forward(self, x):
+                return x
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = _make_runner(Path(tmpdir))
+            runner.raw_model = Mixed()
+            runner._check_parameters_finite()  # no false alarm
+            with torch.no_grad():
+                runner.raw_model.b[1] = float("nan")
+            with self.assertRaisesRegex(NonFiniteParameterError, r"\['b'\]"):
+                runner._check_parameters_finite()
+            with torch.no_grad():
+                runner.raw_model.b[1] = 0.0
+                runner.raw_model.a[0] = -float("inf")
+            with self.assertRaisesRegex(NonFiniteParameterError, r"\['a'\]"):
+                runner._check_parameters_finite()
+
+    def test_check_finite_params_opt_out_and_type(self) -> None:
+        with self.assertRaisesRegex(ValueError, "check_finite_params must be a bool"):
+            RunnerConfig(check_finite_params=1)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            torch.manual_seed(0)
+            model = _TinyModel()
+            runner = HexTrainingRunner(
+                RunnerConfig(output_dir=str(out), num_epochs=1, check_finite_params=False), model,
+                _OverflowingSGD(model.parameters(), lr=0.1), *_make_loaders(n=4, batch_size=2), device="cpu",
+            )
+            runner.run()  # opted out: no NonFiniteParameterError (the NaN loss of step 1 is skipped)
+            self.assertFalse(bool(torch.isfinite(model.lin.weight).all()))
 
     def test_non_finite_parameter_after_step_stops_before_any_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

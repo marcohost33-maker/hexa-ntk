@@ -39,8 +39,25 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   `DistributedContractError` auf allen Ranks vor jedem Save. 6 neue Tests (4 Single-Process, je einer
   im 2- und 3-Rank-gloo-Job), alle rot gegen cd5f6dc (5 + 11 Fehler; eigene Nachpruefung: das 2-Rank-Mid-Save-Szenario
   wurde bei auseinandergelaufenem Job still uebersprungen statt rot -> an die Suite gebunden);
-  7 neue Mutanten, alle getoetet, volle Probe 167/167. Grenzen: der `GradScaler`-Pfad (CUDA) ist unveraendert und hier nicht gelaufen; ein
-  nicht-endlicher Gradient *innerhalb* von `backward` bei einem Rank-Fehler bleibt wie in 3.6 offen.
+  7 neue Mutanten, alle getoetet, volle Probe 167/167.
+  _Zweite Runde (Selbstpruefung von PR-Kopf 1f06120, gleicher Tag):_ die Aussage "GradScaler-Pfad
+  unveraendert, braucht CUDA" war falsch -- `torch.amp.GradScaler("cpu")` (torch 2.6) macht ihn
+  testbar, und gemessen: nach einem vom Scaler uebersprungenen Schritt lief das EMA-Update weiter
+  (`n_averaged` zaehlt, der Mittelwert wandert) und der Schritt zaehlte als gesund mit `grad_norm`
+  NaN/inf (`mean_grad_norm` der Epoche nicht endlich) -> Skip ueber den Scale-Backoff erkannt
+  (`get_scale()` nach `update()` kleiner), EMA uebersprungen, als Skip gezaehlt, keine Kapsel
+  (Routine in AMP); Test rot gegen 1f06120, Wachstums-Positivkontrolle gruen. Bisher undokumentiert,
+  jetzt dokumentiert und getestet: fp32-Ueberlauf der Norm *endlicher* Gradienten wird ebenfalls
+  uebersprungen. Kosten der Parameterpruefung gemessen statt angenommen: 23-29 % eines
+  Kleinbatch-Schritts (10.5M-Parameter-MLP, CPU) mit `isfinite().all()` je Tensor -> exakte,
+  ueberlauffreie Max-Abs-Norm per `torch._foreach_norm(inf)` je (Geraet, dtype), ~20 % auf der CPU,
+  dazu Opt-out `RunnerConfig(check_finite_params=False)`. Neu belegt: Mid-Epoch-Resume ueber einen
+  Gradienten-Skip ist bitgleich (rot gegen cd5f6dc); Randfaelle 3e38/1e308/leerer Parameter/gemischte
+  dtypes; ein deaktivierter GradScaler (`enabled=False`, Skala fest 1.0, `step` ueberspringt nie)
+  nimmt den Pfad ohne Scaler (ohne den Guard: NaN-Gewichte). Ein Mutant der ersten Runde war nach der Umstellung INVALID (leerer `if`-Block) und ist
+  neu gezielt. Grenzen: ein Scaler, der endlos ueberspringt (NaN, den Reskalieren nicht entfernt),
+  und endlose NaN-Loss-Skips stoppen den Lauf nicht -- eine Schranke fuer aufeinanderfolgende Skips
+  ist ein Owner-Entscheid; ein Fehler *innerhalb* von `backward` bleibt wie in 3.6 offen.
   _Evidenz:_ `results/2026-11-09_non-finite-gradient_local-gate.log`.
 - [x] **DDP v1.1: Fehler nach `backward` abgestimmt + 3-Rank-Evidenz (2026-11-02, Linux-Container;
   offen aus dem DDP-Eintrag unten: "Fehler in backward/optimizer.step", "> 2 Ranks").**

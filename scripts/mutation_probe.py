@@ -457,8 +457,19 @@ MUTANTS = (
     # update (no NaN weights, EMA or checkpoints), a non-finite parameter after the
     # step stops the run, and the ranks must agree that all or none skipped.
     Mutant(RU, "            if not math.isfinite(grad_norm_val):\n", "            if False:\n", NF),
-    Mutant(RU, "        self._check_parameters_finite()\n", "", NF),
-    Mutant(RU, "                self._record_non_finite_gradient(batch, loss_val, grad_norm_val)\n", "", NF),
+    Mutant(RU, "            self._check_parameters_finite()\n", "            pass\n", NF),
+    Mutant(RU, "                self._record_skipped_update(batch, loss_val, grad_norm_val)\n", "", NF),
+    # second round: the GradScaler's own skip (scale backoff) skips the EMA and counts as skipped
+    Mutant(RU, "            if self.grad_scaler.get_scale() < scale_before:\n", "            if False:\n", NF),
+    Mutant(RU, "            if self.grad_scaler.get_scale() < scale_before:\n",
+           "            if self.grad_scaler.get_scale() != scale_before:\n", NF),
+    Mutant(RU, "            if p.numel() and (p.is_floating_point() or p.is_complex()):\n",
+           "            if p.is_floating_point() or p.is_complex():\n", NF),
+    Mutant(RU, "        finite = [torch.isfinite(torch.stack(torch._foreach_norm(ts, float(\"inf\")))).all()\n",
+           "        finite = [torch.isfinite(torch.stack(torch._foreach_norm(ts, 2.0))).all()\n", NF),
+    Mutant(RU, "        if self.config.check_finite_params:\n", "        if True:\n", NF),
+    Mutant(RU, "        return self.grad_scaler is not None and self.grad_scaler.is_enabled()\n",
+           "        return self.grad_scaler is not None\n", NF),
     Mutant(RU, "            self._grad_skip_pending = True\n", "            pass\n", T2),
     Mutant(RU, "        if 0 < n_grad_skipped < self.dist.world_size:\n", "        if False:\n", T2),
     Mutant(RU, '        self._agreed_grad_skip(n_grad_skipped, f"step {self.global_step}")\n', "", T2),
