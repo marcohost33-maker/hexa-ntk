@@ -56,6 +56,8 @@ DDP = "ddp_hex_v3.py"
 T2 = "test_ddp_hex_v3.TestTwoRanks"
 I82 = "test_phase1_protocol_hex_v3.TestIssue82Residuals"
 ME = "test_mid_epoch_resume_hex_v3.TestMidEpochResume"
+NF = "test_runner_hex_v3.TestNonFiniteGradient"
+CS = "test_runner_hex_v3.TestConsecutiveSkips"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -452,6 +454,73 @@ MUTANTS = (
            "        padded = -(-self.dataset_len // self.num_replicas) * self.num_replicas\n"
            "        return iter([i % max(self.dataset_len, 1) for i in range(self.rank, padded, self.num_replicas)])\n",
            "test_ddp_hex_v3.TestExactDistributedEvalSampler"),
+    # DDP_RUNNER v1.2 section 3.7 / NTK-R5-NR03: a non-finite gradient norm skips the
+    # update (no NaN weights, EMA or checkpoints), a non-finite parameter after the
+    # step stops the run, and the ranks must agree that all or none skipped.
+    Mutant(RU, "            if not math.isfinite(grad_norm_val):\n", "            if False:\n", NF),
+    Mutant(RU, "            self._check_parameters_finite()\n", "            pass\n", NF),
+    Mutant(RU, "                if not stepped:\n"
+               "                    self._record_skipped_update(batch, loss_val, grad_norm_val)\n",
+           "                if not stepped:\n                    pass\n", NF),
+    # second round: the GradScaler's own skip (scale backoff) skips the EMA and counts as skipped
+    # (third round: retargeted, the backoff test is now an assignment)
+    Mutant(RU, "            backoff = self.grad_scaler.get_scale() < scale_before\n",
+           "            backoff = False\n", NF),
+    Mutant(RU, "            backoff = self.grad_scaler.get_scale() < scale_before\n",
+           "            backoff = self.grad_scaler.get_scale() != scale_before\n", NF),
+    # third round (HX102-02/-04): a non-finite norm unscale_ did not see skips scaler.step,
+    # and only a scale backoff is routine (no capsule)
+    Mutant(RU, "            take = math.isfinite(grad_norm_val)\n", "            take = True\n", NF),
+    # (the replacement called _scaler_active(), removed in 40ff255: the mutant then died of
+    # an AttributeError, not of a test; it now says what the removed helper said)
+    Mutant(RU, "        if self._scaler_backoff:\n", "        if self.grad_scaler is not None:\n", NF),
+    # third round (HX102-01): an OSError recording a skipped update escapes the held region
+    # (HX102-03 put the skip count between the record and the except: site moved with it)
+    Mutant(RU, "                        self._count_skip(batch, loss_val, counts=not self._routine_backoff())\n"
+               "                except Exception as exc:\n",
+           "                        self._count_skip(batch, loss_val, counts=not self._routine_backoff())\n"
+           "                except Exception as exc:\n"
+           "                    if isinstance(exc, OSError):\n"
+           "                        raise\n", "test_ddp_hex_v3.TestWorldSizeOne"),
+    Mutant(RU, "            if p.numel() and (p.is_floating_point() or p.is_complex()):\n",
+           "            if p.is_floating_point() or p.is_complex():\n", NF),
+    Mutant(RU, "        finite = [torch.isfinite(torch.stack(torch._foreach_norm(ts, float(\"inf\")))).all()\n",
+           "        finite = [torch.isfinite(torch.stack(torch._foreach_norm(ts, 2.0))).all()\n", NF),
+    Mutant(RU, "        if self.config.check_finite_params:\n", "        if True:\n", NF),
+    # (the round-2b is_enabled() guard is gone: since HX102-02 a non-finite norm skips
+    # before scaler.step, so a disabled scaler behaves like none and its mutant was
+    # equivalent -- M167 survived the full probe on 3ba3835; the behaviour stays pinned by
+    # test_disabled_grad_scaler_takes_the_no_scaler_path)
+    # HX102-03 (E1109-06a): max_consecutive_skips -- reset on a healthy step, the
+    # exact limit, 0 = off, both skip paths, the routine-backoff exemption, the
+    # count in both resume checkpoints and its restore, the agreed stop under DDP
+    Mutant(RU, "            self._consecutive_skips = 0\n            return loss_val, True, grad_norm_val\n",
+           "            return loss_val, True, grad_norm_val\n", CS),
+    Mutant(RU, "        if limit == 0 or self._consecutive_skips < limit:\n",
+           "        if limit == 0 or self._consecutive_skips <= limit:\n", CS),
+    Mutant(RU, "        if limit == 0 or self._consecutive_skips < limit:\n",
+           "        if self._consecutive_skips < limit:\n", CS),
+    Mutant(RU, "                self._count_skip(batch, loss_val, counts=True)\n", "", CS),
+    # two lines: the single 20-space line is also a substring of the 24-space DDP one
+    Mutant(RU, "                    self._record_skipped_update(batch, loss_val, grad_norm_val)\n"
+               "                    self._count_skip(batch, loss_val, counts=not self._routine_backoff())\n",
+           "                    self._record_skipped_update(batch, loss_val, grad_norm_val)\n", CS),
+    Mutant(RU, "                        self._count_skip(batch, loss_val, counts=not self._routine_backoff())\n"
+               "                except Exception as exc:\n",
+           "                except Exception as exc:\n", T2),
+    Mutant(RU, "        return self._scaler_backoff and self.grad_scaler.get_scale() > 0\n",
+           "        return self._scaler_backoff\n", CS),
+    Mutant(RU, "        return self._scaler_backoff and self.grad_scaler.get_scale() > 0\n",
+           "        return False\n", CS),
+    Mutant(RU, "        self._consecutive_skips = skips\n", "        pass\n", CS),
+    Mutant(RU, '"mid_epoch": record, "consecutive_skips": self._consecutive_skips}',
+           '"mid_epoch": record}', CS),
+    Mutant(RU, '                "consecutive_skips": self._consecutive_skips,\n', "", CS),
+    Mutant(RU, "        if self.dist is None:\n            raise error\n", "        raise error\n", T2),
+    Mutant(RU, "            self._grad_skip_pending = True\n", "            pass\n", T2),
+    Mutant(RU, "        if 0 < n_grad_skipped < self.dist.world_size:\n", "        if False:\n", T2),
+    Mutant(RU, '        self._agreed_grad_skip(n_grad_skipped, f"step {self.global_step}")\n', "", T2),
+    Mutant(RU, '            self._agreed_grad_skip(n_grad_skipped, "the mid-epoch save")\n', "", T2),
     # Issue #82 residuals (2026-10-30): no inf from finite data, dirty-tree slot,
     # break-even bound to the equal-accuracy rule.
     Mutant(P1, "    if np.all(np.isfinite(out)):\n        return out\n", "    return out\n", I82),

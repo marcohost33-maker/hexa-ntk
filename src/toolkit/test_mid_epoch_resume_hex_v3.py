@@ -74,13 +74,26 @@ def _loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return loss
 
 
+class _NanGrad(torch.autograd.Function):
+    """1.0 forward, NaN gradient backward."""
+
+    @staticmethod
+    def forward(ctx: Any, x: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
+        return x.clone()
+
+    @staticmethod
+    def backward(ctx: Any, grad: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
+        return grad * float("nan")
+
+
 class _Crash(RuntimeError):
     pass
 
 
 def _runner(out: Path, *, workers: int = 0, crash_at: int = -1, n: int = 8, generator: bool = True,
             persistent: bool = False, batch_size: int = 2, stream: bool = False,
-            nan_at: Tuple[int, ...] = (), owner: str = "loader", **kw: Any) -> HexTrainingRunner:
+            nan_at: Tuple[int, ...] = (), grad_nan_at: Tuple[int, ...] = (), owner: str = "loader",
+            **kw: Any) -> HexTrainingRunner:
     torch.manual_seed(5)
     random.seed(6)
     np.random.seed(7)
@@ -108,6 +121,9 @@ def _runner(out: Path, *, workers: int = 0, crash_at: int = -1, n: int = 8, gene
         loss = _loss(pred, target)
         if pred.requires_grad and runner.global_step in nan_at:
             loss = loss * float("nan")  # a skipped step
+        if pred.requires_grad and runner.global_step in grad_nan_at:
+            # finite loss, NaN gradient: skipped after backward (DDP_RUNNER 3.7)
+            loss = loss + 0.0 * _NanGrad.apply(pred).sum()  # value unchanged, d/dpred = 0 * NaN = NaN
         return loss
 
     config = RunnerConfig(output_dir=str(out), num_epochs=3, log_every_n_steps=0, ema_decay=0.9,
@@ -178,6 +194,13 @@ class TestMidEpochResume(unittest.TestCase):
     def test_a_step_skipped_before_the_save_is_carried(self) -> None:
         # NaN at step 5 (epoch 1, batch 2): the save at step 6 records 1 skip
         reference = self._check(workers=0, nan_at=(5,))
+        self.assertEqual([e["n_anomalies"] for e in reference["history"]["train"]], [0, 1, 0])
+
+    def test_a_gradient_skip_before_the_save_is_carried(self) -> None:
+        # DDP_RUNNER 3.7: finite loss, NaN gradient at step 5; the update (and the
+        # momentum buffer) is skipped, the save at step 6 records it, and the
+        # resumed run still equals the uninterrupted one bitwise
+        reference = self._check(workers=0, grad_nan_at=(5,))
         self.assertEqual([e["n_anomalies"] for e in reference["history"]["train"]], [0, 1, 0])
 
     def test_without_the_fast_forward_state_the_result_differs(self) -> None:

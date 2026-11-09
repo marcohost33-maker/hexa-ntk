@@ -22,6 +22,54 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Nicht-endlicher Gradient bei endlichem Loss (2026-11-09, Linux-Container; Drive-Befund
+  NTK-R5-NR03/PR04 der Cross-Family-Runde R5 vom 2026-11-04, bisher nicht ins Repo uebernommen).**
+  Auf main cd5f6dc gemessen: liefert `backward` bei endlichem Loss einen NaN-/Inf-Gradienten, skaliert
+  `clip_grad_norm_` alle Gradienten mit der NaN-Norm, `optimizer.step()` schreibt NaN in jedes Gewicht,
+  die EMA-Kopie wird vergiftet, `last.pt` und `resume_last.pt` werden mit NaN-Gewichten gespeichert
+  (ein Resume trainiert auf NaN weiter), und der Lauf meldet die Ursache einen Schritt zu spaet als
+  `NaN_or_Inf_Loss`. Jetzt (`spec/DDP_RUNNER_v1.md` Abschnitt 3.7, v1.2, gilt mit und ohne DDP): ohne
+  `GradScaler` ueberspringt eine nicht-endliche Gesamtnorm Optimizer-Schritt und EMA-Update
+  (Schritt zaehlt als Anomalie, Replay-Kapsel mit den Gewichten *vor* dem verworfenen Update,
+  FailureSignature `NaN_or_Inf_Grad`); ein nach dem Schritt nicht-endlicher Parameter stoppt den Lauf
+  mit `NonFiniteParameterError` vor EMA-Update und jedem Checkpoint (kein Rollback moeglich, daher
+  fail-closed). Unter DDP kein zusaetzlicher Kollektiv-Aufruf: jeder Rank liest dieselben reduzierten
+  Gradienten; das wird nicht angenommen, sondern an den Abstimmungspunkten aus 3.6 mitgezaehlt
+  (vierter Zaehler in `_agreed_next`, zweiter vor dem Mid-Epoch-Save), uneinige Ranks ->
+  `DistributedContractError` auf allen Ranks vor jedem Save. 6 neue Tests (4 Single-Process, je einer
+  im 2- und 3-Rank-gloo-Job), alle rot gegen cd5f6dc (5 + 11 Fehler; eigene Nachpruefung: das 2-Rank-Mid-Save-Szenario
+  wurde bei auseinandergelaufenem Job still uebersprungen statt rot -> an die Suite gebunden);
+  7 neue Mutanten, alle getoetet, volle Probe 167/167.
+  _Zweite Runde (Selbstpruefung von PR-Kopf 1f06120, gleicher Tag):_ die Aussage "GradScaler-Pfad
+  unveraendert, braucht CUDA" war falsch -- `torch.amp.GradScaler("cpu")` (torch 2.6) macht ihn
+  testbar, und gemessen: nach einem vom Scaler uebersprungenen Schritt lief das EMA-Update weiter
+  (`n_averaged` zaehlt, der Mittelwert wandert) und der Schritt zaehlte als gesund mit `grad_norm`
+  NaN/inf (`mean_grad_norm` der Epoche nicht endlich) -> Skip ueber den Scale-Backoff erkannt
+  (`get_scale()` nach `update()` kleiner), EMA uebersprungen, als Skip gezaehlt, keine Kapsel
+  (Routine in AMP); Test rot gegen 1f06120, Wachstums-Positivkontrolle gruen. Bisher undokumentiert,
+  jetzt dokumentiert und getestet: fp32-Ueberlauf der Norm *endlicher* Gradienten wird ebenfalls
+  uebersprungen. Kosten der Parameterpruefung gemessen statt angenommen: 23-29 % eines
+  Kleinbatch-Schritts (10.5M-Parameter-MLP, CPU) mit `isfinite().all()` je Tensor -> exakte,
+  ueberlauffreie Max-Abs-Norm per `torch._foreach_norm(inf)` je (Geraet, dtype), ~20 % auf der CPU,
+  dazu Opt-out `RunnerConfig(check_finite_params=False)`. Neu belegt: Mid-Epoch-Resume ueber einen
+  Gradienten-Skip ist bitgleich (rot gegen cd5f6dc); Randfaelle 3e38/1e308/leerer Parameter/gemischte
+  dtypes; ein deaktivierter GradScaler (`enabled=False`, Skala fest 1.0, `step` ueberspringt nie)
+  nimmt den Pfad ohne Scaler (ohne den Guard: NaN-Gewichte; seit der dritten Runde ist der Guard
+  ueberfluessig und entfernt, s. u.). Ein Mutant der ersten Runde war nach der Umstellung INVALID (leerer `if`-Block) und ist
+  neu gezielt. Grenzen: ein Scaler, der endlos ueberspringt (NaN, den Reskalieren nicht entfernt),
+  und endlose NaN-Loss-Skips stoppen den Lauf nicht -- eine Schranke fuer aufeinanderfolgende Skips
+  ist ein Owner-Entscheid; ein Fehler *innerhalb* von `backward` bleibt wie in 3.6 offen.
+  _Dritte Runde (Owner, unabhaengiges Review von cc9f73a, HX102-01/-02/-04):_ das Protokollieren
+  eines Skips (Kapsel/FailureSignature) laeuft unter DDP in der gehaltenen Region (ein `OSError` auf
+  einem Rank liess die Peers haengen); `unscale_` prueft *vor* dem Unskalieren, daher liefen
+  Norm-Ueberlauf endlicher Gradienten und Skala 0 (1/0 -> NaN) am inf-Check vorbei -> jede
+  nicht-endliche Norm ueberspringt `scaler.step`, nur ein Skip mit gesenkter Skala ist Routine.
+  _Nachpruefung von 3ba3835 (Claude):_ Praemisse auf torch 2.6.0 bestaetigt (`found_inf` 0 bei Skala 0
+  und bei 3e19); CI und lokales Gate waren rot (README-Zaehlungen 1101 statt 1105 Tests nicht
+  nachgezogen), die volle Probe 175/176 -- M167 (`is_enabled()`-Guard aus Runde 2b) ueberlebte als
+  aequivalenter Mutant, weil der HX102-02-Fix einen deaktivierten Scaler bereits wie keinen behandelt
+  -> Guard und Mutant entfernt (Praezedenz #94), Verhaltenstest bleibt; Zaehlungen nachgezogen.
+  _Evidenz:_ `results/2026-11-09_non-finite-gradient_local-gate.log`.
 - [x] **DDP v1.1: Fehler nach `backward` abgestimmt + 3-Rank-Evidenz (2026-11-02, Linux-Container;
   offen aus dem DDP-Eintrag unten: "Fehler in backward/optimizer.step", "> 2 Ranks").**
   `spec/DDP_RUNNER_v1.md` Abschnitt 3.6: Clipping, Optimizer-/`GradScaler`-Schritt und EMA-Update
