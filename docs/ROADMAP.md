@@ -69,6 +69,13 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   nachgezogen), die volle Probe 175/176 -- M167 (`is_enabled()`-Guard aus Runde 2b) ueberlebte als
   aequivalenter Mutant, weil der HX102-02-Fix einen deaktivierten Scaler bereits wie keinen behandelt
   -> Guard und Mutant entfernt (Praezedenz #94), Verhaltenstest bleibt; Zaehlungen nachgezogen.
+  _Nachpruefung von 41e0043 (HX102-03, Claude, Linux):_ 1116 Tests OK, volle Probe 187/187 (M02,
+  unter Windows POSIX-bedingt ueberlebend, ist unter Linux gemessen und getoetet). Der vom Owner
+  gefundene Schein-Kill (Mutant ruft das in 40ff255 entfernte `_scaler_active()` auf, rot durch
+  `AttributeError` statt durch einen Test) war eine Luecke der Probe selbst: `run_mutant` zaehlte
+  jeden roten Lauf. Jetzt `static_invalid` (Modul parsebar, jedes `self.<name>` der Ersetzung im
+  Modul definiert) -> INVALID; der ganze Katalog wird im Unit-Gate geprueft
+  (`test_every_mutant_is_statically_valid`), rueckwirkend auf 495ae48 angewandt meldet er genau M162.
   _Evidenz:_ `results/2026-11-09_non-finite-gradient_local-gate.log`.
 - [x] **DDP v1.1: Fehler nach `backward` abgestimmt + 3-Rank-Evidenz (2026-11-02, Linux-Container;
   offen aus dem DDP-Eintrag unten: "Fehler in backward/optimizer.step", "> 2 Ranks").**
