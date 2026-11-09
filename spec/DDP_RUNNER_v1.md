@@ -23,7 +23,10 @@ what a healthy run computes (every finite-gradient step is taken as before).
 Third round the same day (independent review of cc9f73a): the record of a skipped
 update is held under DDP like the step itself (section 3.6, HX102-01); with an
 active `GradScaler` a non-finite norm that `unscale_` did not see (fp32 overflow of
-finite gradients, a zero scale) is skipped too (section 3.7, HX102-02/-04).
+finite gradients, a zero scale) is skipped too (section 3.7, HX102-02/-04);
+`RunnerConfig.max_consecutive_skips` (default 50, 0 = off) stops a run at the N-th
+skipped step in a row, agreed under DDP and carried across resume (section 3.7,
+HX102-03, owner decision E1109-06a).
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -190,10 +193,35 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    backoff (warning, no capsule); a skip without one (overflowing norm, zero scale)
    is a failure like the no-scaler case: replay capsule and `FailureSignature`
    `NaN_or_Inf_Grad`. A zero scale stays 0 (growth multiplies it), so from then on
-   every step is skipped, each with a capsule: the open limit on endless skips
-   (section 8) applies. Verified on 3ba3835 (Python 3.12.3, torch 2.6.0): with a
-   zero scale and with gradients of 3e19, `unscale_` reports `found_inf` 0 while the
-   norm is NaN resp. inf -- the premise of HX102-02/-04 holds on 2.6.0 too.
+   every step is skipped, each with a capsule, until the limit below stops the run.
+   **Limit on skips in a row (v1.2 third round, HX102-03, owner decision
+   E1109-06a).** A run that skips every step protects its weights but trains
+   nothing and used to end with untrained weights as if it had succeeded (a NaN
+   that rescaling cannot remove, a scale of 0, a loss that stays NaN).
+   `RunnerConfig.max_consecutive_skips` (int >= 0, default 50; 0 turns the limit off)
+   counts skipped training steps in a row: a non-finite loss (item 4), a non-finite
+   gradient norm, a GradScaler skip without a backoff. A routine loss-scale backoff
+   to a still positive scale does *not* count and does not reset the count (early
+   AMP training backs off many times in a row and recovers); a backoff to 0 counts
+   (a zero scale never grows again). A healthy step resets the count. At the N-th
+   skip in a row the run writes a replay capsule and a `FailureSignature` of kind
+   `Consecutive_Skips_Exceeded`, locus `train_step_skip_limit` (a failed write is only
+   logged), and raises `ConsecutiveSkipsError`. Distributed it is a held step error
+   (item 6), agreed at the existing agreement points with no extra collective; the
+   count is equal on every rank because every skip is agreed (items 3, 4 and the
+   check above), so every rank raises its own error, and a rank whose count differed
+   would still stop every rank (its peers raise `PeerRankError`), never leave alone.
+   The count is part of both resume checkpoints (`extra["consecutive_skips"]` at the
+   epoch end and mid-epoch, `spec/MID_EPOCH_RESUME_v1.md`) and restored on resume,
+   so a resume does not step around the limit; a checkpoint without the field
+   (written before the limit existed) resumes with 0, a value that is not an int
+   >= 0 is refused. The field is part of the configuration digest (section 2).
+   A GradScaler that keeps finding inf halves the scale on every step without
+   counting; from 65536 it reaches 0 after about 165 backoffs (the smallest float32
+   is 2^-149), and then the limit stops the run within N more steps.
+   Verified on 3ba3835 (Python 3.12.3, torch 2.6.0): with a zero scale and with
+   gradients of 3e19, `unscale_` reports `found_inf` 0 while the norm is NaN resp.
+   inf -- the premise of HX102-02/-04 holds on 2.6.0 too.
    After every applied step all parameters must be finite, else
    `NonFiniteParameterError` (the step already wrote them: no rollback) before the
    EMA update and before any checkpoint; distributed it is a held error (item 6).
@@ -411,10 +439,10 @@ Not covered (open):
 - **CUDA RNG per rank** (`torch_cuda_random_state_all` of rank 0 is restored on
   every rank's devices); DataLoader worker RNG; a custom (non-legacy) NumPy
   `Generator` held by user code.
-- **A GradScaler that skips forever** (a NaN that rescaling cannot remove) shrinks the
-  scale towards 0 and skips every step without stopping; the NaN-loss path has the same
-  shape (every step skipped, the run ends with untrained weights). A bound on consecutive
-  skips is an owner decision (default and whether it stops the run), not part of v1.2.
+- **Endless skips** (closed in v1.2 third round): `max_consecutive_skips` (section 3.7)
+  stops a run that skips every step. Still open: a GradScaler backoff to a positive
+  scale never counts, so a run whose scale keeps dropping skips about 165 steps from
+  65536 before the count starts; with `max_consecutive_skips=0` nothing stops it.
 - **NCCL/CUDA, more than 3 ranks, more than one host, AMP under DDP**: not run
   (2 and 3 gloo ranks on one host are).
 - ~~**Mid-epoch resume**: resume stays at epoch boundaries.~~ Done 2026-10-30,
