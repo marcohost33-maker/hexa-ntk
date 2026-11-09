@@ -625,7 +625,8 @@ class HexTrainingRunner:
         self._resume_rng_at_step: Optional[Dict[str, torch.Tensor]] = None
         self._epoch_start_state: Optional[Dict[str, Any]] = None
         # Distributed: an error raised after the gradient all-reduce (clipping,
-        # optimizer/scaler step, EMA update) on this rank, held until the next
+        # optimizer/scaler step, EMA update, the record of a skipped update)
+        # on this rank, held until the next
         # agreement point so that every rank raises there (spec section 3.6).
         self._post_step_error: Optional[BaseException] = None
         # Distributed: this rank skipped its last update for a non-finite
@@ -1044,9 +1045,16 @@ class HexTrainingRunner:
 
             if self.dist is None:
                 grad_norm_val, stepped = self._apply_update()
+                if not stepped:
+                    self._record_skipped_update(batch, loss_val, grad_norm_val)
             else:
                 try:
                     grad_norm_val, stepped = self._apply_update()
+                    if not stepped:
+                        # The capsule and FailureSignature of a skip are written
+                        # after the all-reduce too: an OSError there (a full disk
+                        # on one rank) is held like the rest (HX102-01).
+                        self._record_skipped_update(batch, loss_val, grad_norm_val)
                 except Exception as exc:
                     # After the gradient all-reduce: the peers have finished
                     # backward and head for the next agreement point. Raising
@@ -1065,7 +1073,6 @@ class HexTrainingRunner:
                     return loss_val, False, None
 
             if not stepped:
-                self._record_skipped_update(batch, loss_val, grad_norm_val)
                 return loss_val, False, None
             return loss_val, True, grad_norm_val
 
@@ -1206,8 +1213,8 @@ class HexTrainingRunner:
     def _held_what(self, before: str = "") -> str:
         """What a held step error (spec section 3.6) is reported as; the step is the one just taken."""
         before = before or f"step {self.global_step}"
-        return (f"training step {self.global_step - 1} after backward (unscale, clipping, optimizer step or "
-                f"EMA update; stopped before {before})")
+        return (f"training step {self.global_step - 1} after backward (unscale, clipping, optimizer step, "
+                f"EMA update or the record of a skipped update; stopped before {before})")
 
     def _rescue_oom(self, batch: Optional[Dict[str, Any]]) -> None:
         """OOM rescue: GC + CUDA cache (order matters), then capsule + FailureSignature.

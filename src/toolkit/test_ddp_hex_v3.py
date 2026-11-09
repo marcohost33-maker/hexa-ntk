@@ -19,6 +19,7 @@ Three layers:
 """
 from __future__ import annotations
 
+import errno
 import gc
 import json
 import math
@@ -30,6 +31,7 @@ import unittest
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -48,6 +50,7 @@ from ddp_hex_v3 import (
     restore_rng_state_tensors,
     rng_state_tensors,
 )
+from failure_signature_hex_v3 import FailureSignature
 from operator_adapter_hex_v3 import OperatorAdapterV3
 from runner_hex_v3 import HexTrainingRunner, RunnerConfig
 
@@ -527,6 +530,29 @@ class TestWorldSizeOne(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "unscale_ failed") as caught:
                 runner._agreed_next(iter(runner.train_loader))
             self.assertIn("training step 0 after backward", " ".join(caught.exception.__notes__))
+
+    def test_error_recording_a_skipped_update_is_held_too(self) -> None:
+        # HX102-01: the capsule and FailureSignature of a skipped update are written
+        # after DDP's gradient all-reduce as well; an OSError there (a full disk) on
+        # one rank must be held and agreed like an optimizer error, not raised alone.
+        def full(*args: Any, **kwargs: Any) -> None:
+            raise OSError(errno.ENOSPC, "No space left on device (injected)")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp), distributed=True, num_epochs=1)
+            runner._apply_update = lambda: (float("nan"), False)
+            with mock.patch.object(FailureSignature, "register", full):
+                with self.assertLogs("runner_hex_v3", level="ERROR") as logs:
+                    _, healthy, grad_norm = runner._train_one_step(next(iter(runner.train_loader)))
+            self.assertFalse(healthy)
+            self.assertIsNone(grad_norm)
+            self.assertIn("held until the next agreement point", " ".join(logs.output))
+            self.assertIsInstance(runner._post_step_error, OSError)
+            runner.global_step = 1
+            with self.assertRaisesRegex(OSError, "No space left") as caught:
+                runner._agreed_next(iter(runner.train_loader))
+            self.assertIn("training step 0 after backward", " ".join(caught.exception.__notes__))
+            self.assertIsNone(runner._post_step_error)
 
     def test_held_error_survives_a_failed_agreement(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1387,6 +1413,38 @@ def _grad_skip_split(save_every_n_steps: int) -> Callable[[int, int, Path], Dict
     return scenario
 
 
+def _sc_skip_record_error_rank1(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """HX102-01: a NaN gradient on rank 1 (step 0) makes every rank skip the update;
+    writing the FailureSignature of that skip fails on rank 1 only (a full disk).
+
+    Before the fix rank 1 raised at once and its peers waited in the next
+    agreement until the collective timeout; now the error is held and agreed.
+    """
+    calls = {"n": 0}
+    mse = nn.MSELoss()
+
+    def loss_fn(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        if pred.requires_grad:
+            calls["n"] += 1
+            if rank == 1 and calls["n"] == 1:
+                pred = _PoisonGrad.apply(pred)
+        return mse(pred, target)
+
+    def full(*args: Any, **kwargs: Any) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device (injected)")
+
+    model = DDP(_model())
+    runner = HexTrainingRunner(
+        _config(out, distributed=True, is_main_process=rank == 0, num_epochs=1),
+        model, torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9),
+        _train_loader(rank, world), _exact_val_loader(), loss_fn=loss_fn,
+    )
+    if rank != 1:
+        return _post_step_outcome(runner, out)
+    with mock.patch.object(FailureSignature, "register", full):
+        return _post_step_outcome(runner, out)
+
+
 _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "equivalence": _sc_equivalence,
     "padded_val": _sc_padded_val,
@@ -1419,6 +1477,8 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "nan_grad_on_rank1": _sc_nan_grad_on_rank1,
     "grad_skip_split_rank1": _grad_skip_split(0),
     "grad_skip_split_before_mid_save_rank1": _grad_skip_split(1),
+    # last: before the fix it desynchronised the job; the scenarios above stay valid
+    "skip_record_error_rank1": _sc_skip_record_error_rank1,
 }
 
 # The 3-rank job (spec section 8, v1.1): equivalence with an uneven validation
@@ -1610,6 +1670,18 @@ class TestTwoRanks(_MultiRankJob):
 
     def test_non_finite_gradient_skips_on_both_and_a_split_stops_both(self) -> None:
         self._check_grad_skip_scenarios()
+
+    def test_error_recording_a_skipped_update_on_one_rank_fails_both(self) -> None:
+        # HX102-01: rank 1 raises its own OSError, rank 0 the agreed PeerRankError;
+        # neither waits for the collective timeout
+        values = self._ok("skip_record_error_rank1")
+        self.assertEqual(values[1]["error"], "OSError")
+        self.assertIn("No space left on device", values[1]["message"])
+        self.assertTrue(any("agreed failure on rank(s) [1]" in n for n in values[1]["notes"]), values[1]["notes"])
+        self.assertEqual(values[0]["error"], "PeerRankError")
+        for part in ("training step 0 after backward", "failed on rank(s) [1]", "stopped before step 1"):
+            self.assertIn(part, values[0]["message"])
+        self.assertEqual(values[0]["checkpoints"], [])
 
     def test_two_ranks_reproduce_the_single_process_run(self) -> None:
         r0, r1 = self._ok("equivalence")
