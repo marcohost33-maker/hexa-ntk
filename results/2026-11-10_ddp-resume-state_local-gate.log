@@ -730,3 +730,267 @@ M206 KILLED    runner_hex_v3.py -> TestResumeStateDigest
 M207 KILLED    runner_hex_v3.py -> TestResumeStateDigest
 [MUTATION-PROBE] baseline green | 207/207 killed | PASS
 exit 0
+
+# ======================================================================
+# NR transfer 2026-11-10: code under test 6ad5833; same toolchain plus neuraloperator 2.0.0 (requirements-operator.txt)
+
+## Internal sources: 007acc2 NR register (Drive) -- Digi #21 aggregate-kill NR (2026-11-07), SF-R46-01
+## optional-checker NR (2026-11-03), disabled-runner NR (2026-11-09); 007acc2 transfer/audit docs are marked
+## REVIEW_REQUIRED and were not adopted. External: Stryker mutation-testing report schema records killedBy.
+
+## killed_by of the #104 mutants before the expect binding (measured, one run each)
+M107 KILLED TestTwoRanks :: '("model weights", _module_digest(self.raw_model)),' -> ['test_resume_with_other_weights_on_one_rank_fails_both']
+M188 KILLED TestTwoRanks :: '("optimizer state", _state_digest(state(self.optimizer)' -> ['test_other_optimizer_or_scheduler_at_construction_fails_both', 'test_resume_with_other_shared_state_on_one_rank_fails_both']
+M189 KILLED TestTwoRanks :: '("GradScaler state", _state_digest(state(self.grad_scal' -> ['test_resume_with_other_shared_state_on_one_rank_fails_both']
+M190 KILLED TestTwoRanks :: '("EMA state", _module_digest(self.ema_model) if self.em' -> ['test_resume_with_other_shared_state_on_one_rank_fails_both']
+M191 KILLED TestTwoRanks :: 'if names:\n            raise DistributedContractError(\n ' -> ['test_other_optimizer_or_scheduler_at_construction_fails_both', 'test_resume_with_other_shared_state_on_one_rank_fails_both', 'test_resume_with_other_weights_on_one_rank_fails_both']
+M192 KILLED TestTwoRanks :: 'self._agree_shared_state("initial")' -> ['test_other_optimizer_or_scheduler_at_construction_fails_both', 'test_state_digest_error_on_one_rank_is_agreed']
+M193 KILLED TestTwoRanks :: 'self._agree_shared_state("resumed")' -> ['test_resume_with_other_shared_state_on_one_rank_fails_both', 'test_resume_with_other_weights_on_one_rank_fails_both']
+M194 KILLED TestResumeStateDigest :: 'h.update(f"f{value.hex()};".encode("utf-8"))' -> ['test_every_value_change_is_seen']
+M195 KILLED TestResumeStateDigest :: 'for key_digest, item in sorted(items, key=lambda pair: ' -> ['test_equal_state_gives_equal_digest_independent_of_dict_order']
+M196 KILLED TestResumeStateDigest :: 'h.update(f"o{type(value).__qualname__};".encode("utf-8"' -> ['test_opaque_objects_count_by_type_not_by_address']
+M197 KILLED TestResumeStateDigest :: 'h.update(f"T|{t.dtype}|{tuple(t.shape)}|".encode("utf-8' -> ['test_every_value_change_is_seen']
+M198 KILLED TestTwoRanks :: 'parts = self.dist.run_agreed(self._shared_state_digests' -> ['test_amp_grad_scaler_under_ddp_reproduces_the_single_process_run', 'test_amp_nan_gradient_on_one_rank_backs_off_on_both', 'test_consecutive_skip_limit_stops_both_ranks_alike', 'test_error_after_backward_on_one_rank_fails_both', 'test_error_recording_a_skipped_update_on_one_rank_fails_both', 'test_non_finite_gradient_skips_on_both_and_a_split_stops_both', 'test_state_digest_error_on_one_rank_is_agreed']
+M199 KILLED TestResumeStateDigest :: 's = (t.cpu() if t.layout == torch.sparse_coo else t.cpu' -> ['test_sparse_tensors_digest_canonically']
+M200 KILLED TestResumeStateDigest :: 'h.update(f"S|{s.dtype}|{tuple(s.shape)}|{s.sparse_dim()' -> ['test_sparse_tensors_digest_canonically']
+M201 KILLED TestResumeStateDigest :: '_update_tensor_digest(h, s.values())' -> ['test_sparse_tensors_digest_canonically']
+M202 KILLED TestResumeStateDigest :: 'h.update(f"A|{a.dtype.str}|{a.shape}|".encode("utf-8"))' -> ['test_numpy_bytes_sets_and_complex_values_are_seen']
+M203 KILLED TestResumeStateDigest :: 'h.update(f"g|{a.dtype.str}|".encode("utf-8"))\n         ' -> ['test_numpy_bytes_sets_and_complex_values_are_seen']
+M204 KILLED TestResumeStateDigest :: 'h.update(f"c{value.real.hex()},{value.imag.hex()};".enc' -> ['test_numpy_bytes_sets_and_complex_values_are_seen']
+M205 KILLED TestResumeStateDigest :: 'for element_digest in sorted(elements):' -> ['test_set_digest_is_independent_of_the_ranks_hash_seed']
+M206 KILLED TestResumeStateDigest :: '_update_state_digest(h, value.reshape(-1).tolist())' -> ['test_numpy_bytes_sets_and_complex_values_are_seen']
+M207 KILLED TestResumeStateDigest :: 'h.update(b"g|object|")\n            _update_state_digest' -> ['test_numpy_bytes_sets_and_complex_values_are_seen']
+# M198 (digest computation unagreed) killed 6 unrelated tests: its scenario desynchronised the job for every
+# later scenario -> scenario moved to the end; afterwards killed_by = ['test_state_digest_error_on_one_rank_is_agreed']
+
+## Red against 0b3f21d
+# test_gino_adapter_hex_v3...test_unbound_model_is_refused_unless_explicitly_allowed: AssertionError: ValueError not raised
+#   (a foreign, unbound model ran under the default config)
+# test_distributed_checkpoint_bundle_v1: ERROR test_committed_bundle_is_valid (no source_sha_verified),
+#   FAIL test_source_binding_must_be_stated (validate_bundle without the argument did not raise)
+# With the fix and before the opt-ins: 6 existing GINO tests relied on the open default (as the NR predicts);
+#   the real-backend wrapper test passes without opt-in once the binding is searched through submodules
+
+## Gate at 6ad5833
+# ruff: All checks passed! | verify_sources: 80 files PASS | engine_gate: 49/49 PASS
+# coverage run -m unittest discover: Ran 1134 tests, OK (skipped=1: CUDA; the neuraloperator lane ran); coverage 95 %
+# test_gino_adapter_hex_v3 with neuraloperator 2.0.0: Ran 27 tests, OK
+# python scripts/oracles/dcp_bundle_2rank_oracle.py: exit 0 (valid_bundle true, tampered/mismatch/uncommitted rejected)
+# CI on PR #104 head 6ad5833: gate, tests (cpu), stacked gate, stacked tests (cpu), GINO smoke,
+#   distributed-checkpoint-cpu -- all success
+
+## Mutation probe at 6ad5833 (separate git worktree; 26 mutants carry expect)
+M01 KILLED    checkpoint_integration_hex_v3.py -> TestNonMainRankStoresValidatedFloat
+M02 KILLED    checkpoint_integration_hex_v3.py -> TestDurabilityErrorAfterReplace
+M03 KILLED    checkpoint_integration_hex_v3.py -> TestBestGenerationPin
+M04 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M05 KILLED    resume_utils_hex_v3.py -> TestResumeEmaState
+M06 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M07 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M08 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M09 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M10 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M11 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M12 KILLED    checkpoint_integration_hex_v3.py -> TestBestGenerationPin
+M13 KILLED    checkpoint_integration_hex_v3.py -> TestBestGenerationPin
+M14 KILLED    checkpoint_integration_hex_v3.py -> TestBestGenerationPin
+M15 KILLED    checkpoint_integration_hex_v3.py -> TestBestGenerationPin
+M16 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M17 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M18 KILLED    runner_hex_v3.py -> TestDetectorContract
+M19 KILLED    runner_hex_v3.py -> TestFullResumeEquivalence
+M20 KILLED    runner_hex_v3.py -> TestCheckpointSchedule
+M21 KILLED    runner_hex_v3.py -> TestEmptyValidationAndTrainEpoch
+M22 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M23 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M24 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M25 KILLED    warmstart_utils_hex_v3.py -> TestPrefixTransforms
+M26 KILLED    ema_hex_v3.py -> TestDecayContract
+M27 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestShardContentDurabilityIssue59
+M28 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestShardContentDurabilityIssue59
+M29 KILLED    benchmark_hex_v3.py -> TestPublicApiMatchesMetricSpecV4
+M30 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M31 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M32 KILLED    hex_fv_solver_hex_v3.py -> TestLameModesAreExactDiscreteEigenvectors
+M33 KILLED    reference_case_hex_v3.py -> TestConvergenceAnalysis
+M34 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M35 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M36 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M37 KILLED    hex_fv_solver_hex_v3.py -> TestPositivityGateIssue60
+M38 KILLED    hex_fv_solver_hex_v3.py -> TestPositivityGateIssue60
+M39 KILLED    hex_fv_solver_hex_v3.py -> TestTorusLattice
+M40 KILLED    hex_fv_solver_hex_v3.py -> TestEdgeConductances
+M41 KILLED    hex_fv_solver_hex_v3.py -> TestEdgeConductances
+M42 KILLED    hex_fv_solver_hex_v3.py -> TestConjugateGradient
+M43 KILLED    hex_fv_solver_hex_v3.py -> TestSteadySolve
+M44 KILLED    reference_case_hex_v3.py -> TestHexMmsTriStudyGate
+M45 KILLED    reference_case_hex_v3.py -> TestMmsGateDiscrimination
+M46 KILLED    reference_case_hex_v3.py -> TestMmsGateDiscrimination
+M47 KILLED    reference_case_hex_v3.py -> TestHexHeatTorusStudyGate
+M48 KILLED    hex_fv_solver_hex_v3.py -> TestCrankNicolson
+M49 KILLED    hex_fv_solver_hex_v3.py -> TestConjugateGradient
+M50 KILLED    hex_fv_solver_hex_v3.py -> TestConjugateGradient
+M51 KILLED    heat_operator_task_hex_v3.py -> TestBasis
+M52 KILLED    heat_operator_task_hex_v3.py -> TestPriorAndTruth
+M53 KILLED    heat_operator_task_hex_v3.py -> TestManifest
+M54 KILLED    heat_operator_task_hex_v3.py -> TestMetrics
+M55 KILLED    heat_operator_task_hex_v3.py -> TestMetrics
+M56 KILLED    phase1_protocol_hex_v3.py -> TestDigestStringsAreWholeStrings
+M57 KILLED    phase1_protocol_hex_v3.py -> TestDigestStringsAreWholeStrings
+M58 KILLED    phase1_protocol_hex_v3.py -> TestBreakEvenRange
+M59 KILLED    ntk_trajectory_hex_v3.py -> TestFailClosed
+M60 KILLED    ntk_trajectory_hex_v3.py -> TestRepeatedStates
+M61 KILLED    ntk_trajectory_hex_v3.py -> TestRepeatedStates
+M62 KILLED    ntk_trajectory_hex_v3.py -> TestRepeatedStates
+M63 KILLED    ntk_trajectory_hex_v3.py -> TestRepeatedStates
+M64 KILLED    ntk_trajectory_hex_v3.py -> TestRecordCheck
+M65 KILLED    ntk_trajectory_hex_v3.py -> TestRecordCheck
+M66 KILLED    ntk_trajectory_hex_v3.py -> TestFailClosed
+M67 KILLED    ntk_trajectory_hex_v3.py -> TestFailClosed
+M68 KILLED    ntk_trajectory_hex_v3.py -> TestFailClosed
+M69 KILLED    ntk_trajectory_hex_v3.py -> TestClosedForms
+M70 KILLED    ntk_trajectory_hex_v3.py -> TestBinding
+M71 KILLED    ntk_trajectory_hex_v3.py -> TestClosedForms
+M72 KILLED    ntk_trajectory_hex_v3.py -> TestClosedForms
+M73 KILLED    ntk_trajectory_hex_v3.py -> TestClosedForms
+M74 KILLED    ntk_trajectory_hex_v3.py -> TestClosedForms
+M75 KILLED    ntk_trajectory_hex_v3.py -> TestBinding
+M76 KILLED    ntk_trajectory_hex_v3.py -> TestBinding
+M77 KILLED    ntk_trajectory_hex_v3.py -> TestConstructorMetadata
+M78 KILLED    ntk_trajectory_hex_v3.py -> TestPreflightBinding
+M79 KILLED    ntk_trajectory_hex_v3.py -> TestMetadataAliasing
+M80 KILLED    ntk_trajectory_hex_v3.py -> TestMetadataAliasing
+M81 KILLED    ntk_trajectory_hex_v3.py -> TestDriftRange
+M82 KILLED    ntk_trajectory_hex_v3.py -> TestDriftRange
+M83 KILLED    ntk_trajectory_hex_v3.py -> TestConstructorMetadata
+M84 KILLED    ntk_trajectory_hex_v3.py -> TestCrossFamilyR88R98
+M85 KILLED    ntk_trajectory_hex_v3.py -> TestCrossFamilyR88R98
+M86 KILLED    ntk_trajectory_hex_v3.py -> TestCrossFamilyR88R98
+M87 KILLED    ntk_trajectory_hex_v3.py -> TestCrossFamilyR88R98
+M88 KILLED    ntk_trajectory_hex_v3.py -> TestCrossFamilyR88R98
+M89 KILLED    ntk_trajectory_hex_v3.py -> TestCrossFamilyR88R98
+M90 KILLED    runner_hex_v3.py -> TestTwoRanks
+M91 KILLED    ddp_hex_v3.py -> TestTwoRanks
+M92 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M93 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M94 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M95 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M96 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M97 KILLED    runner_hex_v3.py -> TestTwoRanks
+M98 KILLED    runner_hex_v3.py -> TestTwoRanks
+M99 KILLED    runner_hex_v3.py -> TestTwoRanks
+M100 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M101 KILLED    runner_hex_v3.py -> TestTwoRanks
+M102 KILLED    runner_hex_v3.py -> TestTwoRanks
+M103 KILLED    runner_hex_v3.py -> TestTwoRanks
+M104 KILLED    runner_hex_v3.py -> TestTwoRanks
+M105 KILLED    runner_hex_v3.py -> TestTwoRanks
+M106 KILLED    runner_hex_v3.py -> TestTwoRanks
+M107 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_weights_on_one_rank_fails_both | killed_by test_resume_with_other_weights_on_one_rank_fails_both
+M108 KILLED    runner_hex_v3.py -> TestTwoRanks
+M109 KILLED    runner_hex_v3.py -> TestTwoRanks
+M110 KILLED    runner_hex_v3.py -> TestTwoRanks
+M111 KILLED    ddp_hex_v3.py -> TestTwoRanks
+M112 KILLED    ddp_hex_v3.py -> TestTwoRanks
+M113 KILLED    runner_hex_v3.py -> TestTwoRanks
+M114 KILLED    runner_hex_v3.py -> TestTwoRanks
+M115 KILLED    runner_hex_v3.py -> TestTwoRanks
+M116 KILLED    runner_hex_v3.py -> TestTwoRanks
+M117 KILLED    runner_hex_v3.py -> TestTwoRanks
+M118 KILLED    runner_hex_v3.py -> TestTwoRanks
+M119 KILLED    ddp_hex_v3.py -> TestTwoRanks
+M120 KILLED    ddp_hex_v3.py -> TestTwoRanks
+M121 KILLED    runner_hex_v3.py -> TestTwoRanks
+M122 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M123 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M124 KILLED    runner_hex_v3.py -> TestTwoRanks
+M125 KILLED    runner_hex_v3.py -> TestTwoRanks
+M126 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M127 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M128 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M129 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M130 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M131 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M132 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M133 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M134 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M135 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M136 KILLED    runner_hex_v3.py -> TestTwoRanks
+M137 KILLED    runner_hex_v3.py -> TestTwoRanks
+M138 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M139 KILLED    runner_hex_v3.py -> TestTwoRanks
+M140 KILLED    runner_hex_v3.py -> TestTwoRanks
+M141 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M142 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M143 KILLED    runner_hex_v3.py -> TestLoaderGeneratorResume
+M144 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M145 KILLED    runner_hex_v3.py -> TestMidEpochRecord
+M146 KILLED    runner_hex_v3.py -> TestMidEpochRecord
+M147 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M148 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M149 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M150 KILLED    ddp_hex_v3.py -> TestRunnerWithoutProcessGroup
+M151 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M152 KILLED    runner_hex_v3.py -> TestRunnerWithoutProcessGroup
+M153 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M154 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M155 KILLED    ddp_hex_v3.py -> TestExactDistributedEvalSampler
+M156 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M157 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M158 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M159 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M160 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M161 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M162 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M163 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M164 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M165 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M166 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M167 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M168 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M169 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M170 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M171 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M172 KILLED    runner_hex_v3.py -> TestTwoRanks
+M173 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M174 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M175 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M176 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M177 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M178 KILLED    runner_hex_v3.py -> TestTwoRanks
+M179 KILLED    runner_hex_v3.py -> TestTwoRanks
+M180 KILLED    runner_hex_v3.py -> TestTwoRanks
+M181 KILLED    runner_hex_v3.py -> TestTwoRanks
+M182 KILLED    runner_hex_v3.py -> TestTwoRanks
+M183 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
+M184 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
+M185 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
+M186 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
+M187 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
+M188 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_shared_state_on_one_rank_fails_both,test_other_optimizer_or_scheduler_at_construction_fails_both | killed_by test_other_optimizer_or_scheduler_at_construction_fails_both,test_resume_with_other_shared_state_on_one_rank_fails_both
+M189 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_shared_state_on_one_rank_fails_both | killed_by test_resume_with_other_shared_state_on_one_rank_fails_both
+M190 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_shared_state_on_one_rank_fails_both | killed_by test_resume_with_other_shared_state_on_one_rank_fails_both
+M191 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_shared_state_on_one_rank_fails_both,test_other_optimizer_or_scheduler_at_construction_fails_both,test_resume_with_other_weights_on_one_rank_fails_both | killed_by test_other_optimizer_or_scheduler_at_construction_fails_both,test_resume_with_other_shared_state_on_one_rank_fails_both,test_resume_with_other_weights_on_one_rank_fails_both
+M192 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_other_optimizer_or_scheduler_at_construction_fails_both | killed_by test_other_optimizer_or_scheduler_at_construction_fails_both,test_state_digest_error_on_one_rank_is_agreed
+M193 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_shared_state_on_one_rank_fails_both,test_resume_with_other_weights_on_one_rank_fails_both | killed_by test_resume_with_other_shared_state_on_one_rank_fails_both,test_resume_with_other_weights_on_one_rank_fails_both
+M194 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_every_value_change_is_seen | killed_by test_every_value_change_is_seen
+M195 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_equal_state_gives_equal_digest_independent_of_dict_order | killed_by test_equal_state_gives_equal_digest_independent_of_dict_order
+M196 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_opaque_objects_count_by_type_not_by_address | killed_by test_opaque_objects_count_by_type_not_by_address
+M197 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_every_value_change_is_seen | killed_by test_every_value_change_is_seen
+M198 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_state_digest_error_on_one_rank_is_agreed | killed_by test_state_digest_error_on_one_rank_is_agreed
+M199 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_sparse_tensors_digest_canonically | killed_by test_sparse_tensors_digest_canonically
+M200 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_sparse_tensors_digest_canonically | killed_by test_sparse_tensors_digest_canonically
+M201 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_sparse_tensors_digest_canonically | killed_by test_sparse_tensors_digest_canonically
+M202 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_numpy_bytes_sets_and_complex_values_are_seen | killed_by test_numpy_bytes_sets_and_complex_values_are_seen
+M203 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_numpy_bytes_sets_and_complex_values_are_seen | killed_by test_numpy_bytes_sets_and_complex_values_are_seen
+M204 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_numpy_bytes_sets_and_complex_values_are_seen | killed_by test_numpy_bytes_sets_and_complex_values_are_seen
+M205 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_set_digest_is_independent_of_the_ranks_hash_seed | killed_by test_set_digest_is_independent_of_the_ranks_hash_seed
+M206 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_numpy_bytes_sets_and_complex_values_are_seen | killed_by test_numpy_bytes_sets_and_complex_values_are_seen
+M207 KILLED    gino_adapter_hex_v3.py -> TestGinoPhase1Adapter | expect test_unbound_model_is_refused_unless_explicitly_allowed | killed_by test_unbound_model_is_refused_unless_explicitly_allowed
+M208 KILLED    gino_adapter_hex_v3.py -> TestGinoPhase1Adapter | expect test_unbound_model_is_refused_unless_explicitly_allowed | killed_by test_unbound_model_is_refused_unless_explicitly_allowed
+M209 KILLED    gino_adapter_hex_v3.py -> TestGinoPhase1Adapter | expect test_unbound_model_is_refused_unless_explicitly_allowed | killed_by test_unbound_model_is_refused_unless_explicitly_allowed
+M210 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestValidateBundle | expect test_source_binding_must_be_stated | killed_by test_source_binding_must_be_stated
+M211 KILLED    scripts/mutation_probe.py -> TestMutationProbeKilledBy | expect test_verdicts | killed_by test_verdicts
+M212 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_numpy_bytes_sets_and_complex_values_are_seen | killed_by test_numpy_bytes_sets_and_complex_values_are_seen
+[MUTATION-PROBE] baseline green | 212/212 killed | PASS
+exit 0
