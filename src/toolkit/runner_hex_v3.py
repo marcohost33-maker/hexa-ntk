@@ -21,6 +21,10 @@ Integrates:
 Best practices applied:
 - GradScaler.unscale_ BEFORE clip_grad_norm_ (PyTorch AMP requirement)
 - torch.isfinite check on loss BEFORE backward (skip update on NaN)
+- non-finite total gradient norm skips the optimizer step and the EMA update;
+  with a GradScaler its own skip (inf/NaN found by unscale_, seen as a scale
+  backoff) skips the EMA update too and counts as a skipped step; a parameter
+  that is non-finite after the step stops the run before any checkpoint
 - NaN/Inf validation metric never becomes the best checkpoint (skip + record)
 - Empty validation never becomes the best checkpoint (no measurement != 0.0)
 - Best checkpoint is evaluated every epoch; last/resume every
@@ -40,6 +44,7 @@ References:
 from __future__ import annotations
 
 __all__ = [
+    "NonFiniteParameterError",
     "TrainingAnomalyDetector",
     "RunnerConfig",
     "HexTrainingRunner",
@@ -78,6 +83,28 @@ from failure_signature_hex_v3 import FailureSignature
 from operator_adapter_hex_v3 import OperatorAdapterV3
 
 logger = logging.getLogger(__name__)
+
+
+class ConsecutiveSkipsError(RuntimeError):
+    """``RunnerConfig.max_consecutive_skips`` skipped training steps in a row.
+
+    Every skip protects the weights, but a run that skips every step trains
+    nothing and would end with untrained weights as if it had succeeded (a NaN
+    that does not go away, a GradScaler scale of 0). Raised at the N-th skip in
+    a row, after a replay capsule and a FailureSignature of kind
+    ``Consecutive_Skips_Exceeded``; distributed it is a held step error
+    (spec/DDP_RUNNER_v1.md sections 3.6, 3.7) and every rank raises.
+    """
+
+
+class NonFiniteParameterError(RuntimeError):
+    """A parameter is NaN/Inf right after the optimizer step.
+
+    The step has already written it: there is no rollback. The run stops here,
+    before the EMA update and before any checkpoint, so no saved state carries
+    the corrupted weights. Raised on the rank that sees it; distributed it is a
+    held step error (spec/DDP_RUNNER_v1.md section 3.6) and every rank raises.
+    """
 
 
 def _is_non_finite_metric(value: Any) -> bool:
@@ -382,6 +409,19 @@ class RunnerConfig:
     # Anomaly detection
     spike_multiplier: float = 3.0
     spike_window_size: int = 50
+    # After every applied optimizer step, every parameter must be finite, else
+    # NonFiniteParameterError before the EMA update and any checkpoint
+    # (spec/DDP_RUNNER_v1.md 3.7). Costs one read of all weights per step
+    # (measured on CPU: ~20% of a small-batch step of a 10.5M-parameter MLP;
+    # one fused kernel per device/dtype on CUDA). False skips the check: a
+    # non-finite weight is then only seen as a NaN loss on the next step.
+    check_finite_params: bool = True
+    # Stop with ConsecutiveSkipsError at the N-th skipped training step in a row
+    # (non-finite loss, non-finite gradient norm, a GradScaler skip without a
+    # backoff to a positive scale); a healthy step resets the count, a routine
+    # loss-scale backoff leaves it unchanged, resume carries it
+    # (spec/DDP_RUNNER_v1.md 3.7). 0 turns the limit off (skips never stop).
+    max_consecutive_skips: int = 50
 
     # DDP. distributed=True requires an initialized process group and a
     # DistributedDataParallel model; is_main_process must then be rank == 0.
@@ -410,6 +450,7 @@ class RunnerConfig:
         _int_at_least("save_every_n_steps", 0)
         _int_at_least("warmup_steps", 0)
         _int_at_least("spike_window_size", 1)
+        _int_at_least("max_consecutive_skips", 0)
         if math.isnan(self.grad_clip_max_norm) or self.grad_clip_max_norm <= 0:
             raise ValueError(
                 f"grad_clip_max_norm must be > 0 (inf disables clipping), "
@@ -423,6 +464,8 @@ class RunnerConfig:
             raise ValueError(f"ema_decay must be in [0, 1], got {self.ema_decay!r}")
         if not isinstance(self.distributed, bool):
             raise ValueError(f"distributed must be a bool, got {self.distributed!r}")
+        if not isinstance(self.check_finite_params, bool):
+            raise ValueError(f"check_finite_params must be a bool, got {self.check_finite_params!r}")
         if not isinstance(self.is_main_process, bool):
             raise ValueError(f"is_main_process must be a bool, got {self.is_main_process!r}")
         if self.amp_dtype not in ("float16", "bfloat16"):
@@ -601,9 +644,20 @@ class HexTrainingRunner:
         self._resume_rng_at_step: Optional[Dict[str, torch.Tensor]] = None
         self._epoch_start_state: Optional[Dict[str, Any]] = None
         # Distributed: an error raised after the gradient all-reduce (clipping,
-        # optimizer/scaler step, EMA update) on this rank, held until the next
+        # optimizer/scaler step, EMA update, the record of a skipped update)
+        # on this rank, held until the next
         # agreement point so that every rank raises there (spec section 3.6).
         self._post_step_error: Optional[BaseException] = None
+        # Distributed: this rank skipped its last update for a non-finite
+        # gradient norm. Checked at the same agreement points (section 3.7):
+        # every rank reads the same all-reduced gradients, so all or none skip.
+        self._grad_skip_pending = False
+        # The last skip was the GradScaler's own loss-scale backoff (routine in
+        # AMP: warning only, no capsule); set by _apply_update.
+        self._scaler_backoff = False
+        # Skipped training steps in a row (RunnerConfig.max_consecutive_skips);
+        # equal on every rank because every skip is agreed; resume restores it.
+        self._consecutive_skips = 0
 
     # ------------------------------------------------------------------
     # Resume
@@ -751,6 +805,12 @@ class HexTrainingRunner:
         if history is not None:
             self.anomaly_detector.loss_history.clear()
             self.anomaly_detector.loss_history.extend(_float_list(history, "anomaly_history"))
+        # Without it a resume would restart the count and step around the limit;
+        # a checkpoint written before the limit existed carries none: 0.
+        skips = extra.get("consecutive_skips", 0)
+        if isinstance(skips, bool) or not isinstance(skips, int) or skips < 0:
+            raise ValueError(f"Resume checkpoint {resume_path}: consecutive_skips {skips!r} is not an int >= 0")
+        self._consecutive_skips = skips
         mid = extra.get("mid_epoch")
         if mid is None:
             self.start_epoch = report["epoch"] + 1
@@ -900,8 +960,10 @@ class HexTrainingRunner:
         """Distributed: the next batch, prepared, agreed before any forward.
 
         One int64 all-reduce of [ranks that raised, ranks out of data, ranks
-        whose previous step failed after backward]: a held step error (spec
+        whose previous step failed after backward, ranks that skipped the
+        previous update for a non-finite gradient]: a held step error (spec
         section 3.6) raises on every rank first, even at the end of the epoch;
+        a split skip decision (section 3.7) raises next;
         an error (a missing key, an OOM in ``.to(device)``, a rejected adapter
         context) raises on every rank; all ranks out of data ends the epoch;
         some out of data is an unequal step count (a sized IterableDataset
@@ -912,6 +974,7 @@ class HexTrainingRunner:
         exhausted = False
         batch = prepared = None
         step_error, self._post_step_error = self._post_step_error, None
+        grad_skipped, self._grad_skip_pending = self._grad_skip_pending, False
         if step_error is None:  # a rank about to raise loads no further batch
             try:
                 batch = next(iterator)
@@ -925,14 +988,15 @@ class HexTrainingRunner:
                     # .to(device) gets the same rescue (review round 2).
                     self._rescue_oom(batch)
         with self.dist.keeping(step_error if step_error is not None else error):
-            n_failed, n_exhausted, n_step_failed = self.dist.sum_ints(
-                [error is not None, exhausted, step_error is not None]
+            n_failed, n_exhausted, n_step_failed, n_grad_skipped = self.dist.sum_ints(
+                [error is not None, exhausted, step_error is not None, grad_skipped]
             )
         # The previous step's failure first: it happened before this batch.
         if n_step_failed and error is not None:
             # a rare double failure: this rank's own preparing error is only logged
             logger.error("preparing training step %d failed too", self.global_step, exc_info=error)
         self.dist.raise_agreed_failure(step_error, n_step_failed > 0, self._held_what())
+        self._agreed_grad_skip(n_grad_skipped, f"step {self.global_step}")
         self.dist.raise_agreed_failure(error, n_failed > 0, f"preparing training step {self.global_step}")
         if n_exhausted == self.dist.world_size:
             return None
@@ -1002,6 +1066,7 @@ class HexTrainingRunner:
                 pred, loss, loss_val, skip_update = self._agreed_forward(batch, prepared)
             if skip_update:
                 # Do NOT backward or step — protect optimizer
+                self._count_skip(batch, loss_val, counts=True)
                 return loss_val, False, None
 
             # Backward (DDP's gradient all-reduce runs inside it)
@@ -1011,10 +1076,19 @@ class HexTrainingRunner:
                 loss.backward()
 
             if self.dist is None:
-                grad_norm_val = self._apply_update()
+                grad_norm_val, stepped = self._apply_update()
+                if not stepped:
+                    self._record_skipped_update(batch, loss_val, grad_norm_val)
+                    self._count_skip(batch, loss_val, counts=not self._routine_backoff())
             else:
                 try:
-                    grad_norm_val = self._apply_update()
+                    grad_norm_val, stepped = self._apply_update()
+                    if not stepped:
+                        # The capsule and FailureSignature of a skip are written
+                        # after the all-reduce too: an OSError there (a full disk
+                        # on one rank) is held like the rest (HX102-01).
+                        self._record_skipped_update(batch, loss_val, grad_norm_val)
+                        self._count_skip(batch, loss_val, counts=not self._routine_backoff())
                 except Exception as exc:
                     # After the gradient all-reduce: the peers have finished
                     # backward and head for the next agreement point. Raising
@@ -1032,6 +1106,9 @@ class HexTrainingRunner:
                     self._post_step_error = exc
                     return loss_val, False, None
 
+            if not stepped:
+                return loss_val, False, None
+            self._consecutive_skips = 0
             return loss_val, True, grad_norm_val
 
         except RuntimeError as e:
@@ -1043,12 +1120,29 @@ class HexTrainingRunner:
                 raise
             raise
 
-    def _apply_update(self) -> float:
+    def _apply_update(self) -> Tuple[float, bool]:
         """Unscale (AMP), clip, optimizer (or scaler) step and EMA update after backward.
 
-        Returns the gradient norm before clipping. Distributed, every call
-        site runs after DDP's gradient all-reduce, so nothing here is a
-        collective; an error is held by _train_one_step and agreed later.
+        Returns (gradient norm before clipping, whether the step was taken).
+        Without a GradScaler a non-finite norm skips the optimizer step and the
+        EMA update: ``clip_grad_norm_`` would scale every gradient by NaN and
+        the step would write NaN into all parameters (and from there into the
+        EMA copy and every later checkpoint). That includes an fp32 overflow of
+        the norm of finite gradients (elements around 1e19): clipping by an inf
+        norm zeroes every gradient, and the step would apply only momentum and
+        weight decay. With a GradScaler the scaler decides, as in PyTorch AMP:
+        ``scaler.step`` skips when ``unscale_`` found inf/NaN and ``update``
+        then backs the scale off; a lower scale after ``update`` is that skip
+        (the scale only drops on a found inf). ``unscale_`` checks the
+        gradients before it unscales them, so a non-finite norm it did not see
+        (an fp32 overflow of finite gradients; a zero scale, whose 1/0 turns
+        them into NaN) skips ``scaler.step`` here, ``update`` still runs.
+        The EMA update is skipped with any skip (an EMA step on unchanged
+        weights still moves the average).
+        After a step every parameter must be finite, else NonFiniteParameterError
+        (before the EMA update). Distributed, every call site runs after DDP's
+        gradient all-reduce, so nothing here is a collective; an error is held
+        by _train_one_step and agreed later.
         """
         if self.grad_scaler is not None:
             # Unscale BEFORE clipping (PyTorch AMP requirement)
@@ -1059,21 +1153,160 @@ class HexTrainingRunner:
         )
         grad_norm_val = float(grad_norm.item()) if torch.is_tensor(grad_norm) else float(grad_norm)
 
+        self._scaler_backoff = False
         if self.grad_scaler is not None:
-            self.grad_scaler.step(self.optimizer)
+            scale_before = self.grad_scaler.get_scale()
+            # A non-finite norm is skipped here as well, before scaler.step: unscale_
+            # checks the gradients BEFORE it unscales them, so finite gradients whose
+            # fp32 norm overflows (HX102-02) or that become NaN by the 1/0 of a zero
+            # scale (HX102-04) pass its inf check and the scaler would step.
+            take = math.isfinite(grad_norm_val)
+            if take:
+                self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()
+            backoff = self.grad_scaler.get_scale() < scale_before
+            if backoff or not take:
+                self._scaler_backoff = backoff
+                self.optimizer.zero_grad(set_to_none=True)
+                return grad_norm_val, False
         else:
+            if not math.isfinite(grad_norm_val):
+                self.optimizer.zero_grad(set_to_none=True)
+                return grad_norm_val, False
             self.optimizer.step()
+        if self.config.check_finite_params:
+            self._check_parameters_finite()
 
         if self.ema_model is not None:
             self.ema_model.update_parameters(self.raw_model)
-        return grad_norm_val
+        return grad_norm_val, True
+
+    def _check_parameters_finite(self) -> None:
+        """Raise NonFiniteParameterError if the step left a NaN/Inf parameter.
+
+        Exact and overflow-free: the max-abs norm (ord=inf) of a tensor is
+        finite iff every element is (no squaring, so 3e38 stays finite; NaN
+        and +-inf propagate), checked for fp16/bf16/fp32/fp64. One
+        ``torch._foreach_norm`` per (device, dtype) group, as in
+        ``clip_grad_norm_``: a single fused kernel per group on CUDA.
+        Empty tensors are left out (their inf norm is undefined).
+        """
+        groups: Dict[Tuple[torch.device, torch.dtype], List[torch.Tensor]] = {}
+        for p in self.raw_model.parameters():
+            if p.numel() and (p.is_floating_point() or p.is_complex()):
+                groups.setdefault((p.device, p.dtype), []).append(p.detach())
+        if not groups:
+            return
+        finite = [torch.isfinite(torch.stack(torch._foreach_norm(ts, float("inf")))).all()
+                  for ts in groups.values()]
+        if all(bool(f.item()) for f in finite):
+            return
+        names = [n for n, p in self.raw_model.named_parameters()
+                 if p.numel() and not bool(torch.isfinite(p.detach()).all())]
+        raise NonFiniteParameterError(
+            f"non-finite parameter(s) after the optimizer step of training step {self.global_step}: "
+            f"{names[:5]}{' ...' if len(names) > 5 else ''} (finite gradients, so the optimizer itself "
+            "diverged, e.g. a learning rate or state overflow); the run stops before the EMA update "
+            "and before any checkpoint"
+        )
+
+    def _record_skipped_update(self, batch: Dict[str, Any], loss_val: float, grad_norm_val: float) -> None:
+        """A skipped update: log it; unless a scale backoff also capsule + FailureSignature.
+
+        A non-finite gradient norm is a failure worth replaying: the capsule
+        holds the weights the gradient was taken at (the step was not applied).
+        A skip the GradScaler backed its scale off for is the routine loss-scale
+        backoff of AMP (frequent early in training): logged, counted as skipped,
+        no capsule (a capsule per overflow would fill the disk). A skip with an
+        active scaler but no backoff (norm overflow of finite gradients, zero
+        scale) is a failure like the no-scaler case. Distributed, this runs in
+        the held region of _train_one_step (spec section 3.6).
+        """
+        if self.dist is not None:
+            self._grad_skip_pending = True
+        if self._scaler_backoff:
+            logger.warning("Step %d skipped by the GradScaler (inf/NaN gradient at loss scale %s, grad_norm=%s)",
+                           self.global_step, self.grad_scaler.get_scale(), grad_norm_val)
+            return
+        reason = "NaN_or_Inf_Grad"
+        logger.error("Anomaly at step %d: %s (loss=%s finite, grad_norm=%s); update skipped",
+                     self.global_step, reason, loss_val, grad_norm_val)
+        cap_path = dump_replay_capsule_safe(batch, self.raw_model, self.failure_dir, self.global_step)
+        FailureSignature(
+            kind=reason,
+            step=self.global_step,
+            locus="train_step_grad_check",
+            observable=f"loss={loss_val} grad_norm={grad_norm_val}",
+            replay_capsule=cap_path,
+        ).register(self.failure_dir)
+
+    def _routine_backoff(self) -> bool:
+        """The last skip was AMP's routine loss-scale backoff to a still positive scale.
+
+        Such a skip does not count towards max_consecutive_skips (early AMP
+        training backs off many times in a row). A scale that reached 0 can
+        never recover (growth multiplies it), so a backoff to 0 counts.
+        """
+        return self._scaler_backoff and self.grad_scaler.get_scale() > 0
+
+    def _count_skip(self, batch: Dict[str, Any], loss_val: float, *, counts: bool) -> None:
+        """Count a skipped step; stop at the max_consecutive_skips-th in a row (spec 3.7).
+
+        The stop writes a replay capsule and a FailureSignature of kind
+        ``Consecutive_Skips_Exceeded`` (never raising: a failed write is only
+        logged), then raises ConsecutiveSkipsError; distributed the error is
+        held (section 3.6) and agreed at the next agreement point, so every
+        rank stops there. The count is equal on every rank (every skip is
+        agreed), so in practice every rank raises its own error.
+        """
+        if not counts:
+            return
+        self._consecutive_skips += 1
+        limit = self.config.max_consecutive_skips
+        if limit == 0 or self._consecutive_skips < limit:
+            return
+        error = ConsecutiveSkipsError(
+            f"{self._consecutive_skips} training steps in a row were skipped (the last: step "
+            f"{self.global_step}, loss={loss_val}); max_consecutive_skips={limit}: the run trains "
+            "nothing (a non-finite loss or gradient that does not go away, a GradScaler scale of 0)"
+        )
+        try:
+            cap_path = dump_replay_capsule_safe(batch, self.raw_model, self.failure_dir, self.global_step)
+            FailureSignature(
+                kind="Consecutive_Skips_Exceeded",
+                step=self.global_step,
+                locus="train_step_skip_limit",
+                observable=f"consecutive_skips={self._consecutive_skips} limit={limit} loss={loss_val}",
+                replay_capsule=cap_path,
+            ).register(self.failure_dir)
+        except Exception:
+            logger.exception("Failed to record the consecutive-skip stop at step %d", self.global_step)
+        if self.dist is None:
+            raise error
+        logger.error("step %d: %s; held until the next agreement point", self.global_step, error)
+        self._post_step_error = error
+
+    def _agreed_grad_skip(self, n_grad_skipped: int, before: str) -> None:
+        """Distributed: all ranks or none skipped the last update (spec section 3.7).
+
+        Every rank reads the same all-reduced gradients, so the decision is the
+        same everywhere; a split means the ranks' weights already differ (some
+        stepped, some did not) and the run stops on every rank before anything
+        reads them.
+        """
+        if 0 < n_grad_skipped < self.dist.world_size:
+            raise DistributedContractError(
+                f"{n_grad_skipped} of {self.dist.world_size} ranks skipped training step "
+                f"{self.global_step - 1} (non-finite gradient norm or GradScaler skip) and the others "
+                f"applied it: the ranks' weights differ (stopped before {before})"
+            )
 
     def _held_what(self, before: str = "") -> str:
         """What a held step error (spec section 3.6) is reported as; the step is the one just taken."""
         before = before or f"step {self.global_step}"
-        return (f"training step {self.global_step - 1} after backward (unscale, clipping, optimizer step or "
-                f"EMA update; stopped before {before})")
+        return (f"training step {self.global_step - 1} after backward (unscale, clipping, optimizer step, "
+                f"EMA update, the record of a skipped update or the consecutive-skip limit; "
+                f"stopped before {before})")
 
     def _rescue_oom(self, batch: Optional[Dict[str, Any]]) -> None:
         """OOM rescue: GC + CUDA cache (order matters), then capsule + FailureSignature.
@@ -1584,15 +1817,18 @@ class HexTrainingRunner:
         payload's own (rank 0) plus, distributed, every rank's.
 
         Distributed, a step error held since the step just taken is agreed
-        first (one int64 all-reduce): no rank writes a checkpoint of a step
-        that failed on a peer, and the gathers below never run with a rank
-        missing.
+        first (one int64 all-reduce, which also checks that all ranks or none
+        skipped that step for a non-finite gradient): no rank writes a
+        checkpoint of a step that failed on a peer, and the gathers below never
+        run with a rank missing.
         """
         if self.dist is not None:
             step_error, self._post_step_error = self._post_step_error, None
+            grad_skipped, self._grad_skip_pending = self._grad_skip_pending, False
             with self.dist.keeping(step_error):
-                (n_step_failed,) = self.dist.sum_ints([step_error is not None])
+                n_step_failed, n_grad_skipped = self.dist.sum_ints([step_error is not None, grad_skipped])
             self.dist.raise_agreed_failure(step_error, n_step_failed > 0, self._held_what("the mid-epoch save"))
+            self._agreed_grad_skip(n_grad_skipped, "the mid-epoch save")
         start = self._epoch_start_state
         rank_buffers = None
         if self.dist is None:
@@ -1668,7 +1904,7 @@ class HexTrainingRunner:
         }
         if rank_buffers is not None:
             record["rank_buffers"] = rank_buffers
-        extra: Dict[str, Any] = {"mid_epoch": record}
+        extra: Dict[str, Any] = {"mid_epoch": record, "consecutive_skips": self._consecutive_skips}
         if self.dist is None:
             extra["anomaly_history"] = list(self.anomaly_detector.loss_history)
         else:
@@ -1850,6 +2086,7 @@ class HexTrainingRunner:
             extra={
                 "train_loss": train_report["mean_loss"],
                 "val_loss": val_report["val_loss"],
+                "consecutive_skips": self._consecutive_skips,
                 **({"rank_rng_states": rank_rng} if rank_rng is not None else {}),
                 **({"anomaly_history": list(self.anomaly_detector.loss_history)}
                    if self.dist is None else {}),

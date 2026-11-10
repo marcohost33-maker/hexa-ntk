@@ -26,7 +26,9 @@ from dataloader_utils_hex_v3 import make_reproducible_dataloader_kwargs
 from operator_adapter_hex_v3 import OperatorAdapterV3, OperatorBatchContext
 from resume_utils_hex_v3 import EMADecayError, save_resume_checkpoint
 from runner_hex_v3 import (
+    ConsecutiveSkipsError,
     HexTrainingRunner,
+    NonFiniteParameterError,
     RunnerConfig,
     TrainingAnomalyDetector,
     dump_replay_capsule_safe,
@@ -1314,6 +1316,422 @@ class TestValidationNrmse(unittest.TestCase):
             with torch.no_grad():
                 runner.model.lin.bias.fill_(1.0)
             self.assertEqual(runner._validate(epoch=0)["val_nrmse"], float("inf"))
+
+
+# ------------------------------------------------------------------
+# Tests: non-finite gradient / parameter after the step
+# ------------------------------------------------------------------
+
+
+class _PoisonGrad(torch.autograd.Function):
+    """Identity forward; backward multiplies the incoming gradient by ``factor``."""
+
+    @staticmethod
+    def forward(ctx, x, factor):  # type: ignore[override]
+        ctx.factor = factor
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad):  # type: ignore[override]
+        return grad * ctx.factor, None
+
+
+def _poisoned_loss(poison_steps, factor=float("nan")):
+    """MSE whose gradient is multiplied by ``factor`` on the listed training steps (0-based).
+
+    The loss value itself stays finite: only the gradient is non-finite, the
+    case the loss check before backward cannot see.
+    """
+    mse = nn.MSELoss()
+    calls = {"n": 0}
+
+    def loss_fn(pred, target):
+        if pred.requires_grad:
+            step = calls["n"]
+            calls["n"] += 1
+            if step in poison_steps:
+                pred = _PoisonGrad.apply(pred, factor)
+        return mse(pred, target)
+
+    return loss_fn
+
+
+def _non_finite_tensors(path: Path):
+    """Names of floating tensors in a saved checkpoint that hold NaN/Inf."""
+    bad = []
+
+    def walk(obj, where):
+        if torch.is_tensor(obj):
+            if obj.is_floating_point() and not bool(torch.isfinite(obj).all()):
+                bad.append(where)
+        elif isinstance(obj, dict):
+            for k, v in obj.items():
+                walk(v, f"{where}/{k}")
+        elif isinstance(obj, (list, tuple)):
+            for i, v in enumerate(obj):
+                walk(v, f"{where}/{i}")
+
+    walk(torch.load(path, weights_only=False), path.name)
+    return bad
+
+
+class _OverflowingSGD(torch.optim.SGD):
+    """SGD whose update overflows the weight (finite gradients, divergent optimizer)."""
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        out = super().step(closure)
+        self.param_groups[0]["params"][0].mul_(float("inf"))
+        return out
+
+
+class _Crash(RuntimeError):
+    """Injected interruption of a training forward (a preemption)."""
+
+
+class TestConsecutiveSkips(unittest.TestCase):
+    """HX102-03 (owner decision E1109-06a): RunnerConfig.max_consecutive_skips stops
+    a run that skips every step instead of letting it end with untrained weights."""
+
+    def _runner(self, out: Path, loss_fn, *, n: int = 8, scaler=None, **cfg):
+        torch.manual_seed(0)
+        model = _TinyModel()
+        runner = HexTrainingRunner(
+            RunnerConfig(output_dir=str(out), **{"num_epochs": 1, **cfg}), model,
+            torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9), *_make_loaders(n=n, batch_size=2),
+            device="cpu", loss_fn=loss_fn,
+        )
+        if scaler is not None:
+            runner.grad_scaler = scaler
+        return runner
+
+    def _assert_stop(self, runner, n_skips: int, step: int) -> None:
+        with self.assertRaisesRegex(ConsecutiveSkipsError, f"{n_skips} training steps in a row"):
+            runner.run()
+        record = json.loads((runner.failure_dir / f"failure_step{step}_Consecutive_Skips_Exceeded.json").read_text())
+        self.assertEqual(record["locus"], "train_step_skip_limit")
+        self.assertTrue(Path(record["replay_capsule"]).is_file())
+
+    def test_limit_stops_exactly_at_the_nth_skip_in_a_row(self) -> None:
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            self._assert_stop(self._runner(Path(a), _poisoned_loss({0, 1, 2}), max_consecutive_skips=3), 3, 2)
+            # one more allowed: the same three skips end the epoch normally
+            result = self._runner(Path(b), _poisoned_loss({0, 1, 2}), max_consecutive_skips=4).run()
+            self.assertEqual(result["history"]["train"][0]["n_anomalies"], 3)
+
+    def test_a_healthy_step_resets_the_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # 2 + 2 skips around a healthy step 2, across the epoch boundary: never 3 in a row
+            runner = self._runner(Path(tmp), _poisoned_loss({0, 1, 3, 4}), num_epochs=2, max_consecutive_skips=3)
+            result = runner.run()
+            self.assertEqual([t["n_anomalies"] for t in result["history"]["train"]], [3, 1])
+
+    def test_non_finite_loss_skips_count_too(self) -> None:
+        mse = nn.MSELoss()
+
+        def nan_loss(pred, target):
+            return mse(pred, target) * float("nan")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._assert_stop(self._runner(Path(tmp), nan_loss, max_consecutive_skips=2), 2, 1)
+
+    def test_zero_turns_the_limit_off(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._runner(Path(tmp), _poisoned_loss(set(range(8))), num_epochs=2,
+                                  max_consecutive_skips=0).run()
+            self.assertEqual([t["n_anomalies"] for t in result["history"]["train"]], [4, 4])
+
+    def test_routine_backoff_does_not_count_a_zero_scale_does(self) -> None:
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            # three NaN gradients: three backoffs 1024 -> 128, a positive scale: no stop
+            scaler = torch.amp.GradScaler("cpu", init_scale=1024.0)
+            result = self._runner(Path(a), _poisoned_loss({0, 1, 2}), scaler=scaler, max_consecutive_skips=3).run()
+            self.assertEqual(result["history"]["train"][0]["n_anomalies"], 3)
+            self.assertEqual(scaler.get_scale(), 128.0)
+            # HX102-04: a zero scale skips every step forever; now it stops at the limit
+            scaler = torch.amp.GradScaler("cpu", init_scale=1024.0)
+            scaler._lazy_init_scale_growth_tracker(torch.device("cpu"))
+            scaler._scale.fill_(0.0)
+            self._assert_stop(self._runner(Path(b), _poisoned_loss(set()), scaler=scaler, max_consecutive_skips=3),
+                              3, 2)
+        with tempfile.TemporaryDirectory() as c:
+            # a backoff that reaches 0 (2**-149 * 0.5 rounds to 0 in float32) counts at once
+            scaler = torch.amp.GradScaler("cpu", init_scale=1024.0)
+            scaler._lazy_init_scale_growth_tracker(torch.device("cpu"))
+            scaler._scale.fill_(2.0 ** -149)
+            self._assert_stop(self._runner(Path(c), _poisoned_loss({0}), scaler=scaler, max_consecutive_skips=1),
+                              1, 0)
+            self.assertEqual(scaler.get_scale(), 0.0)
+
+    def test_mid_epoch_resume_carries_the_count(self) -> None:
+        # run 1 skips steps 0 and 1, saves after each step and is interrupted in step 2;
+        # the resumed run skips its first step: the third in a row, the limit is 3
+        poisoned = _poisoned_loss({0, 1})
+        calls = {"n": 0}
+
+        def interrupted(pred, target):
+            if pred.requires_grad:
+                calls["n"] += 1
+                if calls["n"] == 3:
+                    raise _Crash("preempted (injected)")
+            return poisoned(pred, target)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            first = self._runner(out, interrupted, max_consecutive_skips=3, save_every_n_steps=1)
+            with self.assertRaises(_Crash):
+                first.run()
+            resume = out / "checkpoints" / "resume_last.pt"
+            payload = torch.load(resume, weights_only=False)
+            self.assertEqual(payload["extra"]["mid_epoch"]["batches_done"], 2)
+            self.assertEqual(payload["extra"]["consecutive_skips"], 2)
+            second = self._runner(out, _poisoned_loss({0}), max_consecutive_skips=3, save_every_n_steps=1,
+                                  resume_from=str(resume), resume_trusted=True)
+            self._assert_stop(second, 3, 2)
+
+    def test_epoch_boundary_resume_carries_the_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            self._runner(out, _poisoned_loss({2, 3}), max_consecutive_skips=3).run()  # ends on 2 skips
+            resume = out / "checkpoints" / "resume_last.pt"
+            self.assertEqual(torch.load(resume, weights_only=False)["extra"]["consecutive_skips"], 2)
+            second = self._runner(out, _poisoned_loss({0}), num_epochs=2, max_consecutive_skips=3,
+                                  resume_from=str(resume), resume_trusted=True)
+            self._assert_stop(second, 3, 4)
+
+    def test_config_and_checkpoint_values_are_checked(self) -> None:
+        for bad in (-1, True, 1.5, None):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "max_consecutive_skips"):
+                RunnerConfig(max_consecutive_skips=bad)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            self._runner(out, _poisoned_loss(set())).run()
+            resume = out / "checkpoints" / "resume_last.pt"
+            payload = torch.load(resume, weights_only=False)
+            payload["extra"]["consecutive_skips"] = -2
+            torch.save(payload, resume)
+            runner = self._runner(out, _poisoned_loss(set()), num_epochs=2, resume_from=str(resume),
+                                  resume_trusted=True)
+            with self.assertRaisesRegex(ValueError, "consecutive_skips -2"):
+                runner.run()
+
+
+class TestNonFiniteGradient(unittest.TestCase):
+    """A finite loss with a NaN/Inf gradient used to write NaN into every
+    parameter (clip_grad_norm_ scales by the NaN norm, then optimizer.step),
+    from there into the EMA copy, last.pt and resume_last.pt; the failure was
+    reported one step late as a NaN loss. Measured red against cd5f6dc."""
+
+    def _run(self, out: Path, loss_fn, scaler=None, **cfg):
+        torch.manual_seed(0)
+        model = _TinyModel()
+        start = [p.detach().clone() for p in model.parameters()]
+        runner = HexTrainingRunner(
+            RunnerConfig(output_dir=str(out), num_epochs=1, **cfg), model,
+            torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9), *_make_loaders(n=4, batch_size=2),
+            device="cpu", loss_fn=loss_fn,
+        )
+        if scaler is not None:
+            # the runner builds a GradScaler only on CUDA; torch >= 2.3 has the
+            # same scaler on the CPU, so the AMP skip path is testable here
+            runner.grad_scaler = scaler
+        return runner, model, start, runner.run()
+
+    def _assert_no_non_finite_checkpoint(self, out: Path) -> None:
+        saved = sorted(out.rglob("*.pt"))
+        self.assertTrue(saved)
+        for path in saved:
+            self.assertEqual(_non_finite_tensors(path), [], path.name)
+
+    def test_nan_gradient_skips_step_and_keeps_weights(self) -> None:
+        for factor in (float("nan"), float("inf")):
+            with self.subTest(factor=factor), tempfile.TemporaryDirectory() as tmpdir:
+                out = Path(tmpdir)
+                runner, model, start, result = self._run(out, _poisoned_loss({0, 1}, factor))
+                for p, p0 in zip(model.parameters(), start):
+                    self.assertTrue(torch.equal(p.detach(), p0))  # no step was applied
+                for p, p0 in zip(runner.ema_model.module.parameters(), start):
+                    self.assertTrue(torch.equal(p.detach(), p0))  # no EMA update either
+                train = result["history"]["train"][0]
+                self.assertEqual((train["n_batches"], train["n_anomalies"]), (0, 2))
+                self.assertTrue(math.isnan(train["mean_grad_norm"]))  # no healthy step: no measurement
+                self._assert_no_non_finite_checkpoint(out)
+                kinds = sorted(json.loads(f.read_text())["kind"] for f in runner.failure_dir.glob("failure_*.json"))
+                self.assertEqual(kinds, ["NaN_or_Inf_Grad", "NaN_or_Inf_Grad"])
+                step0 = json.loads((runner.failure_dir / "failure_step0_NaN_or_Inf_Grad.json").read_text())
+                self.assertEqual(step0["locus"], "train_step_grad_check")
+                capsule = torch.load(step0["replay_capsule"], weights_only=False)
+                self.assertTrue(torch.equal(capsule["model_state_dict"]["lin.weight"], start[0]))
+
+    def test_one_bad_step_is_skipped_the_others_train(self) -> None:
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            _, model, start, result = self._run(Path(a), _poisoned_loss({0}))
+            train = result["history"]["train"][0]
+            self.assertEqual((train["n_batches"], train["n_anomalies"]), (1, 1))
+            self.assertTrue(math.isfinite(train["mean_grad_norm"]))
+            self.assertFalse(torch.equal(model.lin.weight.detach(), start[0]))  # step 1 trained
+            self._assert_no_non_finite_checkpoint(Path(a))
+            # healthy reference: the poisoned run differs only by the missing step 0
+            _, clean, _, _ = self._run(Path(b), _poisoned_loss(set()))
+            self.assertFalse(torch.equal(clean.lin.weight.detach(), model.lin.weight.detach()))
+
+    def test_skip_with_mid_epoch_saves_keeps_the_record_consistent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            _, _, _, result = self._run(out, _poisoned_loss({0}), save_every_n_steps=1)
+            self.assertEqual(result["history"]["train"][0]["n_anomalies"], 1)
+            self._assert_no_non_finite_checkpoint(out)
+
+    def test_overflowing_norm_of_finite_gradients_is_skipped(self) -> None:
+        # every gradient element finite (~1e25 in float32), the fp32 norm overflows
+        # to inf: clipping would zero the gradients and the step apply only momentum
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            runner, model, start, result = self._run(out, _poisoned_loss({0}, 1e25))
+            train = result["history"]["train"][0]
+            self.assertEqual((train["n_batches"], train["n_anomalies"]), (1, 1))
+            step0 = json.loads((runner.failure_dir / "failure_step0_NaN_or_Inf_Grad.json").read_text())
+            self.assertIn("grad_norm=inf", step0["observable"])
+            self._assert_no_non_finite_checkpoint(out)
+
+    def test_grad_scaler_skip_skips_the_ema_and_counts_as_skipped(self) -> None:
+        # AMP: the scaler skips optimizer.step on an inf/NaN gradient and halves
+        # the scale; the EMA must not move and the step must not count as a
+        # healthy one with grad_norm=nan (mean_grad_norm used to become NaN/inf)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            scaler = torch.amp.GradScaler("cpu", init_scale=1024.0)
+            runner, model, start, result = self._run(out, _poisoned_loss({0}), scaler=scaler)
+            train = result["history"]["train"][0]
+            self.assertEqual((train["n_batches"], train["n_anomalies"]), (1, 1))
+            self.assertTrue(math.isfinite(train["mean_grad_norm"]))
+            self.assertEqual(scaler.get_scale(), 512.0)  # one backoff, no growth
+            self.assertEqual(int(runner.ema_model.n_averaged), 1)  # only the applied step
+            self.assertEqual(sorted(runner.failure_dir.glob("failure_*.json")), [])  # routine, no capsule
+            self._assert_no_non_finite_checkpoint(out)
+
+    def test_overflowing_norm_of_finite_gradients_is_skipped_with_a_grad_scaler(self) -> None:
+        # HX102-02: every element finite after unscale_ (~1e25), so the scaler finds
+        # no inf, steps and keeps its scale; the fp32 norm overflows to inf, clipping
+        # zeroes the gradients, and the step counted as healthy with grad_norm=inf
+        # (mean_grad_norm=inf). It is no loss-scale backoff: capsule + signature.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            scaler = torch.amp.GradScaler("cpu", init_scale=1024.0)
+            runner, model, start, result = self._run(out, _poisoned_loss({0}, 1e25), scaler=scaler)
+            train = result["history"]["train"][0]
+            self.assertEqual((train["n_batches"], train["n_anomalies"]), (1, 1))
+            self.assertTrue(math.isfinite(train["mean_grad_norm"]))
+            self.assertEqual(scaler.get_scale(), 1024.0)  # no backoff, no growth (interval 2000)
+            self.assertEqual(int(runner.ema_model.n_averaged), 1)  # only the applied step
+            step0 = json.loads((runner.failure_dir / "failure_step0_NaN_or_Inf_Grad.json").read_text())
+            self.assertIn("grad_norm=inf", step0["observable"])
+            capsule = torch.load(step0["replay_capsule"], weights_only=False)
+            self.assertTrue(torch.equal(capsule["model_state_dict"]["lin.weight"], start[0]))
+            self._assert_no_non_finite_checkpoint(out)
+
+    def test_zero_loss_scale_is_a_skip(self) -> None:
+        # HX102-04: at scale 0 the scaled gradients are 0 and unscale_ multiplies them
+        # by 1/0 = inf (NaN, found after the check on the inputs); the scale cannot drop
+        # below 0, so the backoff test never saw a skip
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            scaler = torch.amp.GradScaler("cpu", init_scale=1024.0)
+            scaler._lazy_init_scale_growth_tracker(torch.device("cpu"))
+            scaler._scale.fill_(0.0)
+            runner, model, start, result = self._run(out, _poisoned_loss(set()), scaler=scaler)
+            train = result["history"]["train"][0]
+            self.assertEqual((train["n_batches"], train["n_anomalies"]), (0, 2))
+            self.assertTrue(math.isnan(train["mean_grad_norm"]))  # no healthy step: no measurement
+            for p, p0 in zip(model.parameters(), start):
+                self.assertTrue(torch.equal(p.detach(), p0))
+            self.assertEqual(int(runner.ema_model.n_averaged), 0)
+            self._assert_no_non_finite_checkpoint(out)
+
+    def test_disabled_grad_scaler_takes_the_no_scaler_path(self) -> None:
+        # GradScaler(enabled=False): scale stays 1.0 and scaler.step never skips, so
+        # the scale-backoff test cannot see the NaN; the update must take the
+        # no-scaler path (skip + FailureSignature), not stop with NaN weights
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            scaler = torch.amp.GradScaler("cpu", enabled=False)
+            runner, model, start, result = self._run(out, _poisoned_loss({0}), scaler=scaler)
+            train = result["history"]["train"][0]
+            self.assertEqual((train["n_batches"], train["n_anomalies"]), (1, 1))
+            self.assertTrue((runner.failure_dir / "failure_step0_NaN_or_Inf_Grad.json").is_file())
+            self._assert_no_non_finite_checkpoint(out)
+
+    def test_grad_scaler_growth_is_not_a_skip(self) -> None:
+        # positive control: a scale that grows after every clean step (growth_interval=1)
+        # is no skip, and a power-of-two scale reproduces the unscaled run bitwise
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            scaler = torch.amp.GradScaler("cpu", init_scale=1024.0, growth_interval=1)
+            runner, scaled, _, result = self._run(Path(a), _poisoned_loss(set()), scaler=scaler)
+            self.assertEqual(result["history"]["train"][0]["n_anomalies"], 0)
+            self.assertEqual(scaler.get_scale(), 4096.0)  # grew twice
+            self.assertEqual(int(runner.ema_model.n_averaged), 2)
+            _, plain, _, _ = self._run(Path(b), _poisoned_loss(set()))
+            for p, q in zip(scaled.parameters(), plain.parameters()):
+                self.assertTrue(torch.equal(p.detach(), q.detach()))
+
+    def test_parameter_check_is_exact_at_the_edges(self) -> None:
+        # max-abs norm: 3e38 (float32) and 1e308 (float64) are finite, no overflow
+        # false alarm; an empty parameter is ignored; NaN in a float64 group of a
+        # mixed-dtype model is found and named
+        class Mixed(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = nn.Parameter(torch.full((3,), 3e38))
+                self.b = nn.Parameter(torch.full((2,), 1e308, dtype=torch.float64))
+                self.empty = nn.Parameter(torch.zeros(0))
+
+            def forward(self, x):
+                return x
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = _make_runner(Path(tmpdir))
+            runner.raw_model = Mixed()
+            runner._check_parameters_finite()  # no false alarm
+            with torch.no_grad():
+                runner.raw_model.b[1] = float("nan")
+            with self.assertRaisesRegex(NonFiniteParameterError, r"\['b'\]"):
+                runner._check_parameters_finite()
+            with torch.no_grad():
+                runner.raw_model.b[1] = 0.0
+                runner.raw_model.a[0] = -float("inf")
+            with self.assertRaisesRegex(NonFiniteParameterError, r"\['a'\]"):
+                runner._check_parameters_finite()
+
+    def test_check_finite_params_opt_out_and_type(self) -> None:
+        with self.assertRaisesRegex(ValueError, "check_finite_params must be a bool"):
+            RunnerConfig(check_finite_params=1)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            torch.manual_seed(0)
+            model = _TinyModel()
+            runner = HexTrainingRunner(
+                RunnerConfig(output_dir=str(out), num_epochs=1, check_finite_params=False), model,
+                _OverflowingSGD(model.parameters(), lr=0.1), *_make_loaders(n=4, batch_size=2), device="cpu",
+            )
+            runner.run()  # opted out: no NonFiniteParameterError (the NaN loss of step 1 is skipped)
+            self.assertFalse(bool(torch.isfinite(model.lin.weight).all()))
+
+    def test_non_finite_parameter_after_step_stops_before_any_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir)
+            torch.manual_seed(0)
+            model = _TinyModel()
+            runner = HexTrainingRunner(
+                RunnerConfig(output_dir=str(out), num_epochs=1), model,
+                _OverflowingSGD(model.parameters(), lr=0.1), *_make_loaders(n=4, batch_size=2), device="cpu",
+            )
+            ema_before = [p.detach().clone() for p in runner.ema_model.module.parameters()]
+            with self.assertRaisesRegex(NonFiniteParameterError, r"step 0: \['lin\.weight'"):
+                runner.run()
+            self.assertEqual(sorted(out.rglob("*.pt")), [])
+            for p, p0 in zip(runner.ema_model.module.parameters(), ema_before):
+                self.assertTrue(torch.equal(p.detach(), p0))  # EMA not updated with the bad step
+
 
 
 if __name__ == "__main__":

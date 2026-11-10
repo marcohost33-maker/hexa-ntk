@@ -19,6 +19,7 @@ Three layers:
 """
 from __future__ import annotations
 
+import errno
 import gc
 import json
 import math
@@ -30,6 +31,7 @@ import unittest
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -48,6 +50,7 @@ from ddp_hex_v3 import (
     restore_rng_state_tensors,
     rng_state_tensors,
 )
+from failure_signature_hex_v3 import FailureSignature
 from operator_adapter_hex_v3 import OperatorAdapterV3
 from runner_hex_v3 import HexTrainingRunner, RunnerConfig
 
@@ -527,6 +530,29 @@ class TestWorldSizeOne(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "unscale_ failed") as caught:
                 runner._agreed_next(iter(runner.train_loader))
             self.assertIn("training step 0 after backward", " ".join(caught.exception.__notes__))
+
+    def test_error_recording_a_skipped_update_is_held_too(self) -> None:
+        # HX102-01: the capsule and FailureSignature of a skipped update are written
+        # after DDP's gradient all-reduce as well; an OSError there (a full disk) on
+        # one rank must be held and agreed like an optimizer error, not raised alone.
+        def full(*args: Any, **kwargs: Any) -> None:
+            raise OSError(errno.ENOSPC, "No space left on device (injected)")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp), distributed=True, num_epochs=1)
+            runner._apply_update = lambda: (float("nan"), False)
+            with mock.patch.object(FailureSignature, "register", full):
+                with self.assertLogs("runner_hex_v3", level="ERROR") as logs:
+                    _, healthy, grad_norm = runner._train_one_step(next(iter(runner.train_loader)))
+            self.assertFalse(healthy)
+            self.assertIsNone(grad_norm)
+            self.assertIn("held until the next agreement point", " ".join(logs.output))
+            self.assertIsInstance(runner._post_step_error, OSError)
+            runner.global_step = 1
+            with self.assertRaisesRegex(OSError, "No space left") as caught:
+                runner._agreed_next(iter(runner.train_loader))
+            self.assertIn("training step 0 after backward", " ".join(caught.exception.__notes__))
+            self.assertIsNone(runner._post_step_error)
 
     def test_held_error_survives_a_failed_agreement(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1316,6 +1342,146 @@ def _sc_equivalence_12(rank: int, world: int, out: Path) -> Dict[str, Any]:
     }
 
 
+class _PoisonGrad(torch.autograd.Function):
+    """Identity forward; backward multiplies the incoming gradient by NaN."""
+
+    @staticmethod
+    def forward(ctx: Any, x: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx: Any, grad: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
+        return grad * float("nan")
+
+
+def _sc_nan_grad_on_rank1(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """Section 3.7: a finite loss with a NaN gradient on rank 1 only (its step 1).
+
+    DDP's all-reduce spreads the NaN to every rank's gradient, so every rank
+    skips that update on its own; the agreement points confirm it. Before the
+    fix all ranks stepped with NaN and trained on NaN weights from then on.
+    """
+    calls = {"n": 0}
+    mse = nn.MSELoss()
+
+    def loss_fn(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        if pred.requires_grad:
+            calls["n"] += 1
+            if rank == 1 and calls["n"] == 2:
+                pred = _PoisonGrad.apply(pred)
+        return mse(pred, target)
+
+    model = DDP(_model())
+    runner = HexTrainingRunner(
+        _config(out, distributed=True, is_main_process=rank == 0, num_epochs=2, save_every_n_steps=1),
+        model, torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9),
+        _train_loader(rank, world), _exact_val_loader(), loss_fn=loss_fn,
+    )
+    result = runner.run()
+    return {
+        "digest": _digest(runner.raw_model),
+        "finite": all(bool(torch.isfinite(p).all()) for p in runner.raw_model.parameters())
+        and all(bool(torch.isfinite(p).all()) for p in runner.ema_model.module.parameters()),
+        "n_anomalies": [t["n_anomalies"] for t in result["history"]["train"]],
+        "n_batches": [t["n_batches"] for t in result["history"]["train"]],
+        "failure_files": sorted(p.name for p in runner.failure_dir.glob("*.json")),
+    }
+
+
+def _grad_skip_split(save_every_n_steps: int) -> Callable[[int, int, Path], Dict[str, Any]]:
+    """Section 3.7 fault injection: rank 1 alone skips step 0 (as if only its
+    reduced gradient were non-finite), the peers apply it. The weights now
+    differ; the next agreement point must stop every rank before any save."""
+
+    def scenario(rank: int, world: int, out: Path) -> Dict[str, Any]:
+        runner = _failing_step_runner(rank, world, out, failing_rank=-1, fail_at=-1, num_epochs=1,
+                                      save_every_n_steps=save_every_n_steps)
+        if rank == 1:
+            original = runner._apply_update
+            calls = {"n": 0}
+
+            def split() -> Any:
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    runner.optimizer.zero_grad(set_to_none=True)
+                    return float("nan"), False
+                return original()
+
+            runner._apply_update = split
+        return _post_step_outcome(runner, out)
+
+    return scenario
+
+
+def _sc_skip_record_error_rank1(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """HX102-01: a NaN gradient on rank 1 (step 0) makes every rank skip the update;
+    writing the FailureSignature of that skip fails on rank 1 only (a full disk).
+
+    Before the fix rank 1 raised at once and its peers waited in the next
+    agreement until the collective timeout; now the error is held and agreed.
+    """
+    calls = {"n": 0}
+    mse = nn.MSELoss()
+
+    def loss_fn(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        if pred.requires_grad:
+            calls["n"] += 1
+            if rank == 1 and calls["n"] == 1:
+                pred = _PoisonGrad.apply(pred)
+        return mse(pred, target)
+
+    def full(*args: Any, **kwargs: Any) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device (injected)")
+
+    model = DDP(_model())
+    runner = HexTrainingRunner(
+        _config(out, distributed=True, is_main_process=rank == 0, num_epochs=1),
+        model, torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9),
+        _train_loader(rank, world), _exact_val_loader(), loss_fn=loss_fn,
+    )
+    if rank != 1:
+        return _post_step_outcome(runner, out)
+    with mock.patch.object(FailureSignature, "register", full):
+        return _post_step_outcome(runner, out)
+
+
+def _skip_limit(poison: str, preset_rank1: int) -> Callable[[int, int, Path], Dict[str, Any]]:
+    """HX102-03: max_consecutive_skips=2 under DDP; rank 1 poisons its first two steps.
+
+    ``poison="grad"``: a NaN gradient, spread to every rank by the all-reduce;
+    both ranks reach the limit together in step 1 and each raises its own
+    ConsecutiveSkipsError at the agreement. ``poison="loss"`` with rank 1's
+    count preset to 1 (a desynchronised count, fault injection): only rank 1
+    reaches the limit, in step 0, on the non-finite-loss path outside the
+    held region of the update; the stop must still be agreed, not a lone exit.
+    """
+
+    def scenario(rank: int, world: int, out: Path) -> Dict[str, Any]:
+        calls = {"n": 0}
+        mse = nn.MSELoss()
+
+        def loss_fn(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+            if pred.requires_grad:
+                calls["n"] += 1
+                if rank == 1 and calls["n"] <= 2:
+                    if poison == "loss":
+                        return mse(pred, target) * float("nan")
+                    pred = _PoisonGrad.apply(pred)
+            return mse(pred, target)
+
+        model = DDP(_model())
+        runner = HexTrainingRunner(
+            _config(out, distributed=True, is_main_process=rank == 0, num_epochs=2, max_consecutive_skips=2),
+            model, torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9),
+            _train_loader(rank, world), _exact_val_loader(), loss_fn=loss_fn,
+        )
+        if rank == 1:
+            runner._consecutive_skips = preset_rank1
+        return _post_step_outcome(runner, out)
+
+    return scenario
+
+
 _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "equivalence": _sc_equivalence,
     "padded_val": _sc_padded_val,
@@ -1345,6 +1511,13 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "step_error_last_step_rank1": _sc_step_error_last_step_rank1,
     "step_error_before_mid_save_rank1": _sc_step_error_before_mid_save_rank1,
     "ema_error_rank0": _sc_ema_error_rank0,
+    "nan_grad_on_rank1": _sc_nan_grad_on_rank1,
+    "grad_skip_split_rank1": _grad_skip_split(0),
+    "grad_skip_split_before_mid_save_rank1": _grad_skip_split(1),
+    # last: before the fix it desynchronised the job; the scenarios above stay valid
+    "skip_record_error_rank1": _sc_skip_record_error_rank1,
+    "skip_limit_both": _skip_limit("grad", 0),
+    "skip_limit_desync_rank1": _skip_limit("loss", 1),
 }
 
 # The 3-rank job (spec section 8, v1.1): equivalence with an uneven validation
@@ -1357,6 +1530,8 @@ _SCENARIOS_3: Dict[str, Callable[[int, int, Path], Any]] = {
     "step_error_last_step_rank1": _sc_step_error_last_step_rank1,
     "step_error_before_mid_save_rank1": _sc_step_error_before_mid_save_rank1,
     "ema_error_rank0": _sc_ema_error_rank0,
+    "nan_grad_on_rank1": _sc_nan_grad_on_rank1,
+    "grad_skip_split_rank1": _grad_skip_split(0),
 }
 
 _SUITES: Dict[str, Dict[str, Callable[[int, int, Path], Any]]] = {"two": _SCENARIOS, "three": _SCENARIOS_3}
@@ -1499,6 +1674,29 @@ class _MultiRankJob(unittest.TestCase):
         values = self._post_step("ema_error_rank0", 0, 0, "stopped before step 1")
         self.assertEqual(values[0]["checkpoints"], [])
 
+    def _check_grad_skip_scenarios(self) -> None:
+        """Section 3.7: a NaN gradient skips on every rank; a split skip stops every rank."""
+        values = self._ok("nan_grad_on_rank1")
+        for rank, value in enumerate(values):
+            with self.subTest("nan_grad_on_rank1", rank=rank):
+                self.assertTrue(value["finite"])
+                self.assertEqual(value["digest"], values[0]["digest"])
+                self.assertEqual(value["n_anomalies"], [1, 0])
+                self.assertIn("failure_step1_NaN_or_Inf_Grad.json", value["failure_files"])
+        names = ["grad_skip_split_rank1"]
+        if "grad_skip_split_before_mid_save_rank1" in _SUITES[self.SUITE]:
+            # bound to the suite, not to the results: a scenario missing from a
+            # desynchronised job must fail in _ok, not be skipped
+            names.append("grad_skip_split_before_mid_save_rank1")
+        for name in names:
+            before = "the mid-epoch save" if "mid_save" in name else "stopped before step 1"
+            for rank, value in enumerate(self._ok(name)):
+                with self.subTest(name, rank=rank):
+                    self.assertEqual(value["error"], "DistributedContractError")
+                    self.assertIn(f"1 of {self.WORLD} ranks skipped training step 0", value["message"])
+                    self.assertIn(before, value["message"])
+                    self.assertEqual(value["checkpoints"], [])
+
 
 class TestTwoRanks(_MultiRankJob):
     """Real 2-rank gloo job; every scenario must end, none may hang."""
@@ -1508,6 +1706,37 @@ class TestTwoRanks(_MultiRankJob):
 
     def test_error_after_backward_on_one_rank_fails_both(self) -> None:
         self._check_post_step_scenarios()
+
+    def test_non_finite_gradient_skips_on_both_and_a_split_stops_both(self) -> None:
+        self._check_grad_skip_scenarios()
+
+    def test_error_recording_a_skipped_update_on_one_rank_fails_both(self) -> None:
+        # HX102-01: rank 1 raises its own OSError, rank 0 the agreed PeerRankError;
+        # neither waits for the collective timeout
+        values = self._ok("skip_record_error_rank1")
+        self.assertEqual(values[1]["error"], "OSError")
+        self.assertIn("No space left on device", values[1]["message"])
+        self.assertTrue(any("agreed failure on rank(s) [1]" in n for n in values[1]["notes"]), values[1]["notes"])
+        self.assertEqual(values[0]["error"], "PeerRankError")
+        for part in ("training step 0 after backward", "failed on rank(s) [1]", "stopped before step 1"):
+            self.assertIn(part, values[0]["message"])
+        self.assertEqual(values[0]["checkpoints"], [])
+
+    def test_consecutive_skip_limit_stops_both_ranks_alike(self) -> None:
+        # HX102-03: equal counts, both ranks raise their own error at the same agreement
+        for rank, value in enumerate(self._ok("skip_limit_both")):
+            with self.subTest("skip_limit_both", rank=rank):
+                self.assertEqual(value["error"], "ConsecutiveSkipsError")
+                self.assertIn("2 training steps in a row were skipped (the last: step 1", value["message"])
+                self.assertTrue(any("agreed failure on rank(s) [0, 1]" in n for n in value["notes"]), value["notes"])
+                self.assertEqual(value["checkpoints"], [])
+        # a desynchronised count: rank 1 alone at the limit, rank 0 stops with it, no hang
+        values = self._ok("skip_limit_desync_rank1")
+        self.assertEqual(values[1]["error"], "ConsecutiveSkipsError")
+        self.assertTrue(any("agreed failure on rank(s) [1]" in n for n in values[1]["notes"]), values[1]["notes"])
+        self.assertEqual(values[0]["error"], "PeerRankError")
+        for part in ("training step 0", "failed on rank(s) [1]", "stopped before step 1"):
+            self.assertIn(part, values[0]["message"])
 
     def test_two_ranks_reproduce_the_single_process_run(self) -> None:
         r0, r1 = self._ok("equivalence")
@@ -1671,6 +1900,9 @@ class TestThreeRanks(_MultiRankJob):
 
     def test_error_after_backward_on_one_rank_fails_all(self) -> None:
         self._check_post_step_scenarios()
+
+    def test_non_finite_gradient_skips_on_all_and_a_split_stops_all(self) -> None:
+        self._check_grad_skip_scenarios()
 
 
 if __name__ == "__main__":
