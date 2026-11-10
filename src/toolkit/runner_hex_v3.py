@@ -54,6 +54,7 @@ import collections
 import dataclasses
 import gc
 import hashlib
+import inspect
 import json
 import logging
 import math
@@ -141,14 +142,36 @@ def _update_tensor_digest(h: Any, tensor: torch.Tensor) -> None:
 
 
 def _module_digest(module: nn.Module) -> bytes:
-    """SHA-256 over the names, dtypes, shapes and bytes of a module's state."""
+    """SHA-256 over the names, dtypes, shapes and bytes of a module's state.
+
+    A non-tensor entry (a module's ``get_extra_state()``) is digested like any
+    other state value and refused if opaque (R8); before, it was skipped, so
+    ranks with other extra state agreed.
+    """
     h = hashlib.sha256()
-    for name, tensor in module.state_dict(keep_vars=False).items():
-        if not torch.is_tensor(tensor):
-            continue
+    for name, value in module.state_dict(keep_vars=False).items():
         h.update(f"{name}|".encode("utf-8"))
-        _update_tensor_digest(h, tensor)
+        if torch.is_tensor(value):
+            _update_tensor_digest(h, value)
+        else:
+            _update_state_digest(h, value)
     return h.digest()
+
+
+# The value types a state digest admits, held as objects and matched by identity
+# (spec/DDP_RUNNER_v1.md section 6, R8). Before, any other object contributed only
+# its type name: two classes of one name, or one class with other hidden
+# attributes, digested alike (cross-family GPT-6 A7-R2 "opaque fallback"). And
+# isinstance() would admit subclasses whose hex(), __format__ or items() write
+# other bytes. collections.Counter: MultiStepLR keeps its milestones in one.
+_DIGESTIBLE_TYPES: Tuple[type, ...] = (
+    type(None), bool, int, float, complex, str, bytes, bytearray,
+    set, frozenset, dict, collections.Counter, list, tuple,
+    torch.Tensor, nn.Parameter, np.ndarray,
+    *{t for t in np.sctypeDict.values() if isinstance(t, type) and issubclass(t, np.generic)},
+)
+# id() of a live, held object is unique: identity without calling a metaclass __eq__
+_DIGESTIBLE_TYPE_IDS = frozenset(id(t) for t in _DIGESTIBLE_TYPES)
 
 
 def _update_state_digest(h: Any, value: Any) -> None:
@@ -159,10 +182,18 @@ def _update_state_digest(h: Any, value: Any) -> None:
     (``float.hex``, so -0.0, NaN and every ulp count), complex numbers, ints,
     bools, strings, bytes, None, and dicts/lists/tuples/sets of them (dict keys
     and set elements sorted by their encoding). Every value is typed: 1, 1.0,
-    True and np.int64(1) differ. Any other object contributes its type name
-    only, never its ``repr``: a ``repr`` may carry a memory address and would
-    differ between ranks that hold equal state (such objects are not compared).
+    True and np.int64(1) differ. Any other object -- including a subclass of an
+    admitted type -- raises TypeError: its bytes are not known, and neither its
+    ``repr`` (a memory address) nor its type name (forgeable, not unique) says
+    whether two ranks hold the same state.
     """
+    if id(type(value)) not in _DIGESTIBLE_TYPE_IDS:
+        cls = type(value)
+        raise TypeError(
+            f"state value of type {cls.__module__}.{cls.__qualname__} cannot be compared "
+            "between ranks (only tensors, NumPy values and plain Python scalars and "
+            "containers are digested; other objects are refused, not named)"
+        )
     if torch.is_tensor(value):
         _update_tensor_digest(h, value)
     elif isinstance(value, np.ndarray):
@@ -215,13 +246,11 @@ def _update_state_digest(h: Any, value: Any) -> None:
             h.update(key_digest)
             _update_state_digest(h, item)
         h.update(b"}")
-    elif isinstance(value, (list, tuple)):
+    else:  # list or tuple: the last admitted types
         h.update(f"l{len(value)}[".encode("utf-8"))
         for item in value:
             _update_state_digest(h, item)
         h.update(b"]")
-    else:
-        h.update(f"o{type(value).__qualname__};".encode("utf-8"))
 
 
 def _state_digest(state: Any) -> bytes:
@@ -229,6 +258,99 @@ def _state_digest(state: Any) -> bytes:
     h = hashlib.sha256()
     _update_state_digest(h, state)
     return h.digest()
+
+
+# Equal state_dict() bytes mean equal future training only for classes whose
+# state_dict() carries everything step() reads (spec/DDP_RUNNER_v1.md section 6,
+# R8). The built-in classes measured to have that property (torch 2.6.0: load the
+# state into an instance built with other arguments, step on, same learning rates /
+# parameters) are held here as objects at import and matched by identity: a
+# class's __module__ and __qualname__ are writable, so a foreign class can carry
+# the names "torch.optim.lr_scheduler" and "StepLR" (cross-family GPT-6 R8-01).
+# Not admitted: LambdaLR and MultiplicativeLR (a plain function or lambda is not in
+# their state: other functions on two ranks gave 0.0531 vs 0.0262 after 3 steps)
+# and CyclicLR (a custom scale_fn is not in its state either).
+_lrs = torch.optim.lr_scheduler
+_TRUSTED_SCHEDULERS: Tuple[type, ...] = (
+    _lrs.StepLR, _lrs.MultiStepLR, _lrs.ConstantLR, _lrs.LinearLR, _lrs.ExponentialLR,
+    _lrs.PolynomialLR, _lrs.CosineAnnealingLR, _lrs.CosineAnnealingWarmRestarts,
+    _lrs.ReduceLROnPlateau, _lrs.OneCycleLR, _lrs.SequentialLR, _lrs.ChainedScheduler,
+)
+# their inner schedulers drive the learning rate and must pass the same check
+_COMPOSITE_SCHEDULERS: Tuple[type, ...] = (_lrs.SequentialLR, _lrs.ChainedScheduler)
+_TRUSTED_OPTIMIZERS: Tuple[type, ...] = tuple(
+    cls for cls in (
+        getattr(torch.optim, name, None)
+        for name in ("Adadelta", "Adafactor", "Adagrad", "Adam", "Adamax", "AdamW", "ASGD",
+                     "LBFGS", "NAdam", "RAdam", "RMSprop", "Rprop", "SGD", "SparseAdam")
+    )
+    if isinstance(cls, type)
+)
+_TRUSTED_GRAD_SCALERS: Tuple[type, ...] = (torch.amp.GradScaler,)
+# Instance-level step: torch's own LR schedulers wrap optimizer.step on the
+# instance (lr_scheduler.patch_track_step_called), so it cannot be refused there.
+_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED = frozenset({"step"})
+# Hooks that rewrite an optimizer's exported state (Optimizer.register_state_dict_*_hook)
+_OPTIMIZER_EXPORT_HOOKS = ("_optimizer_state_dict_pre_hooks", "_optimizer_state_dict_post_hooks")
+
+
+def _is_method(attr: Any) -> bool:
+    """A class attribute an instance attribute of the same name would replace as behaviour."""
+    return callable(attr) or isinstance(attr, classmethod)
+
+
+def _comparable_state(
+    obj: Any, trusted: Tuple[type, ...], what: str, *, tolerated: frozenset = frozenset()
+) -> Any:
+    """``obj.state_dict()`` if equal states mean equal behaviour on every rank; None for None.
+
+    Refused with DistributedContractError, before ``state_dict()`` runs:
+
+    - a class that is not exactly one of ``trusted`` (identity, not names, not
+      isinstance: a subclass or look-alike may read hidden attributes, and a
+      metaclass ``__eq__`` or a ``__class__`` property can fake equality);
+    - an instance attribute that shadows a method of the class (an instance-level
+      ``state_dict``, ``step`` or ``get_lr``: the state then says nothing about the
+      behaviour), except the instance-level ``step`` torch puts on an optimizer;
+    - an optimizer with a state_dict pre/post hook (it rewrites the exported state);
+    - a SequentialLR/ChainedScheduler whose inner schedulers fail any of this.
+
+    Not covered: a class patched process-wide (``torch.optim.SGD.step = ...``) and
+    torch itself (identity is no supply-chain attestation); hooks that change
+    ``step`` (they do not alter the state).
+    """
+    if obj is None:
+        return None
+    cls = type(obj)
+    name = f"{cls.__module__}.{cls.__qualname__}"
+    if not any(cls is allowed for allowed in trusted):
+        raise DistributedContractError(
+            f"{what}: {name} is not one of the built-in classes whose state_dict() determines "
+            "its future behaviour, so equal states on the ranks would not mean equal training "
+            "(subclasses and classes that only carry a built-in name are refused; LambdaLR, "
+            "MultiplicativeLR and CyclicLR keep functions outside their state)"
+        )
+    shadowing = sorted(
+        attr for attr in vars(obj)
+        if isinstance(attr, str) and attr not in tolerated and _is_method(inspect.getattr_static(cls, attr, None))
+    )
+    if shadowing:
+        raise DistributedContractError(
+            f"{what}: this {name} instance overrides {', '.join(shadowing)}; its state_dict() "
+            "would not describe its behaviour"
+        )
+    hooked = [attr for attr in _OPTIMIZER_EXPORT_HOOKS if getattr(obj, attr, None)]
+    if hooked:
+        raise DistributedContractError(
+            f"{what}: this {name} has state_dict hooks ({', '.join(hooked)}) that rewrite its state"
+        )
+    if any(cls is composite for composite in _COMPOSITE_SCHEDULERS):
+        inner = vars(obj).get("_schedulers")
+        if type(inner) is not list and type(inner) is not tuple:
+            raise DistributedContractError(f"{what}: {name} holds its schedulers in an unknown container")
+        for child in inner:
+            _comparable_state(child, trusted, f"{what} (inside {cls.__qualname__})", tolerated=tolerated)
+    return obj.state_dict()
 
 
 def _is_oom(exc: BaseException) -> bool:
@@ -908,15 +1030,21 @@ class HexTrainingRunner:
         the anomaly history and mid-epoch rank buffers (the latter are copied in
         after the resume check, ``_resume_local``). A component the run does not
         use (no scheduler, no EMA, no GradScaler) is digested as None on every rank.
-        """
-        def state(obj: Any) -> Any:
-            return None if obj is None else obj.state_dict()
 
+        Optimizer, scheduler and GradScaler are compared only if equal states mean
+        equal behaviour: exactly a built-in class, no instance-level override of
+        its methods (``_comparable_state``, section 6, R8); else
+        DistributedContractError, agreed like any digest failure.
+        """
+        optimizer = _comparable_state(self.optimizer, _TRUSTED_OPTIMIZERS, "optimizer",
+                                      tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
+        scheduler = _comparable_state(self.scheduler, _TRUSTED_SCHEDULERS, "scheduler")
+        grad_scaler = _comparable_state(self.grad_scaler, _TRUSTED_GRAD_SCALERS, "GradScaler")
         return [
             ("model weights", _module_digest(self.raw_model)),
-            ("optimizer state", _state_digest(state(self.optimizer))),
-            ("scheduler state", _state_digest(state(self.scheduler))),
-            ("GradScaler state", _state_digest(state(self.grad_scaler))),
+            ("optimizer state", _state_digest(optimizer)),
+            ("scheduler state", _state_digest(scheduler)),
+            ("GradScaler state", _state_digest(grad_scaler)),
             ("EMA state", _module_digest(self.ema_model) if self.ema_model is not None
              else _state_digest(None)),
         ]

@@ -52,7 +52,17 @@ from ddp_hex_v3 import (
 )
 from failure_signature_hex_v3 import FailureSignature
 from operator_adapter_hex_v3 import OperatorAdapterV3
-from runner_hex_v3 import HexTrainingRunner, RunnerConfig, _module_digest, _state_digest
+from runner_hex_v3 import (
+    _OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED,
+    _TRUSTED_GRAD_SCALERS,
+    _TRUSTED_OPTIMIZERS,
+    _TRUSTED_SCHEDULERS,
+    HexTrainingRunner,
+    RunnerConfig,
+    _comparable_state,
+    _module_digest,
+    _state_digest,
+)
 
 # ------------------------------------------------------------------
 # Fixtures shared by the in-process tests and the spawned ranks
@@ -331,16 +341,61 @@ class TestResumeStateDigest(unittest.TestCase):
         module.register_buffer("s", coalesced)
         self.assertEqual(len(_module_digest(module)), 32)
 
-    def test_opaque_objects_count_by_type_not_by_address(self) -> None:
-        class _Opaque:
+    def test_opaque_state_values_are_refused_not_named(self) -> None:
+        # R8 (cross-family GPT-6 A7-R2, "opaque fallback"): before, an unknown object
+        # was digested by its type name only, so two classes of one name -- or one
+        # class with other hidden attributes -- agreed between ranks
+        def opaque_class(hidden: int) -> type:
+            return type("Opaque", (), {"hidden": hidden})
+
+        first, second = opaque_class(1)(), opaque_class(2)()
+        self.assertEqual(type(first).__qualname__, type(second).__qualname__)  # the collision
+        for value in (first, object(), {"nested": [1, first]}, np.array([first], dtype=object)):
+            with self.subTest(value=type(value).__name__), self.assertRaisesRegex(TypeError, "cannot be compared"):
+                _state_digest(value)
+
+        # subclasses of admitted types are refused too: they may write other bytes
+        class LyingFloat(float):
+            def hex(self) -> str:
+                return (0.5).hex()
+
+        class LyingDict(dict):
             pass
 
-        # two live instances have different repr() (memory address) but must agree;
-        # both kept alive, else CPython may reuse the first one's address
-        first, second = _Opaque(), _Opaque()
-        self.assertNotEqual(repr(first), repr(second))
-        self.assertEqual(_state_digest({"f": first}), _state_digest({"f": second}))
-        self.assertNotEqual(_state_digest({"f": first}), _state_digest({"f": object()}))
+        for value in (LyingFloat(0.25), type("I", (int,), {})(3), LyingDict(a=1),
+                      torch.zeros(1).as_subclass(type("T", (torch.Tensor,), {}))):
+            with self.subTest(value=type(value).__name__), self.assertRaisesRegex(TypeError, "cannot be compared"):
+                _state_digest({"v": value})
+        # positive control: what built-in states hold stays digestible
+        import collections
+
+        for value in (collections.Counter({2: 1}), np.float32(1.5), np.int64(2), np.bool_(True),
+                      torch.zeros(2), nn.Parameter(torch.ones(1)), (1, None), frozenset({1})):
+            with self.subTest(value=type(value).__name__):
+                self.assertEqual(len(_state_digest({"v": value})), 32)
+
+    def test_module_extra_state_is_digested_and_opaque_extra_state_refused(self) -> None:
+        class WithExtra(nn.Module):
+            def __init__(self, extra: Any) -> None:
+                super().__init__()
+                self.lin = nn.Linear(2, 1)
+                self.extra = extra
+
+            def get_extra_state(self) -> Any:
+                return self.extra
+
+            def set_extra_state(self, state: Any) -> None:
+                self.extra = state
+
+        def module(extra: Any) -> nn.Module:
+            torch.manual_seed(0)
+            return WithExtra(extra)
+
+        # before: non-tensor entries were skipped, other extra state agreed
+        self.assertEqual(_module_digest(module({"k": 1})), _module_digest(module({"k": 1})))
+        self.assertNotEqual(_module_digest(module({"k": 1})), _module_digest(module({"k": 2})))
+        with self.assertRaisesRegex(TypeError, "cannot be compared"):
+            _module_digest(module(object()))
 
     def test_numpy_bytes_sets_and_complex_values_are_seen(self) -> None:
         # before: every one of these fell into the type-name branch, so two
@@ -472,6 +527,174 @@ class TestResumeStateDigest(unittest.TestCase):
 # ------------------------------------------------------------------
 
 
+class TestComparableState(unittest.TestCase):
+    """R8 (cross-family GPT-6 R8-01): optimizer, scheduler and GradScaler states are
+    compared between ranks only for built-in classes held by identity whose state
+    determines their behaviour (spec section 6)."""
+
+    REFUSED = "not one of the built-in classes"
+
+    @staticmethod
+    def _opt(cls: type = torch.optim.SGD, **kw: Any) -> torch.optim.Optimizer:
+        return cls(nn.Linear(2, 1).parameters(), lr=0.1, **kw)
+
+    def _refused(self, obj: Any, trusted: Any, pattern: str, **kw: Any) -> None:
+        with self.assertRaisesRegex(DistributedContractError, pattern):
+            _comparable_state(obj, trusted, "component", **kw)
+
+    def test_forged_scheduler_class_is_refused(self) -> None:
+        lrs = torch.optim.lr_scheduler
+        nameonly = _forged(object, "StepLR", "torch.optim.lr_scheduler", state_dict=lambda self: {})
+        subclass = _forged_step_lr()
+
+        class Meta(type):  # the strongest forger: equal to StepLR, same hash
+            def __eq__(cls, other: Any) -> bool:
+                return True
+
+            def __hash__(cls) -> int:
+                return hash(lrs.StepLR)
+
+        meta = Meta("StepLR", (lrs.StepLR,), {"__module__": "torch.optim.lr_scheduler"})
+
+        class ClassLiar(lrs.StepLR):
+            @property
+            def __class__(self) -> type:  # type: ignore[override]
+                return lrs.StepLR
+
+        # premises: each forger fools the check it targets
+        for cls in (nameonly, subclass, meta):
+            self.assertEqual((cls.__module__, cls.__name__), ("torch.optim.lr_scheduler", "StepLR"))
+        self.assertIn(meta, {lrs.StepLR})  # a set/dict lookup would admit it
+        liar = ClassLiar(self._opt(), step_size=1)
+        self.assertTrue(isinstance(liar, lrs.StepLR) and liar.__class__ is lrs.StepLR)
+        for obj in (nameonly(), subclass(self._opt(), step_size=1), meta(self._opt(), step_size=1), liar):
+            with self.subTest(forger=type(obj).__qualname__):
+                self._refused(obj, _TRUSTED_SCHEDULERS, self.REFUSED)
+        # negative control: the genuine class passes and yields its own state
+        real = lrs.StepLR(self._opt(), step_size=1)
+        self.assertEqual(_state_digest(_comparable_state(real, _TRUSTED_SCHEDULERS, "scheduler")),
+                         _state_digest(real.state_dict()))
+
+    def test_every_trusted_component_is_compared(self) -> None:
+        # positive control over the whole allowlist: no false refusal of a built-in
+        built = {name: make(self._opt(), 0) for name, make in _SCHEDULER_BUILDERS.items()}
+        self.assertEqual({type(s) for s in built.values()}, set(_TRUSTED_SCHEDULERS))
+        for name, sched in built.items():
+            with self.subTest(scheduler=name):
+                self.assertEqual(_comparable_state(sched, _TRUSTED_SCHEDULERS, "scheduler").keys(),
+                                 sched.state_dict().keys())
+        for cls in _TRUSTED_OPTIMIZERS:
+            with self.subTest(optimizer=cls.__name__):
+                opt = _build_optimizer(cls, 0.1)[1]
+                torch.optim.lr_scheduler.StepLR(opt, step_size=1)  # torch puts step on the instance
+                self.assertIn("step", vars(opt))
+                _comparable_state(opt, _TRUSTED_OPTIMIZERS, "optimizer",
+                                  tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
+        _comparable_state(_cpu_scaler(), _TRUSTED_GRAD_SCALERS, "GradScaler")
+        self.assertIsNone(_comparable_state(None, _TRUSTED_SCHEDULERS, "scheduler"))
+
+    def test_trusted_scheduler_state_determines_the_learning_rates(self) -> None:
+        """The oracle behind the allowlist: load a state into a scheduler built with
+        other arguments, step on -- the learning rates must be the original's."""
+        for name, make in _SCHEDULER_BUILDERS.items():
+            with self.subTest(scheduler=name):
+                original, other = _lr_continuations(make)
+                self.assertEqual(original, other)
+
+    def test_lambda_multiplicative_and_custom_cyclic_lr_are_refused(self) -> None:
+        lrs = torch.optim.lr_scheduler
+        untrusted = {
+            "LambdaLR": lambda o, k: lrs.LambdaLR(o, [lambda e: 0.9 ** e, lambda e: 0.8 ** e][k]),
+            "MultiplicativeLR": lambda o, k: lrs.MultiplicativeLR(o, [lambda e: 0.9, lambda e: 0.8][k]),
+            "CyclicLR": lambda o, k: lrs.CyclicLR(o, 0.01, 0.1, scale_fn=[lambda x: 1.0, lambda x: 0.5][k]),
+        }
+        for name, make in untrusted.items():
+            with self.subTest(scheduler=name):
+                original, other = _lr_continuations(make)
+                self.assertNotEqual(original, other)  # premise: equal state, other learning rates
+                self._refused(make(self._opt(), 0), _TRUSTED_SCHEDULERS, self.REFUSED)
+
+    def test_instance_override_of_state_export_or_behaviour_is_refused(self) -> None:
+        lrs = torch.optim.lr_scheduler
+        for attr, value in (("state_dict", lambda: {}), ("get_lr", lambda: [0.5]), ("step", lambda *a: None)):
+            sched = lrs.StepLR(self._opt(), step_size=1)
+            setattr(sched, attr, value)
+            with self.subTest(scheduler_override=attr):
+                self._refused(sched, _TRUSTED_SCHEDULERS, f"overrides {attr}")
+        opt = self._opt()
+        opt.state_dict = lambda: {}
+        self._refused(opt, _TRUSTED_OPTIMIZERS, "overrides state_dict",
+                      tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
+        for register in ("register_state_dict_pre_hook", "register_state_dict_post_hook"):
+            opt = self._opt()
+            getattr(opt, register)(lambda *a: None)
+            with self.subTest(hook=register):
+                self._refused(opt, _TRUSTED_OPTIMIZERS, "state_dict hooks",
+                              tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
+        # negative control: plain instance data (no method shadowed) is not refused
+        sched = lrs.StepLR(self._opt(), step_size=1)
+        sched.note = "user data"
+        _comparable_state(sched, _TRUSTED_SCHEDULERS, "scheduler")
+
+    def test_composite_scheduler_with_forged_or_overridden_child_is_refused(self) -> None:
+        lrs = torch.optim.lr_scheduler
+        forged_exp = _forged(lrs.ExponentialLR, "ExponentialLR", "torch.optim.lr_scheduler")
+        for composite in ("ChainedScheduler", "SequentialLR"):
+            def build(child: Callable[[Any], Any]) -> Any:
+                o = self._opt()
+                inner = [lrs.ConstantLR(o), child(o)]
+                return (lrs.ChainedScheduler(inner) if composite == "ChainedScheduler"
+                        else lrs.SequentialLR(o, inner, milestones=[2]))
+
+            with self.subTest(composite, child="genuine"):
+                _comparable_state(build(lambda o: lrs.ExponentialLR(o, 0.9)), _TRUSTED_SCHEDULERS, "scheduler")
+            with self.subTest(composite, child="forged"):
+                self._refused(build(lambda o: forged_exp(o, 0.9)), _TRUSTED_SCHEDULERS,
+                              f"inside {composite}.*{self.REFUSED}")
+            with self.subTest(composite, child="lambda"):
+                self._refused(build(lambda o: lrs.LambdaLR(o, lambda e: 1.0)), _TRUSTED_SCHEDULERS,
+                              f"inside {composite}")
+            overridden = build(lambda o: lrs.ExponentialLR(o, 0.9))
+            overridden._schedulers[1].get_lr = lambda: [0.5]
+            with self.subTest(composite, child="instance override"):
+                self._refused(overridden, _TRUSTED_SCHEDULERS, "overrides get_lr")
+            hidden = build(lambda o: lrs.ExponentialLR(o, 0.9))
+            hidden._schedulers = type("L", (list,), {})(hidden._schedulers)
+            with self.subTest(composite, child="foreign container"):
+                self._refused(hidden, _TRUSTED_SCHEDULERS, "unknown container")
+
+    def test_forged_optimizer_and_grad_scaler_are_refused(self) -> None:
+        forged_sgd = _forged(torch.optim.SGD, "SGD", "torch.optim.sgd")
+        self._refused(forged_sgd(nn.Linear(2, 1).parameters(), lr=0.1), _TRUSTED_OPTIMIZERS, self.REFUSED,
+                      tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
+        forged_scaler = _forged(torch.amp.GradScaler, "GradScaler", "torch.amp.grad_scaler")
+        self._refused(forged_scaler("cpu"), _TRUSTED_GRAD_SCALERS, self.REFUSED)
+        # the tolerated instance-level step exists for optimizers only
+        sched = torch.optim.lr_scheduler.StepLR(self._opt(), step_size=1)
+        sched.step = lambda *a: None
+        self._refused(sched, _TRUSTED_SCHEDULERS, "overrides step")
+
+    def test_trusted_optimizer_state_determines_the_update(self) -> None:
+        """Oracle for the optimizer allowlist: two optimizers built with other
+        learning rates, both loaded with one saved state, step alike."""
+        for cls in _TRUSTED_OPTIMIZERS:
+            with self.subTest(optimizer=cls.__name__):
+                model, opt, closure, x = _build_optimizer(cls, 0.05)
+                for _ in range(3):
+                    opt.step(closure)
+                saved = _roundtrip({"model": model.state_dict(), "opt": opt.state_dict()})
+                params = []
+                for lr in (0.05, 0.5):
+                    m, o, c, _ = _build_optimizer(cls, lr)
+                    m.load_state_dict(_roundtrip(saved["model"]))
+                    o.load_state_dict(_roundtrip(saved["opt"]))  # a copy: the step tensor is not copied by torch
+                    for _ in range(3):
+                        o.step(c)
+                    params.append([p.detach().clone() for p in m.parameters()])
+                for a, b in zip(*params):
+                    self.assertTrue(torch.equal(a, b))
+
+
 class TestWorldSizeOne(unittest.TestCase):
     """The distributed path under coverage; world 1 must equal no DDP at all."""
 
@@ -506,6 +729,32 @@ class TestWorldSizeOne(unittest.TestCase):
             train,
             val,
         )
+
+    def test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler(self) -> None:
+        # R8 at the runner: each component goes through the identity check, at
+        # construction (the initial agreement) and whenever the digests are built
+        with tempfile.TemporaryDirectory() as tmp:
+            model = DDP(_model())
+            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+            with self.assertRaisesRegex(DistributedContractError, "scheduler: .*LambdaLR is not one"):
+                HexTrainingRunner(_config(Path(tmp) / "a", distributed=True), model, opt,
+                                  DataLoader(_Data(8, seed=1), batch_size=4),
+                                  DataLoader(_Data(5, seed=2), batch_size=2),
+                                  scheduler=torch.optim.lr_scheduler.LambdaLR(opt, lambda e: 1.0))
+            runner = self._runner(Path(tmp) / "b", distributed=True)
+            self.assertEqual(len(runner._shared_state_digests()), 5)  # positive control
+            forged_sgd = _forged(torch.optim.SGD, "SGD", "torch.optim.sgd")
+            components = (
+                ("optimizer", forged_sgd(runner.raw_model.parameters(), lr=0.1)),
+                ("scheduler", _forged_step_lr()(runner.optimizer, step_size=1)),
+                ("grad_scaler", _forged(torch.amp.GradScaler, "GradScaler", "torch.amp.grad_scaler")("cpu")),
+            )
+            for attr, forged in components:
+                saved = getattr(runner, attr)
+                setattr(runner, attr, forged)
+                with self.subTest(attr), self.assertRaisesRegex(DistributedContractError, "is not one of the built-in"):
+                    runner._shared_state_digests()
+                setattr(runner, attr, saved)
 
     def test_world_one_reproduces_single_process_bitwise(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1435,6 +1684,133 @@ def _cpu_scaler() -> torch.amp.GradScaler:
     return torch.amp.GradScaler("cpu", init_scale=1024.0, growth_interval=2)
 
 
+# ------------------------------------------------------------------
+# R8: trusted classes by identity (TestComparableState and the 2-rank job)
+def _forged(base: type, name: str, module: str, **body: Any) -> type:
+    """A class carrying a built-in's name and module (cross-family GPT-6 R8-01:
+    ``type('StepLR', ..., {'__module__': 'torch.optim.lr_scheduler'})``)."""
+    return type(name, (base,), {"__module__": module, "__qualname__": name, **body})
+
+
+def _forged_step_lr() -> type:
+    """Named torch.optim.lr_scheduler.StepLR, StepLR's state, half its learning rates."""
+    step_lr = torch.optim.lr_scheduler.StepLR
+
+    def get_lr(self: Any) -> List[float]:
+        return [0.5 * lr for lr in step_lr.get_lr(self)]
+
+    return _forged(step_lr, "StepLR", "torch.optim.lr_scheduler", get_lr=get_lr)
+
+
+def _roundtrip(state: Any) -> Any:
+    """Through torch.save/torch.load like a checkpoint: no tensor shared with the source."""
+    import io
+
+    buffer = io.BytesIO()
+    torch.save(state, buffer)
+    buffer.seek(0)
+    return torch.load(buffer, weights_only=False)
+
+
+def _scheduler_builders() -> Dict[str, Callable[[torch.optim.Optimizer, int], Any]]:
+    """One builder per trusted scheduler; ``k`` selects other constructor arguments."""
+    lrs = torch.optim.lr_scheduler
+    return {
+        "StepLR": lambda o, k: lrs.StepLR(o, 2 + k, gamma=0.5 + 0.1 * k),
+        "MultiStepLR": lambda o, k: lrs.MultiStepLR(o, [1 + k, 3], gamma=0.5 + 0.1 * k),
+        "ConstantLR": lambda o, k: lrs.ConstantLR(o, factor=0.3 + 0.1 * k, total_iters=3 + k),
+        "LinearLR": lambda o, k: lrs.LinearLR(o, 0.2 + 0.1 * k, total_iters=4 + k),
+        "ExponentialLR": lambda o, k: lrs.ExponentialLR(o, 0.9 - 0.1 * k),
+        "PolynomialLR": lambda o, k: lrs.PolynomialLR(o, 6 + k, power=1.0 + k),
+        "CosineAnnealingLR": lambda o, k: lrs.CosineAnnealingLR(o, 5 + k, eta_min=0.001 * k),
+        "CosineAnnealingWarmRestarts": lambda o, k: lrs.CosineAnnealingWarmRestarts(o, 3 + k, T_mult=1 + k),
+        "ReduceLROnPlateau": lambda o, k: lrs.ReduceLROnPlateau(o, patience=1 + k, factor=0.5 + 0.1 * k),
+        "OneCycleLR": lambda o, k: lrs.OneCycleLR(o, 1.0 + k, total_steps=20 + k,
+                                                  anneal_strategy=("cos", "linear")[k]),
+        "SequentialLR": lambda o, k: lrs.SequentialLR(
+            o, [lrs.LinearLR(o, 0.2 + 0.1 * k), lrs.ExponentialLR(o, 0.9 - 0.1 * k)], [2 + k]),
+        "ChainedScheduler": lambda o, k: lrs.ChainedScheduler(
+            [lrs.ConstantLR(o, 0.3 + 0.1 * k), lrs.ExponentialLR(o, 0.9 - 0.1 * k)]),
+    }
+
+
+_SCHEDULER_BUILDERS = _scheduler_builders()
+
+
+def _lr_continuations(make: Callable[[torch.optim.Optimizer, int], Any]) -> List[List[float]]:
+    """Learning rates of 3 steps after loading one saved (optimizer, scheduler) state into
+    a scheduler built like the original (k=0) and one built with other arguments (k=1)."""
+    import warnings
+
+    def run(k: int, steps: int, saved: Optional[Any] = None) -> Any:
+        opt = torch.optim.SGD(nn.Linear(2, 1).parameters(), lr=0.1, momentum=0.9)
+        sched = make(opt, k)
+        if saved is not None:
+            opt.load_state_dict(_roundtrip(saved[0]))
+            sched.load_state_dict(_roundtrip(saved[1]))
+        lrs = []
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # optimizer.step without gradients, toy loop
+            for _ in range(steps):
+                opt.step()
+                if isinstance(sched, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    sched.step(1.0)
+                else:
+                    sched.step()
+                lrs.append(opt.param_groups[0]["lr"])
+        return opt, sched, lrs
+
+    opt, sched, _ = run(0, 3)
+    saved = (opt.state_dict(), sched.state_dict())
+    return [run(k, 3, saved)[2] for k in (0, 1)]
+
+
+def _build_optimizer(cls: type, lr: float) -> Any:
+    """(model, optimizer, closure, input) for one trusted optimizer class, float64."""
+    torch.manual_seed(0)
+    if cls is getattr(torch.optim, "SparseAdam", None):
+        model: nn.Module = nn.Embedding(5, 3, sparse=True, dtype=torch.float64)
+        x = torch.tensor([0, 2, 4])
+    else:
+        model = nn.Linear(3, 2, dtype=torch.float64)
+        x = torch.linspace(-1, 1, 12, dtype=torch.float64).reshape(4, 3)
+    opt = cls(model.parameters(), lr=lr)
+
+    def closure() -> torch.Tensor:
+        opt.zero_grad()
+        loss = model(x).pow(2).sum()
+        loss.backward()
+        return loss
+
+    return model, opt, closure, x
+
+
+def _scheduler_differs(kind: str) -> Callable[[int, int, Path], Any]:
+    """R8 (cross-family GPT-6 R8-01, A7-R2): equal scheduler state, other behaviour on
+    rank 1. ``kind="lambda"``: LambdaLR with another function on rank 1 (the function is
+    not in the state); ``kind="forged"``: rank 1's scheduler is a class named
+    torch.optim.lr_scheduler.StepLR that halves the learning rate. Before, both
+    digests agreed and both ranks trained to the end with diverging weights."""
+
+    def scenario(rank: int, world: int, out: Path) -> Any:
+        model = DDP(_model())
+        opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        if kind == "lambda":
+            factor = 0.8 if rank == 1 else 0.9
+            sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda e: factor ** e)
+        else:
+            cls = _forged_step_lr() if rank == 1 else torch.optim.lr_scheduler.StepLR
+            sched = cls(opt, step_size=1, gamma=0.5)
+        runner = HexTrainingRunner(
+            _config(out, distributed=True, is_main_process=rank == 0, num_epochs=2),
+            model, opt, _train_loader(rank, world), _exact_val_loader(), scheduler=sched,
+        )
+        runner.run()
+        return {"digest": _digest(runner.raw_model)}
+
+    return scenario
+
+
 def _resume_with_rank1_copy(mutate: Callable[[Dict[str, Any]], None], *,
                             scaler: bool = False) -> Callable[[int, int, Path], Any]:
     """Rank 1 resumes from a copy of rank 0's file whose weights are equal but
@@ -1490,8 +1866,9 @@ def _construction_differs(part: str) -> Callable[[int, int, Path], Any]:
 
 def _sc_state_dict_error_rank1(rank: int, world: int, out: Path) -> Any:
     """Round 3: building the shared-state digest fails on rank 1 only (here: its
-    scheduler's state_dict raises). Unagreed, rank 1 left while rank 0 waited in
-    the digest broadcast until the process-group timeout."""
+    scheduler carries an instance-level state_dict that raises; since R8 that
+    override is refused before it runs). Unagreed, rank 1 left while rank 0
+    waited in the digest broadcast until the process-group timeout."""
     model = DDP(_model())
     opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
     sched = torch.optim.lr_scheduler.StepLR(opt, step_size=1)
@@ -1585,19 +1962,21 @@ class _StepFailure(RuntimeError):
     """Injected error after backward (optimizer step / EMA update)."""
 
 
-class _FailingSGD(torch.optim.SGD):
-    """SGD whose ``fail_at``-th step raises (1-based; -1 never)."""
+def _failing_sgd(params: Any, *, fail_at: int, **kw: Any) -> torch.optim.SGD:
+    """A genuine SGD whose ``fail_at``-th step raises (1-based; -1 never).
 
-    def __init__(self, params: Any, *, fail_at: int, **kw: Any) -> None:
-        super().__init__(params, **kw)
-        self.fail_at = fail_at
-        self.calls = 0
+    Injected by a step pre-hook, not a subclass: since R8 the shared-state check
+    refuses an optimizer that is not exactly a built-in class."""
+    opt = torch.optim.SGD(params, **kw)
+    calls = [0]
 
-    def step(self, closure: Any = None) -> Any:
-        self.calls += 1
-        if self.calls == self.fail_at:
-            raise _StepFailure(f"optimizer step {self.calls} failed (injected)")
-        return super().step(closure)
+    def fail(optimizer: Any, args: Any, kwargs: Any) -> None:
+        calls[0] += 1
+        if calls[0] == fail_at:
+            raise _StepFailure(f"optimizer step {calls[0]} failed (injected)")
+
+    opt.register_step_pre_hook(fail)
+    return opt
 
 
 def _post_step_outcome(runner: HexTrainingRunner, out: Path) -> Dict[str, Any]:
@@ -1616,7 +1995,7 @@ def _failing_step_runner(rank: int, world: int, out: Path, *, failing_rank: int,
     return HexTrainingRunner(
         _config(out, distributed=True, is_main_process=rank == 0, **kw),
         model,
-        _FailingSGD(model.parameters(), fail_at=fail_at if rank == failing_rank else -1, lr=0.1),
+        _failing_sgd(model.parameters(), fail_at=fail_at if rank == failing_rank else -1, lr=0.1),
         _train_loader(rank, world), _exact_val_loader(),
     )
 
@@ -1852,6 +2231,8 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "resume_same_scaler_state": _resume_with_rank1_copy(lambda payload: None, scaler=True),
     "construction_other_lr_on_rank1": _construction_differs("optimizer"),
     "construction_other_scheduler_on_rank1": _construction_differs("scheduler"),
+    "lambda_lr_other_function_on_rank1": _scheduler_differs("lambda"),
+    "forged_step_lr_on_rank1": _scheduler_differs("forged"),
     "amp_equivalence": _sc_amp_equivalence,
     "amp_nan_grad_on_rank1": _sc_amp_nan_grad_on_rank1,
     "step_error_last_step_rank1": _sc_step_error_last_step_rank1,
@@ -2242,9 +2623,28 @@ class TestTwoRanks(_MultiRankJob):
                     message = res.get(name, {}).get("message", "")
                     self.assertEqual(message, f"initial state differs from rank 0 on at least one rank: {part}")
 
+    def test_untrusted_scheduler_is_refused_on_both_ranks(self) -> None:
+        # R8: equal state, other behaviour -- red before (both ranks ran to the end)
+        self.assertEqual(self._errors("lambda_lr_other_function_on_rank1"), ["DistributedContractError"] * 2,
+                         [res.get("lambda_lr_other_function_on_rank1") for res in self.results])
+        for res in self.results:
+            message = res["lambda_lr_other_function_on_rank1"]["message"]
+            self.assertIn("scheduler: torch.optim.lr_scheduler.LambdaLR is not one of the built-in classes", message)
+        # forged on rank 1 only: rank 1 refuses, rank 0 is told (agreed, no hang)
+        name = "forged_step_lr_on_rank1"
+        self.assertEqual(self._errors(name), ["PeerRankError", "DistributedContractError"],
+                         [res.get(name) for res in self.results])
+        self.assertIn("scheduler: torch.optim.lr_scheduler.StepLR is not one of the built-in classes",
+                      self.results[1][name]["message"])
+        self.assertIn("failed on rank(s) [1]", self.results[0][name]["message"])
+
     def test_state_digest_error_on_one_rank_is_agreed(self) -> None:
+        # rank 1's scheduler carries an instance-level state_dict: since R8 it is
+        # refused before it runs -- the refusal on one rank is agreed like any
+        # digest failure (before R8: the injected state_dict raised _StepFailure)
         r0, r1 = self._ok("state_dict_error_rank1")
-        self.assertEqual(r1["error"], "_StepFailure")
+        self.assertEqual(r1["error"], "DistributedContractError")
+        self.assertIn("overrides state_dict", r1["message"])
         self.assertEqual(r0["error"], "PeerRankError", r0)
         self.assertIn("failed on rank(s) [1]", r0["message"])
         # agreed at once, not after the 30 s process-group timeout of this job
@@ -2336,8 +2736,10 @@ class TestThreeRanks(_MultiRankJob):
             self.assertEqual(res.get(name, {}).get("message"),
                              "initial state differs from rank 0 on at least one rank: optimizer state, scheduler state")
         # a digest failure on the middle rank: its own error there, PeerRankError naming it elsewhere
+        # (since R8 its instance-level state_dict is refused before it runs)
         values = self._ok("state_dict_error_rank1")
-        self.assertEqual([v["error"] for v in values], ["PeerRankError", "_StepFailure", "PeerRankError"])
+        self.assertEqual([v["error"] for v in values], ["PeerRankError", "DistributedContractError", "PeerRankError"])
+        self.assertIn("overrides state_dict", values[1]["message"])
         for rank in (0, 2):
             self.assertIn("failed on rank(s) [1]", values[rank]["message"])
             self.assertLess(values[rank]["seconds"], 15.0)
