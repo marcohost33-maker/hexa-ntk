@@ -420,7 +420,11 @@ broadcast of every buffer of the model and the EMA copy;
 one all-reduce of `len(dataset)` int64 counts (8 bytes per sample), a few
 1-element flags, one all-reduce + broadcast of 4 float64. Once at construction and
 once per resume: a 160-byte broadcast and a 5-element int64 all-reduce (the shared
-state, section 6). Per resume save: three
+state, section 6). Their local cost is hashing: every rank copies its weights, EMA,
+optimizer and scheduler state to the CPU one tensor at a time and runs SHA-256 over
+it -- measured 2026-11-10 on the container CPU (torch 2.6.0, fp32, 50.4M parameters,
+Adam): weights 0.17 s, Adam state 0.34 s (about 1.1 GB/s), linear in the bytes, plus the
+device-to-host copy on a GPU. Per resume save: three
 all-gathers of ~10 KB per rank. Rank 0's checkpoint write happens while the
 peers wait in the closing all-reduce: a write longer than the process-group
 timeout (gloo default 30 min, NCCL 10 min) ends the job.

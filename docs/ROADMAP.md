@@ -55,8 +55,9 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   ChainedScheduler), zweimal gebaut oder neu geladen -> gleicher Digest, ein Schritt mehr -> anderer;
   zudem laufen alle 2- und 3-Rank-Szenarien durch den neuen Konstruktions-Check. Primaerquelle: die
   DDP-Doku setzt voraus, dass der Optimizer die reduzierten Gradienten auf allen Prozessen gleich
-  anwendet; DDP gleicht nur Parameter/Buffer bei der Konstruktion ab. 4 neue Tests, 7 neue Mutanten,
-  volle Probe 202/202.
+  anwendet; DDP gleicht nur Parameter/Buffer bei der Konstruktion ab. 4 neue Tests, 8 neue Mutanten,
+  volle Probe 203/203. Kosten gemessen: 50,4M Parameter mit Adam -> 0,17 s Gewichte + 0,34 s Adam-Zustand
+  je Abgleich (SHA-256 ca. 1,1 GB/s, Container-CPU), einmal bei Konstruktion und je Resume.
   Grenzen: Autocast (fp16/bf16) unter DDP, CUDA-GradScaler, NCCL weiter nicht gelaufen; was ein
   `state_dict` nicht enthaelt (z. B. die Funktionen eines `LambdaLR`), ist nicht vergleichbar.
   _Evidenz:_ `results/2026-11-10_ddp-resume-state_local-gate.log`.

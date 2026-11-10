@@ -930,3 +930,6 @@
 | 108FABD5DA7A02EB | 2026-11-10 13:00 | src/toolkit | DDP v1.3 review round: construction_other_lr/scheduler_on_rank1 (2-rank gloo), NumPy/bytes/set/complex digest test, hash-seed independence via 3 subprocesses, no false positive over 6 optimizers x 6 schedulers: test_ddp_hex_v3.py |
 | 066EB8E767BEF43B | 2026-11-10 13:00 | scripts | DDP v1.3 review round: 7 new mutants (agreement at construction/after resume off, array dtype/shape, NumPy scalar, complex imaginary part, set sorting, object arrays); stop-mutant site follows the shared message: mutation_probe.py |
 | 3178B24233E5D640 | 2026-11-10 13:00 | spec | v1.3 review round: section 2 same state at construction, section 6 typed digest + measured false-positive matrix + LambdaLR limit, section 7 collectives: DDP_RUNNER_v1.md |
+| A853A04EED01A15F | 2026-11-10 13:40 | src/toolkit | DDP v1.3 review round 2: structured NumPy scalar with an object field (its bytes are addresses) digests by value: test_ddp_hex_v3.py |
+| 0F1C947F27CD5EB8 | 2026-11-10 13:40 | scripts | DDP v1.3 review round 2: mutant for the object branch of NumPy scalars (203 mutants): mutation_probe.py |
+| 03C17F13555E730A | 2026-11-10 13:40 | spec | v1.3 review round 2: section 7 measured hashing cost of the shared-state agreement (50.4M params + Adam: 0.17 s + 0.34 s): DDP_RUNNER_v1.md |

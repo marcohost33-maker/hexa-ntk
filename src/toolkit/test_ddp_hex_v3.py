@@ -339,6 +339,13 @@ class TestResumeStateDigest(unittest.TestCase):
             with self.subTest(a=a, b=b):
                 self.assertNotEqual(_state_digest(a), _state_digest(b))
         self.assertEqual(_state_digest({1, "x", 2.5}), _state_digest({2.5, 1, "x"}))
+        # a structured scalar with an object field holds pointers: digest its values
+        rec = [("n", np.int64), ("o", object)]
+        first = np.array([(1, "a" * 3)], dtype=rec)[0]
+        second = np.array([(1, "".join(["a"] * 3))], dtype=rec)[0]  # equal value, other str object
+        self.assertNotEqual(first.tobytes(), second.tobytes())  # the premise: tobytes sees addresses
+        self.assertEqual(_state_digest(first), _state_digest(second))
+        self.assertNotEqual(_state_digest(first), _state_digest(np.array([(1, "b")], dtype=rec)[0]))
         self.assertEqual(_state_digest(np.array([3.0, -0.0])), _state_digest(np.array([3.0, -0.0])))
 
     def test_set_digest_is_independent_of_the_ranks_hash_seed(self) -> None:

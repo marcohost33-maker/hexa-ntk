@@ -557,6 +557,8 @@ MUTANTS = (
            '        h.update(f"c{value.real.hex()};".encode("utf-8"))\n', SD),
     Mutant(RU, "        for element_digest in sorted(elements):\n", "        for element_digest in elements:\n", SD),
     Mutant(RU, "            _update_state_digest(h, value.reshape(-1).tolist())\n", "", SD),
+    Mutant(RU, '            h.update(b"g|object|")\n            _update_state_digest(h, value.item())\n',
+           '            h.update(a.tobytes())\n', SD),
 )
 
 
