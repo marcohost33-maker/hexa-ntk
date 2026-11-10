@@ -350,7 +350,9 @@ class TestResumeStateDigest(unittest.TestCase):
 
         first, second = opaque_class(1)(), opaque_class(2)()
         self.assertEqual(type(first).__qualname__, type(second).__qualname__)  # the collision
-        for value in (first, object(), {"nested": [1, first]}, np.array([first], dtype=object)):
+        # the strongest forger: an unrelated class carrying an admitted type's name
+        named_float = type("float", (), {"__module__": "builtins"})()
+        for value in (first, object(), {"nested": [1, first]}, np.array([first], dtype=object), named_float):
             with self.subTest(value=type(value).__name__), self.assertRaisesRegex(TypeError, "cannot be compared"):
                 _state_digest(value)
 

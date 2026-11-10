@@ -405,16 +405,49 @@ value) (object arrays by their elements),
 NumPy scalars by dtype and bytes, floats by `float.hex` (one ulp and -0.0 count),
 complex numbers by both parts, ints, bools, strings, bytes and `None`; dict keys and
 set elements sorted by their encoding (string hashing and with it set order differ
-between processes: `PYTHONHASHSEED`); any other object counts by its type name only,
-never by `repr` (a `repr` may carry a memory address that differs between ranks with
-equal state), so its value is not compared. Measured without a false refusal: 6
+between processes: `PYTHONHASHSEED`). Values are admitted by the identity of their
+exact type (R8, 2026-11-11): any other object -- also a subclass of an admitted type,
+whose `hex()`, `__format__` or `items()` may write other bytes -- raises `TypeError`
+(agreed like any digest failure). Before R8 it counted by its type name only (never by
+`repr`, which may carry a memory address): two classes of one name, or one class with
+other hidden attributes, agreed (cross-family GPT-6 A7-R2, "opaque fallback").
+`collections.Counter` is admitted (MultiStepLR keeps its milestones in one). The
+weights and EMA digests include a module's non-tensor `get_extra_state()` entries the
+same way (before R8 they were skipped). Measured without a false refusal: 6
 optimizers (SGD with Nesterov, Adam with AMSGrad, AdamW, centred RMSprop, Adagrad,
 LBFGS) x 11 schedulers (none, StepLR, MultiStepLR, LambdaLR, OneCycleLR,
 CosineAnnealingWarmRestarts, ReduceLROnPlateau, SequentialLR, ChainedScheduler,
 CyclicLR, PolynomialLR): equal state built twice or reloaded digests equally, one
-more step digests differently (a 6 x 6 subset is a unit test). Not comparable: what a
-`state_dict` does not hold, e.g. the functions of a `LambdaLR` (PyTorch stores `None`
-for them). Rank-local state is
+more step digests differently (a 6 x 6 subset is a unit test).
+
+**Which states are comparable (R8, 2026-11-11, cross-family GPT-6 R8-01).** Equal
+`state_dict()` bytes mean equal future training only if the state holds everything
+`step()` reads. Before the digest, `_comparable_state` therefore admits the optimizer,
+scheduler and `GradScaler` only if `type(obj)` *is* one of the built-in classes held as
+objects at import -- not by `__module__`/`__qualname__` (writable: a class built as
+`type('StepLR', ..., {'__module__': 'torch.optim.lr_scheduler'})` carries both names),
+not by `isinstance` (a subclass, or a `__class__` property), not by set membership (a
+metaclass `__eq__`/`__hash__`). Admitted: the optimizers Adadelta, Adafactor, Adagrad,
+Adam, Adamax, AdamW, ASGD, LBFGS, NAdam, RAdam, RMSprop, Rprop, SGD, SparseAdam; the
+schedulers StepLR, MultiStepLR, ConstantLR, LinearLR, ExponentialLR, PolynomialLR,
+CosineAnnealingLR, CosineAnnealingWarmRestarts, ReduceLROnPlateau, OneCycleLR,
+SequentialLR, ChainedScheduler (the inner schedulers of the last two pass the same check,
+in a plain list or tuple); `torch.amp.GradScaler`. Oracle (unit tests, torch 2.6.0): a
+state saved and loaded into an instance built with other arguments continues with the
+original's learning rates (every admitted scheduler) or updates (every admitted
+optimizer). Refused: `LambdaLR` and `MultiplicativeLR` (a function is not in their
+state: 0.0531 vs 0.0262 after 3 steps with two lambdas), `CyclicLR` (a custom
+`scale_fn` is not in its state), every subclass and look-alike; an instance attribute
+that shadows a method (`state_dict`, `get_lr`, `step`; for the optimizer the
+instance-level `step` that torch's own schedulers install is tolerated); an optimizer
+with a `state_dict` pre/post hook (it rewrites the exported state). The refusal is a
+`DistributedContractError` inside the agreed digest computation, so a refusal on one
+rank stops every rank (2-rank job: `lambda_lr_other_function_on_rank1`,
+`forged_step_lr_on_rank1`, `state_dict_error_rank1`). Not covered: a class patched
+process-wide, torch itself (in-process identity is no supply-chain attestation: pin
+and verify the wheel), optimizer step hooks and the instance-level optimizer `step`
+(they change no state), and the model class (user code; its weights are compared).
+Rank-local state is
 excluded by design: RNG streams and loader generators (restored per rank above), the
 anomaly history, and mid-epoch rank buffers (copied in after this check,
 `spec/MID_EPOCH_RESUME_v1.md`).

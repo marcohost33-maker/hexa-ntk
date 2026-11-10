@@ -71,6 +71,10 @@ ME = "test_mid_epoch_resume_hex_v3.TestMidEpochResume"
 NF = "test_runner_hex_v3.TestNonFiniteGradient"
 CS = "test_runner_hex_v3.TestConsecutiveSkips"
 SD = "test_ddp_hex_v3.TestResumeStateDigest"
+CS8 = "test_ddp_hex_v3.TestComparableState"
+W1 = "test_ddp_hex_v3.TestWorldSizeOne"
+_SHADOW_SITE = ("        if isinstance(attr, str) and attr not in tolerated"
+                " and _is_method(inspect.getattr_static(cls, attr, None))\n")
 RS = "test_resume_with_other_shared_state_on_one_rank_fails_both"
 CO = "test_other_optimizer_or_scheduler_at_construction_fails_both"
 RW = "test_resume_with_other_weights_on_one_rank_fails_both"
@@ -547,10 +551,10 @@ MUTANTS = (
     Mutant(P1, "    return np.where(np.isfinite(out), out, fallback)\n", "    return fallback\n", I82),
     # Resume agreement over every shared state (2026-11-10, DDP_RUNNER v1.3):
     # each component, the stop itself and the canonical digest.
-    Mutant(RU, '            ("optimizer state", _state_digest(state(self.optimizer))),\n',
+    Mutant(RU, '            ("optimizer state", _state_digest(optimizer)),\n',
            '            ("optimizer state", _state_digest(None)),\n', T2,
            expect=(RS, CO,)),
-    Mutant(RU, '            ("GradScaler state", _state_digest(state(self.grad_scaler))),\n',
+    Mutant(RU, '            ("GradScaler state", _state_digest(grad_scaler)),\n',
            '            ("GradScaler state", _state_digest(None)),\n', T2,
            expect=(RS,)),
     Mutant(RU, '            ("EMA state", _module_digest(self.ema_model) if self.ema_model is not None\n',
@@ -569,9 +573,10 @@ MUTANTS = (
     Mutant(RU, "        for key_digest, item in sorted(items, key=lambda pair: pair[0]):\n",
            "        for key_digest, item in items:\n", SD,
            expect=('test_equal_state_gives_equal_digest_independent_of_dict_order',)),
-    Mutant(RU, '        h.update(f"o{type(value).__qualname__};".encode("utf-8"))\n',
-           '        h.update(f"o{value!r};".encode("utf-8"))\n', SD,
-           expect=('test_opaque_objects_count_by_type_not_by_address',)),
+    # R8 (2026-11-11): the type-name fallback is gone; the identity gate replaces it
+    # (its mutants follow at the end, with the comparable-state guard)
+    Mutant(RU, "    if id(type(value)) not in _DIGESTIBLE_TYPE_IDS:\n", "    if False:\n", SD,
+           expect=('test_opaque_state_values_are_refused_not_named',)),
     Mutant(RU, '    h.update(f"T|{t.dtype}|{tuple(t.shape)}|".encode("utf-8"))\n',
            '    h.update(b"T|")\n', SD,
            expect=('test_every_value_change_is_seen',)),
@@ -621,6 +626,73 @@ MUTANTS = (
     Mutant(RU, '            h.update(b"g|object|")\n            _update_state_digest(h, value.item())\n',
            '            h.update(a.tobytes())\n', SD,
            expect=('test_numpy_bytes_sets_and_complex_values_are_seen',)),
+    # R8 (2026-11-11, cross-family GPT-6 R8-01 / A7-R2): comparable states by class
+    # identity, typed values by exact type. Per comparison: removed, weakened to
+    # isinstance/names (the forgeries the reviewer named), narrowed.
+    Mutant(RU, "    if id(type(value)) not in _DIGESTIBLE_TYPE_IDS:\n",
+           "    if not isinstance(value, _DIGESTIBLE_TYPES):\n", SD,
+           expect=('test_opaque_state_values_are_refused_not_named',)),
+    Mutant(RU, "    if id(type(value)) not in _DIGESTIBLE_TYPE_IDS:\n",
+           "    if type(value).__qualname__ not in {t.__qualname__ for t in _DIGESTIBLE_TYPES}:\n", SD,
+           expect=('test_opaque_state_values_are_refused_not_named',)),
+    Mutant(RU, "        else:\n            _update_state_digest(h, value)\n    return h.digest()\n",
+           "    return h.digest()\n", SD,
+           expect=('test_module_extra_state_is_digested_and_opaque_extra_state_refused',)),
+    Mutant(RU, "        else:\n            _update_state_digest(h, value)\n    return h.digest()\n",
+           "        else:\n            h.update(type(value).__qualname__.encode())\n    return h.digest()\n", SD,
+           expect=('test_module_extra_state_is_digested_and_opaque_extra_state_refused',)),
+    Mutant(RU, "        else:\n            _update_state_digest(h, value)\n    return h.digest()\n",
+           "        elif isinstance(value, dict):\n"
+           "            _update_state_digest(h, value)\n    return h.digest()\n", SD,
+           expect=('test_module_extra_state_is_digested_and_opaque_extra_state_refused',)),
+    Mutant(RU, "    if not any(cls is allowed for allowed in trusted):\n", "    if False:\n", CS8,
+           expect=('test_forged_scheduler_class_is_refused',
+                   'test_lambda_multiplicative_and_custom_cyclic_lr_are_refused',
+                   'test_forged_optimizer_and_grad_scaler_are_refused')),
+    Mutant(RU, "    if not any(cls is allowed for allowed in trusted):\n",
+           "    if not isinstance(obj, trusted):\n", CS8,
+           expect=('test_forged_scheduler_class_is_refused', 'test_forged_optimizer_and_grad_scaler_are_refused')),
+    Mutant(RU, "    if not any(cls is allowed for allowed in trusted):\n",
+           "    if not any((cls.__module__, cls.__name__) == (t.__module__, t.__name__) for t in trusted):\n", CS8,
+           expect=('test_forged_scheduler_class_is_refused',)),
+    Mutant(RU, "    if not any(cls is allowed for allowed in trusted):\n",
+           "    if cls not in set(trusted):\n", CS8,
+           expect=('test_forged_scheduler_class_is_refused',)),
+    Mutant(RU, "    if shadowing:\n", "    if False:\n", CS8,
+           expect=('test_instance_override_of_state_export_or_behaviour_is_refused',)),
+    Mutant(RU, _SHADOW_SITE, '        if attr == "state_dict"\n', CS8,
+           expect=('test_instance_override_of_state_export_or_behaviour_is_refused',)),
+    Mutant(RU, _SHADOW_SITE,
+           "        if isinstance(attr, str) and _is_method(inspect.getattr_static(cls, attr, None))\n", CS8,
+           expect=('test_every_trusted_component_is_compared',)),
+    Mutant(RU, "    hooked = [attr for attr in _OPTIMIZER_EXPORT_HOOKS if getattr(obj, attr, None)]\n",
+           "    hooked = []\n", CS8,
+           expect=('test_instance_override_of_state_export_or_behaviour_is_refused',)),
+    Mutant(RU, '_OPTIMIZER_EXPORT_HOOKS = ("_optimizer_state_dict_pre_hooks", "_optimizer_state_dict_post_hooks")\n',
+           '_OPTIMIZER_EXPORT_HOOKS = ("_optimizer_state_dict_post_hooks",)\n', CS8,
+           expect=('test_instance_override_of_state_export_or_behaviour_is_refused',)),
+    Mutant(RU, "    if hooked:\n", "    if len(hooked) > 1:\n", CS8,
+           expect=('test_instance_override_of_state_export_or_behaviour_is_refused',)),
+    Mutant(RU, "    if any(cls is composite for composite in _COMPOSITE_SCHEDULERS):\n", "    if False:\n", CS8,
+           expect=('test_composite_scheduler_with_forged_or_overridden_child_is_refused',)),
+    Mutant(RU, "        if type(inner) is not list and type(inner) is not tuple:\n",
+           "        if not isinstance(inner, (list, tuple)):\n", CS8,
+           expect=('test_composite_scheduler_with_forged_or_overridden_child_is_refused',)),
+    Mutant(RU, "        for child in inner:\n", "        for child in inner[:1]:\n", CS8,
+           expect=('test_composite_scheduler_with_forged_or_overridden_child_is_refused',)),
+    Mutant(RU, '        optimizer = _comparable_state(self.optimizer, _TRUSTED_OPTIMIZERS, "optimizer",\n'
+               "                                      tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)\n",
+           "        optimizer = self.optimizer.state_dict()\n", W1,
+           expect=('test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler',)),
+    Mutant(RU, '        scheduler = _comparable_state(self.scheduler, _TRUSTED_SCHEDULERS, "scheduler")\n',
+           "        scheduler = None if self.scheduler is None else self.scheduler.state_dict()\n", W1,
+           expect=('test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler',)),
+    Mutant(RU, '        scheduler = _comparable_state(self.scheduler, _TRUSTED_SCHEDULERS, "scheduler")\n',
+           "        scheduler = None if self.scheduler is None else self.scheduler.state_dict()\n", T2,
+           expect=('test_untrusted_scheduler_is_refused_on_both_ranks',)),
+    Mutant(RU, '        grad_scaler = _comparable_state(self.grad_scaler, _TRUSTED_GRAD_SCALERS, "GradScaler")\n',
+           "        grad_scaler = None if self.grad_scaler is None else self.grad_scaler.state_dict()\n", W1,
+           expect=('test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler',)),
 )
 
 
