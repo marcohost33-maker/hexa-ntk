@@ -937,3 +937,12 @@
 | DE3C302572EA73B4 | 2026-11-10 15:00 | src/toolkit | DDP v1.3 third round: state_dict_error_rank1 (2 and 3 ranks), construction_other_lr_on_rank1 on 3 ranks, sparse digest unit test: test_ddp_hex_v3.py |
 | 1B8AB7664BE4CBC3 | 2026-11-10 15:00 | scripts | DDP v1.3 third round: 4 new mutants (digest unagreed, sparse not coalesced, sparse header, sparse values); tensor-header site follows the shared encoder (207 mutants): mutation_probe.py |
 | 04F478FEA39430E7 | 2026-11-10 15:00 | spec | v1.3 third round: agreed digest computation, sparse tensors, corrected collective count: DDP_RUNNER_v1.md |
+| CB557A38829FF33C | 2026-11-10 21:00 | src/toolkit | NR SF-R46-01 sweep: predict_gino refuses a model without config binding unless allow_unbound=True; binding found on submodules (wrappers, DDP), two bindings refused (red on 0b3f21d: a foreign model ran under the default config): gino_adapter_hex_v3.py |
+| 64AD9FE27CBE5924 | 2026-11-10 21:00 | src/toolkit | NR SF-R46-01 sweep: unbound/forged/wrapped/two-binding test; five dtype tests on test doubles opt in with allow_unbound=True: test_gino_adapter_hex_v3.py |
+| 548B0DB4A70BC64F | 2026-11-10 21:00 | src/toolkit | NR SF-R46-01 sweep: validate_bundle needs an explicit expected_source_sha; source_sha_verified in the report: test_distributed_checkpoint_bundle_v1.py |
+| 2AF70FEC3218AF94 | 2026-11-10 21:00 | src/toolkit | NR transfer: state_dict_error_rank1 moved to the end of the 2-rank suite (its unfixed desync failed 6 later tests: killed_by showed it): test_ddp_hex_v3.py |
+| 081496395E099CD4 | 2026-11-10 21:00 | src/toolkit | NR transfer: TestMutationProbeKilledBy (failed-test parsing incl. subTests, verdicts incl. KILLED_ELSEWHERE, every expect names a real test method): test_hex_timestep_contract.py |
+| 11ABBA24089A8D26 | 2026-11-10 21:00 | scripts | NR transfer (Digi #21 aggregate-kill NR): killed_by per run, Mutant.expect, verdict KILLED_ELSEWHERE; expect on 26 mutants; 5 new mutants (probe verdict, 3 GINO binding guards, bundle source binding) -> 212: mutation_probe.py |
+| 4B5A6F30CFFA8E14 | 2026-11-10 21:00 | scripts/oracles | NR SF-R46-01 sweep: expected_source_sha keyword without default; report field source_sha_verified: distributed_checkpoint_bundle_v1.py |
+| F7B3E8E09DA598C0 | 2026-11-10 21:00 | scripts/oracles | NR SF-R46-01 sweep: negative cases state the expected source too (local run exit 0): dcp_bundle_2rank_oracle.py |
+| AD11C41A99FDB423 | 2026-11-10 21:00 | spec | Amendment 2026-11-10: config binding of predict_gino is fail-closed: GINO_ADAPTER_PHASE1_v2.md |

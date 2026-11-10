@@ -378,5 +378,61 @@ class TestDocsContract(unittest.TestCase):
                     sys.path.remove(tmp)
 
 
+def _load_mutation_probe():
+    path = _ROOT / "scripts" / "mutation_probe.py"
+    spec = importlib.util.spec_from_file_location("mutation_probe_judge", path)
+    assert spec is not None and spec.loader is not None
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    return probe
+
+
+class TestMutationProbeKilledBy(unittest.TestCase):
+    """killed_by / expect of scripts/mutation_probe.py (internal NR 2026-11-07: a red
+    test class hid that the guard's own falsifier stayed green)."""
+
+    _OUT = (
+        "test_a (m.C.test_a) ... ok\n"
+        "======================================================================\n"
+        "FAIL: test_b (m.C.test_b) [scenario] (rank=1)\n"
+        "----------------------------------------------------------------------\n"
+        "ERROR: test_c (m.C.test_c)\n"
+        "FAIL: test_b (m.C.test_b) [scenario] (rank=0)\n"
+        "Ran 3 tests in 0.1s\n\nFAILED (failures=2, errors=1)\n"
+    )
+
+    def test_failed_tests_are_parsed_once_each_with_subtests(self) -> None:
+        probe = _load_mutation_probe()
+        self.assertEqual(probe.failed_tests(self._OUT), ["test_b", "test_c"])
+        self.assertEqual(probe.failed_tests("Ran 2 tests\n\nOK\n"), [])
+
+    def test_verdicts(self) -> None:
+        probe = _load_mutation_probe()
+        self.assertEqual(probe.judge(0, "Ran 3 tests\n\nOK\n"), ("SURVIVED", []))
+        self.assertEqual(probe.judge(1, self._OUT), ("KILLED", ["test_b", "test_c"]))
+        self.assertEqual(probe.judge(1, self._OUT, ("test_b",)), ("KILLED", ["test_b", "test_c"]))
+        # red, but the test meant to pin the mutant stayed green
+        self.assertEqual(probe.judge(1, self._OUT, ("test_a",)), ("KILLED_ELSEWHERE", ["test_b", "test_c"]))
+        self.assertEqual(probe.judge(1, self._OUT, ("test_b", "test_a"))[0], "KILLED_ELSEWHERE")
+        # no test ran (import error): never a kill, whatever was expected
+        self.assertEqual(probe.judge(1, "ImportError: boom\n", ("test_b",))[0], "INVALID")
+
+    def test_every_expected_test_exists_in_its_target_class(self) -> None:
+        # a misspelt name would only ever show up as KILLED_ELSEWHERE
+        probe = _load_mutation_probe()
+        checked = 0
+        for mutant in probe.MUTANTS:
+            if not mutant.expect:
+                continue
+            module_name, class_name = mutant.test.rsplit(".", 1)
+            source = (_ROOT / "src" / "toolkit" / f"{module_name}.py").read_text(encoding="utf-8")
+            body = source.split(f"class {class_name}(", 1)[1].split("\nclass ", 1)[0]
+            for name in mutant.expect:
+                with self.subTest(mutant=mutant.original[:40], test=name):
+                    self.assertIn(f"    def {name}(self", body)
+                    checked += 1
+        self.assertGreater(checked, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

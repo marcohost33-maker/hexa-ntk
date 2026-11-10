@@ -22,6 +22,30 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Internes NR-Wissen auf hexa-ntk uebertragen (2026-11-10, Linux-Container, Python 3.12.3, torch 2.6.0,
+  neuraloperator 2.0.0).** Quellen: 007acc2-Wissens- und Auditdokumente (selbst als REVIEW_REQUIRED markiert,
+  daher nichts ungeprueft uebernommen) und das NR-Register. Drei Regeln gegen das Repo geprueft:
+  (1) _"Handdiskriminierung als Sammelzahl verdeckte blinde Falsifier"_ (Digi #21, 2026-11-07): ein Mutant
+  galt als getoetet, sobald irgendein Test seiner Klasse rot war. Jetzt zeichnet `scripts/mutation_probe.py`
+  je Lauf die roten Testmethoden auf (`killed_by`, wie das Stryker-Report-Schema) und ein Mutant kann sie
+  verlangen (`expect`); bleibt ein erwarteter Test gruen, lautet das Urteil `KILLED_ELSEWHERE` (zaehlt
+  nicht). Gemessen fuer alle 20 Mutanten von #104 und einen alten: keiner ist blind, aber der Mutant
+  "Digest-Berechnung ohne Abstimmung" riss 6 fremde Tests mit (sein Szenario desynchronisierte den
+  2-Rank-Job fuer alle spaeteren) -> Szenario ans Ende verschoben, danach nur noch sein eigener Test rot.
+  (2) _"Optionaler Pruefer mit Default None ueberspringt den Waechter"_ (SF-R46-01, 2026-11-03; flottenweit
+  laut NR nicht gesucht): Sweep ueber Toolkit, Skripte und Engine. Zwei Befunde behoben, je rot belegt:
+  `predict_gino` liess ein Modell ohne Config-Bindung unter jeder Config laufen (Provenienz der
+  Phase-1-Laeufe) -> abgelehnt ausser mit `allow_unbound=True`, Bindung auch hinter Wrappern (DDP)
+  gefunden, zwei verschiedene Bindungen abgelehnt (`spec/GINO_ADAPTER_PHASE1_v2.md` Amendment 2026-11-10);
+  `validate_bundle` (Checkpoint-Orakel) meldete ohne Argument `valid` fuer ein Bundle beliebiger Quelle ->
+  Keyword Pflicht, Bericht `source_sha_verified`; das Evidenz-Orakel `dcp_bundle_2rank_oracle.py` lokal
+  `exit 0`. Wie die NR vorhersagt, stuetzten sich 5 GINO- und 9 Bundle-Tests auf den offenen Default.
+  (3) _"Abgeschalteter Runner macht CI still cancelled"_ (2026-11-09): alle Jobs `ubuntu-latest`, der
+  einzige zeitgesteuerte Lauf (zizmor) wöchentlich `success` -> kein Befund.
+  Eigener Fehler unterwegs: ein neuer Mutant war INVALID (Zeile geloescht, leerer `if`-Block) -> `pass`.
+  5 neue Tests, 5 neue Mutanten, volle Probe 212/212.
+  _Evidenz:_ `results/2026-11-10_ddp-resume-state_local-gate.log`.
+
 - [x] **Resume unter DDP: alle geteilten Zustaende abgeglichen, nicht nur die Gewichte; erste
   AMP-unter-DDP-Evidenz (2026-11-10, Linux-Container, Python 3.12.3, torch 2.6.0; DDP_RUNNER v1.3).**
   Auf main 22e6308 gemessen: nach einem verteilten Resume verglich der Runner Epoche, Schritt,
@@ -659,6 +683,11 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   Runner ruft es in jedem Schritt auf, auch mit `grad_clip_max_norm=inf`. Optionen: Norm ueber
   `grad.coalesce().values()` selbst berechnen, oder Sparse-Gradienten bei der Konstruktion klar ablehnen.
   Owner-Entscheid; Phase 1 (GINO) braucht keine Sparse-Gradienten.
+
+- [ ] **Engine `load_raw(expected_semantics=None)` ueberspringt die Semantik-Pruefung (NR-Sweep
+  2026-11-10).** Gleiches Muster wie SF-R46-01 (Typverwechslung last/best/resume nur geprueft, wenn der
+  Aufrufer es verlangt). Nicht geaendert: `src/hexantk_v3.py` ist kanonisch und wird nach coworker-dde
+  gespiegelt (Issue #74); eine Aenderung braucht den Spiegel-Lauf. Owner-Entscheid.
 
 ## Zurueckgestellt (bewusst, mit Begruendung)
 

@@ -165,6 +165,51 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "construction config"):
             predict_gino(model, lattice, np.ones((2, lattice.num_nodes)), other)
 
+    def test_unbound_model_is_refused_unless_explicitly_allowed(self) -> None:
+        # Internal NR SF-R46-01 ("an optional checker whose absence skips the guard is
+        # fail-open"): a model not built by build_gino carries no config digest and
+        # used to run under ANY config, so a run of a foreign GINO (other modes or
+        # radius) could be attributed to the preregistered config's digest.
+        cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
+        lattice = triangle_hex_lattice(32)
+
+        class Foreign(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.w = torch.nn.Parameter(torch.ones(()))
+
+            def forward(self, **batch: torch.Tensor) -> torch.Tensor:
+                return self.w * torch.zeros(batch["x"].shape[0], lattice.num_nodes, 1)
+
+        u0 = np.ones((1, lattice.num_nodes))
+        with self.assertRaisesRegex(ValueError, "no config binding"):
+            predict_gino(Foreign(), lattice, u0, cfg)
+        out = predict_gino(Foreign(), lattice, u0, cfg, allow_unbound=True)  # vouched for by the caller
+        self.assertEqual(tuple(out.shape), (1, lattice.num_nodes))
+        with self.assertRaisesRegex(TypeError, "allow_unbound must be bool"):
+            predict_gino(Foreign(), lattice, u0, cfg, allow_unbound=1)
+        forged = Foreign()
+        setattr(forged, "_hexantk_gino_config_digest", 12345)  # not a digest string
+        with self.assertRaisesRegex(ValueError, "construction config"):
+            predict_gino(forged, lattice, u0, cfg)
+        # a wrapper (DDP, a caller's module) keeps the binding of the model inside it
+        inner = Foreign()
+        setattr(inner, "_hexantk_gino_config_digest", cfg.digest())
+        class Wrap(torch.nn.Module):
+            def __init__(self, core: torch.nn.Module) -> None:
+                super().__init__()
+                self.core = core
+
+            def forward(self, **batch: torch.Tensor) -> torch.Tensor:
+                return self.core(**batch)
+
+        wrapper = Wrap(inner)
+        self.assertEqual(tuple(predict_gino(wrapper, lattice, u0, cfg).shape), (1, lattice.num_nodes))
+        other = Foreign()
+        setattr(other, "_hexantk_gino_config_digest", GinoPhase1Config(latent_resolution=16, n_modes=3).digest())
+        with self.assertRaisesRegex(ValueError, "2 different config bindings"):
+            predict_gino(torch.nn.ModuleList([inner, other]), lattice, u0, cfg)
+
     def test_reject_wrong_training_resolution_and_backend_version(self) -> None:
         cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
         for n in (8, 16, 64):
@@ -210,7 +255,7 @@ class TestGinoPhase1Adapter(unittest.TestCase):
 
         model = CheckedDouble()
         u0 = torch.ones((1, lattice.num_nodes), dtype=torch.float64, requires_grad=True)
-        out = predict_gino(model, lattice, u0, cfg)
+        out = predict_gino(model, lattice, u0, cfg, allow_unbound=True)  # test double
         self.assertEqual(out.dtype, torch.float64)
         out.sum().backward()
         self.assertIsNotNone(model.linear.weight.grad)
@@ -251,7 +296,7 @@ class TestGinoPhase1Adapter(unittest.TestCase):
                 raise AssertionError("mixed dtype should fail before model invocation")
 
         with self.assertRaisesRegex(ValueError, "inconsistent floating dtypes"):
-            predict_gino(MixedModel(), lattice, np.ones(lattice.num_nodes), cfg)
+            predict_gino(MixedModel(), lattice, np.ones(lattice.num_nodes), cfg, allow_unbound=True)
 
     def test_reject_oversized_n_without_allocating_lattice(self) -> None:
         cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
@@ -412,7 +457,8 @@ class TestGinoPhase1Adapter(unittest.TestCase):
                 return self.linear(batch["x"])
 
         with self.assertRaisesRegex(ValueError, "complex spectral weights"):
-            predict_gino(Mixed(), lattice, torch.ones((1, lattice.num_nodes), dtype=torch.float64), cfg)
+            predict_gino(Mixed(), lattice, torch.ones((1, lattice.num_nodes), dtype=torch.float64), cfg,
+                         allow_unbound=True)
 
     @unittest.skipUnless(importlib.util.find_spec("neuralop"), "optional neuraloperator backend not installed")
     def test_actual_backend_float64_is_refused_by_the_adapter(self) -> None:
@@ -469,7 +515,7 @@ class TestGinoHardening20261015(unittest.TestCase):
         self.assertFalse(type(wrapped).__module__.startswith("neuralop."))
         u0 = torch.ones((1, lattice.num_nodes), dtype=torch.float64)
         with self.assertRaises(Exception) as caught:
-            predict_gino(wrapped, lattice, u0, cfg)
+            predict_gino(wrapped, lattice, u0, cfg, allow_unbound=True)  # test double
         got = type(caught.exception).__name__
         self.assertIsInstance(caught.exception, ValueError, f"expected ValueError, got {got}")
         self.assertIn("float64", str(caught.exception))
@@ -479,7 +525,7 @@ class TestGinoHardening20261015(unittest.TestCase):
         lattice = triangle_hex_lattice(8)
         cfg = GinoPhase1Config(latent_resolution=8, n_modes=3)
         out = predict_gino(_Wrapper(_neuralop_like_core(torch.float32)), lattice,
-                           torch.ones((1, lattice.num_nodes)), cfg)
+                           torch.ones((1, lattice.num_nodes)), cfg, allow_unbound=True)
         self.assertEqual(out.dtype, torch.float32)
         self.assertEqual(tuple(out.shape), (1, lattice.num_nodes))
 

@@ -120,7 +120,7 @@ def run(source_sha: str) -> dict[str, object]:
         partial = root / "partial"
         shutil.copytree(bundle_dir, partial)
         (partial / "COMMITTED.json").unlink()
-        missing_commit = rejected(lambda: validate_bundle(partial))
+        missing_commit = rejected(lambda: validate_bundle(partial, expected_source_sha=source_sha))
 
         corrupt = root / "corrupt"
         shutil.copytree(bundle_dir, corrupt)
@@ -132,7 +132,7 @@ def run(source_sha: str) -> dict[str, object]:
         target = candidates[0] if candidates else corrupt / "dcp" / ".metadata"
         with target.open("ab") as stream:
             stream.write(b"X")
-        tampered = rejected(lambda: validate_bundle(corrupt))
+        tampered = rejected(lambda: validate_bundle(corrupt, expected_source_sha=source_sha))
 
         wrong_sha = rejected(
             lambda: validate_bundle(bundle_dir, expected_source_sha="0" * 40)
@@ -143,7 +143,7 @@ def run(source_sha: str) -> dict[str, object]:
         marker = json.loads((writing / "COMMITTED.json").read_text(encoding="utf-8"))
         marker["state"] = "WRITING"
         (writing / "COMMITTED.json").write_text(json.dumps(marker), encoding="utf-8")
-        not_committed = rejected(lambda: validate_bundle(writing))
+        not_committed = rejected(lambda: validate_bundle(writing, expected_source_sha=source_sha))
 
     negatives = [missing_commit, tampered, wrong_sha, not_committed]
     return {

@@ -1852,8 +1852,6 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "resume_same_scaler_state": _resume_with_rank1_copy(lambda payload: None, scaler=True),
     "construction_other_lr_on_rank1": _construction_differs("optimizer"),
     "construction_other_scheduler_on_rank1": _construction_differs("scheduler"),
-    # last of the new ones: unfixed it desynchronises the job (timeout on rank 0)
-    "state_dict_error_rank1": _sc_state_dict_error_rank1,
     "amp_equivalence": _sc_amp_equivalence,
     "amp_nan_grad_on_rank1": _sc_amp_nan_grad_on_rank1,
     "step_error_last_step_rank1": _sc_step_error_last_step_rank1,
@@ -1866,6 +1864,10 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "skip_record_error_rank1": _sc_skip_record_error_rank1,
     "skip_limit_both": _skip_limit("grad", 0),
     "skip_limit_desync_rank1": _skip_limit("loss", 1),
+    # very last: unfixed it desynchronises the job (rank 0 times out), and every
+    # later scenario would fail with it -- the mutation probe's killed_by showed
+    # 6 unrelated tests red for that mutant before this moved here
+    "state_dict_error_rank1": _sc_state_dict_error_rank1,
 }
 
 # The 3-rank job (spec section 8, v1.1): equivalence with an uneven validation

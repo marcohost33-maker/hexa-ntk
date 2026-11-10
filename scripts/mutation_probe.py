@@ -18,10 +18,20 @@ missing dependencies or import errors would make every mutant look killed. A
 mutant counts as KILLED only if its run executed tests ("Ran N tests", N > 0)
 and ended in "FAILED (...)".
 
+Which test killed it (2026-11-10, internal NR "Handdiskriminierung als
+Sammelzahl verdeckte blinde Falsifier", Digi #21): a red test class says
+nothing about WHICH test saw the mutant; a test named after a guard can stay
+green while another test of the class happens to fail. Every run therefore
+records the failing test methods (``killed_by``, as the Stryker
+mutation-testing report schema does), and a mutant may name the tests that
+must fail (``expect``). If one of them stays green the verdict is
+KILLED_ELSEWHERE: the mutant died, but not of the test meant to pin it, and
+that counts as not killed.
+
 Run from anywhere (every file is restored, also on failure):
     python scripts/mutation_probe.py
-Exit codes: 0 every mutant killed; 1 a mutant survived or a run was not a
-valid test failure; 2 a mutant no longer applies (source moved on); 3 the
+Exit codes: 0 every mutant killed; 1 a mutant survived, was killed elsewhere
+than its expected tests, or a run was not a valid test failure; 2 a mutant no longer applies (source moved on); 3 the
 baseline is red (the probe proves nothing then).
 """
 from __future__ import annotations
@@ -41,6 +51,8 @@ class Mutant(NamedTuple):
     original: str
     mutated: str
     test: str
+    # test methods (names without class) that must be among the failures
+    expect: tuple[str, ...] = ()
 
 
 CK = "checkpoint_integration_hex_v3.py"
@@ -59,6 +71,9 @@ ME = "test_mid_epoch_resume_hex_v3.TestMidEpochResume"
 NF = "test_runner_hex_v3.TestNonFiniteGradient"
 CS = "test_runner_hex_v3.TestConsecutiveSkips"
 SD = "test_ddp_hex_v3.TestResumeStateDigest"
+RS = "test_resume_with_other_shared_state_on_one_rank_fails_both"
+CO = "test_other_optimizer_or_scheduler_at_construction_fails_both"
+RW = "test_resume_with_other_weights_on_one_rank_fails_both"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -351,7 +366,8 @@ MUTANTS = (
     Mutant(RU, "        if self.dist is not None:\n            self._require_equal_batch_count()\n", "", T2),
     # v1.3: the weights are one of five resume digests; the stop itself has its own mutant below
     Mutant(RU, '            ("model weights", _module_digest(self.raw_model)),\n',
-           '            ("model weights", _state_digest(None)),\n', T2),
+           '            ("model weights", _state_digest(None)),\n', T2,
+           expect=(RW,)),
     Mutant(RU, '        report = self.dist.run_agreed(self._resume_local, what="resume")\n',
            "        report = self._resume_local()\n", T2),
     Mutant(RU, "            loss_sum, loss_n, grad_sum, grad_n = self.dist.all_reduce_sum(\n"
@@ -532,41 +548,79 @@ MUTANTS = (
     # Resume agreement over every shared state (2026-11-10, DDP_RUNNER v1.3):
     # each component, the stop itself and the canonical digest.
     Mutant(RU, '            ("optimizer state", _state_digest(state(self.optimizer))),\n',
-           '            ("optimizer state", _state_digest(None)),\n', T2),
+           '            ("optimizer state", _state_digest(None)),\n', T2,
+           expect=(RS, CO,)),
     Mutant(RU, '            ("GradScaler state", _state_digest(state(self.grad_scaler))),\n',
-           '            ("GradScaler state", _state_digest(None)),\n', T2),
+           '            ("GradScaler state", _state_digest(None)),\n', T2,
+           expect=(RS,)),
     Mutant(RU, '            ("EMA state", _module_digest(self.ema_model) if self.ema_model is not None\n',
-           '            ("EMA state", _state_digest(None) if self.ema_model is not None\n', T2),
+           '            ("EMA state", _state_digest(None) if self.ema_model is not None\n', T2,
+           expect=(RS,)),
     Mutant(RU, "        if names:\n            raise DistributedContractError(\n                f\"{when} state",
-           "        if False:\n            raise DistributedContractError(\n                f\"{when} state", T2),
-    Mutant(RU, '        self._agree_shared_state("initial")\n', "", T2),
-    Mutant(RU, '        self._agree_shared_state("resumed")\n', "", T2),
+           "        if False:\n            raise DistributedContractError(\n                f\"{when} state", T2,
+           expect=(RS, CO, RW,)),
+    Mutant(RU, '        self._agree_shared_state("initial")\n', "", T2,
+           expect=(CO,)),
+    Mutant(RU, '        self._agree_shared_state("resumed")\n', "", T2,
+           expect=(RS, RW,)),
     Mutant(RU, '        h.update(f"f{value.hex()};".encode("utf-8"))\n',
-           '        h.update(f"f{round(value, 6)};".encode("utf-8"))\n', SD),
+           '        h.update(f"f{round(value, 6)};".encode("utf-8"))\n', SD,
+           expect=('test_every_value_change_is_seen',)),
     Mutant(RU, "        for key_digest, item in sorted(items, key=lambda pair: pair[0]):\n",
-           "        for key_digest, item in items:\n", SD),
+           "        for key_digest, item in items:\n", SD,
+           expect=('test_equal_state_gives_equal_digest_independent_of_dict_order',)),
     Mutant(RU, '        h.update(f"o{type(value).__qualname__};".encode("utf-8"))\n',
-           '        h.update(f"o{value!r};".encode("utf-8"))\n', SD),
+           '        h.update(f"o{value!r};".encode("utf-8"))\n', SD,
+           expect=('test_opaque_objects_count_by_type_not_by_address',)),
     Mutant(RU, '    h.update(f"T|{t.dtype}|{tuple(t.shape)}|".encode("utf-8"))\n',
-           '    h.update(b"T|")\n', SD),
+           '    h.update(b"T|")\n', SD,
+           expect=('test_every_value_change_is_seen',)),
     # round 3: digest failures agreed; sparse layouts by value
     Mutant(RU, '        parts = self.dist.run_agreed(self._shared_state_digests, what=f"the {when} state digest")\n',
-           '        parts = self._shared_state_digests()\n', T2),
+           '        parts = self._shared_state_digests()\n', T2,
+           expect=('test_state_digest_error_on_one_rank_is_agreed',)),
     Mutant(RU, "        s = (t.cpu() if t.layout == torch.sparse_coo else t.cpu().to_sparse_coo()).coalesce()\n",
-           "        s = t.cpu() if t.layout == torch.sparse_coo else t.cpu().to_sparse_coo()\n", SD),
+           "        s = t.cpu() if t.layout == torch.sparse_coo else t.cpu().to_sparse_coo()\n", SD,
+           expect=('test_sparse_tensors_digest_canonically',)),
     Mutant(RU, '        h.update(f"S|{s.dtype}|{tuple(s.shape)}|{s.sparse_dim()}|".encode("utf-8"))\n',
-           '        h.update(b"S|")\n', SD),
-    Mutant(RU, "        _update_tensor_digest(h, s.values())\n", "", SD),
+           '        h.update(b"S|")\n', SD,
+           expect=('test_sparse_tensors_digest_canonically',)),
+    Mutant(RU, "        _update_tensor_digest(h, s.values())\n", "", SD,
+           expect=('test_sparse_tensors_digest_canonically',)),
     Mutant(RU, '            h.update(f"A|{a.dtype.str}|{a.shape}|".encode("utf-8"))\n',
-           '            h.update(b"A|")\n', SD),
+           '            h.update(b"A|")\n', SD,
+           expect=('test_numpy_bytes_sets_and_complex_values_are_seen',)),
     Mutant(RU, '            h.update(f"g|{a.dtype.str}|".encode("utf-8"))\n            h.update(a.tobytes())\n',
-           '            h.update(b"g|")\n', SD),
+           '            h.update(b"g|")\n', SD,
+           expect=('test_numpy_bytes_sets_and_complex_values_are_seen',)),
     Mutant(RU, '        h.update(f"c{value.real.hex()},{value.imag.hex()};".encode("utf-8"))\n',
-           '        h.update(f"c{value.real.hex()};".encode("utf-8"))\n', SD),
-    Mutant(RU, "        for element_digest in sorted(elements):\n", "        for element_digest in elements:\n", SD),
-    Mutant(RU, "            _update_state_digest(h, value.reshape(-1).tolist())\n", "", SD),
+           '        h.update(f"c{value.real.hex()};".encode("utf-8"))\n', SD,
+           expect=('test_numpy_bytes_sets_and_complex_values_are_seen',)),
+    Mutant(RU, "        for element_digest in sorted(elements):\n", "        for element_digest in elements:\n", SD,
+           expect=('test_set_digest_is_independent_of_the_ranks_hash_seed',)),
+    Mutant(RU, "            _update_state_digest(h, value.reshape(-1).tolist())\n", "", SD,
+           expect=('test_numpy_bytes_sets_and_complex_values_are_seen',)),
+    # internal NR SF-R46-01 sweep (2026-11-10): fail-open optional checks closed
+    Mutant("gino_adapter_hex_v3.py", "        if allow_unbound:\n            return\n",
+           "        return\n", "test_gino_adapter_hex_v3.TestGinoPhase1Adapter",
+           expect=("test_unbound_model_is_refused_unless_explicitly_allowed",)),
+    Mutant("gino_adapter_hex_v3.py", "        candidates.extend(model.modules())\n", "        pass\n",
+           "test_gino_adapter_hex_v3.TestGinoPhase1Adapter",
+           expect=("test_unbound_model_is_refused_unless_explicitly_allowed",)),
+    Mutant("gino_adapter_hex_v3.py", "    if len(found) > 1:\n", "    if False:\n",
+           "test_gino_adapter_hex_v3.TestGinoPhase1Adapter",
+           expect=("test_unbound_model_is_refused_unless_explicitly_allowed",)),
+    Mutant("scripts/oracles/distributed_checkpoint_bundle_v1.py",
+           '        "source_sha_verified": expected_source_sha is not None,\n',
+           '        "source_sha_verified": True,\n', "test_distributed_checkpoint_bundle_v1.TestValidateBundle",
+           expect=("test_source_binding_must_be_stated",)),
+    # the probe's own expect check (KILLED_ELSEWHERE), pinned by its unit test
+    Mutant("scripts/mutation_probe.py", "    if any(name not in killed_by for name in expect):\n",
+           "    if False:\n", "test_hex_timestep_contract.TestMutationProbeKilledBy",
+           expect=("test_verdicts",)),
     Mutant(RU, '            h.update(b"g|object|")\n            _update_state_digest(h, value.item())\n',
-           '            h.update(a.tobytes())\n', SD),
+           '            h.update(a.tobytes())\n', SD,
+           expect=('test_numpy_bytes_sets_and_complex_values_are_seen',)),
 )
 
 
@@ -587,12 +641,39 @@ def _tests_ran(output: str) -> int:
     return int(match.group(1)) if match else 0
 
 
+# unittest's "FAIL: test_name (module.Class.test_name) [sub] (k=v)" / "ERROR: ..."
+_FAILED = re.compile(r"^(?:FAIL|ERROR): (\w+) \(", re.MULTILINE)
+
+
+def failed_tests(output: str) -> list[str]:
+    """The test methods that failed or errored in a unittest run, sorted, once each."""
+    return sorted(set(_FAILED.findall(output)))
+
+
+def judge(returncode: int, output: str, expect: tuple[str, ...] = ()) -> tuple[str, list[str]]:
+    """Verdict and ``killed_by`` of one mutant run (see the module docstring)."""
+    if returncode == 0:
+        return "SURVIVED", []
+    killed_by = failed_tests(output)
+    if not (_tests_ran(output) > 0 and "FAILED (" in output):
+        return "INVALID", killed_by
+    if any(name not in killed_by for name in expect):
+        return "KILLED_ELSEWHERE", killed_by
+    return "KILLED", killed_by
+
+
 def run_mutant(mutant: Mutant) -> str:
     """Apply one mutant, run its test class, restore.
 
-    Returns "KILLED", "SURVIVED" or "INVALID" (the run failed without
-    executing tests, e.g. a crash before discovery).
+    Returns "KILLED", "SURVIVED", "KILLED_ELSEWHERE" (red, but an expected
+    test stayed green) or "INVALID" (the run failed without executing tests,
+    e.g. a crash before discovery).
     """
+    return run_mutant_detail(mutant)[0]
+
+
+def run_mutant_detail(mutant: Mutant) -> tuple[str, list[str]]:
+    """``run_mutant`` plus the failing test methods (``killed_by``)."""
     path = (REPO if "/" in mutant.module else TOOLKIT) / mutant.module
     original = path.read_text(encoding="utf-8")
     if original.count(mutant.original) != 1:
@@ -602,12 +683,7 @@ def run_mutant(mutant: Mutant) -> str:
         result = _run_tests(mutant.test)
     finally:
         path.write_text(original, encoding="utf-8")
-    if result.returncode == 0:
-        return "SURVIVED"
-    output = result.stderr + result.stdout
-    if _tests_ran(output) > 0 and "FAILED (" in output:
-        return "KILLED"
-    return "INVALID"
+    return judge(result.returncode, result.stderr + result.stdout, mutant.expect)
 
 
 def check_baseline() -> list[str]:
@@ -630,12 +706,15 @@ def main() -> int:
     killed = 0
     for index, mutant in enumerate(MUTANTS, 1):
         try:
-            status = run_mutant(mutant)
+            status, killed_by = run_mutant_detail(mutant)
         except LookupError as exc:
             print(f"M{index:02d} STALE     {exc}")
             return 2
         killed += status == "KILLED"
-        print(f"M{index:02d} {status:<8}  {mutant.module} -> {mutant.test.rsplit('.', 1)[-1]}")
+        line = f"M{index:02d} {status:<8}  {mutant.module} -> {mutant.test.rsplit('.', 1)[-1]}"
+        if mutant.expect or status == "KILLED_ELSEWHERE":
+            line += f" | expect {','.join(mutant.expect)} | killed_by {','.join(killed_by) or '-'}"
+        print(line)
     ok = killed == len(MUTANTS)
     print(f"[MUTATION-PROBE] baseline green | {killed}/{len(MUTANTS)} killed | {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
