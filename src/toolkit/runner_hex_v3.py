@@ -131,6 +131,55 @@ def _module_digest(module: nn.Module) -> bytes:
     return h.digest()
 
 
+def _update_state_digest(h: Any, value: Any) -> None:
+    """Feed a canonical, rank-independent encoding of a ``state_dict`` value into ``h``.
+
+    Exact for what optimizer, scheduler and GradScaler states hold: tensors
+    (dtype, shape, bytes), floats (``float.hex``, so -0.0, NaN and every ulp
+    count), ints, bools, strings, None, and dicts/lists/tuples of them (dict
+    keys sorted by their encoding). Any other object contributes its type name
+    only, never its ``repr``: a ``repr`` may carry a memory address and would
+    differ between ranks that hold equal state.
+    """
+    if torch.is_tensor(value):
+        t = value.detach().cpu().contiguous()
+        h.update(f"T|{t.dtype}|{tuple(t.shape)}|".encode("utf-8"))
+        h.update(t.reshape(-1).view(torch.uint8).numpy().tobytes())
+    elif isinstance(value, bool) or value is None:
+        h.update(f"{value!r};".encode("utf-8"))
+    elif isinstance(value, int):
+        h.update(f"i{value};".encode("utf-8"))
+    elif isinstance(value, float):
+        h.update(f"f{value.hex()};".encode("utf-8"))
+    elif isinstance(value, str):
+        h.update(f"s{len(value)}:{value};".encode("utf-8"))
+    elif isinstance(value, dict):
+        items = []
+        for key, item in value.items():
+            k = hashlib.sha256()
+            _update_state_digest(k, key)
+            items.append((k.digest(), item))
+        h.update(f"d{len(items)}{{".encode("utf-8"))
+        for key_digest, item in sorted(items, key=lambda pair: pair[0]):
+            h.update(key_digest)
+            _update_state_digest(h, item)
+        h.update(b"}")
+    elif isinstance(value, (list, tuple)):
+        h.update(f"l{len(value)}[".encode("utf-8"))
+        for item in value:
+            _update_state_digest(h, item)
+        h.update(b"]")
+    else:
+        h.update(f"o{type(value).__qualname__};".encode("utf-8"))
+
+
+def _state_digest(state: Any) -> bytes:
+    """SHA-256 of a ``state_dict`` (see ``_update_state_digest``); pass None for an absent component."""
+    h = hashlib.sha256()
+    _update_state_digest(h, state)
+    return h.digest()
+
+
 def _is_oom(exc: BaseException) -> bool:
     return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
 
@@ -765,12 +814,44 @@ class HexTrainingRunner:
         if self.dist.any_true(ref != mine):
             raise DistributedContractError("resumed run_id differs from rank 0 on at least one rank")
         # Same path, different bytes (no shared file system, a stale copy):
-        # the weights each rank actually loaded must be rank 0's.
-        mine = _module_digest(self.raw_model)
-        ref = self.dist.broadcast_bytes(mine if self.dist.rank == 0 else None, 32)
-        if self.dist.any_true(ref != mine):
-            raise DistributedContractError("resumed model weights differ from rank 0 on at least one rank")
+        # every state the ranks must share has to be rank 0's, not only the
+        # weights (spec/DDP_RUNNER_v1.md section 6). Equal weights with another
+        # optimizer state (momentum), learning-rate schedule, EMA average or
+        # GradScaler scale diverge the ranks silently from the first step on:
+        # DDP averages gradients that each rank then applies differently, and
+        # with unequal loss scales it averages gradients scaled differently.
+        parts = self._resume_state_digests()
+        mine = b"".join(digest for _, digest in parts)
+        ref = self.dist.broadcast_bytes(mine if self.dist.rank == 0 else None, len(mine))
+        differs = self.dist.sum_ints(
+            [int(ref[32 * i:32 * (i + 1)] != digest) for i, (_, digest) in enumerate(parts)]
+        )
+        names = [name for (name, _), n in zip(parts, differs) if n]
+        if names:
+            raise DistributedContractError(
+                f"resumed state differs from rank 0 on at least one rank: {', '.join(names)}"
+            )
         return report
+
+    def _resume_state_digests(self) -> List[Tuple[str, bytes]]:
+        """The states every rank must hold equally after a resume, each with its digest.
+
+        Rank-local state is excluded by design: RNG streams, loader generators,
+        the anomaly history and mid-epoch rank buffers (the latter are copied in
+        after this check, ``_resume_local``). A component the run does not use
+        (no scheduler, no EMA, no GradScaler) is digested as None on every rank.
+        """
+        def state(obj: Any) -> Any:
+            return None if obj is None else obj.state_dict()
+
+        return [
+            ("model weights", _module_digest(self.raw_model)),
+            ("optimizer state", _state_digest(state(self.optimizer))),
+            ("scheduler state", _state_digest(state(self.scheduler))),
+            ("GradScaler state", _state_digest(state(self.grad_scaler))),
+            ("EMA state", _module_digest(self.ema_model) if self.ema_model is not None
+             else _state_digest(None)),
+        ]
 
     def _resume_local(self) -> Dict[str, Any]:
         resume_path = Path(self.config.resume_from)

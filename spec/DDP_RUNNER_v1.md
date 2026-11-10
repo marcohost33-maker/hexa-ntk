@@ -27,6 +27,13 @@ finite gradients, a zero scale) is skipped too (section 3.7, HX102-02/-04);
 `RunnerConfig.max_consecutive_skips` (default 50, 0 = off) stops a run at the N-th
 skipped step in a row, agreed under DDP and carried across resume (section 3.7,
 HX102-03, owner decision E1109-06a).
+**Version 1.3** (2026-11-10): the post-resume agreement covers every state the ranks
+must share, not only the weights: optimizer, scheduler, `GradScaler` and EMA state
+(section 6). Measured red on main 22e6308: rank 1 resuming from a copy with equal
+weights but other momentum buffers (or another loss scale, or another EMA average)
+ran to the end on both ranks with different weights. First AMP-under-DDP evidence:
+a CPU `GradScaler` in the 2-rank gloo job (section 8). No change to what a healthy
+run computes.
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -348,6 +355,29 @@ epoch boundary), the SHA-256 of the adopted `run_id`, and a SHA-256 over the
 names, dtypes, shapes and bytes of the loaded model state must equal rank 0's,
 else `DistributedContractError` on every rank (same path, different bytes: no
 shared file system, a stale copy).
+**v1.3: every shared state, named.** The weights are not the whole state the ranks
+share. Equal weights with another optimizer state (momentum buffers), learning-rate
+schedule, EMA average or `GradScaler` state pass a weights-only check and diverge the
+ranks silently from the first step: DDP averages the gradients, each rank then
+applies them with its own momentum or rate; with unequal loss scales DDP even
+averages gradients scaled differently and each rank unscales them with its own
+scale. Five SHA-256 digests are now compared with rank 0's in one broadcast
+(160 bytes) and one 5-element int64 all-reduce (the count of ranks that differ, per
+component; v1.2: a 32-byte broadcast and a 1-element all-reduce): the model state
+(as before), `optimizer.state_dict()`, `scheduler.state_dict()`,
+`grad_scaler.state_dict()` and the EMA module's state (`n_averaged` included). A
+component the run does not use is digested as `None` on every rank. The error
+names the components that differ (`resumed state differs from rank 0 on at least
+one rank: optimizer state`). The optimizer/scheduler/scaler digest is canonical and
+exact: tensors by dtype, shape and bytes, floats by `float.hex` (one ulp and -0.0
+count), ints, bools, strings and `None` typed, dict keys sorted by their encoding;
+any other object counts by its type name only, never by `repr` (a `repr` may carry a
+memory address that differs between ranks with equal state). Rank-local state is
+excluded by design: RNG streams and loader generators (restored per rank above), the
+anomaly history, and mid-epoch rank buffers (copied in after this check,
+`spec/MID_EPOCH_RESUME_v1.md`). Not covered: two ranks whose optimizers were built
+with different hyperparameters and which *start* without a resume (no state has
+been loaded to compare; `load_state_dict` overwrites the hyperparameters on resume).
 
 ## 7. Collectives used
 
@@ -443,8 +473,16 @@ Not covered (open):
   stops a run that skips every step. Still open: a GradScaler backoff to a positive
   scale never counts, so a run whose scale keeps dropping skips about 165 steps from
   65536 before the count starts; with `max_consecutive_skips=0` nothing stops it.
-- **NCCL/CUDA, more than 3 ranks, more than one host, AMP under DDP**: not run
-  (2 and 3 gloo ranks on one host are).
+- **NCCL/CUDA, more than 3 ranks, more than one host**: not run (2 and 3 gloo ranks
+  on one host are). **AMP under DDP** (v1.3, partly): the runner builds a
+  `GradScaler` and autocast only on CUDA; the 2-rank gloo job injects
+  `torch.amp.GradScaler("cpu", init_scale=1024, growth_interval=2)` on every rank.
+  Measured: both ranks end with bitwise equal weights, EMA and scale, equal to the
+  single-process run with the same scaler (<= 1e-12; the scale grew from 1024 to
+  8192); a NaN gradient on rank 1 only is spread by the all-reduce, both ranks
+  back off once (no capsule, counted as one skip) and stay bitwise equal; a resume
+  with a halved scale on rank 1 is refused on both ranks (section 6). Not covered:
+  autocast (fp16/bf16 forward) under DDP, a CUDA `GradScaler`, NCCL.
 - ~~**Mid-epoch resume**: resume stays at epoch boundaries.~~ Done 2026-10-30,
   `spec/MID_EPOCH_RESUME_v1.md` (this line had not been updated, v1.1).
 - **Errors before the forward are agreed (section 3.3), errors inside DDP's forward

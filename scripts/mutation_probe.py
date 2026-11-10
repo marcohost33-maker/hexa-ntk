@@ -58,6 +58,7 @@ I82 = "test_phase1_protocol_hex_v3.TestIssue82Residuals"
 ME = "test_mid_epoch_resume_hex_v3.TestMidEpochResume"
 NF = "test_runner_hex_v3.TestNonFiniteGradient"
 CS = "test_runner_hex_v3.TestConsecutiveSkips"
+SD = "test_ddp_hex_v3.TestResumeStateDigest"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -348,9 +349,9 @@ MUTANTS = (
     Mutant(RU, "        if self.dist is None:\n            return self._save_checkpoints_local(",
            "        if True:\n            return self._save_checkpoints_local(", T2),
     Mutant(RU, "        if self.dist is not None:\n            self._require_equal_batch_count()\n", "", T2),
-    Mutant(RU, "        if self.dist.any_true(ref != mine):\n"
-           "            raise DistributedContractError(\"resumed model",
-           "        if False:\n            raise DistributedContractError(\"resumed model", T2),
+    # v1.3: the weights are one of five resume digests; the stop itself has its own mutant below
+    Mutant(RU, '            ("model weights", _module_digest(self.raw_model)),\n',
+           '            ("model weights", _state_digest(None)),\n', T2),
     Mutant(RU, '        report = self.dist.run_agreed(self._resume_local, what="resume")\n',
            "        report = self._resume_local()\n", T2),
     Mutant(RU, "            loss_sum, loss_n, grad_sum, grad_n = self.dist.all_reduce_sum(\n"
@@ -528,6 +529,24 @@ MUTANTS = (
     Mutant(P1, "        if not isinstance(dirty, bool):\n", "        if False:\n", I82),
     Mutant(P1, "    if upper < float(fe[-1]) or upper > float(fe[0]):\n        return None\n", "", I82),
     Mutant(P1, "    return np.where(np.isfinite(out), out, fallback)\n", "    return fallback\n", I82),
+    # Resume agreement over every shared state (2026-11-10, DDP_RUNNER v1.3):
+    # each component, the stop itself and the canonical digest.
+    Mutant(RU, '            ("optimizer state", _state_digest(state(self.optimizer))),\n',
+           '            ("optimizer state", _state_digest(None)),\n', T2),
+    Mutant(RU, '            ("GradScaler state", _state_digest(state(self.grad_scaler))),\n',
+           '            ("GradScaler state", _state_digest(None)),\n', T2),
+    Mutant(RU, '            ("EMA state", _module_digest(self.ema_model) if self.ema_model is not None\n',
+           '            ("EMA state", _state_digest(None) if self.ema_model is not None\n', T2),
+    Mutant(RU, "        if names:\n            raise DistributedContractError(\n                f\"resumed state",
+           "        if False:\n            raise DistributedContractError(\n                f\"resumed state", T2),
+    Mutant(RU, '        h.update(f"f{value.hex()};".encode("utf-8"))\n',
+           '        h.update(f"f{round(value, 6)};".encode("utf-8"))\n', SD),
+    Mutant(RU, "        for key_digest, item in sorted(items, key=lambda pair: pair[0]):\n",
+           "        for key_digest, item in items:\n", SD),
+    Mutant(RU, '        h.update(f"o{type(value).__qualname__};".encode("utf-8"))\n',
+           '        h.update(f"o{value!r};".encode("utf-8"))\n', SD),
+    Mutant(RU, '        h.update(f"T|{t.dtype}|{tuple(t.shape)}|".encode("utf-8"))\n',
+           '        h.update(b"T|")\n', SD),
 )
 
 

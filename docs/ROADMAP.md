@@ -22,6 +22,35 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **Resume unter DDP: alle geteilten Zustaende abgeglichen, nicht nur die Gewichte; erste
+  AMP-unter-DDP-Evidenz (2026-11-10, Linux-Container, Python 3.12.3, torch 2.6.0; DDP_RUNNER v1.3).**
+  Auf main 22e6308 gemessen: nach einem verteilten Resume verglich der Runner Epoche, Schritt,
+  Best-Metrik, Mid-Epoch-Position, run_id und die Modellgewichte mit Rank 0 -- nicht aber Optimizer-,
+  Scheduler-, GradScaler- und EMA-Zustand. Eine veraltete Kopie mit gleichen Gewichten (kein gemeinsames
+  Dateisystem) lief durch: Rank 1 mit anderem Momentum, halbierter Loss-Skala oder anderem EMA-Mittel
+  trainierte auf beiden Ranks bis zum Ende, die Gewichte liefen auseinander (rot belegt: beide Ranks
+  `ok`, Digests verschieden). Jetzt (`spec/DDP_RUNNER_v1.md` Abschnitt 6): fuenf SHA-256-Digests
+  (Gewichte, `optimizer.state_dict()`, `scheduler.state_dict()`, `grad_scaler.state_dict()`, EMA-Modul)
+  in einem Broadcast plus einem 5-Element-All-Reduce -- gleich viele Kollektiv-Aufrufe wie vorher --,
+  die Fehlermeldung nennt die abweichenden Komponenten. Der Digest ist kanonisch und exakt (Floats per
+  `float.hex`, Schluessel sortiert, unbekannte Objekte nur per Typname, nie per `repr` mit
+  Speicheradresse). AMP unter DDP, soweit auf der CPU messbar: CPU-`GradScaler` auf beiden Ranks ->
+  Gewichte, EMA und Skala bitgleich zwischen den Ranks und gleich dem Einzelprozess-Lauf (<= 1e-12,
+  Skala 1024 -> 8192); NaN-Gradient nur auf Rank 1 -> beide Ranks ein Backoff (Skala 2048 statt 8192),
+  keine Kapsel, bitgleich. 8 neue Tests (4 aus dem 2-Rank-Job: abweichender geteilter Zustand mit 3
+  Szenarien, Positivkontrolle, 2 AMP-Szenarien; 4 Digest-Unit-Tests; dazu die Gewichts-Meldung
+  geschaerft); 8 neue Mutanten, der alte Mutant des Gewichts-Checks auf die Komponente `model weights` umgezielt (sein Ziel gab es nicht mehr; die erste volle Probe brach daran als STALE ab). Eigene Nachpruefung: zwei
+  Mutanten ueberlebten zuerst -- der Typname-Test erzeugte seine Objekte nacheinander und CPython
+  verwendete die Speicheradresse wieder (Test geschaerft), der bool-Mutant war aequivalent (gestrichen).
+  Grenzen: Autocast (fp16/bf16) unter DDP, CUDA-GradScaler, NCCL weiter nicht gelaufen; Ranks, deren
+  Optimizer ohne Resume mit verschiedenen Hyperparametern starten, werden nicht erkannt (offen).
+  _Evidenz:_ `results/2026-11-10_ddp-resume-state_local-gate.log`.
+- [x] **Lizenzstand GAOT/GINOT nachgeprueft (#60 Punkt 3, 2026-11-10).** Beide Repos
+  (`camlab-ethz/GAOT`, `QibangLiu/GINOT`) zeigen auf ihrer GitHub-Seite weiterhin keine Lizenzdatei und
+  keinen Lizenzhinweis im README (Seitenabruf; die Lizenz-API antwortete 403, daher nur Seitenbefund).
+  Stand unveraendert: kein Vendoring, Nutzung nur mit Erlaubnis der Autoren oder Clean-Room aus dem
+  Paper (Owner-Entscheid D8 der Vorregistrierung).
+
 - [x] **Nicht-endlicher Gradient bei endlichem Loss (2026-11-09, Linux-Container; Drive-Befund
   NTK-R5-NR03/PR04 der Cross-Family-Runde R5 vom 2026-11-04, bisher nicht ins Repo uebernommen).**
   Auf main cd5f6dc gemessen: liefert `backward` bei endlichem Loss einen NaN-/Inf-Gradienten, skaliert
@@ -593,6 +622,8 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   > 2 Ranks, AMP unter DDP, CUDA-RNG je Rank, Fehler in backward/optimizer.step. Nachtrag
   2026-11-02 (v1.1): 3 Ranks und Fehler nach backward (Optimizer-Schritt, EMA) erledigt; offen
   bleiben NCCL/CUDA, > 3 Ranks, mehrere Hosts, AMP unter DDP, CUDA-RNG je Rank, Fehler in backward.
+  Nachtrag 2026-11-10 (v1.3): AMP unter DDP mit CPU-`GradScaler` belegt (Autocast/CUDA/NCCL weiter offen);
+  Resume gleicht jetzt alle geteilten Zustaende ab (oben unter Erledigt).
 - [x] ~~**CI-Reproduzierbarkeit:** `numpy` ist im Testjob ungepinnt.~~ Erledigt 2026-10-14
   (siehe oben): `numpy==2.5.3` im Testjob, wie in den Evidence-Lanes; inline wie `torch==2.6.0`,
   weil `requirements-dev.txt` laut Kopf nur Dev-Tools pinnt.

@@ -52,7 +52,7 @@ from ddp_hex_v3 import (
 )
 from failure_signature_hex_v3 import FailureSignature
 from operator_adapter_hex_v3 import OperatorAdapterV3
-from runner_hex_v3 import HexTrainingRunner, RunnerConfig
+from runner_hex_v3 import HexTrainingRunner, RunnerConfig, _state_digest
 
 # ------------------------------------------------------------------
 # Fixtures shared by the in-process tests and the spawned ranks
@@ -283,6 +283,61 @@ class TestRunnerWithoutProcessGroup(unittest.TestCase):
 
 # ------------------------------------------------------------------
 # In-process gloo group, world size 1
+class TestResumeStateDigest(unittest.TestCase):
+    """The canonical digest behind the post-resume agreement (spec section 6)."""
+
+    def test_equal_state_gives_equal_digest_independent_of_dict_order(self) -> None:
+        a = {"scale": 1024.0, "growth_tracker": 3, "nested": [1, (2.5, None), "x"]}
+        b = {"nested": [1, (2.5, None), "x"], "growth_tracker": 3, "scale": 1024.0}
+        self.assertEqual(_state_digest(a), _state_digest(b))
+
+    def test_every_value_change_is_seen(self) -> None:
+        base = {"scale": 1024.0, "n": 3, "flag": True, "name": "sgd", "t": torch.zeros(2)}
+        changed = [
+            {**base, "scale": math.nextafter(1024.0, 2048.0)},  # one ulp
+            {**base, "scale": 1024},  # int vs float
+            {**base, "n": 4},
+            {**base, "flag": False},
+            {**base, "flag": 1},  # bool vs int
+            {**base, "name": "sgd "},
+            {**base, "t": torch.zeros(2, dtype=torch.float64)},  # dtype
+            {**base, "t": torch.zeros(1, 2)},  # shape
+            {**base, "t": torch.tensor([0.0, -0.0])},  # bytes (-0.0)
+            {**base, "extra": None},
+        ]
+        ref = _state_digest(base)
+        for other in changed:
+            with self.subTest(other=other):
+                self.assertNotEqual(_state_digest(other), ref)
+        self.assertNotEqual(_state_digest(0.0), _state_digest(-0.0))
+        self.assertEqual(_state_digest(float("nan")), _state_digest(float("nan")))
+        self.assertNotEqual(_state_digest([1, 2]), _state_digest([[1, 2]]))
+
+    def test_opaque_objects_count_by_type_not_by_address(self) -> None:
+        class _Opaque:
+            pass
+
+        # two live instances have different repr() (memory address) but must agree;
+        # both kept alive, else CPython may reuse the first one's address
+        first, second = _Opaque(), _Opaque()
+        self.assertNotEqual(repr(first), repr(second))
+        self.assertEqual(_state_digest({"f": first}), _state_digest({"f": second}))
+        self.assertNotEqual(_state_digest({"f": first}), _state_digest({"f": object()}))
+
+    def test_real_optimizer_scheduler_and_scaler_states(self) -> None:
+        def states(momentum: float) -> List[bytes]:
+            model = _model()
+            opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=momentum)
+            model(torch.ones(1, 3, dtype=torch.float64)).sum().backward()
+            opt.step()
+            sched = torch.optim.lr_scheduler.StepLR(opt, step_size=1)
+            return [_state_digest(opt.state_dict()), _state_digest(sched.state_dict()),
+                    _state_digest(torch.amp.GradScaler("cpu").state_dict())]
+
+        self.assertEqual(states(0.9), states(0.9))
+        self.assertNotEqual(states(0.9)[0], states(0.8)[0])
+
+
 # ------------------------------------------------------------------
 
 
@@ -1243,6 +1298,115 @@ def _sc_resume_other_weights_on_rank1(rank: int, world: int, out: Path) -> Any:
                 resume_from=str(path), resume_trusted=True).run()
 
 
+def _cpu_scaler() -> torch.amp.GradScaler:
+    # The runner builds a GradScaler only on CUDA; torch >= 2.3 has the same
+    # scaler on the CPU, so AMP's scaler path under DDP is testable with gloo.
+    return torch.amp.GradScaler("cpu", init_scale=1024.0, growth_interval=2)
+
+
+def _resume_with_rank1_copy(mutate: Callable[[Dict[str, Any]], None], *,
+                            scaler: bool = False) -> Callable[[int, int, Path], Any]:
+    """Rank 1 resumes from a copy of rank 0's file whose weights are equal but
+    whose ``mutate``-d state is not (a stale copy, no shared file system).
+
+    Before the fix only the weights were compared: the run went on and the
+    ranks applied the same averaged gradients differently from then on.
+    """
+
+    def scenario(rank: int, world: int, out: Path) -> Any:
+        first = _ddp_runner(rank, out, train=_train_loader(rank, world), val=_exact_val_loader(), num_epochs=1)
+        if scaler:
+            first.grad_scaler = _cpu_scaler()
+        first.run()
+        path = out / "checkpoints" / "resume_last.pt"
+        if rank == 1:
+            payload = torch.load(path, weights_only=False)
+            mutate(payload)
+            other = out / "rank1_copy.pt"
+            torch.save(payload, other)
+            path = other
+        second = _ddp_runner(rank, out, train=_train_loader(rank, world), val=_exact_val_loader(), num_epochs=3,
+                             resume_from=str(path), resume_trusted=True)
+        if scaler:
+            second.grad_scaler = _cpu_scaler()
+        second.run()
+        return {"digest": _digest(second.raw_model)}
+
+    return scenario
+
+
+def _bump_momentum(payload: Dict[str, Any]) -> None:
+    for state in payload["optimizer_state_dict"]["state"].values():
+        state["momentum_buffer"].add_(1.0)
+
+
+def _halve_scale(payload: Dict[str, Any]) -> None:
+    payload["grad_scaler_state_dict"]["scale"] = payload["grad_scaler_state_dict"]["scale"] / 2
+
+
+def _move_ema(payload: Dict[str, Any]) -> None:
+    for value in payload["ema_state_dict"].values():
+        if torch.is_tensor(value) and value.is_floating_point():
+            value.add_(1.0)
+
+
+def _amp_run(rank: int, world: int, out: Path, *, poison_rank: int = -1, poison_call: int = -1) -> Dict[str, Any]:
+    """A CPU GradScaler on every rank; ``poison_rank`` gets a NaN gradient in its
+    ``poison_call``-th training step (the all-reduce spreads it to every rank)."""
+    calls = {"n": 0}
+    mse = nn.MSELoss()
+
+    def loss_fn(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        if pred.requires_grad:
+            calls["n"] += 1
+            if rank == poison_rank and calls["n"] == poison_call:
+                pred = _PoisonGrad.apply(pred)
+        return mse(pred, target)
+
+    model = DDP(_model())
+    runner = HexTrainingRunner(
+        _config(out, distributed=True, is_main_process=rank == 0),
+        model, torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9),
+        _train_loader(rank, world), _exact_val_loader(), loss_fn=loss_fn,
+    )
+    runner.grad_scaler = _cpu_scaler()
+    result = runner.run()
+    return {
+        "params": _flat_params(runner.raw_model),
+        "ema": _flat_params(runner.ema_model.module),
+        "digest": _digest(runner.raw_model),
+        "scale": runner.grad_scaler.get_scale(),
+        "mean_loss": [t["mean_loss"] for t in result["history"]["train"]],
+        "n_anomalies": [t["n_anomalies"] for t in result["history"]["train"]],
+        "failure_files": sorted(p.name for p in runner.failure_dir.glob("*.json")),
+    }
+
+
+def _amp_single_process_reference(out: Path) -> Dict[str, Any]:
+    """The run the 2-rank AMP job must reproduce: global batch 4, the same CPU GradScaler."""
+    model = _model()
+    runner = HexTrainingRunner(
+        _config(out), model, torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9),
+        DataLoader(_Data(8, seed=1), batch_size=4), DataLoader(_Data(5, seed=2), batch_size=5),
+    )
+    runner.grad_scaler = _cpu_scaler()
+    result = runner.run()
+    return {
+        "params": _flat_params(model),
+        "ema": _flat_params(runner.ema_model.module),
+        "scale": runner.grad_scaler.get_scale(),
+        "mean_loss": [t["mean_loss"] for t in result["history"]["train"]],
+    }
+
+
+def _sc_amp_equivalence(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    return _amp_run(rank, world, out)
+
+
+def _sc_amp_nan_grad_on_rank1(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    return _amp_run(rank, world, out, poison_rank=1, poison_call=2)
+
+
 class _StepFailure(RuntimeError):
     """Injected error after backward (optimizer step / EMA update)."""
 
@@ -1508,6 +1672,12 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "resume_rank_rng": _sc_resume_rank_rng,
     "resume_missing_on_rank1": _sc_resume_missing_on_rank1,
     "resume_other_weights_on_rank1": _sc_resume_other_weights_on_rank1,
+    "resume_other_optimizer_state_on_rank1": _resume_with_rank1_copy(_bump_momentum),
+    "resume_other_scaler_state_on_rank1": _resume_with_rank1_copy(_halve_scale, scaler=True),
+    "resume_other_ema_state_on_rank1": _resume_with_rank1_copy(_move_ema),
+    "resume_same_scaler_state": _resume_with_rank1_copy(lambda payload: None, scaler=True),
+    "amp_equivalence": _sc_amp_equivalence,
+    "amp_nan_grad_on_rank1": _sc_amp_nan_grad_on_rank1,
     "step_error_last_step_rank1": _sc_step_error_last_step_rank1,
     "step_error_before_mid_save_rank1": _sc_step_error_before_mid_save_rank1,
     "ema_error_rank0": _sc_ema_error_rank0,
@@ -1860,6 +2030,57 @@ class TestTwoRanks(_MultiRankJob):
 
     def test_resume_with_other_weights_on_one_rank_fails_both(self) -> None:
         self.assertEqual(self._errors("resume_other_weights_on_rank1"), ["DistributedContractError"] * 2)
+        for res in self.results:
+            self.assertIn(": model weights", res.get("resume_other_weights_on_rank1", {}).get("message", ""))
+
+    def test_resume_with_other_shared_state_on_one_rank_fails_both(self) -> None:
+        # equal weights, another optimizer / GradScaler / EMA state on rank 1: red
+        # before the fix (the run went on and the ranks drifted apart)
+        for name, part in (("resume_other_optimizer_state_on_rank1", "optimizer state"),
+                           ("resume_other_scaler_state_on_rank1", "GradScaler state"),
+                           ("resume_other_ema_state_on_rank1", "EMA state")):
+            # unfixed, the run completes and the ranks' weights drift apart: show the digests
+            self.assertEqual(self._errors(name), ["DistributedContractError"] * 2,
+                             f"{name}: {[res.get(name) for res in self.results]}")
+            for rank, res in enumerate(self.results):
+                with self.subTest(name, rank=rank):
+                    message = res.get(name, {}).get("message", "")
+                    self.assertTrue(message.endswith(f"on at least one rank: {part}"), message)
+
+    def test_resume_with_equal_scaler_state_runs(self) -> None:
+        # positive control: the same file on both ranks, GradScaler included
+        r0, r1 = self._ok("resume_same_scaler_state")
+        self.assertEqual(r0["digest"], r1["digest"])
+
+    def test_amp_grad_scaler_under_ddp_reproduces_the_single_process_run(self) -> None:
+        r0, r1 = self._ok("amp_equivalence")
+        self.assertEqual(r0["params"], r1["params"])
+        self.assertEqual(r0["ema"], r1["ema"])
+        self.assertEqual(r0["scale"], r1["scale"])
+        with tempfile.TemporaryDirectory() as ref_dir:
+            ref = _amp_single_process_reference(Path(ref_dir))
+        # growth_interval=2 over 6 healthy steps: 1024 doubled three times
+        self.assertEqual(r0["scale"], ref["scale"])
+        self.assertEqual(ref["scale"], 8192.0)
+        for key in ("params", "ema", "mean_loss"):
+            for got, want in zip(r0[key], ref[key]):
+                self.assertAlmostEqual(got, want, delta=1e-12, msg=key)
+        self.assertEqual(r0["n_anomalies"], [0, 0, 0])
+
+    def test_amp_nan_gradient_on_one_rank_backs_off_on_both(self) -> None:
+        r0, r1 = self._ok("amp_nan_grad_on_rank1")
+        clean, _ = self._ok("amp_equivalence")
+        for value in (r0, r1):
+            self.assertTrue(all(math.isfinite(x) for x in value["params"] + value["ema"]))
+            # the scaler's skip is agreed like any skip and counted, routine: no capsule
+            self.assertEqual(value["n_anomalies"], [1, 0, 0])
+            self.assertEqual(value["failure_files"], [])
+        self.assertEqual(r0["digest"], r1["digest"])
+        self.assertEqual(r0["scale"], r1["scale"])
+        # step 0 healthy, step 1 backs off (1024 -> 512, tracker reset), steps 2-5
+        # grow twice: 2048, against 8192 in the clean run
+        self.assertEqual(r0["scale"], 2048.0)
+        self.assertEqual(clean["scale"], 8192.0)
 
 
 class TestThreeRanks(_MultiRankJob):
