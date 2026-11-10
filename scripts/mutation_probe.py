@@ -537,8 +537,10 @@ MUTANTS = (
            '            ("GradScaler state", _state_digest(None)),\n', T2),
     Mutant(RU, '            ("EMA state", _module_digest(self.ema_model) if self.ema_model is not None\n',
            '            ("EMA state", _state_digest(None) if self.ema_model is not None\n', T2),
-    Mutant(RU, "        if names:\n            raise DistributedContractError(\n                f\"resumed state",
-           "        if False:\n            raise DistributedContractError(\n                f\"resumed state", T2),
+    Mutant(RU, "        if names:\n            raise DistributedContractError(\n                f\"{when} state",
+           "        if False:\n            raise DistributedContractError(\n                f\"{when} state", T2),
+    Mutant(RU, '        self._agree_shared_state("initial")\n', "", T2),
+    Mutant(RU, '        self._agree_shared_state("resumed")\n', "", T2),
     Mutant(RU, '        h.update(f"f{value.hex()};".encode("utf-8"))\n',
            '        h.update(f"f{round(value, 6)};".encode("utf-8"))\n', SD),
     Mutant(RU, "        for key_digest, item in sorted(items, key=lambda pair: pair[0]):\n",
@@ -547,6 +549,14 @@ MUTANTS = (
            '        h.update(f"o{value!r};".encode("utf-8"))\n', SD),
     Mutant(RU, '        h.update(f"T|{t.dtype}|{tuple(t.shape)}|".encode("utf-8"))\n',
            '        h.update(b"T|")\n', SD),
+    Mutant(RU, '            h.update(f"A|{a.dtype.str}|{a.shape}|".encode("utf-8"))\n',
+           '            h.update(b"A|")\n', SD),
+    Mutant(RU, '            h.update(f"g|{a.dtype.str}|".encode("utf-8"))\n            h.update(a.tobytes())\n',
+           '            h.update(b"g|")\n', SD),
+    Mutant(RU, '        h.update(f"c{value.real.hex()},{value.imag.hex()};".encode("utf-8"))\n',
+           '        h.update(f"c{value.real.hex()};".encode("utf-8"))\n', SD),
+    Mutant(RU, "        for element_digest in sorted(elements):\n", "        for element_digest in elements:\n", SD),
+    Mutant(RU, "            _update_state_digest(h, value.reshape(-1).tolist())\n", "", SD),
 )
 
 

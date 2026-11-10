@@ -42,8 +42,23 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   geschaerft); 8 neue Mutanten, der alte Mutant des Gewichts-Checks auf die Komponente `model weights` umgezielt (sein Ziel gab es nicht mehr; die erste volle Probe brach daran als STALE ab). Eigene Nachpruefung: zwei
   Mutanten ueberlebten zuerst -- der Typname-Test erzeugte seine Objekte nacheinander und CPython
   verwendete die Speicheradresse wieder (Test geschaerft), der bool-Mutant war aequivalent (gestrichen).
-  Grenzen: Autocast (fp16/bf16) unter DDP, CUDA-GradScaler, NCCL weiter nicht gelaufen; Ranks, deren
-  Optimizer ohne Resume mit verschiedenen Hyperparametern starten, werden nicht erkannt (offen).
+  _Review-Runde (Selbstpruefung von 5c9d753, gleicher Tag):_ (1) die als offen gemeldete Grenze
+  "Ranks, deren Optimizer ohne Resume mit verschiedenen Hyperparametern starten" ist geschlossen: derselbe
+  Abgleich laeuft jetzt auch bei der Konstruktion (rot gegen 5c9d753: Rank 1 mit Lernrate 0.2 statt 0.1
+  oder anderem StepLR lief bis zum Ende, Gewichte auseinander; jetzt `initial state differs ...:
+  optimizer state, scheduler state`). (2) Der Digest verlor Werte: NumPy-Skalare/-Arrays, bytes, Mengen
+  und komplexe Zahlen fielen in den Typname-Zweig -- verschiedene Werte, gleicher Digest (11 Teilfaelle
+  rot gegen 5c9d753); jetzt typisiert und exakt kodiert. (3) Mengen werden sortiert: die
+  Iterationsreihenfolge von String-Mengen haengt von `PYTHONHASHSEED` ab und ist je Prozess (= Rank)
+  anders -- per Subprozess mit drei Seeds belegt. (4) Falsch-Positive geprueft statt angenommen: 6
+  Optimizer x 11 Scheduler (u. a. LBFGS, OneCycleLR, ReduceLROnPlateau, SequentialLR,
+  ChainedScheduler), zweimal gebaut oder neu geladen -> gleicher Digest, ein Schritt mehr -> anderer;
+  zudem laufen alle 2- und 3-Rank-Szenarien durch den neuen Konstruktions-Check. Primaerquelle: die
+  DDP-Doku setzt voraus, dass der Optimizer die reduzierten Gradienten auf allen Prozessen gleich
+  anwendet; DDP gleicht nur Parameter/Buffer bei der Konstruktion ab. 4 neue Tests, 7 neue Mutanten,
+  volle Probe 202/202.
+  Grenzen: Autocast (fp16/bf16) unter DDP, CUDA-GradScaler, NCCL weiter nicht gelaufen; was ein
+  `state_dict` nicht enthaelt (z. B. die Funktionen eines `LambdaLR`), ist nicht vergleichbar.
   _Evidenz:_ `results/2026-11-10_ddp-resume-state_local-gate.log`.
 - [x] **Lizenzstand GAOT/GINOT nachgeprueft (#60 Punkt 3, 2026-11-10).** Beide Repos
   (`camlab-ethz/GAOT`, `QibangLiu/GINOT`) zeigen auf ihrer GitHub-Seite weiterhin keine Lizenzdatei und

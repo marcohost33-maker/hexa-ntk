@@ -63,6 +63,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
@@ -134,25 +135,58 @@ def _module_digest(module: nn.Module) -> bytes:
 def _update_state_digest(h: Any, value: Any) -> None:
     """Feed a canonical, rank-independent encoding of a ``state_dict`` value into ``h``.
 
-    Exact for what optimizer, scheduler and GradScaler states hold: tensors
-    (dtype, shape, bytes), floats (``float.hex``, so -0.0, NaN and every ulp
-    count), ints, bools, strings, None, and dicts/lists/tuples of them (dict
-    keys sorted by their encoding). Any other object contributes its type name
+    Exact for what optimizer, scheduler and GradScaler states hold: tensors and
+    NumPy arrays (dtype, shape, bytes), NumPy scalars (dtype, bytes), floats
+    (``float.hex``, so -0.0, NaN and every ulp count), complex numbers, ints,
+    bools, strings, bytes, None, and dicts/lists/tuples/sets of them (dict keys
+    and set elements sorted by their encoding). Every value is typed: 1, 1.0,
+    True and np.int64(1) differ. Any other object contributes its type name
     only, never its ``repr``: a ``repr`` may carry a memory address and would
-    differ between ranks that hold equal state.
+    differ between ranks that hold equal state (such objects are not compared).
     """
     if torch.is_tensor(value):
         t = value.detach().cpu().contiguous()
         h.update(f"T|{t.dtype}|{tuple(t.shape)}|".encode("utf-8"))
         h.update(t.reshape(-1).view(torch.uint8).numpy().tobytes())
+    elif isinstance(value, np.ndarray):
+        if value.dtype.hasobject:  # object arrays: their elements, not pointers
+            h.update(f"A|object|{value.shape}|".encode("utf-8"))
+            _update_state_digest(h, value.reshape(-1).tolist())
+        else:
+            a = np.ascontiguousarray(value)
+            h.update(f"A|{a.dtype.str}|{a.shape}|".encode("utf-8"))
+            h.update(a.tobytes())
+    elif isinstance(value, np.generic):
+        a = np.asarray(value)
+        if a.dtype.hasobject:
+            h.update(b"g|object|")
+            _update_state_digest(h, value.item())
+        else:
+            h.update(f"g|{a.dtype.str}|".encode("utf-8"))
+            h.update(a.tobytes())
     elif isinstance(value, bool) or value is None:
         h.update(f"{value!r};".encode("utf-8"))
     elif isinstance(value, int):
         h.update(f"i{value};".encode("utf-8"))
     elif isinstance(value, float):
         h.update(f"f{value.hex()};".encode("utf-8"))
+    elif isinstance(value, complex):
+        h.update(f"c{value.real.hex()},{value.imag.hex()};".encode("utf-8"))
     elif isinstance(value, str):
         h.update(f"s{len(value)}:{value};".encode("utf-8"))
+    elif isinstance(value, (bytes, bytearray)):
+        h.update(f"b{len(value)}:".encode("utf-8"))
+        h.update(bytes(value))
+    elif isinstance(value, (set, frozenset)):
+        elements = []
+        for element in value:
+            e = hashlib.sha256()
+            _update_state_digest(e, element)
+            elements.append(e.digest())
+        h.update(f"S{len(elements)}{{".encode("utf-8"))
+        for element_digest in sorted(elements):
+            h.update(element_digest)
+        h.update(b"}")
     elif isinstance(value, dict):
         items = []
         for key, item in value.items():
@@ -598,6 +632,12 @@ class HexTrainingRunner:
                 "use_amp to the same autocast dtype and GradScaler: bfloat16 falls back to "
                 "float16 + GradScaler on a GPU without bf16 support)"
             )
+        # The same config does not make the same state: an optimizer built with
+        # another learning rate or momentum on one rank, another scheduler, a
+        # pre-loaded optimizer state or GradScaler scale on one rank all pass the
+        # config digest and diverge the ranks silently from the first step
+        # (DDP averages gradients and assumes every rank applies them alike).
+        self._agree_shared_state("initial")
         # One run identity: best.pt and the resume record carry rank 0's.
         self.ckpt_mgr.run_id = self.dist.broadcast_bytes(
             bytes.fromhex(self.ckpt_mgr.run_id) if self.dist.rank == 0 else None, 16
@@ -820,7 +860,16 @@ class HexTrainingRunner:
         # GradScaler scale diverge the ranks silently from the first step on:
         # DDP averages gradients that each rank then applies differently, and
         # with unequal loss scales it averages gradients scaled differently.
-        parts = self._resume_state_digests()
+        self._agree_shared_state("resumed")
+        return report
+
+    def _agree_shared_state(self, when: str) -> None:
+        """Every rank's shared state must be rank 0's, else DistributedContractError on all ranks.
+
+        One broadcast of the five digests and one 5-element all-reduce of
+        per-component mismatch counts, so every rank names the same components.
+        """
+        parts = self._shared_state_digests()
         mine = b"".join(digest for _, digest in parts)
         ref = self.dist.broadcast_bytes(mine if self.dist.rank == 0 else None, len(mine))
         differs = self.dist.sum_ints(
@@ -829,17 +878,16 @@ class HexTrainingRunner:
         names = [name for (name, _), n in zip(parts, differs) if n]
         if names:
             raise DistributedContractError(
-                f"resumed state differs from rank 0 on at least one rank: {', '.join(names)}"
+                f"{when} state differs from rank 0 on at least one rank: {', '.join(names)}"
             )
-        return report
 
-    def _resume_state_digests(self) -> List[Tuple[str, bytes]]:
-        """The states every rank must hold equally after a resume, each with its digest.
+    def _shared_state_digests(self) -> List[Tuple[str, bytes]]:
+        """The states every rank must hold equally (at construction and after a resume), with digests.
 
         Rank-local state is excluded by design: RNG streams, loader generators,
         the anomaly history and mid-epoch rank buffers (the latter are copied in
-        after this check, ``_resume_local``). A component the run does not use
-        (no scheduler, no EMA, no GradScaler) is digested as None on every rank.
+        after the resume check, ``_resume_local``). A component the run does not
+        use (no scheduler, no EMA, no GradScaler) is digested as None on every rank.
         """
         def state(obj: Any) -> Any:
             return None if obj is None else obj.state_dict()

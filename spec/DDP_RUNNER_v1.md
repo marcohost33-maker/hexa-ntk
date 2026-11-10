@@ -34,6 +34,12 @@ weights but other momentum buffers (or another loss scale, or another EMA averag
 ran to the end on both ranks with different weights. First AMP-under-DDP evidence:
 a CPU `GradScaler` in the 2-rank gloo job (section 8). No change to what a healthy
 run computes.
+Review round the same day (self-review of 5c9d753): the same agreement now also runs
+at construction (section 2: ranks built with another learning rate or scheduler, red
+on 5c9d753 -- both ranks trained to the end with diverging weights); the digest no
+longer loses values of NumPy scalars/arrays, bytes, sets and complex numbers (they
+fell into the type-name branch: different values, equal digest); set elements are
+sorted because string hashing, and with it set order, differs between processes.
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -80,6 +86,12 @@ would all-reduce scaled with unscaled gradients (review round 2). A different `n
 cadence would issue a different sequence of collectives (hang), a different best
 policy or `use_ema` would silently select differently, and `resume_from` on one
 rank only left the others in the first training collective (review finding 3).
+
+**Same state (v1.3).** Then the digests of the model state, optimizer, scheduler,
+`GradScaler` and EMA must equal rank 0's (section 6, the same check as after a
+resume), else `DistributedContractError` naming the components on every rank. An
+equal config does not imply equal state: an optimizer built with another learning
+rate on one rank passed every check before and trained the ranks apart.
 
 `distributed` and `is_main_process` must be `bool`. All checkpoints, the EMA copy,
 validation and replay capsules use the unwrapped module (`runner.raw_model`):
@@ -355,8 +367,8 @@ epoch boundary), the SHA-256 of the adopted `run_id`, and a SHA-256 over the
 names, dtypes, shapes and bytes of the loaded model state must equal rank 0's,
 else `DistributedContractError` on every rank (same path, different bytes: no
 shared file system, a stale copy).
-**v1.3: every shared state, named.** The weights are not the whole state the ranks
-share. Equal weights with another optimizer state (momentum buffers), learning-rate
+**v1.3: every shared state, named (at construction and after a resume).** The weights
+are not the whole state the ranks share. Equal weights with another optimizer state (momentum buffers), learning-rate
 schedule, EMA average or `GradScaler` state pass a weights-only check and diverge the
 ranks silently from the first step: DDP averages the gradients, each rank then
 applies them with its own momentum or rate; with unequal loss scales DDP even
@@ -368,16 +380,30 @@ component; v1.2: a 32-byte broadcast and a 1-element all-reduce): the model stat
 `grad_scaler.state_dict()` and the EMA module's state (`n_averaged` included). A
 component the run does not use is digested as `None` on every rank. The error
 names the components that differ (`resumed state differs from rank 0 on at least
-one rank: optimizer state`). The optimizer/scheduler/scaler digest is canonical and
-exact: tensors by dtype, shape and bytes, floats by `float.hex` (one ulp and -0.0
-count), ints, bools, strings and `None` typed, dict keys sorted by their encoding;
-any other object counts by its type name only, never by `repr` (a `repr` may carry a
-memory address that differs between ranks with equal state). Rank-local state is
+one rank: optimizer state`). The same agreement runs once at construction, after the
+config digest (section 2): the same `RunnerConfig` does not make the same state, and
+an optimizer built with another learning rate or momentum, another scheduler, or a
+pre-loaded optimizer state or loss scale on one rank would diverge the ranks from the
+first step (`initial state differs from rank 0 on at least one rank: optimizer state,
+scheduler state` -- a learning rate also shows in the scheduler's `base_lrs`). The
+optimizer/scheduler/scaler digest is canonical and exact and every value is typed:
+tensors and NumPy arrays by dtype, shape and bytes (object arrays by their elements),
+NumPy scalars by dtype and bytes, floats by `float.hex` (one ulp and -0.0 count),
+complex numbers by both parts, ints, bools, strings, bytes and `None`; dict keys and
+set elements sorted by their encoding (string hashing and with it set order differ
+between processes: `PYTHONHASHSEED`); any other object counts by its type name only,
+never by `repr` (a `repr` may carry a memory address that differs between ranks with
+equal state), so its value is not compared. Measured without a false refusal: 6
+optimizers (SGD with Nesterov, Adam with AMSGrad, AdamW, centred RMSprop, Adagrad,
+LBFGS) x 11 schedulers (none, StepLR, MultiStepLR, LambdaLR, OneCycleLR,
+CosineAnnealingWarmRestarts, ReduceLROnPlateau, SequentialLR, ChainedScheduler,
+CyclicLR, PolynomialLR): equal state built twice or reloaded digests equally, one
+more step digests differently (a 6 x 6 subset is a unit test). Not comparable: what a
+`state_dict` does not hold, e.g. the functions of a `LambdaLR` (PyTorch stores `None`
+for them). Rank-local state is
 excluded by design: RNG streams and loader generators (restored per rank above), the
 anomaly history, and mid-epoch rank buffers (copied in after this check,
-`spec/MID_EPOCH_RESUME_v1.md`). Not covered: two ranks whose optimizers were built
-with different hyperparameters and which *start* without a resume (no state has
-been loaded to compare; `load_state_dict` overwrites the hyperparameters on resume).
+`spec/MID_EPOCH_RESUME_v1.md`).
 
 ## 7. Collectives used
 
@@ -392,7 +418,9 @@ before the gathers. Per agreed failure (error path only): one
 all-reduce of `world_size` int64 to name the failing ranks. Per validation:
 broadcast of every buffer of the model and the EMA copy;
 one all-reduce of `len(dataset)` int64 counts (8 bytes per sample), a few
-1-element flags, one all-reduce + broadcast of 4 float64. Per resume save: three
+1-element flags, one all-reduce + broadcast of 4 float64. Once at construction and
+once per resume: a 160-byte broadcast and a 5-element int64 all-reduce (the shared
+state, section 6). Per resume save: three
 all-gathers of ~10 KB per rank. Rank 0's checkpoint write happens while the
 peers wait in the closing all-reduce: a write longer than the process-group
 timeout (gloo default 30 min, NCCL 10 min) ends the job.

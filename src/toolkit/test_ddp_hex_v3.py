@@ -324,6 +324,112 @@ class TestResumeStateDigest(unittest.TestCase):
         self.assertEqual(_state_digest({"f": first}), _state_digest({"f": second}))
         self.assertNotEqual(_state_digest({"f": first}), _state_digest({"f": object()}))
 
+    def test_numpy_bytes_sets_and_complex_values_are_seen(self) -> None:
+        # before: every one of these fell into the type-name branch, so two
+        # different values gave the same digest (a difference went unnoticed)
+        pairs = [
+            (np.int64(1), np.int64(2)), (np.bool_(True), np.bool_(False)),
+            (np.float32(1.5), np.float32(2.5)), (np.array([1.0]), np.array([2.0])),
+            (np.array([1.0]), np.array([1.0], dtype=np.float32)), (np.array([[1, 2]]), np.array([1, 2])),
+            (np.array([{"a": 1}], dtype=object), np.array([{"a": 2}], dtype=object)),
+            (b"a", b"b"), ({1}, {2}), (frozenset({1}), frozenset({1, 2})), (1 + 2j, 1 + 3j),
+            (1, np.int64(1)), (1, 1.0), (b"a", "a"),
+        ]
+        for a, b in pairs:
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(_state_digest(a), _state_digest(b))
+        self.assertEqual(_state_digest({1, "x", 2.5}), _state_digest({2.5, 1, "x"}))
+        self.assertEqual(_state_digest(np.array([3.0, -0.0])), _state_digest(np.array([3.0, -0.0])))
+
+    def test_set_digest_is_independent_of_the_ranks_hash_seed(self) -> None:
+        # str hashing is randomised per process (PYTHONHASHSEED), so a set of
+        # strings iterates in another order on another rank: unsorted, equal
+        # state would digest differently (a false refusal of a correct resume)
+        import subprocess
+        import sys
+
+        code = ("import sys; sys.path.insert(0, %r); from runner_hex_v3 import _state_digest; "
+                "print(_state_digest({'s': {'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', "
+                "'theta', 'iota', 'kappa'}, 'f': frozenset({'x', 'y', 'z', 'w'})}).hex()); "
+                "print(list({'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta'}))"
+                % str(Path(__file__).resolve().parent))
+        outputs = []
+        for seed in ("1", "2", "3"):
+            env = dict(os.environ, PYTHONHASHSEED=seed)
+            done = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True,
+                                  timeout=120, check=True)
+            outputs.append(done.stdout.splitlines())
+        self.assertEqual(len({out[0] for out in outputs}), 1)
+        # the premise: the iteration order itself does differ between the seeds
+        self.assertGreater(len({out[1] for out in outputs}), 1)
+
+    def test_no_false_positive_across_real_optimizers_and_schedulers(self) -> None:
+        """Equal state built twice (other object addresses) or loaded from a
+        state_dict must digest equally, else a correct resume would be refused;
+        one more step must be seen. 6 optimizers x 6 schedulers here; the wider
+        6 x 11 matrix was measured on 2026-11-10 (gate log)."""
+        from torch.optim import lr_scheduler as lrs
+
+        optimizers = {
+            "SGD": lambda p: torch.optim.SGD(p, lr=0.1, momentum=0.9, nesterov=True),
+            "Adam": lambda p: torch.optim.Adam(p, lr=0.01, amsgrad=True),
+            "AdamW": lambda p: torch.optim.AdamW(p, lr=0.01),
+            "RMSprop": lambda p: torch.optim.RMSprop(p, lr=0.01, centered=True),
+            "Adagrad": lambda p: torch.optim.Adagrad(p, lr=0.01),
+            "LBFGS": lambda p: torch.optim.LBFGS(p, lr=0.1),
+        }
+        schedulers = {
+            "none": lambda o: None,
+            "MultiStepLR": lambda o: lrs.MultiStepLR(o, [1, 2, 2]),
+            "LambdaLR": lambda o: lrs.LambdaLR(o, lambda e: 0.9 ** e),
+            "Plateau": lambda o: lrs.ReduceLROnPlateau(o),
+            "Sequential": lambda o: lrs.SequentialLR(o, [lrs.LinearLR(o), lrs.ExponentialLR(o, 0.9)],
+                                                     milestones=[2]),
+            "Chained": lambda o: lrs.ChainedScheduler([lrs.ConstantLR(o), lrs.ExponentialLR(o, 0.9)]),
+        }
+
+        def build(opt_name: str, sched_name: str, steps: int) -> Any:
+            torch.manual_seed(0)
+            model = nn.Linear(3, 2, dtype=torch.float64)
+            opt = optimizers[opt_name](model.parameters())
+            sched = schedulers[sched_name](opt)
+            x = torch.linspace(-1, 1, 12, dtype=torch.float64).reshape(4, 3)
+
+            def closure() -> torch.Tensor:
+                opt.zero_grad()
+                loss = model(x).pow(2).sum()
+                loss.backward()
+                return loss
+
+            for _ in range(steps):
+                opt.step(closure)
+                if sched is not None:
+                    sched.step(1.0) if sched_name == "Plateau" else sched.step()
+            return opt, sched
+
+        def digest(obj: Any) -> bytes:
+            return _state_digest(None if obj is None else obj.state_dict())
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # scheduler-order warnings of the toy loop
+            for opt_name in optimizers:
+                for sched_name in schedulers:
+                    with self.subTest(optimizer=opt_name, scheduler=sched_name):
+                        a, sa = build(opt_name, sched_name, 3)
+                        b, sb = build(opt_name, sched_name, 3)
+                        c, sc = build(opt_name, sched_name, 0)
+                        c.load_state_dict(a.state_dict())
+                        if sc is not None:
+                            sc.load_state_dict(sa.state_dict())
+                        e, _ = build(opt_name, sched_name, 4)
+                        self.assertEqual(digest(a), digest(b))
+                        self.assertEqual(digest(sa), digest(sb))
+                        self.assertEqual(digest(c), digest(a))
+                        self.assertEqual(digest(sc), digest(sa))
+                        self.assertNotEqual(digest(e), digest(a))
+
     def test_real_optimizer_scheduler_and_scaler_states(self) -> None:
         def states(momentum: float) -> List[bytes]:
             model = _model()
@@ -1335,6 +1441,28 @@ def _resume_with_rank1_copy(mutate: Callable[[Dict[str, Any]], None], *,
     return scenario
 
 
+def _construction_differs(part: str) -> Callable[[int, int, Path], Any]:
+    """Rank 1 builds its optimizer with another learning rate (``part="optimizer"``)
+    or its scheduler with another step size (``part="scheduler"``), with the
+    same RunnerConfig. Before the check both ranks trained to the end and
+    diverged: DDP averages the gradients, each rank applied them its own way."""
+
+    def scenario(rank: int, world: int, out: Path) -> Any:
+        model = DDP(_model())
+        lr = 0.2 if (part == "optimizer" and rank == 1) else 0.1
+        opt = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+        step_size = 2 if (part == "scheduler" and rank == 1) else 1
+        runner = HexTrainingRunner(
+            _config(out, distributed=True, is_main_process=rank == 0, num_epochs=2),
+            model, opt, _train_loader(rank, world), _exact_val_loader(),
+            scheduler=torch.optim.lr_scheduler.StepLR(opt, step_size=step_size, gamma=0.5),
+        )
+        runner.run()
+        return {"digest": _digest(runner.raw_model)}
+
+    return scenario
+
+
 def _bump_momentum(payload: Dict[str, Any]) -> None:
     for state in payload["optimizer_state_dict"]["state"].values():
         state["momentum_buffer"].add_(1.0)
@@ -1676,6 +1804,8 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "resume_other_scaler_state_on_rank1": _resume_with_rank1_copy(_halve_scale, scaler=True),
     "resume_other_ema_state_on_rank1": _resume_with_rank1_copy(_move_ema),
     "resume_same_scaler_state": _resume_with_rank1_copy(lambda payload: None, scaler=True),
+    "construction_other_lr_on_rank1": _construction_differs("optimizer"),
+    "construction_other_scheduler_on_rank1": _construction_differs("scheduler"),
     "amp_equivalence": _sc_amp_equivalence,
     "amp_nan_grad_on_rank1": _sc_amp_nan_grad_on_rank1,
     "step_error_last_step_rank1": _sc_step_error_last_step_rank1,
@@ -2046,6 +2176,19 @@ class TestTwoRanks(_MultiRankJob):
                 with self.subTest(name, rank=rank):
                     message = res.get(name, {}).get("message", "")
                     self.assertTrue(message.endswith(f"on at least one rank: {part}"), message)
+
+    def test_other_optimizer_or_scheduler_at_construction_fails_both(self) -> None:
+        # same RunnerConfig, another learning rate / scheduler on rank 1: red before
+        # (both ranks trained to the end with diverging weights)
+        # another learning rate also shows in the scheduler's base_lrs/_last_lr
+        for name, part in (("construction_other_lr_on_rank1", "optimizer state, scheduler state"),
+                           ("construction_other_scheduler_on_rank1", "scheduler state")):
+            self.assertEqual(self._errors(name), ["DistributedContractError"] * 2,
+                             f"{name}: {[res.get(name) for res in self.results]}")
+            for rank, res in enumerate(self.results):
+                with self.subTest(name, rank=rank):
+                    message = res.get(name, {}).get("message", "")
+                    self.assertEqual(message, f"initial state differs from rank 0 on at least one rank: {part}")
 
     def test_resume_with_equal_scaler_state_runs(self) -> None:
         # positive control: the same file on both ranks, GradScaler included
