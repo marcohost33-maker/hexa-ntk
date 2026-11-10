@@ -120,15 +120,34 @@ def _is_non_finite_metric(value: Any) -> bool:
         return False
 
 
+def _update_tensor_digest(h: Any, tensor: torch.Tensor) -> None:
+    """Feed dtype, shape and bytes of a tensor into ``h``; the device does not count.
+
+    Sparse layouts (COO, CSR, CSC, BSR, BSC) count by their value: coalesced COO
+    indices and values, so an uncoalesced tensor equals its coalesced form and a
+    CSR tensor equals the COO tensor of the same value (``.contiguous()`` refuses
+    every non-strided layout).
+    """
+    t = tensor.detach()
+    if t.layout != torch.strided:
+        s = (t.cpu() if t.layout == torch.sparse_coo else t.cpu().to_sparse_coo()).coalesce()
+        h.update(f"S|{s.dtype}|{tuple(s.shape)}|{s.sparse_dim()}|".encode("utf-8"))
+        _update_tensor_digest(h, s.indices())
+        _update_tensor_digest(h, s.values())
+        return
+    t = t.cpu().contiguous()
+    h.update(f"T|{t.dtype}|{tuple(t.shape)}|".encode("utf-8"))
+    h.update(t.reshape(-1).view(torch.uint8).numpy().tobytes())
+
+
 def _module_digest(module: nn.Module) -> bytes:
     """SHA-256 over the names, dtypes, shapes and bytes of a module's state."""
     h = hashlib.sha256()
     for name, tensor in module.state_dict(keep_vars=False).items():
         if not torch.is_tensor(tensor):
             continue
-        t = tensor.detach().cpu().contiguous()
-        h.update(f"{name}|{t.dtype}|{tuple(t.shape)}|".encode("utf-8"))
-        h.update(t.reshape(-1).view(torch.uint8).numpy().tobytes())
+        h.update(f"{name}|".encode("utf-8"))
+        _update_tensor_digest(h, tensor)
     return h.digest()
 
 
@@ -145,9 +164,7 @@ def _update_state_digest(h: Any, value: Any) -> None:
     differ between ranks that hold equal state (such objects are not compared).
     """
     if torch.is_tensor(value):
-        t = value.detach().cpu().contiguous()
-        h.update(f"T|{t.dtype}|{tuple(t.shape)}|".encode("utf-8"))
-        h.update(t.reshape(-1).view(torch.uint8).numpy().tobytes())
+        _update_tensor_digest(h, value)
     elif isinstance(value, np.ndarray):
         if value.dtype.hasobject:  # object arrays: their elements, not pointers
             h.update(f"A|object|{value.shape}|".encode("utf-8"))
@@ -869,7 +886,10 @@ class HexTrainingRunner:
         One broadcast of the five digests and one 5-element all-reduce of
         per-component mismatch counts, so every rank names the same components.
         """
-        parts = self._shared_state_digests()
+        # Computing the digests can fail on one rank only (a state_dict that
+        # raises, an OOM while copying a GPU state to the CPU): agree on it, else
+        # that rank leaves while its peers wait in the broadcast until the timeout.
+        parts = self.dist.run_agreed(self._shared_state_digests, what=f"the {when} state digest")
         mine = b"".join(digest for _, digest in parts)
         ref = self.dist.broadcast_bytes(mine if self.dist.rank == 0 else None, len(mine))
         differs = self.dist.sum_ints(

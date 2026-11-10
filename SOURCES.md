@@ -933,3 +933,7 @@
 | A853A04EED01A15F | 2026-11-10 13:40 | src/toolkit | DDP v1.3 review round 2: structured NumPy scalar with an object field (its bytes are addresses) digests by value: test_ddp_hex_v3.py |
 | 0F1C947F27CD5EB8 | 2026-11-10 13:40 | scripts | DDP v1.3 review round 2: mutant for the object branch of NumPy scalars (203 mutants): mutation_probe.py |
 | 03C17F13555E730A | 2026-11-10 13:40 | spec | v1.3 review round 2: section 7 measured hashing cost of the shared-state agreement (50.4M params + Adam: 0.17 s + 0.34 s): DDP_RUNNER_v1.md |
+| 9750B0C7C94A1C34 | 2026-11-10 15:00 | src/toolkit | DDP v1.3 third round: digest computation agreed via run_agreed (red on f173c56: rank 0 hung 30.1 s until the gloo timeout); shared `_update_tensor_digest`, sparse layouts by coalesced COO value (red: .contiguous() crashed), also for the weights digest: runner_hex_v3.py |
+| DE3C302572EA73B4 | 2026-11-10 15:00 | src/toolkit | DDP v1.3 third round: state_dict_error_rank1 (2 and 3 ranks), construction_other_lr_on_rank1 on 3 ranks, sparse digest unit test: test_ddp_hex_v3.py |
+| 1B8AB7664BE4CBC3 | 2026-11-10 15:00 | scripts | DDP v1.3 third round: 4 new mutants (digest unagreed, sparse not coalesced, sparse header, sparse values); tensor-header site follows the shared encoder (207 mutants): mutation_probe.py |
+| 04F478FEA39430E7 | 2026-11-10 15:00 | spec | v1.3 third round: agreed digest computation, sparse tensors, corrected collective count: DDP_RUNNER_v1.md |

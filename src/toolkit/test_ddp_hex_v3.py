@@ -52,7 +52,7 @@ from ddp_hex_v3 import (
 )
 from failure_signature_hex_v3 import FailureSignature
 from operator_adapter_hex_v3 import OperatorAdapterV3
-from runner_hex_v3 import HexTrainingRunner, RunnerConfig, _state_digest
+from runner_hex_v3 import HexTrainingRunner, RunnerConfig, _module_digest, _state_digest
 
 # ------------------------------------------------------------------
 # Fixtures shared by the in-process tests and the spawned ranks
@@ -312,6 +312,24 @@ class TestResumeStateDigest(unittest.TestCase):
         self.assertNotEqual(_state_digest(0.0), _state_digest(-0.0))
         self.assertEqual(_state_digest(float("nan")), _state_digest(float("nan")))
         self.assertNotEqual(_state_digest([1, 2]), _state_digest([[1, 2]]))
+
+    def test_sparse_tensors_digest_canonically(self) -> None:
+        # before: .contiguous() refused every non-strided layout (RuntimeError)
+        i = torch.tensor([[0, 1, 1], [2, 0, 0]])
+        v = torch.tensor([1.0, 2.0, 3.0])
+        uncoalesced = torch.sparse_coo_tensor(i, v, (2, 3))  # duplicate (1, 0) entries
+        coalesced = uncoalesced.coalesce()
+        dense = uncoalesced.to_dense()
+        self.assertEqual(_state_digest(uncoalesced), _state_digest(coalesced))  # same value
+        self.assertEqual(_state_digest(dense.to_sparse_csr()), _state_digest(coalesced))  # layout-free value
+        self.assertNotEqual(_state_digest(coalesced), _state_digest(dense))  # sparse vs strided typed
+        other = torch.sparse_coo_tensor(i, torch.tensor([1.0, 2.0, 4.0]), (2, 3))
+        self.assertNotEqual(_state_digest(other), _state_digest(coalesced))
+        self.assertNotEqual(_state_digest(torch.sparse_coo_tensor(i, v, (2, 4))), _state_digest(uncoalesced))
+        self.assertNotEqual(_state_digest(uncoalesced.double()), _state_digest(uncoalesced))
+        module = nn.Module()
+        module.register_buffer("s", coalesced)
+        self.assertEqual(len(_module_digest(module)), 32)
 
     def test_opaque_objects_count_by_type_not_by_address(self) -> None:
         class _Opaque:
@@ -1470,6 +1488,27 @@ def _construction_differs(part: str) -> Callable[[int, int, Path], Any]:
     return scenario
 
 
+def _sc_state_dict_error_rank1(rank: int, world: int, out: Path) -> Any:
+    """Round 3: building the shared-state digest fails on rank 1 only (here: its
+    scheduler's state_dict raises). Unagreed, rank 1 left while rank 0 waited in
+    the digest broadcast until the process-group timeout."""
+    model = DDP(_model())
+    opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+    sched = torch.optim.lr_scheduler.StepLR(opt, step_size=1)
+    if rank == 1:
+        def broken() -> Dict[str, Any]:
+            raise _StepFailure("scheduler state_dict failed (injected)")
+
+        sched.state_dict = broken
+    t0 = time.monotonic()
+    try:
+        HexTrainingRunner(_config(out, distributed=True, is_main_process=rank == 0, num_epochs=1),
+                          model, opt, _train_loader(rank, world), _exact_val_loader(), scheduler=sched)
+    except Exception as exc:
+        return {"error": type(exc).__name__, "message": str(exc), "seconds": time.monotonic() - t0}
+    return {"error": None, "message": "", "seconds": time.monotonic() - t0}
+
+
 def _bump_momentum(payload: Dict[str, Any]) -> None:
     for state in payload["optimizer_state_dict"]["state"].values():
         state["momentum_buffer"].add_(1.0)
@@ -1813,6 +1852,8 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "resume_same_scaler_state": _resume_with_rank1_copy(lambda payload: None, scaler=True),
     "construction_other_lr_on_rank1": _construction_differs("optimizer"),
     "construction_other_scheduler_on_rank1": _construction_differs("scheduler"),
+    # last of the new ones: unfixed it desynchronises the job (timeout on rank 0)
+    "state_dict_error_rank1": _sc_state_dict_error_rank1,
     "amp_equivalence": _sc_amp_equivalence,
     "amp_nan_grad_on_rank1": _sc_amp_nan_grad_on_rank1,
     "step_error_last_step_rank1": _sc_step_error_last_step_rank1,
@@ -1839,6 +1880,8 @@ _SCENARIOS_3: Dict[str, Callable[[int, int, Path], Any]] = {
     "ema_error_rank0": _sc_ema_error_rank0,
     "nan_grad_on_rank1": _sc_nan_grad_on_rank1,
     "grad_skip_split_rank1": _grad_skip_split(0),
+    "construction_other_lr_on_rank1": _construction_differs("optimizer"),
+    "state_dict_error_rank1": _sc_state_dict_error_rank1,
 }
 
 _SUITES: Dict[str, Dict[str, Callable[[int, int, Path], Any]]] = {"two": _SCENARIOS, "three": _SCENARIOS_3}
@@ -2197,6 +2240,14 @@ class TestTwoRanks(_MultiRankJob):
                     message = res.get(name, {}).get("message", "")
                     self.assertEqual(message, f"initial state differs from rank 0 on at least one rank: {part}")
 
+    def test_state_digest_error_on_one_rank_is_agreed(self) -> None:
+        r0, r1 = self._ok("state_dict_error_rank1")
+        self.assertEqual(r1["error"], "_StepFailure")
+        self.assertEqual(r0["error"], "PeerRankError", r0)
+        self.assertIn("failed on rank(s) [1]", r0["message"])
+        # agreed at once, not after the 30 s process-group timeout of this job
+        self.assertLess(r0["seconds"], 15.0)
+
     def test_resume_with_equal_scaler_state_runs(self) -> None:
         # positive control: the same file on both ranks, GradScaler included
         r0, r1 = self._ok("resume_same_scaler_state")
@@ -2274,6 +2325,20 @@ class TestThreeRanks(_MultiRankJob):
 
     def test_non_finite_gradient_skips_on_all_and_a_split_stops_all(self) -> None:
         self._check_grad_skip_scenarios()
+
+    def test_shared_state_of_the_middle_rank_is_checked_on_all(self) -> None:
+        # rank 1 of 3 differs: every rank raises, with the same named components
+        name = "construction_other_lr_on_rank1"
+        self.assertEqual(self._errors(name), ["DistributedContractError"] * 3)
+        for res in self.results:
+            self.assertEqual(res.get(name, {}).get("message"),
+                             "initial state differs from rank 0 on at least one rank: optimizer state, scheduler state")
+        # a digest failure on the middle rank: its own error there, PeerRankError naming it elsewhere
+        values = self._ok("state_dict_error_rank1")
+        self.assertEqual([v["error"] for v in values], ["PeerRankError", "_StepFailure", "PeerRankError"])
+        for rank in (0, 2):
+            self.assertIn("failed on rank(s) [1]", values[rank]["message"])
+            self.assertLess(values[rank]["seconds"], 15.0)
 
 
 if __name__ == "__main__":

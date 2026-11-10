@@ -58,6 +58,15 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   anwendet; DDP gleicht nur Parameter/Buffer bei der Konstruktion ab. 4 neue Tests, 8 neue Mutanten,
   volle Probe 203/203. Kosten gemessen: 50,4M Parameter mit Adam -> 0,17 s Gewichte + 0,34 s Adam-Zustand
   je Abgleich (SHA-256 ca. 1,1 GB/s, Container-CPU), einmal bei Konstruktion und je Resume.
+  _Dritte Runde (Selbstpruefung von f173c56, gleicher Tag):_ (5) scheiterte das Berechnen der Digests auf
+  nur einem Rank (ein `state_dict()`, das wirft; ein OOM beim Kopieren eines GPU-Zustands), verliess dieser
+  Rank den Abgleich und die anderen warteten im Broadcast bis zum Timeout (rot: Rank 0 nach 30,1 s mit
+  gloo-`RuntimeError` statt `PeerRankError`); jetzt per `run_agreed` abgestimmt, auch auf dem mittleren von
+  3 Ranks (Kosten: ein 1-Element-All-Reduce mehr je Abgleich; die Aussage oben "gleich viele
+  Kollektiv-Aufrufe wie vorher" gilt damit nicht mehr). (6) Sparse-Tensoren liessen Digest und den aelteren Gewichts-Digest abstuerzen (`.contiguous()`);
+  jetzt per Wert (koaleszierte COO-Indizes und -Werte, CSR = COO gleichen Werts). Die zuerst vermutete
+  Regression (Resume mit sparsem SGD-Momentum) ist ueber den Runner nicht erreichbar -- falsifiziert, siehe
+  den offenen Punkt "Sparse-Gradienten" unten. 3 neue Tests, 4 neue Mutanten, volle Probe 207/207.
   Grenzen: Autocast (fp16/bf16) unter DDP, CUDA-GradScaler, NCCL weiter nicht gelaufen; was ein
   `state_dict` nicht enthaelt (z. B. die Funktionen eines `LambdaLR`), ist nicht vergleichbar.
   _Evidenz:_ `results/2026-11-10_ddp-resume-state_local-gate.log`.
@@ -643,6 +652,13 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 - [x] ~~**CI-Reproduzierbarkeit:** `numpy` ist im Testjob ungepinnt.~~ Erledigt 2026-10-14
   (siehe oben): `numpy==2.5.3` im Testjob, wie in den Evidence-Lanes; inline wie `torch==2.6.0`,
   weil `requirements-dev.txt` laut Kopf nur Dev-Tools pinnt.
+
+- [ ] **Sparse-Gradienten im Runner (Befund 2026-11-10, vorbestehend).** Ein Modell mit
+  `nn.Embedding(sparse=True)` (von DDP unterstuetzt) bricht im ersten Schritt ab: `clip_grad_norm_`
+  (torch 2.6.0) kennt `linalg_vector_norm` fuer `SparseCPU` nicht (`runner_hex_v3.py` `_apply_update`), und der
+  Runner ruft es in jedem Schritt auf, auch mit `grad_clip_max_norm=inf`. Optionen: Norm ueber
+  `grad.coalesce().values()` selbst berechnen, oder Sparse-Gradienten bei der Konstruktion klar ablehnen.
+  Owner-Entscheid; Phase 1 (GINO) braucht keine Sparse-Gradienten.
 
 ## Zurueckgestellt (bewusst, mit Begruendung)
 

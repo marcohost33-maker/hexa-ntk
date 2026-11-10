@@ -40,6 +40,11 @@ on 5c9d753 -- both ranks trained to the end with diverging weights); the digest 
 longer loses values of NumPy scalars/arrays, bytes, sets and complex numbers (they
 fell into the type-name branch: different values, equal digest); set elements are
 sorted because string hashing, and with it set order, differs between processes.
+Third round the same day (self-review of f173c56): computing the digests is agreed
+(`run_agreed`): a `state_dict()` that raised on one rank left it alone while its peers
+waited in the digest broadcast until the timeout (red: 30.1 s, gloo `RuntimeError`
+instead of `PeerRankError`); sparse tensors are digested by value instead of crashing
+(also in the weights digest).
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -373,9 +378,15 @@ schedule, EMA average or `GradScaler` state pass a weights-only check and diverg
 ranks silently from the first step: DDP averages the gradients, each rank then
 applies them with its own momentum or rate; with unequal loss scales DDP even
 averages gradients scaled differently and each rank unscales them with its own
-scale. Five SHA-256 digests are now compared with rank 0's in one broadcast
+scale. Five SHA-256 digests are now computed in one `run_agreed` (a failure on one rank --
+a `state_dict()` that raises, an OOM while copying a GPU state -- raises there and
+`PeerRankError` on the peers, instead of leaving them in the broadcast) and compared
+with rank 0's in one broadcast
 (160 bytes) and one 5-element int64 all-reduce (the count of ranks that differ, per
-component; v1.2: a 32-byte broadcast and a 1-element all-reduce): the model state
+component). Collectives per check: the 1-element all-reduce of `run_agreed`, the
+broadcast with its own 1-element flag all-reduce, the 5-element all-reduce (v1.2: the
+same without the `run_agreed` step; the first v1.3 text said "as many as before",
+which held until the third round added the agreement of the digest computation): the model state
 (as before), `optimizer.state_dict()`, `scheduler.state_dict()`,
 `grad_scaler.state_dict()` and the EMA module's state (`n_averaged` included). A
 component the run does not use is digested as `None` on every rank. The error
@@ -387,7 +398,10 @@ pre-loaded optimizer state or loss scale on one rank would diverge the ranks fro
 first step (`initial state differs from rank 0 on at least one rank: optimizer state,
 scheduler state` -- a learning rate also shows in the scheduler's `base_lrs`). The
 optimizer/scheduler/scaler digest is canonical and exact and every value is typed:
-tensors and NumPy arrays by dtype, shape and bytes (object arrays by their elements),
+tensors (any device, any dtype incl. bf16/fp8/complex/bool) and NumPy arrays by dtype,
+shape and bytes, sparse tensors (COO, CSR, CSC, BSR, BSC) by their coalesced COO indices
+and values (an uncoalesced tensor equals its coalesced form, CSR equals COO of the same
+value) (object arrays by their elements),
 NumPy scalars by dtype and bytes, floats by `float.hex` (one ulp and -0.0 count),
 complex numbers by both parts, ints, bools, strings, bytes and `None`; dict keys and
 set elements sorted by their encoding (string hashing and with it set order differ
@@ -419,8 +433,8 @@ all-reduce of `world_size` int64 to name the failing ranks. Per validation:
 broadcast of every buffer of the model and the EMA copy;
 one all-reduce of `len(dataset)` int64 counts (8 bytes per sample), a few
 1-element flags, one all-reduce + broadcast of 4 float64. Once at construction and
-once per resume: a 160-byte broadcast and a 5-element int64 all-reduce (the shared
-state, section 6). Their local cost is hashing: every rank copies its weights, EMA,
+once per resume: a 1-element all-reduce (digest computation agreed), a 160-byte
+broadcast and a 5-element int64 all-reduce (the shared state, section 6). Their local cost is hashing: every rank copies its weights, EMA,
 optimizer and scheduler state to the CPU one tensor at a time and runs SHA-256 over
 it -- measured 2026-11-10 on the container CPU (torch 2.6.0, fp32, 50.4M parameters,
 Adam): weights 0.17 s, Adam state 0.34 s (about 1.1 GB/s), linear in the bytes, plus the
