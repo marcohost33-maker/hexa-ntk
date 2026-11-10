@@ -22,6 +22,26 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **HNTK-98-01: End-to-End-Split-Probe des gefitteten Vergleichs + Rollen-Label (2026-11-10,
+  Linux-Container; offen aus dem Cross-Family-Review 2026-11-06, Drive `007acc2/02_ANTWORTEN`,
+  Verdikt zu #98 `REVIEW_REQUIRED`: "exakte Map darf nicht als lernbarer fairer Wettbewerber
+  ausgegeben werden; Trainings-/Testtrennung muss im vollstaendigen End-to-End-Lauf mit metamorpher
+  Identitaetsprobe bestaetigt werden").** `spec/PHASE1_PROTOCOL_v1.md` §2c:
+  `LinearComparatorPoint.role` ist an `kind` gebunden (`oracle_upper_bound` /
+  `learned_from_train_split`); `comparator_split_probe` fittet POD-Ridge auf dem Trainingssplit und
+  prueft auf dem echten, getimten Pfad zehn Relationen: Split disjunkt (IDs und Inhalt inkl.
+  `-0.0`, fail-closed **vor** jedem Fit), ID- und Zeilen-Leck abgelehnt, umbenannte Trainings-IDs
+  -> bitgleicher Operator (IDs speisen nur den Guard), Refit bitgleich, Trainingsreihenfolge bis
+  Toleranz (gemessen 2.2e-15 relativ), andere Test-Ziele -> Operator und Vorhersagen bitgleich bei
+  bewegtem Fehler, jede Vorhersage bitgleich unter Umkehr und Ueberschreiben der uebrigen Eingaben,
+  Punkt an den Fit gebunden, optional Recovery gegen eine Referenz (gemessen 4.5e-10 gegen die
+  synthetische Halbgruppe). Jede Relation hat eine Negativkontrolle (Guard umgangen, IDs im Fit,
+  Ziele in der Vorhersage, zwei Kopplungen ueber Samples), die genau ihre Relation rot macht.
+  Zugleich ist main 22e6308 (DDP v1.2, #102) in die #98-Linie gemergt; Konflikte nur in README,
+  ROADMAP und SOURCES (append-only, beide Bloecke behalten). Grenzen: kein T1-Fit (nur synthetische
+  Daten vor der Freigabe), Beinahe-Duplikate (1 ulp) erkennt die Probe nicht, kein GINO-Adapter.
+  _Evidenz:_ `results/2026-11-10_hntk98-split-probe_local-gate.log`.
+
 - [x] **Nicht-endlicher Gradient bei endlichem Loss (2026-11-09, Linux-Container; Drive-Befund
   NTK-R5-NR03/PR04 der Cross-Family-Runde R5 vom 2026-11-04, bisher nicht ins Repo uebernommen).**
   Auf main cd5f6dc gemessen: liefert `backward` bei endlichem Loss einen NaN-/Inf-Gradienten, skaliert

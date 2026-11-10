@@ -48,6 +48,10 @@ __all__ = [
     "exact_linear_map",
     "LinearComparatorPoint",
     "linear_comparator_point",
+    "COMPARATOR_ROLES",
+    "SplitProbeRelation",
+    "ComparatorSplitProbe",
+    "comparator_split_probe",
     "pareto_frontier",
     "error_at_time",
     "time_at_error",
@@ -111,7 +115,7 @@ from hex_fv_solver_hex_v3 import (
     torus_hex_lattice,
     triangle_hex_lattice,
 )
-from linear_baseline_hex_v3 import PODRidgeBaseline
+from linear_baseline_hex_v3 import LeakageError, LinearBaselineConfig, PODRidgeBaseline, _row_hashes
 
 PROTOCOL_ID = "PHASE1_PROTOCOL_v1"
 _MANIFEST_SCHEMA = "hexantk_phase1_run_manifest_v1"
@@ -717,12 +721,23 @@ def exact_linear_map(config: HeatOperatorTaskConfig, lattice: HexLattice) -> Tup
     return np.ascontiguousarray(phi * decay[None, :]), np.ascontiguousarray(np.linalg.pinv(phi))
 
 
+#: Information set of a comparator kind (section 2c, HNTK-98-01). The exact map reads the task
+#: basis, which no learner sees: an upper bound, never reported as a fair competitor.
+COMPARATOR_ROLES: Mapping[str, str] = MappingProxyType({
+    "exact_linear_map": "oracle_upper_bound",
+    "pod_ridge": "learned_from_train_split",
+})
+
+
 @dataclass(frozen=True)
 class LinearComparatorPoint:
     """A linear map on the curve's test inputs, timed like the baseline (spec section 2b, D-T1-1).
 
     ``kind`` is ``"exact_linear_map"`` (the oracle ``exact_linear_map``, no data) or
-    ``"pod_ridge"`` (a ``PODRidgeBaseline`` fitted on the training split). The timed
+    ``"pod_ridge"`` (a ``PODRidgeBaseline`` fitted on the training split). ``role`` says
+    which of the two information sets the point used (section 2c, HNTK-98-01):
+    ``"oracle_upper_bound"`` (the task basis, unavailable to any learner, never a fair
+    competitor) or ``"learned_from_train_split"`` (the training pairs only). The timed
     call is the factorised application ``L @ (R @ u0)`` at batch size 1; ``rank`` is
     the inner dimension of the factors, ``operator_sha256`` binds both factors,
     ``num_train`` and ``train_ids_sha256`` the training ids (``0`` and ``None`` for
@@ -731,6 +746,7 @@ class LinearComparatorPoint:
     """
 
     kind: str
+    role: str
     n: int
     domain: str
     sample_count: int
@@ -778,6 +794,23 @@ def linear_comparator_point(
     (``predict`` raises ``LeakageError`` if a scored id or input row was trained on)
     before anything is timed. Predictions are the outputs of the timed call itself.
     """
+    return _linear_comparator_run(config, u0, truth, lattice, comparator=comparator, sample_ids=sample_ids,
+                                  protocol=protocol, timed_samples=timed_samples, clock=clock)[0]
+
+
+def _linear_comparator_run(
+    config: HeatOperatorTaskConfig,
+    u0: Any,
+    truth: Any,
+    lattice: HexLattice,
+    *,
+    comparator: Any,
+    sample_ids: Optional[Sequence[int]],
+    protocol: TimingProtocol,
+    timed_samples: Optional[int],
+    clock: Callable[[], float],
+) -> Tuple[LinearComparatorPoint, np.ndarray]:
+    """``linear_comparator_point`` plus the predictions of its timed call (read-only copy; section 2c)."""
     if not isinstance(config, HeatOperatorTaskConfig):
         raise TypeError("config must be a HeatOperatorTaskConfig")
     if not isinstance(lattice, HexLattice) or lattice.domain != config.domain:
@@ -827,8 +860,10 @@ def linear_comparator_point(
     metrics = evaluate_predictions(predictions, targets, lattice)
     rel_l2 = np.asarray(metrics["rel_l2"], dtype=np.float64)
     low, high = _bootstrap_median_rows(rows, protocol)
+    predictions.flags.writeable = False
     return LinearComparatorPoint(
-        kind=kind, n=int(lattice.n), domain=str(lattice.domain), sample_count=int(samples), timed_samples=int(timed),
+        kind=kind, role=COMPARATOR_ROLES[kind], n=int(lattice.n), domain=str(lattice.domain),
+        sample_count=int(samples), timed_samples=int(timed),
         mean_rel_l2=float(_finite_stat(np.mean, rel_l2)), median_rel_l2=float(_finite_stat(np.median, rel_l2)),
         mean_rel_h1=float(_finite_stat(np.mean, np.asarray(metrics["rel_h1"], dtype=np.float64))),
         mean_rel_max=float(_finite_stat(np.mean, np.asarray(metrics["rel_max"], dtype=np.float64))),
@@ -837,6 +872,241 @@ def linear_comparator_point(
         train_ids_sha256=train_digest, kappa=float(config.kappa), t_final=float(config.t_final),
         task_config_sha256=config.digest(), warmup=int(protocol.warmup), repeats=int(protocol.repeats),
         timing_protocol_sha256=protocol.digest(), clock=_clock_name(clock),
+    ), predictions
+
+
+# ------------------------------------------------------------------
+# Section 2c: end-to-end split probe of the fitted comparator (HNTK-98-01)
+# ------------------------------------------------------------------
+
+# Tolerance of the training-order relation (section 2c): a permuted training set changes the
+# summation order inside the SVDs, so the refit operator agrees with the first only up to
+# rounding. Measured on the synthetic fixtures of the tests: <= 1e-13 relative; the default
+# leaves three orders of headroom and is still far below any learned-map error that matters.
+_ORDER_TOLERANCE = 1e-10
+
+
+@dataclass(frozen=True)
+class SplitProbeRelation:
+    """One metamorphic relation of ``comparator_split_probe``: its name, whether it holds, a measured detail."""
+
+    name: str
+    holds: bool
+    detail: str
+
+
+@dataclass(frozen=True)
+class ComparatorSplitProbe:
+    """Result of ``comparator_split_probe`` (spec section 2c). ``passed`` is the AND of every relation.
+
+    ``order_max_rel`` is the measured relative Frobenius distance between the operator fitted on
+    the training set and on its reversed order; ``recovery_max_rel`` the largest relative L2
+    distance between the learned and the reference predictions on the test inputs (``None``
+    without a reference). The digests bind the split and the fitted operator.
+    """
+
+    passed: bool
+    relations: Tuple[SplitProbeRelation, ...]
+    num_train: int
+    num_test: int
+    train_ids_sha256: str
+    test_ids_sha256: str
+    operator_sha256: str
+    order_max_rel: float
+    recovery_max_rel: Optional[float]
+
+    def failed(self) -> Tuple[str, ...]:
+        return tuple(r.name for r in self.relations if not r.holds)
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = asdict(self)
+        out["relations"] = [asdict(r) for r in self.relations]
+        return out
+
+
+def _ids_digest(ids: Sequence[int]) -> str:
+    return hashlib.sha256(_canonical_json(sorted(int(i) for i in ids))).hexdigest()
+
+
+def _factor_digest(model: PODRidgeBaseline) -> str:
+    left, right = model.factors()
+    return hashlib.sha256(_canonical_json({
+        "left": _array_sha256(np.ascontiguousarray(left, dtype=np.float64)),
+        "right": _array_sha256(np.ascontiguousarray(right, dtype=np.float64)),
+    })).hexdigest()
+
+
+def _raises_leakage(fn: Callable[[], Any]) -> Tuple[bool, str]:
+    try:
+        fn()
+    except LeakageError as exc:
+        return True, f"LeakageError: {exc}"
+    return False, "accepted without LeakageError"
+
+
+def comparator_split_probe(
+    config: HeatOperatorTaskConfig,
+    lattice: HexLattice,
+    train_u0: Any,
+    train_ut: Any,
+    train_ids: Sequence[int],
+    test_u0: Any,
+    test_truth: Any,
+    test_ids: Sequence[int],
+    *,
+    linear_config: Optional[LinearBaselineConfig] = None,
+    reference: Any = None,
+    recovery_tolerance: Optional[float] = None,
+    order_tolerance: float = _ORDER_TOLERANCE,
+) -> ComparatorSplitProbe:
+    """End-to-end metamorphic probe of the train/test separation of the fitted comparator (section 2c).
+
+    Fits a ``PODRidgeBaseline`` (weights: the lattice's cell area) on the training pairs, runs
+    ``linear_comparator_point`` on the test set and checks relations that must hold if, and
+    only if, the scored path sees the training pairs and nothing of the test targets:
+
+    - ``split_disjoint`` (precondition, fail closed): no id and no input row (canonical bytes,
+      ``-0.0 -> 0.0``) is in both sets; otherwise ``LeakageError`` before any fit;
+    - ``id_leak_refused`` / ``row_leak_refused``: a test input under a training id, and a
+      training input under a fresh id, raise ``LeakageError`` in ``linear_comparator_point``;
+    - ``ids_do_not_enter_the_fit``: relabelling the training ids leaves the operator bitwise
+      equal (ids feed the guard only);
+    - ``refit_bitwise``: a second fit on the same pairs gives the same operator bytes;
+    - ``training_order``: the reversed training order gives the operator up to
+      ``order_tolerance`` (relative Frobenius norm; summation order differs in the SVDs);
+    - ``targets_do_not_enter_the_prediction``: replacing the test targets by other finite
+      fields leaves ``operator_sha256`` and the predictions bitwise equal, while the reported
+      error changes (the targets are read by the metrics only);
+    - ``samples_are_independent``: reversing the test set and overwriting all other inputs
+      leaves the prediction of every sample bitwise equal (no cross-sample information);
+    - ``point_is_bound``: the point's ``operator_sha256``, ``num_train``, ``train_ids_sha256``
+      and ``role`` (``"learned_from_train_split"``) match the probe's own fit;
+    - ``recovers_reference`` (only with ``reference``, an ``(M, M)`` matrix or factors
+      ``(L, R)``): the learned predictions are within ``recovery_tolerance`` (relative L2 per
+      sample) of the reference's.
+
+    Before the owner approves the preregistration, call it on synthetic data only: it fits a
+    model, and nothing may be fitted on T1 data before approval (section 2b). A passed probe
+    certifies the separation of this path on these arrays, not the accuracy of a model.
+    """
+    if not isinstance(config, HeatOperatorTaskConfig):
+        raise TypeError("config must be a HeatOperatorTaskConfig")
+    if not isinstance(lattice, HexLattice) or lattice.domain != config.domain:
+        raise ValueError(f"lattice must be a {config.domain} HexLattice")
+    x_train = _fields(train_u0, lattice, name="train_u0")
+    y_train = _fields(train_ut, lattice, name="train_ut")
+    x_test = _fields(test_u0, lattice, name="test_u0")
+    y_test = _fields(test_truth, lattice, name="test_truth")
+    if x_train.shape != y_train.shape or x_test.shape != y_test.shape:
+        raise ValueError("inputs and targets of each split must have the same shape")
+    if x_test.shape[0] < 2:
+        raise ValueError("the probe needs at least 2 test samples (sample independence)")
+    tol = _positive_float(order_tolerance, name="order_tolerance")
+    if (reference is None) != (recovery_tolerance is None):
+        raise ValueError("reference and recovery_tolerance come together")
+    rec_tol = None if recovery_tolerance is None else _positive_float(recovery_tolerance, name="recovery_tolerance")
+    tr_ids = [int(i) for i in train_ids]
+    te_ids = [int(i) for i in test_ids]
+    # Precondition: a split that shares an id or an input row is refused before anything is fitted.
+    shared_ids = sorted(set(tr_ids) & set(te_ids))
+    if shared_ids:
+        raise LeakageError(f"{len(shared_ids)} sample ids are in both splits, e.g. {shared_ids[:5]}")
+    shared_rows = set(_row_hashes(x_train)) & set(_row_hashes(x_test))
+    if shared_rows:
+        raise LeakageError(f"{len(shared_rows)} input rows are in both splits (content match after -0.0 -> 0.0)")
+    weights = np.full(lattice.num_nodes, float(lattice.cell_area))
+
+    def fit(x: np.ndarray, y: np.ndarray, ids: Sequence[int]) -> PODRidgeBaseline:
+        return PODRidgeBaseline(weights, linear_config).fit(x, y, ids)
+
+    model = fit(x_train, y_train, tr_ids)
+    digest = _factor_digest(model)
+    relations: List[SplitProbeRelation] = [SplitProbeRelation(
+        "split_disjoint", True, f"{len(tr_ids)} train / {len(te_ids)} test ids and rows disjoint")]
+    timing = TimingProtocol(warmup=0, repeats=1, bootstrap_resamples=1)
+
+    def run(inputs: np.ndarray, truth: np.ndarray, ids: Sequence[int]) -> Tuple[LinearComparatorPoint, np.ndarray]:
+        # The scored path itself: guard, timed call, metrics; its predictions are those of the timed call.
+        return _linear_comparator_run(config, inputs, truth, lattice, comparator=model, sample_ids=ids,
+                                      protocol=timing, timed_samples=1, clock=time.perf_counter)
+
+    def point(inputs: np.ndarray, truth: np.ndarray, ids: Sequence[int]) -> LinearComparatorPoint:
+        return run(inputs, truth, ids)[0]
+
+    fresh = max(tr_ids + te_ids) + 1
+    holds, detail = _raises_leakage(lambda: point(x_test[:1], y_test[:1], [tr_ids[0]]))
+    relations.append(SplitProbeRelation("id_leak_refused", holds, detail))
+    holds, detail = _raises_leakage(lambda: point(x_train[:1], y_train[:1], [fresh]))
+    relations.append(SplitProbeRelation("row_leak_refused", holds, detail))
+
+    relabelled = [fresh + 1 + i for i in range(len(tr_ids))]
+    same = _factor_digest(fit(x_train, y_train, relabelled)) == digest
+    relations.append(SplitProbeRelation("ids_do_not_enter_the_fit", same,
+                                        "operator bytes equal" if same else "operator bytes differ"))
+    same = _factor_digest(fit(x_train, y_train, tr_ids)) == digest
+    relations.append(SplitProbeRelation("refit_bitwise", same,
+                                        "operator bytes equal" if same else "operator bytes differ"))
+    g = model.matrix()
+    g_rev = fit(x_train[::-1], y_train[::-1], tr_ids[::-1]).matrix()
+    order_rel = float(np.linalg.norm(g_rev - g) / np.linalg.norm(g))
+    relations.append(SplitProbeRelation("training_order", order_rel <= tol,
+                                        f"relative Frobenius distance {order_rel:.3e} (tolerance {tol:.1e})"))
+
+    base, predictions = run(x_test, y_test, te_ids)
+    # Other finite targets: the rows reversed and shifted, so no row keeps its target.
+    other_truth = y_test[::-1] + 1.0
+    swapped, swapped_predictions = run(x_test, other_truth, te_ids)
+    same_operator = swapped.operator_sha256 == base.operator_sha256
+    same_predictions = bool(np.array_equal(swapped_predictions, predictions))
+    error_moved = swapped.mean_rel_l2 != base.mean_rel_l2
+    relations.append(SplitProbeRelation(
+        "targets_do_not_enter_the_prediction", same_operator and same_predictions and error_moved,
+        f"operator equal: {same_operator}, predictions equal: {same_predictions}, "
+        f"error moved: {error_moved} ({base.mean_rel_l2:.3e} -> {swapped.mean_rel_l2:.3e})"))
+
+    reversed_pred = run(x_test[::-1], y_test[::-1], te_ids[::-1])[1][::-1]
+    independent = bool(np.array_equal(reversed_pred, predictions))
+    for i in range(x_test.shape[0]):
+        others = x_test[::-1] * 2.0 + 0.5             # every other row overwritten (fresh content)
+        others[i] = x_test[i]
+        independent = independent and bool(np.array_equal(run(others, y_test, te_ids)[1][i], predictions[i]))
+    relations.append(SplitProbeRelation(
+        "samples_are_independent", independent,
+        "every prediction bitwise equal under reversal and replacement of the other inputs"
+        if independent else "a prediction depends on another test input"))
+
+    bound = (base.operator_sha256 == digest and base.num_train == len(tr_ids)
+             and base.train_ids_sha256 == _ids_digest(tr_ids) and base.kind == "pod_ridge"
+             and base.role == COMPARATOR_ROLES["pod_ridge"])
+    relations.append(SplitProbeRelation(
+        "point_is_bound", bound, f"operator {base.operator_sha256[:12]}, num_train {base.num_train}, role {base.role}"))
+
+    recovery: Optional[float] = None
+    if reference is not None:
+        if isinstance(reference, tuple):
+            if len(reference) != 2:
+                raise ValueError("reference factors must be a pair (L, R)")
+            left, right = (np.asarray(f, dtype=np.float64) for f in reference)
+            expected = np.stack([left @ (right @ row) for row in x_test])
+        else:
+            matrix = np.asarray(reference, dtype=np.float64)
+            if matrix.shape != (lattice.num_nodes, lattice.num_nodes):
+                raise ValueError(f"reference must be ({lattice.num_nodes}, {lattice.num_nodes}) or factors (L, R)")
+            expected = x_test @ matrix.T
+        if expected.shape != predictions.shape or not np.all(np.isfinite(expected)):
+            raise ValueError("reference predictions must be finite and match the test set")
+        scale = np.linalg.norm(expected, axis=1)
+        if np.any(scale == 0.0):
+            raise ValueError("a reference prediction is zero: relative recovery undefined")
+        recovery = float(np.max(np.linalg.norm(predictions - expected, axis=1) / scale))
+        relations.append(SplitProbeRelation(
+            "recovers_reference", recovery <= rec_tol,
+            f"max relative L2 to the reference {recovery:.3e} (tolerance {rec_tol:.1e})"))
+
+    return ComparatorSplitProbe(
+        passed=all(r.holds for r in relations), relations=tuple(relations), num_train=len(tr_ids),
+        num_test=len(te_ids), train_ids_sha256=_ids_digest(tr_ids), test_ids_sha256=_ids_digest(te_ids),
+        operator_sha256=digest, order_max_rel=order_rel, recovery_max_rel=recovery,
     )
 
 

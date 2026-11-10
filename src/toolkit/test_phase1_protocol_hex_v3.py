@@ -1966,8 +1966,8 @@ class TestLinearComparatorPoint(unittest.TestCase):
     def test_exact_map_point(self):
         point = pp.linear_comparator_point(self.config, self.data["u0"], self.data["uT"], self.lattice,
                                            protocol=self.protocol, clock=_fake_clock())
-        self.assertEqual((point.kind, point.n, point.rank, point.num_train, point.train_ids_sha256),
-                         ("exact_linear_map", 16, 15, 0, None))
+        self.assertEqual((point.kind, point.role, point.n, point.rank, point.num_train, point.train_ids_sha256),
+                         ("exact_linear_map", "oracle_upper_bound", 16, 15, 0, None))
         self.assertLess(point.mean_rel_l2, 1e-13)
         self.assertEqual((point.median_wall_time_s, point.wall_time_ci_s), (0.5, (0.5, 0.5)))
         self.assertEqual((point.warmup, point.repeats, point.clock), (1, 3, "custom:count.__next__"))
@@ -1982,7 +1982,8 @@ class TestLinearComparatorPoint(unittest.TestCase):
         point = pp.linear_comparator_point(self.synthetic, self.test_u0, self.test_truth, self.lattice,
                                            comparator=self.model, sample_ids=ids, protocol=self.protocol,
                                            clock=_fake_clock())
-        self.assertEqual((point.kind, point.num_train, point.rank), ("pod_ridge", 40, self.model.info["rank_in"]))
+        self.assertEqual((point.kind, point.role, point.num_train, point.rank),
+                         ("pod_ridge", "learned_from_train_split", 40, self.model.info["rank_in"]))
         self.assertEqual(point.train_ids_sha256,
                          hashlib.sha256(json.dumps(list(range(40)), separators=(",", ":")).encode()).hexdigest())
         self.assertLess(point.mean_rel_l2, 1e-8)
@@ -2043,6 +2044,177 @@ class TestLinearComparatorPoint(unittest.TestCase):
         with self.assertRaises(TypeError):
             pp.linear_comparator_point(*args, protocol=None, clock=_fake_clock())
 
+
+
+class TestComparatorSplitProbe(unittest.TestCase):
+    """Section 2c (HNTK-98-01): end-to-end split probe of the fitted comparator, synthetic data only.
+
+    Every relation has a negative control: a deliberately broken path (guard bypassed, ids in the
+    fit, targets in the prediction, cross-sample coupling) must turn exactly its relation red.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.config = HeatOperatorTaskConfig(t_final=0.005)
+        cls.lattice = triangle_hex_lattice(16)
+        cls.semigroup = _semigroup_matrix(cls.lattice, 0.005)
+        _, vec = np.linalg.eigh(cls.semigroup)
+        basis = vec[:, -15:]
+        rng = np.random.default_rng(321)
+        cls.train_u0 = rng.standard_normal((40, 15)) @ basis.T
+        cls.train_ut = cls.train_u0 @ cls.semigroup.T
+        cls.test_u0 = rng.standard_normal((6, 15)) @ basis.T
+        cls.test_truth = cls.test_u0 @ cls.semigroup.T
+        cls.train_ids = list(range(40))
+        cls.test_ids = list(range(1000, 1006))
+
+    def probe(self, **kwargs):
+        return pp.comparator_split_probe(self.config, self.lattice, self.train_u0, self.train_ut, self.train_ids,
+                                         self.test_u0, self.test_truth, self.test_ids, **kwargs)
+
+    def test_clean_split_passes_every_relation(self):
+        result = self.probe(reference=self.semigroup, recovery_tolerance=1e-8)
+        self.assertTrue(result.passed, result.failed())
+        self.assertEqual([r.name for r in result.relations], [
+            "split_disjoint", "id_leak_refused", "row_leak_refused", "ids_do_not_enter_the_fit", "refit_bitwise",
+            "training_order", "targets_do_not_enter_the_prediction", "samples_are_independent", "point_is_bound",
+            "recovers_reference"])
+        self.assertEqual((result.num_train, result.num_test), (40, 6))
+        self.assertLess(result.order_max_rel, 1e-12)
+        self.assertLess(result.recovery_max_rel, 1e-8)
+        self.assertEqual(result.train_ids_sha256,
+                         hashlib.sha256(json.dumps(list(range(40)), separators=(",", ":")).encode()).hexdigest())
+        json.dumps(result.to_dict(), allow_nan=False)
+        self.assertEqual(self.probe(reference=self.semigroup, recovery_tolerance=1e-8).to_dict()["operator_sha256"],
+                         result.operator_sha256)
+        # Reference as factors (L, R): the same recovery relation.
+        left, right = np.linalg.qr(self.semigroup)
+        self.assertTrue(self.probe(reference=(left, right), recovery_tolerance=1e-8).passed)
+
+    def test_the_probe_reports_the_operator_the_point_times(self):
+        result = self.probe()
+        point = pp.linear_comparator_point(
+            self.config, self.test_u0, self.test_truth, self.lattice,
+            comparator=pp.PODRidgeBaseline(np.full(self.lattice.num_nodes, self.lattice.cell_area)).fit(
+                self.train_u0, self.train_ut, self.train_ids),
+            sample_ids=self.test_ids, protocol=pp.TimingProtocol(warmup=0, repeats=1, bootstrap_resamples=1),
+            clock=_fake_clock())
+        self.assertEqual(point.operator_sha256, result.operator_sha256)
+        # The predictions the probe reads are those of the timed call, handed out read-only.
+        again, predictions = pp._linear_comparator_run(
+            self.config, self.test_u0, self.test_truth, self.lattice, comparator="exact_linear_map",
+            sample_ids=None, protocol=pp.TimingProtocol(warmup=0, repeats=1, bootstrap_resamples=1),
+            timed_samples=None, clock=_fake_clock())
+        self.assertFalse(predictions.flags.writeable)
+        self.assertEqual(predictions.shape, self.test_u0.shape)
+        self.assertEqual(again.role, "oracle_upper_bound")
+        self.assertNotIn("recovers_reference", [r.name for r in result.relations])
+        self.assertIsNone(result.recovery_max_rel)
+
+    def test_shared_id_or_row_is_refused_before_any_fit(self):
+        from unittest import mock
+        from linear_baseline_hex_v3 import LeakageError
+        with mock.patch.object(pp.PODRidgeBaseline, "fit", side_effect=AssertionError("fitted")) as fit:
+            with self.assertRaisesRegex(LeakageError, "sample ids are in both splits"):
+                pp.comparator_split_probe(self.config, self.lattice, self.train_u0, self.train_ut, self.train_ids,
+                                          self.test_u0, self.test_truth, [5] + self.test_ids[1:])
+            leaked = self.test_u0.copy()
+            leaked[2] = self.train_u0[7]
+            with self.assertRaisesRegex(LeakageError, "input rows are in both splits"):
+                pp.comparator_split_probe(self.config, self.lattice, self.train_u0, self.train_ut, self.train_ids,
+                                          leaked, self.test_truth, self.test_ids)
+            signed = self.train_u0.copy()                       # -0.0 and 0.0 are the same content
+            signed[3, 0] = 0.0
+            leaked = self.test_u0.copy()
+            leaked[0] = signed[3]
+            leaked[0, 0] = -0.0
+            with self.assertRaisesRegex(LeakageError, "input rows are in both splits"):
+                pp.comparator_split_probe(self.config, self.lattice, signed, self.train_ut, self.train_ids,
+                                          leaked, self.test_truth, self.test_ids)
+            fit.assert_not_called()
+
+    def test_bypassed_guard_turns_the_leak_relations_red(self):
+        from unittest import mock
+        with mock.patch.object(pp.PODRidgeBaseline, "predict", lambda self, u0, ids: self._apply(np.atleast_2d(u0))):
+            result = self.probe()
+        self.assertFalse(result.passed)
+        self.assertEqual(set(result.failed()), {"id_leak_refused", "row_leak_refused"})
+
+    def test_ids_in_the_fit_turn_the_relabel_relation_red(self):
+        from unittest import mock
+        original = pp.PODRidgeBaseline.fit
+
+        def fit(self, u0, u_t, sample_ids):                     # a fit that reads its ids
+            return original(self, u0, np.asarray(u_t) * (1.0 + 1e-9 * min(sample_ids)), sample_ids)
+
+        with mock.patch.object(pp.PODRidgeBaseline, "fit", fit):
+            result = self.probe()
+        self.assertEqual(result.failed(), ("ids_do_not_enter_the_fit",))
+
+    def test_targets_in_the_prediction_turn_their_relation_red(self):
+        from unittest import mock
+        original = pp._linear_comparator_run
+
+        def leaky(config, u0, truth, lattice, **kwargs):        # predictions nudged towards the targets
+            point, pred = original(config, u0, truth, lattice, **kwargs)
+            return point, pred + 1e-12 * np.asarray(truth)
+
+        with mock.patch.object(pp, "_linear_comparator_run", leaky):
+            result = self.probe()
+        self.assertEqual(result.failed(), ("targets_do_not_enter_the_prediction",))
+
+    def test_cross_sample_coupling_turns_the_independence_relation_red(self):
+        from unittest import mock
+        original = pp._linear_comparator_run
+
+        # Two couplings, each seen by one half of the relation only: a column minimum over the
+        # batch is invariant under reversal (only the overwrite sees it); a row-position term is
+        # invariant under the overwrite (only the reversal sees it).
+        couplings = {
+            "batch_minimum": lambda u0: np.sort(np.asarray(u0), axis=0)[:1],
+            "row_position": lambda u0: np.arange(np.asarray(u0).shape[0], dtype=np.float64)[:, None],
+        }
+        for name, term in couplings.items():
+            def coupled(config, u0, truth, lattice, term=term, **kwargs):
+                point, pred = original(config, u0, truth, lattice, **kwargs)
+                return point, pred + 1e-12 * term(u0)
+
+            with self.subTest(coupling=name), mock.patch.object(pp, "_linear_comparator_run", coupled):
+                self.assertEqual(self.probe().failed(), ("samples_are_independent",))
+
+    def test_order_and_recovery_tolerances_are_enforced(self):
+        tight = self.probe(order_tolerance=1e-300)
+        self.assertEqual(tight.failed(), () if tight.order_max_rel == 0.0 else ("training_order",))
+        wrong = self.probe(reference=np.eye(self.lattice.num_nodes), recovery_tolerance=1e-8)
+        self.assertEqual(wrong.failed(), ("recovers_reference",))
+        self.assertGreater(wrong.recovery_max_rel, 1e-3)
+
+    def test_validation(self):
+        with self.assertRaises(TypeError):
+            pp.comparator_split_probe({}, self.lattice, self.train_u0, self.train_ut, self.train_ids,
+                                      self.test_u0, self.test_truth, self.test_ids)
+        with self.assertRaises(ValueError):
+            pp.comparator_split_probe(self.config, torus_hex_lattice(16), self.train_u0, self.train_ut,
+                                      self.train_ids, self.test_u0, self.test_truth, self.test_ids)
+        with self.assertRaisesRegex(ValueError, "same shape"):
+            pp.comparator_split_probe(self.config, self.lattice, self.train_u0, self.train_ut[:5], self.train_ids,
+                                      self.test_u0, self.test_truth, self.test_ids)
+        with self.assertRaisesRegex(ValueError, "at least 2 test samples"):
+            pp.comparator_split_probe(self.config, self.lattice, self.train_u0, self.train_ut, self.train_ids,
+                                      self.test_u0[:1], self.test_truth[:1], self.test_ids[:1])
+        with self.assertRaisesRegex(ValueError, "come together"):
+            self.probe(reference=self.semigroup)
+        with self.assertRaisesRegex(ValueError, "come together"):
+            self.probe(recovery_tolerance=1e-8)
+        with self.assertRaises(ValueError):
+            self.probe(order_tolerance=0.0)
+        with self.assertRaisesRegex(ValueError, "pair"):
+            self.probe(reference=(self.semigroup,), recovery_tolerance=1e-8)
+        with self.assertRaisesRegex(ValueError, "must be"):
+            self.probe(reference=np.eye(3), recovery_tolerance=1e-8)
+        zero = np.zeros((self.lattice.num_nodes, self.lattice.num_nodes))
+        with self.assertRaisesRegex(ValueError, "zero"):
+            self.probe(reference=zero, recovery_tolerance=1e-8)
 
 # ------------------------------------------------------------------
 # Section 11: D4 float-order stability of a radius graph (HEX-P2-02)

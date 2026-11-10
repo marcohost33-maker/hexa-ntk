@@ -61,6 +61,7 @@ FRR = "test_phase1_protocol_hex_v3.TestFairRefinementAndRichardson"
 ME = "test_mid_epoch_resume_hex_v3.TestMidEpochResume"
 NF = "test_runner_hex_v3.TestNonFiniteGradient"
 CS = "test_runner_hex_v3.TestConsecutiveSkips"
+SPP = "test_phase1_protocol_hex_v3.TestComparatorSplitProbe"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -564,6 +565,21 @@ MUTANTS = (
     Mutant(LB, '        return fit["p_out"] @ fit["b"].T, (fit["p_in"].T * self.weights[None, :])\n',
            '        return fit["p_out"] @ fit["b"], (fit["p_in"].T * self.weights[None, :])\n',
            "test_linear_baseline_hex_v3.TestViewsAndInvariance"),
+    # 2026-11-10 HNTK-98-01 (section 2c): role label and the end-to-end split probe.
+    Mutant(P1, '    "pod_ridge": "learned_from_train_split",\n', '    "pod_ridge": "oracle_upper_bound",\n',
+           "test_phase1_protocol_hex_v3.TestLinearComparatorPoint"),
+    Mutant(P1, "    if shared_ids:\n", "    if False:\n", SPP),
+    Mutant(P1, "    if shared_rows:\n", "    if False:\n", SPP),
+    Mutant(P1, "    same = _factor_digest(fit(x_train, y_train, relabelled)) == digest\n",
+           "    same = _factor_digest(fit(x_train, y_train, tr_ids)) == digest\n", SPP),
+    Mutant(P1, "    same_predictions = bool(np.array_equal(swapped_predictions, predictions))\n",
+           "    same_predictions = bool(np.array_equal(predictions, predictions))\n", SPP),
+    Mutant(P1, "    independent = bool(np.array_equal(reversed_pred, predictions))\n",
+           "    independent = True\n", SPP),
+    Mutant(P1, "        independent = independent and bool(np.array_equal(run(others, y_test, te_ids)[1][i], "
+           "predictions[i]))\n", "        pass\n", SPP),
+    Mutant(P1, "    predictions.flags.writeable = False\n    return LinearComparatorPoint(\n",
+           "    return LinearComparatorPoint(\n", SPP),
 )
 
 

@@ -197,7 +197,7 @@ protocol, so it can stand in the same cost-accuracy plane.
   `sample_ids` and runs its leakage guard (`predict`, `LeakageError` on a
   trained id or a training row under a new id) before anything is timed.
 
-`LinearComparatorPoint` carries `kind`, `n`, `domain`, `sample_count`,
+`LinearComparatorPoint` carries `kind`, `role` (section 2c), `n`, `domain`, `sample_count`,
 `timed_samples`, the four error statistics, `median_wall_time_s`,
 `wall_time_ci_s`, `rank` (inner dimension of the factors), `num_train`,
 `operator_sha256` (SHA-256 of the canonical bytes of both factors),
@@ -210,6 +210,65 @@ claim against CN must also beat the learned linear map is the owner's
 amendment (ADR-003). Until approval the POD-ridge comparator is fitted on no
 T1 data (preregistration: no model on T1 before approval); its tests use
 synthetic linear data. The oracle is not a fit and may run on T1 inputs.
+
+## 2c. End-to-end split probe of the fitted comparator (amendment 2026-11-10, HNTK-98-01)
+
+**Why.** The cross-family review of 2026-11-06 (Drive, `007acc2/02_ANTWORTEN`,
+finding HNTK-98-01 on draft PR #98) accepted the decision binding of
+sections 2a/5a but left two points open: the exact map must never be
+reported as a learnable, fair competitor, and the train/test separation of
+the fitted comparator must be confirmed end to end with a metamorphic
+identity probe, not only by the unit test of its guard.
+
+**Role label.** `LinearComparatorPoint.role` is fixed by `kind`
+(`COMPARATOR_ROLES`): `"oracle_upper_bound"` for `exact_linear_map` (it
+reads the task basis, which no learner sees) and
+`"learned_from_train_split"` for `pod_ridge`. A report that puts both next
+to the curve carries the label with each point.
+
+**Probe.** `comparator_split_probe(config, lattice, train_u0, train_ut,
+train_ids, test_u0, test_truth, test_ids, linear_config=None,
+reference=None, recovery_tolerance=None, order_tolerance=1e-10)` fits a
+`PODRidgeBaseline` (weights: the cell area) on the training pairs and runs
+the scored path of section 2b (`linear_comparator_point`; the probe reads
+the predictions of its timed call through the internal
+`_linear_comparator_run`, not a re-implementation). Relations, in order:
+
+| Relation | Must hold because |
+|---|---|
+| `split_disjoint` | precondition: no id and no input row (canonical bytes, `-0.0 -> 0.0`) in both sets; otherwise `LeakageError` **before any fit** |
+| `id_leak_refused` | a test input under a training id raises `LeakageError` in the scored path |
+| `row_leak_refused` | a training input under a fresh id raises `LeakageError` in the scored path |
+| `ids_do_not_enter_the_fit` | relabelled training ids give bitwise the same operator (ids feed the guard only) |
+| `refit_bitwise` | a second fit on the same pairs gives the same operator bytes |
+| `training_order` | the reversed training order gives the operator within `order_tolerance` (relative Frobenius; SVD summation order differs) |
+| `targets_do_not_enter_the_prediction` | other finite test targets leave `operator_sha256` and the timed predictions bitwise equal, while the reported error changes |
+| `samples_are_independent` | reversing the test set, and overwriting every other input, leaves each prediction bitwise equal |
+| `point_is_bound` | the point's `operator_sha256`, `num_train`, `train_ids_sha256`, `kind` and `role` match the probe's own fit |
+| `recovers_reference` | only with `reference` (an `(M, M)` matrix or factors `(L, R)`): every learned prediction within `recovery_tolerance` (relative L2) of the reference's |
+
+`ComparatorSplitProbe` carries `passed` (AND of all relations), the
+relations with a measured detail each, `num_train`, `num_test`, the SHA-256
+of the sorted train and test ids, `operator_sha256`, `order_max_rel` and
+`recovery_max_rel`.
+
+**Negative controls (tests).** Each relation is shown to discriminate: a
+bypassed guard turns exactly `id_leak_refused` and `row_leak_refused` red,
+a fit that reads its ids turns `ids_do_not_enter_the_fit` red, predictions
+nudged by `1e-12` times the targets turn
+`targets_do_not_enter_the_prediction` red, and a batch mean added to every
+row turns `samples_are_independent` red; a shared id, a shared row and a
+shared row that differs only in the sign of a zero are refused with no call
+to `fit`.
+
+**Limits.** The probe certifies the separation of this code path on the
+arrays it was given, not the accuracy of a model and not the provenance of
+the arrays (a test set that is a near duplicate of the training set, e.g.
+one ulp apart, passes `split_disjoint`; the id ranges of the
+preregistration are the guard there). It fits a model: before the owner
+approves the preregistration it runs on synthetic data only (section 2b),
+never on T1 data. A GINO adapter is not covered; the same relations are the
+template for it once a model may be trained.
 
 ## 3. Pareto-efficient frontier and log-log interpolation (section 6)
 
