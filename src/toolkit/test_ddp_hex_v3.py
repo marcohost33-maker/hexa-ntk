@@ -574,8 +574,15 @@ class TestComparableState(unittest.TestCase):
                 self._refused(obj, _TRUSTED_SCHEDULERS, self.REFUSED)
         # negative control: the genuine class passes and yields its own state
         real = lrs.StepLR(self._opt(), step_size=1)
-        self.assertEqual(_state_digest(_comparable_state(real, _TRUSTED_SCHEDULERS, "scheduler")),
+        self.assertEqual(_state_digest(self._admitted(real, _TRUSTED_SCHEDULERS)),
                          _state_digest(real.state_dict()))
+
+    def _admitted(self, obj: Any, trusted: Any, **kw: Any) -> Any:
+        """A positive control: a refusal here is a false refusal, reported as a test failure."""
+        try:
+            return _comparable_state(obj, trusted, "component", **kw)
+        except DistributedContractError as exc:
+            self.fail(f"false refusal of a built-in {type(obj).__qualname__}: {exc}")
 
     def test_every_trusted_component_is_compared(self) -> None:
         # positive control over the whole allowlist: no false refusal of a built-in
@@ -583,16 +590,14 @@ class TestComparableState(unittest.TestCase):
         self.assertEqual({type(s) for s in built.values()}, set(_TRUSTED_SCHEDULERS))
         for name, sched in built.items():
             with self.subTest(scheduler=name):
-                self.assertEqual(_comparable_state(sched, _TRUSTED_SCHEDULERS, "scheduler").keys(),
-                                 sched.state_dict().keys())
+                self.assertEqual(self._admitted(sched, _TRUSTED_SCHEDULERS).keys(), sched.state_dict().keys())
         for cls in _TRUSTED_OPTIMIZERS:
             with self.subTest(optimizer=cls.__name__):
                 opt = _build_optimizer(cls, 0.1)[1]
                 torch.optim.lr_scheduler.StepLR(opt, step_size=1)  # torch puts step on the instance
                 self.assertIn("step", vars(opt))
-                _comparable_state(opt, _TRUSTED_OPTIMIZERS, "optimizer",
-                                  tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
-        _comparable_state(_cpu_scaler(), _TRUSTED_GRAD_SCALERS, "GradScaler")
+                self._admitted(opt, _TRUSTED_OPTIMIZERS, tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
+        self._admitted(_cpu_scaler(), _TRUSTED_GRAD_SCALERS)
         self.assertIsNone(_comparable_state(None, _TRUSTED_SCHEDULERS, "scheduler"))
 
     def test_trusted_scheduler_state_determines_the_learning_rates(self) -> None:
@@ -636,7 +641,7 @@ class TestComparableState(unittest.TestCase):
         # negative control: plain instance data (no method shadowed) is not refused
         sched = lrs.StepLR(self._opt(), step_size=1)
         sched.note = "user data"
-        _comparable_state(sched, _TRUSTED_SCHEDULERS, "scheduler")
+        self._admitted(sched, _TRUSTED_SCHEDULERS)
 
     def test_composite_scheduler_with_forged_or_overridden_child_is_refused(self) -> None:
         lrs = torch.optim.lr_scheduler
@@ -649,7 +654,7 @@ class TestComparableState(unittest.TestCase):
                         else lrs.SequentialLR(o, inner, milestones=[2]))
 
             with self.subTest(composite, child="genuine"):
-                _comparable_state(build(lambda o: lrs.ExponentialLR(o, 0.9)), _TRUSTED_SCHEDULERS, "scheduler")
+                self._admitted(build(lambda o: lrs.ExponentialLR(o, 0.9)), _TRUSTED_SCHEDULERS)
             with self.subTest(composite, child="forged"):
                 self._refused(build(lambda o: forged_exp(o, 0.9)), _TRUSTED_SCHEDULERS,
                               f"inside {composite}.*{self.REFUSED}")
