@@ -1,0 +1,70 @@
+# R8 local gate (cross-family GPT-6 R8-01 / A7-R2): comparable shared state by class identity
+# Windows 11, CI command chain of .github/workflows/ci.yml mirrored locally (GINO smoke lane NOT run: neuraloperator not installed).
+# This log is committed on top of the measured HEAD below; that commit adds only this file.
+HEAD d5b2cc87d91548c54acc2d51a3f4039772f258ef
+python Python 3.12.10 torch 2.6.0+cpu numpy 2.5.3
+== ruff
+All checks passed!
+ruff exit=0
+== compileall
+compile exit=0
+== verify_sources
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+verify_sources exit=0
+== engine_gate
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+engine_gate exit=0
+== unittest discover + coverage
+suite exit=0
+Ran 1145 tests in 198.229s
+OK (skipped=15)
+TOTAL                                           6280    265   2388    195    94%
+coverage exit=0
+== FV/reference across OpenBLAS kernels
+Ran 117 tests in 9.560s OK kernel=Prescott exit=0
+Ran 117 tests in 13.405s OK kernel=Sandybridge exit=0
+Ran 117 tests in 15.523s OK kernel=Haswell exit=0
+Ran 117 tests in 9.440s OK kernel=Zen exit=0
+
+== discrimination (G:/Meine Ablage/Vero/Tools/diskriminierung.py, ledger diskriminierung_runs.jsonl)
+dk_units.log:  R8-01 identity removed                                      DISKRIMINIERT  [subTest: 4 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-02 identity -> isinstance                                DISKRIMINIERT  [subTest: 3 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-03 identity -> module/name (reviewer R7 guard)           DISKRIMINIERT  [subTest: 3 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-04 identity -> set membership (metaclass __eq__)         DISKRIMINIERT  [subTest: 1 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-05 identity removed: LambdaLR/MultiplicativeLR/CyclicLR  DISKRIMINIERT  [subTest: 3 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-06 identity removed: forged optimizer/GradScaler         DISKRIMINIERT (Zeilenenden angeglichen)
+dk_units.log:  R8-07 instance override removed                             DISKRIMINIERT  [subTest: 3 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-08 instance override only state_dict                     DISKRIMINIERT  [subTest: 2 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-09 tolerance dropped (false refusal)                     ROT, ART-UNBESTIMMT  [subTest: 14 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-10 export hooks ignored                                  DISKRIMINIERT  [subTest: 2 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-11 only post hooks                                       DISKRIMINIERT  [subTest: 1 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-12 one hook admitted                                     DISKRIMINIERT  [subTest: 2 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-13 composite recursion removed                           DISKRIMINIERT  [subTest: 8 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-14 container by isinstance                               DISKRIMINIERT  [subTest: 2 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-15 first child only                                      DISKRIMINIERT  [subTest: 6 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-16 digest gate removed (type-name fallback gone too)     DISKRIMINIERT  [subTest: 9 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-17 digest gate isinstance                                DISKRIMINIERT  [subTest: 4 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-18 digest gate by name                                   DISKRIMINIERT  [subTest: 1 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_units.log:  R8-19 extra_state skipped again                             DISKRIMINIERT (Zeilenenden angeglichen)
+dk_units.log:  R8-20 extra_state by type name                              DISKRIMINIERT (Zeilenenden angeglichen)
+dk_units.log:  R8-21 extra_state only dicts                                DISKRIMINIERT (Zeilenenden angeglichen)
+dk_units.log:20/21 diskriminieren.
+dk_units.log:Lauf    -> run_id DK-20261111T000131-234afbc6d829
+dk_units.log:Stufe   -> provenienz_klasse VOLL
+dk_part2.log:  R8-09 tolerance dropped (false refusal)          DISKRIMINIERT  [subTest: 14 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_part2.log:  R8-22 call site optimizer                        DISKRIMINIERT  [subTest: 1 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_part2.log:  R8-23 call site scheduler                        DISKRIMINIERT (Zeilenenden angeglichen)
+dk_part2.log:  R8-24 call site GradScaler                       DISKRIMINIERT  [subTest: 1 rot von ? beurteilt] (Zeilenenden angeglichen)
+dk_part2.log:  R8-25 call site scheduler, real 2-rank gloo job  DISKRIMINIERT (Zeilenenden angeglichen)
+dk_part2.log:5/5 diskriminieren.
+dk_part2.log:Lauf    -> run_id DK-20261111T000753-ac677743b21f
+dk_part2.log:Stufe   -> provenienz_klasse VOLL
+dk_part3.log:  R8-26 moved site: optimizer digest dropped   DISKRIMINIERT (Zeilenenden angeglichen)
+dk_part3.log:  R8-27 moved site: GradScaler digest dropped  DISKRIMINIERT (Zeilenenden angeglichen)
+dk_part3.log:2/2 diskriminieren.
+dk_part3.log:Lauf    -> run_id DK-20261111T001603-2ccbf4a57801
+dk_part3.log:Stufe   -> provenienz_klasse VOLL
+# R8-09 in the first run was red by an uncaught DistributedContractError (not an assertion);
+# fixed in 428446b (positive controls use self.fail), re-run DISKRIMINIERT in DK-20261111T000753-ac677743b21f.
+
+== baseline before the fix (c3d0e4b): python -m unittest test_ddp_hex_v3 -> Ran 91 tests, OK, exit 0
