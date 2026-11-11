@@ -443,11 +443,18 @@ state: 0.0531 vs 0.0262 after 3 steps with two lambdas), `CyclicLR` (a custom
 `scale_fn` is not in its state), every subclass and look-alike; an instance attribute
 that shadows a method (`state_dict`, `get_lr`, `step`; for the optimizer the
 instance-level `step` that torch's own schedulers install is tolerated); an optimizer
-with a `state_dict` pre/post hook (it rewrites the exported state). The refusal is a
+with a `state_dict` or `load_state_dict` pre/post hook (it rewrites the exported or
+loaded state); a class whose behaviour-carrying methods (`step`, `state_dict`,
+`load_state_dict`, `get_lr`, `_get_closed_form_lr`, `get_last_lr`, `zero_grad`,
+`update`, `scale`, `unscale_`, resolved through the MRO) are no longer the objects
+held at import (R8.1, Quella F2-A 2026-11-11: `type(obj) is SGD` still holds after
+`SGD.step = ...`). torch's own `profile_hook_step` wrapper around `step` is admitted
+only if its code object is torch's wrapper and its closure holds the function held at
+import. The refusal is a
 `DistributedContractError` inside the agreed digest computation, so a refusal on one
 rank stops every rank (2-rank job: `lambda_lr_other_function_on_rank1`,
 `forged_step_lr_on_rank1`, `state_dict_error_rank1`). Not covered: a class patched
-process-wide, torch itself (in-process identity is no supply-chain attestation: pin
+before the runner module was imported, torch itself (in-process identity is no supply-chain attestation: pin
 and verify the wheel), optimizer step hooks and the instance-level optimizer `step`
 (they change no state), and the model class (user code; its weights are compared).
 Rank-local state is

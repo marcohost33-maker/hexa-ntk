@@ -290,8 +290,45 @@ _TRUSTED_GRAD_SCALERS: Tuple[type, ...] = (torch.amp.GradScaler,)
 # Instance-level step: torch's own LR schedulers wrap optimizer.step on the
 # instance (lr_scheduler.patch_track_step_called), so it cannot be refused there.
 _OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED = frozenset({"step"})
-# Hooks that rewrite an optimizer's exported state (Optimizer.register_state_dict_*_hook)
-_OPTIMIZER_EXPORT_HOOKS = ("_optimizer_state_dict_pre_hooks", "_optimizer_state_dict_post_hooks")
+# Hooks that rewrite an optimizer's exported or loaded state
+# (Optimizer.register_state_dict_*_hook, register_load_state_dict_*_hook).
+_OPTIMIZER_EXPORT_HOOKS = (
+    "_optimizer_state_dict_pre_hooks", "_optimizer_state_dict_post_hooks",
+    "_optimizer_load_state_dict_pre_hooks", "_optimizer_load_state_dict_post_hooks",
+)
+# Identity of the class alone does not pin its behaviour: a method can be replaced
+# on the class process-wide (``torch.optim.SGD.step = ...``) and still pass
+# ``type(obj) is SGD`` (Quella F2-A, 2026-11-11). The behaviour-carrying methods
+# are therefore held at import, resolved through the MRO like an instance lookup,
+# and compared by identity before a state is admitted.
+_BEHAVIOUR_METHODS = (
+    "step", "state_dict", "load_state_dict", "get_lr", "_get_closed_form_lr",
+    "get_last_lr", "zero_grad", "update", "scale", "unscale_",
+)
+
+
+def _method_snapshot(cls: type) -> Dict[str, Any]:
+    return {name: inspect.getattr_static(cls, name, None) for name in _BEHAVIOUR_METHODS}
+
+
+_METHODS_AT_IMPORT: Dict[type, Dict[str, Any]] = {
+    cls: _method_snapshot(cls)
+    for cls in (*_TRUSTED_SCHEDULERS, *_TRUSTED_OPTIMIZERS, *_TRUSTED_GRAD_SCALERS)
+}
+# torch replaces ``cls.step`` itself on the first instance
+# (Optimizer._patch_step_function -> profile_hook_step, torch/optim/optimizer.py).
+# Only that wrapper is admitted: same code object as torch's wrapper AND the held
+# function in its closure (``__wrapped__``/``hooked`` are plain, settable attributes).
+_TORCH_STEP_WRAPPER_CODE = torch.optim.Optimizer.profile_hook_step(lambda *a, **k: None).__code__
+
+
+def _method_unchanged(cls: type, method: str, held: Any) -> bool:
+    current = inspect.getattr_static(cls, method, None)
+    if current is held:
+        return True
+    if method != "step" or getattr(current, "__code__", None) is not _TORCH_STEP_WRAPPER_CODE:
+        return False
+    return any(cell.cell_contents is held for cell in (current.__closure__ or ()))
 
 
 def _is_method(attr: Any) -> bool:
@@ -315,9 +352,13 @@ def _comparable_state(
     - an optimizer with a state_dict pre/post hook (it rewrites the exported state);
     - a SequentialLR/ChainedScheduler whose inner schedulers fail any of this.
 
-    Not covered: a class patched process-wide (``torch.optim.SGD.step = ...``) and
-    torch itself (identity is no supply-chain attestation); hooks that change
-    ``step`` (they do not alter the state).
+    - a class whose behaviour-carrying methods (``_BEHAVIOUR_METHODS``) were replaced
+      since import, also on a base class (``torch.optim.SGD.step = ...``);
+    - an optimizer with a load_state_dict pre/post hook.
+
+    Not covered: a patch applied before this module was imported, and torch itself
+    (identity is no supply-chain attestation); hooks that change ``step`` (they do
+    not alter the state).
     """
     if obj is None:
         return None
@@ -329,6 +370,16 @@ def _comparable_state(
             "its future behaviour, so equal states on the ranks would not mean equal training "
             "(subclasses and classes that only carry a built-in name are refused; LambdaLR, "
             "MultiplicativeLR and CyclicLR keep functions outside their state)"
+        )
+    snapshot = _METHODS_AT_IMPORT.get(cls)
+    patched = sorted(
+        method for method, held in (snapshot or {}).items()
+        if not _method_unchanged(cls, method, held)
+    ) if snapshot is not None else ["<no snapshot>"]
+    if patched:
+        raise DistributedContractError(
+            f"{what}: {name} has methods replaced since import ({', '.join(patched)}); "
+            "its state_dict() would not describe its behaviour"
         )
     shadowing = sorted(
         attr for attr in vars(obj)

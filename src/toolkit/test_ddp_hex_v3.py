@@ -577,6 +577,53 @@ class TestComparableState(unittest.TestCase):
         self.assertEqual(_state_digest(self._admitted(real, _TRUSTED_SCHEDULERS)),
                          _state_digest(real.state_dict()))
 
+    def test_class_method_patched_process_wide_is_refused(self) -> None:
+        # Quella F2-A: `type(obj) is SGD` still holds after SGD.step is replaced on the class
+        for owner, method in ((torch.optim.SGD, "step"), (torch.optim.Optimizer, "state_dict"),
+                              (torch.optim.lr_scheduler.StepLR, "get_lr")):
+            with self.subTest(patched=f"{owner.__qualname__}.{method}"):
+                original = owner.__dict__[method]
+                obj = (torch.optim.lr_scheduler.StepLR(self._opt(), step_size=1)
+                       if method == "get_lr" else self._opt())
+                trusted = _TRUSTED_SCHEDULERS if method == "get_lr" else _TRUSTED_OPTIMIZERS
+                self._admitted(obj, trusted, tolerated=frozenset({"step"}))  # before the patch
+                try:
+                    setattr(owner, method, lambda self, *a, **k: None)
+                    self.assertTrue(any(type(obj) is c for c in trusted))  # identity alone still passes
+                    self._refused(obj, trusted, "replaced since import", tolerated=frozenset({"step"}))
+                finally:
+                    setattr(owner, method, original)
+        # strongest forger: torch's own step wrapper (same code object) around a foreign function
+        opt = self._opt()
+        original = torch.optim.SGD.__dict__["step"]
+        try:
+            forged = torch.optim.Optimizer.profile_hook_step(lambda self, *a, **k: None)
+            forged.hooked = True  # type: ignore[attr-defined]
+            torch.optim.SGD.step = forged  # type: ignore[method-assign]
+            self.assertIs(forged.__code__, original.__code__)  # the wrapper is indistinguishable by code
+            self._refused(opt, _TRUSTED_OPTIMIZERS, "replaced since import", tolerated=frozenset({"step"}))
+        finally:
+            torch.optim.SGD.step = original  # type: ignore[method-assign]
+        # negative control: a patch on a base method StepLR overrides does not reach
+        # StepLR's behaviour and must not cause a false refusal
+        base = torch.optim.lr_scheduler.LRScheduler
+        original = base.__dict__["get_lr"]
+        try:
+            base.get_lr = lambda self: []  # type: ignore[method-assign]
+            self._admitted(torch.optim.lr_scheduler.StepLR(self._opt(), step_size=1), _TRUSTED_SCHEDULERS)
+        finally:
+            base.get_lr = original  # type: ignore[method-assign]
+        # negative control: after restoring, the genuine classes pass again
+        self._admitted(self._opt(), _TRUSTED_OPTIMIZERS, tolerated=frozenset({"step"}))
+        self._admitted(torch.optim.lr_scheduler.StepLR(self._opt(), step_size=1), _TRUSTED_SCHEDULERS)
+
+    def test_optimizer_load_state_dict_hook_is_refused(self) -> None:
+        for register in ("register_load_state_dict_pre_hook", "register_load_state_dict_post_hook"):
+            with self.subTest(hook=register):
+                opt = self._opt()
+                getattr(opt, register)(lambda *a, **k: None)
+                self._refused(opt, _TRUSTED_OPTIMIZERS, "state_dict hooks", tolerated=frozenset({"step"}))
+
     def _admitted(self, obj: Any, trusted: Any, **kw: Any) -> Any:
         """A positive control: a refusal here is a false refusal, reported as a test failure."""
         try:
