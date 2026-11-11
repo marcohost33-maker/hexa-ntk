@@ -96,7 +96,10 @@ rank only left the others in the first training collective (review finding 3).
 `GradScaler` and EMA must equal rank 0's (section 6, the same check as after a
 resume), else `DistributedContractError` naming the components on every rank. An
 equal config does not imply equal state: an optimizer built with another learning
-rate on one rank passed every check before and trained the ranks apart.
+rate on one rank passed every check before and trained the ranks apart. Since R8
+(2026-11-11) the optimizer, scheduler and `GradScaler` must also be built-in classes
+whose state determines their behaviour (section 6, "Which states are comparable"):
+a `LambdaLR`, a subclass or a look-alike class is refused here, on every rank.
 
 `distributed` and `is_main_process` must be `bool`. All checkpoints, the EMA copy,
 validation and replay capsules use the unwrapped module (`runner.raw_model`):
