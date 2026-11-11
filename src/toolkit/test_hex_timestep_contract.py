@@ -417,6 +417,17 @@ class TestMutationProbeKilledBy(unittest.TestCase):
         # no test ran (import error): never a kill, whatever was expected
         self.assertEqual(probe.judge(1, "ImportError: boom\n", ("test_b",))[0], "INVALID")
 
+    def test_every_mutation_site_occurs_exactly_once(self) -> None:
+        # 2026-11-11: a change to runner_hex_v3.py (R8.1) left one site STALE; the
+        # full probe stopped there with exit 2 while every CI check stayed green,
+        # because only the slow probe looked at the sites
+        probe = _load_mutation_probe()
+        for index, mutant in enumerate(probe.MUTANTS, 1):
+            base = _ROOT if "/" in mutant.module else _ROOT / "src" / "toolkit"
+            text = (base / mutant.module).read_text(encoding="utf-8")
+            with self.subTest(mutant=f"M{index:02d}", site=mutant.original[:60]):
+                self.assertEqual(text.count(mutant.original), 1)
+
     def test_every_expected_test_exists_in_its_target_class(self) -> None:
         # a misspelt name would only ever show up as KILLED_ELSEWHERE
         probe = _load_mutation_probe()
