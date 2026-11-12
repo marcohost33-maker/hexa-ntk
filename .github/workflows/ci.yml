@@ -99,3 +99,16 @@ jobs:
             echo "== OPENBLAS_CORETYPE=$kernel"
             OPENBLAS_CORETYPE="$kernel" python -m unittest test_hex_fv_solver_hex_v3 test_reference_case_hex_v3
           done
+      - name: multi-rank jobs under collective-consistency checks
+        # TORCH_DISTRIBUTED_DEBUG=DETAIL wraps the gloo group (ProcessGroupWrapper):
+        # before every collective the ranks compare its sequence number, op type,
+        # shapes and dtypes. A desync (one rank skipping or adding a collective,
+        # e.g. a fault injection that bypasses the pre-step agreement on one rank,
+        # found in the R12 phase 2 self-review) then raises "Detected mismatch
+        # between collectives" at once instead of hanging until the gloo timeout;
+        # PyTorch reports desync as the usual cause of watchdog timeouts.
+        # The rank processes are spawned, so they inherit the variable.
+        working-directory: src/toolkit
+        env:
+          TORCH_DISTRIBUTED_DEBUG: DETAIL
+        run: python -m unittest test_ddp_hex_v3.TestWorldSizeOne test_ddp_hex_v3.TestTwoRanks test_ddp_hex_v3.TestThreeRanks

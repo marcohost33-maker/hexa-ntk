@@ -1940,27 +1940,46 @@ class HexTrainingRunner:
         Every rank reaches this point once per update, after DDP's gradient
         all-reduce: the errors of unscale_ and clipping are caught on the way here
         (``error``), so no rank is elsewhere. Then the behaviour check
-        (``_admit_step_behaviour``) and one int64 all-reduce (``any_true``): if
-        any rank failed or refused, every rank raises now -- the failing rank its
-        own exception, the others PeerRankError -- and NO rank has stepped
-        (007acc2 R11 / R12 phase 2: before, a rank whose check refused held its
-        error while its peers stepped, so the ranks' weights differed until the
-        run stopped at the next agreement point). Cost: one short all-reduce per
-        update; the check itself runs once (about 0.6 ms on CPU for SGD).
+        (``_admit_step_behaviour``) and ONE 2-element int64 all-reduce of [ranks
+        that failed or refused, ranks that would take the step]:
+
+        - a failure or refusal anywhere raises on every rank -- the failing rank
+          its own exception, the others PeerRankError -- and NO rank has stepped
+          (007acc2 R11 / R12 phase 2: before, a rank whose check refused held its
+          error while its peers stepped, so the weights differed until the run
+          stopped at the next agreement point);
+        - a split skip decision (some ranks' gradient norm non-finite, the others'
+          finite; impossible with identical all-reduced gradients unless they
+          differ, spec section 3.7) raises DistributedContractError on every rank
+          before any rank steps. A GradScaler that skips inside ``step`` on one
+          rank only is still caught after the step (``_agreed_grad_skip``).
+
+        Whatever leaves this method -- also a failure of the collective itself (a
+        peer died, the process-group timeout) -- is marked as agreed, so
+        ``_train_one_step`` raises it at once instead of holding it for the next
+        collective on a broken group. Cost: one short all-reduce per update; the
+        check itself runs once (about 0.6 ms on CPU for SGD).
         """
-        if error is None:
-            try:
-                self._admit_step_behaviour(take)
-            except Exception as exc:  # re-raised below, after the peers know
-                error = exc
-        with self.dist.keeping(error):
-            failed = self.dist.any_true(error is not None)
         try:
+            if error is None:
+                try:
+                    self._admit_step_behaviour(take)
+                except Exception as exc:  # re-raised below, after the peers know
+                    error = exc
+            with self.dist.keeping(error):
+                n_failed, n_take = self.dist.sum_ints([error is not None, take])
             self.dist.raise_agreed_failure(
-                error, failed,
+                error, n_failed > 0,
                 f"training step {self.global_step} before the optimizer step (unscale, clipping or "
                 "the behaviour check of optimizer/GradScaler)",
             )
+            world = self.dist.world_size
+            if 0 < n_take < world:
+                raise DistributedContractError(
+                    f"{world - n_take} of {world} ranks would skip training step {self.global_step} "
+                    "(non-finite gradient norm) and the others would apply it: refused before the "
+                    "optimizer step, no rank stepped"
+                )
         except Exception as exc:
             self._agreed_pre_step_error = exc
             raise

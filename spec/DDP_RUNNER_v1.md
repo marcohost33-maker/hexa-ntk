@@ -57,6 +57,15 @@ The state digest encodes NumPy dtypes by their full schema (structured field nam
 order, offsets, titles, subarrays; red on 4e6bcf0: `[('x',i4),('y',i4)]` and
 `[('u',i4),('v',i4)]` digested alike, both `|V8`), refuses dtype metadata and carries a
 schema id (`hexantk/shared-state-digest/v2`). No change to what a healthy run computes.
+Self-review the same day (of 3b11876): the pre-step all-reduce now also carries the
+skip decision (2 elements, same single collective): a split of the norm-based skip
+is refused before any rank steps (red on 3b11876: rank 0 stepped, the split was
+caught one step later with differing weights); a failure of the pre-step collective
+itself (a dead peer, the timeout) is raised at once instead of held into the next
+collective on a broken group (red on 3b11876: held); the `GradScaler` check on a
+skipped step is pinned by a test; a 3-rank job covers a refusal on the middle rank;
+CI runs the multi-rank jobs under `TORCH_DISTRIBUTED_DEBUG=DETAIL` (every collective's
+sequence number, type, shapes and dtypes compared across ranks).
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -163,9 +172,15 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    all-reduce per update): every rank reaches it after DDP's gradient all-reduce, with
    the errors of `unscale_` and clipping caught on the way, then runs the behaviour
    check of section 6 (`_admit_step_behaviour`: the optimizer if the step will be
-   taken, the `GradScaler` whenever there is one). If any rank failed or refused,
-   every rank raises there -- the failing rank its own exception with a note, the
-   others `PeerRankError` -- and no rank has stepped. What follows (the step, the
+   taken, the `GradScaler` whenever there is one). The all-reduce carries two
+   counts, ranks that failed or refused and ranks that would take the step. If any
+   rank failed or refused, every rank raises there -- the failing rank its own
+   exception with a note, the others `PeerRankError` -- and no rank has stepped. If
+   only some ranks would take the step (a split of the skip decision of item 7),
+   every rank raises `DistributedContractError` there, again before any step.
+   Whatever leaves this agreement, also a failure of its own collective, is raised
+   at once, never held (holding it would send the rank into the next collective on
+   a broken group). What follows (the step, the
    EMA update, the skip record) is held as described next. `GradScaler.unscale_` (AMP), clipping, the optimizer
    (or `GradScaler`) step, the EMA update and, for a skipped update (item 7), its
    replay capsule and `FailureSignature` run per rank after DDP's gradient
@@ -516,7 +531,7 @@ NCCL backend on the runner's CUDA device (`device="cuda:k"`), else on the curren
 CUDA device (`torch.cuda.set_device(local_rank)` first). Only the default process
 group is used. Cost per training step: a 4-element and a 1-element all-reduce (v1.0: 2 + 1;
 the third element is the held-step-error count, section 3.6, the fourth the
-skipped-update count, section 3.7), plus one 1-element all-reduce before the update
+skipped-update count, section 3.7), plus one 2-element all-reduce before the update
 (v1.4, section 3 item 6; with the behaviour check about 0.6 ms on CPU for SGD, the
 check measured with torch 2.6.0 on the container CPU). Per epoch with a scheduler:
 one 1-element all-reduce before `scheduler.step()` (v1.4). Per mid-epoch save: one more 2-element all-reduce
@@ -602,6 +617,17 @@ Mutation probe: 35 mutants, each switching one guard of sections 2-6 off, all
 killed (`scripts/mutation_probe.py`, full probe 120/120 on 2026-10-30, exit 0; the
 first full probe after the review round left the two `len()` fast-fail mutants alive,
 the test now checks the fast fail's own message).
+
+v1.4 self-review (2026-11-12, same environment): `pre_step_collective failure` raised,
+not held, and the norm-split refused before any step (both red on 3b11876); the
+GradScaler check on a skipped step and the 3-rank middle-rank refusal (both red on
+4e6bcf0, green on 3b11876: they pin what 3b11876 introduced). The GradScaler's own
+skip inside `step()` on one rank (`scaler_skip_split_*`, 2 and 3 ranks) is only known
+after the step and is still caught by section 3.7's agreement before the next batch
+or the mid-epoch save. All multi-rank jobs also pass under
+`TORCH_DISTRIBUTED_DEBUG=DETAIL` (82 tests, no mismatch); a positive control (a
+1- vs 2-element all-reduce) is reported there at once as "Detected mismatch between
+collectives", where plain gloo waits for the timeout.
 
 v1.4 (R12 phase 2, 2026-11-12, Linux container, Python 3.12, torch 2.6.0): six new or
 changed tests, all red against 4e6bcf0 (run there with the new test file and a

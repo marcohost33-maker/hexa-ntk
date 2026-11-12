@@ -715,8 +715,8 @@ MUTANTS = (
     Mutant(RU, "    h = hashlib.sha256(_DIGEST_SCHEMA)\n    _update_state_digest(h, state)\n",
            "    h = hashlib.sha256()\n    _update_state_digest(h, state)\n", SD,
            expect=("test_digest_carries_the_schema_version",)),
-    Mutant(RU, "            failed = self.dist.any_true(error is not None)\n",
-           "            failed = error is not None\n", T2,
+    Mutant(RU, "                n_failed, n_take = self.dist.sum_ints([error is not None, take])\n",
+           "                n_failed, n_take = int(error is not None), int(take)\n", T2,
            expect=("test_behaviour_patch_on_one_rank_stops_every_rank_before_any_step",)),
     Mutant(RU, "            self._agree_before_step(error, take)\n", "            pass\n", W1,
            expect=("test_unscale_error_is_agreed_before_the_step",)),
@@ -728,6 +728,16 @@ MUTANTS = (
     Mutant(RU, "            if self.dist is not None:\n                # The scheduler must still behave as held",
            "            if False:\n                # The scheduler must still behave as held", T2,
            expect=("test_scheduler_patch_on_one_rank_is_refused_before_scheduler_step",)),
+    # R12 phase 2 self-review: skip split refused before the step; a failure of the
+    # pre-step collective is raised, not held; the GradScaler is checked on a skip too.
+    Mutant(RU, "            if 0 < n_take < world:\n", "            if False:\n", T2,
+           expect=("test_non_finite_gradient_skips_on_both_and_a_split_stops_both",)),
+    Mutant(RU, "        except Exception as exc:\n            self._agreed_pre_step_error = exc\n            raise\n",
+           "        except Exception:\n            raise\n", W1,
+           expect=("test_failure_of_the_pre_step_collective_is_raised_not_held",)),
+    Mutant(RU, "        if self.grad_scaler is not None:\n            _admit_behaviour(self.grad_scaler,",
+           "        if take and self.grad_scaler is not None:\n            _admit_behaviour(self.grad_scaler,", W1,
+           expect=("test_grad_scaler_is_checked_when_the_step_is_skipped_too",)),
 )
 
 

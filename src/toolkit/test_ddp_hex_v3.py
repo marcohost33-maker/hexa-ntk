@@ -1312,6 +1312,48 @@ class TestWorldSizeOne(unittest.TestCase):
             for before, after in zip(weights, runner.raw_model.parameters()):
                 self.assertTrue(torch.equal(before, after.detach()))
 
+    def test_failure_of_the_pre_step_collective_is_raised_not_held(self) -> None:
+        # R12 phase 2 self-review: the pre-step agreement sits inside the held region
+        # of _train_one_step. Before this was fixed, a failure of its collective (a
+        # peer died, the timeout) was held as if this rank's step had failed, and the
+        # rank went on into the next collective on the broken group (a second timeout).
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp), distributed=True, num_epochs=1)
+
+            def broken(values: Any) -> List[int]:
+                raise RuntimeError("Connection closed by peer (injected)")
+
+            weights = [p.detach().clone() for p in runner.raw_model.parameters()]
+            runner.dist.sum_ints = broken
+            try:
+                with self.assertRaisesRegex(RuntimeError, "Connection closed by peer"):
+                    runner._train_one_step(next(iter(runner.train_loader)))
+            finally:
+                del runner.dist.sum_ints
+            self.assertIsNone(runner._post_step_error)  # raised, not held
+            self.assertIsNone(runner._agreed_pre_step_error)
+            for before, after in zip(weights, runner.raw_model.parameters()):
+                self.assertTrue(torch.equal(before, after.detach()))
+
+    def test_grad_scaler_is_checked_when_the_step_is_skipped_too(self) -> None:
+        # GradScaler.update() runs on a skipped step as well (it backs the scale off),
+        # so its behaviour is checked before every update, not only before a step
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp), distributed=True, num_epochs=1)
+            runner.grad_scaler = _cpu_scaler()
+            calls = [0]
+
+            def forged_update(self: Any, new_scale: Any = None) -> None:
+                calls[0] += 1
+
+            nan = mock.patch.object(torch.nn.utils, "clip_grad_norm_",
+                                    lambda *a, **k: torch.tensor(float("nan")))
+            with nan, mock.patch.object(torch.amp.GradScaler, "update", forged_update):
+                with self.assertRaisesRegex(Exception, "GradScaler before step") as caught:
+                    runner._train_one_step(next(iter(runner.train_loader)))
+            self.assertIn("training step 0 before the optimizer step", " ".join(caught.exception.__notes__))
+            self.assertEqual(calls[0], 0)  # the forged update never ran
+
     def test_error_recording_a_skipped_update_is_held_too(self) -> None:
         # HX102-01: the capsule and FailureSignature of a skipped update are written
         # after DDP's gradient all-reduce as well; an OSError there (a full disk) on
@@ -2507,7 +2549,7 @@ def _grad_skip_split(save_every_n_steps: int) -> Callable[[int, int, Path], Dict
         runner = _failing_step_runner(rank, world, out, failing_rank=-1, fail_at=-1, num_epochs=1,
                                       save_every_n_steps=save_every_n_steps)
         if rank != 1:
-            return _post_step_outcome(runner, out)
+            return _behaviour_patch_outcome(runner, out, None)
         # Through the real update path (R12 phase 2): rank 1's first gradient norm
         # reads NaN, so it skips while still taking part in the pre-step agreement.
         # Replacing _apply_update on one rank would bypass that collective, a
@@ -2521,7 +2563,40 @@ def _grad_skip_split(save_every_n_steps: int) -> Callable[[int, int, Path], Dict
             return torch.tensor(float("nan")) if calls["n"] == 1 else norm
 
         with mock.patch.object(torch.nn.utils, "clip_grad_norm_", split):
-            return _post_step_outcome(runner, out)
+            return _behaviour_patch_outcome(runner, out, None)
+
+    return scenario
+
+
+def _scaler_skip_split(save_every_n_steps: int) -> Callable[[int, int, Path], Dict[str, Any]]:
+    """Section 3.7, the split the pre-step agreement cannot see: rank 1's GradScaler
+    skips inside ``step`` (as if it alone found an inf) and backs its scale off,
+    rank 0 steps. Caught after the step, at the next agreement point / before the
+    mid-epoch save (``_agreed_grad_skip``)."""
+
+    def scenario(rank: int, world: int, out: Path) -> Dict[str, Any]:
+        model = DDP(_model())
+        runner = HexTrainingRunner(
+            _config(out, distributed=True, is_main_process=rank == 0, num_epochs=1,
+                    save_every_n_steps=save_every_n_steps),
+            model, torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9),
+            _train_loader(rank, world), _exact_val_loader(),
+        )
+        runner.grad_scaler = _cpu_scaler()
+        if rank == 1:
+            step = runner._step_optimizer
+            calls = [0]
+
+            def scaler_skips() -> None:
+                calls[0] += 1
+                if calls[0] == 1:
+                    # what GradScaler.step + update do on a found inf: no step, lower scale
+                    runner.grad_scaler._scale.mul_(0.5)
+                    return
+                step()
+
+            runner._step_optimizer = scaler_skips  # type: ignore[method-assign]
+        return _behaviour_patch_outcome(runner, out, None)
 
     return scenario
 
@@ -2637,6 +2712,8 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "nan_grad_on_rank1": _sc_nan_grad_on_rank1,
     "grad_skip_split_rank1": _grad_skip_split(0),
     "grad_skip_split_before_mid_save_rank1": _grad_skip_split(1),
+    "scaler_skip_split_rank1": _scaler_skip_split(0),
+    "scaler_skip_split_before_mid_save_rank1": _scaler_skip_split(1),
     # last: before the fix it desynchronised the job; the scenarios above stay valid
     "skip_record_error_rank1": _sc_skip_record_error_rank1,
     "skip_limit_both": _skip_limit("grad", 0),
@@ -2661,6 +2738,8 @@ _SCENARIOS_3: Dict[str, Callable[[int, int, Path], Any]] = {
     "ema_error_rank0": _sc_ema_error_rank0,
     "nan_grad_on_rank1": _sc_nan_grad_on_rank1,
     "grad_skip_split_rank1": _grad_skip_split(0),
+    "scaler_skip_split_rank1": _scaler_skip_split(0),
+    "optimizer_patch_rank1": _sc_optimizer_patch_rank1,
     "construction_other_lr_on_rank1": _construction_differs("optimizer"),
     "state_dict_error_rank1": _sc_state_dict_error_rank1,
 }
@@ -2820,6 +2899,21 @@ class _MultiRankJob(unittest.TestCase):
             # desynchronised job must fail in _ok, not be skipped
             names.append("grad_skip_split_before_mid_save_rank1")
         for name in names:
+            # R12 phase 2: a split of the norm-based skip decision is refused in the
+            # pre-step agreement, before ANY rank steps (before: rank 0 stepped and the
+            # run stopped at the next agreement point with differing weights)
+            for rank, value in enumerate(self._ok(name)):
+                with self.subTest(name, rank=rank):
+                    self.assertEqual(value["error"], "DistributedContractError")
+                    self.assertIn(f"1 of {self.WORLD} ranks would skip training step 0", value["message"])
+                    self.assertIn("no rank stepped", value["message"])
+                    self.assertTrue(value["weights_unchanged"], value)
+                    self.assertEqual(value["checkpoints"], [])
+        scaler_names = [n for n in ("scaler_skip_split_rank1", "scaler_skip_split_before_mid_save_rank1")
+                        if n in _SUITES[self.SUITE]]
+        for name in scaler_names:
+            # the GradScaler's own skip inside step() is only known after the step:
+            # still caught before anything reads the differing weights
             before = "the mid-epoch save" if "mid_save" in name else "stopped before step 1"
             for rank, value in enumerate(self._ok(name)):
                 with self.subTest(name, rank=rank):
@@ -3151,6 +3245,19 @@ class TestThreeRanks(_MultiRankJob):
 
     def test_error_after_backward_on_one_rank_fails_all(self) -> None:
         self._check_post_step_scenarios()
+
+    def test_behaviour_patch_on_the_middle_rank_stops_all_before_any_step(self) -> None:
+        # R12 phase 2 with three ranks: the refusing rank is the middle one, so
+        # both peers must name rank 1 and neither may have stepped
+        values = self._ok("optimizer_patch_rank1")
+        self.assertEqual([v["error"] for v in values],
+                         ["PeerRankError", "DistributedContractError", "PeerRankError"], values)
+        for rank, value in enumerate(values):
+            with self.subTest(rank=rank):
+                self.assertTrue(value["weights_unchanged"], value)
+                self.assertEqual(value["global_step"], 0)
+                if rank != 1:
+                    self.assertIn("failed on rank(s) [1]", value["message"])
 
     def test_non_finite_gradient_skips_on_all_and_a_split_stops_all(self) -> None:
         self._check_grad_skip_scenarios()
