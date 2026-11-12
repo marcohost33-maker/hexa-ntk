@@ -1,0 +1,66 @@
+# R12 phase 2 (DDP_RUNNER v1.4) local gate -- 2026-11-12T15:12Z
+# base: PR #104 head 4e6bcf0; this log is committed with the change it checks (tree = commit of this log)
+# env: Linux container 6.18.44-fc-v378, Python 3.12.3, torch 2.6.0+cu124 (CPU execution; wheel from PyPI, CI uses the +cpu wheel), numpy 2.5.3, ruff 0.17.3, coverage 7.17.0; neuraloperator not installed (GINO lane skips)
+
+== ruff check src scripts
+All checks passed!
+exit=0
+
+== python -m compileall -q src scripts
+exit=0
+
+== python scripts/verify_sources.py
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+exit=0
+
+== python scripts/engine_gate.py
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+exit=0
+
+== coverage run -m unittest discover -s src/toolkit -t src/toolkit -p test_*.py
+exit=0
+Ran 1169 tests in 80.400s
+
+OK (skipped=7)
+
+== python -m coverage report (fail_under from pyproject)
+TOTAL                                           6565    272   2516    215    94%
+exit=0
+
+== negative-first: the new/changed tests against 4e6bcf0 (scratch worktree, new test file, shim: _DIGEST_SCHEMA + no-op _step_optimizer the old runner never calls)
+FAIL: test_structured_dtypes_are_digested_by_their_schema (test_ddp_hex_v3.TestResumeStateDigest.test_structured_dtypes_are_digested_by_their_schema) (dtype=dtype([('u', '<i4'), ('v', '<i4')]))
+FAIL: test_structured_dtypes_are_digested_by_their_schema (test_ddp_hex_v3.TestResumeStateDigest.test_structured_dtypes_are_digested_by_their_schema) (dtype=dtype([('y', '<i4'), ('x', '<i4')]))
+FAIL: test_structured_dtypes_are_digested_by_their_schema (test_ddp_hex_v3.TestResumeStateDigest.test_structured_dtypes_are_digested_by_their_schema) (dtype=dtype([('x', '<f4'), ('y', '<i4')]))
+FAIL: test_structured_dtypes_are_digested_by_their_schema (test_ddp_hex_v3.TestResumeStateDigest.test_structured_dtypes_are_digested_by_their_schema) (dtype=dtype([('x', '<i4'), ('y', '<i2'), ('z', '<i2')]))
+FAIL: test_structured_dtypes_are_digested_by_their_schema (test_ddp_hex_v3.TestResumeStateDigest.test_structured_dtypes_are_digested_by_their_schema) (dtype=dtype({'names': ['x', 'y'], 'formats': ['<i4', '<i4'], 'offsets': [4, 0], 'itemsize': 8}))
+FAIL: test_structured_dtypes_are_digested_by_their_schema (test_ddp_hex_v3.TestResumeStateDigest.test_structured_dtypes_are_digested_by_their_schema) (dtype=dtype([(('X', 'x'), '<i4'), ('y', '<i4')]))
+FAIL: test_structured_dtypes_are_digested_by_their_schema (test_ddp_hex_v3.TestResumeStateDigest.test_structured_dtypes_are_digested_by_their_schema) (dtype=dtype([('x', '<i2', (2,)), ('y', '<i4')]))
+FAIL: test_structured_dtypes_are_digested_by_their_schema (test_ddp_hex_v3.TestResumeStateDigest.test_structured_dtypes_are_digested_by_their_schema) (dtype=dtype('V8'))
+FAIL: test_structured_dtypes_are_digested_by_their_schema (test_ddp_hex_v3.TestResumeStateDigest.test_structured_dtypes_are_digested_by_their_schema)
+FAIL: test_dtype_metadata_is_refused (test_ddp_hex_v3.TestResumeStateDigest.test_dtype_metadata_is_refused) (dtype=dtype('float64'))
+FAIL: test_dtype_metadata_is_refused (test_ddp_hex_v3.TestResumeStateDigest.test_dtype_metadata_is_refused) (dtype=dtype([('x', '<f8')]))
+FAIL: test_digest_carries_the_schema_version (test_ddp_hex_v3.TestResumeStateDigest.test_digest_carries_the_schema_version)
+FAIL: test_behaviour_patch_on_one_rank_stops_every_rank_before_any_step (test_ddp_hex_v3.TestTwoRanks.test_behaviour_patch_on_one_rank_stops_every_rank_before_any_step)
+FAIL: test_scheduler_patch_on_one_rank_is_refused_before_scheduler_step (test_ddp_hex_v3.TestTwoRanks.test_scheduler_patch_on_one_rank_is_refused_before_scheduler_step)
+FAIL: test_unscale_error_is_agreed_before_the_step (test_ddp_hex_v3.TestWorldSizeOne.test_unscale_error_is_agreed_before_the_step)
+Ran 6 tests in 10.849s
+FAILED (failures=15)
+OLDHEAD r0: {'error': 'PeerRankError', 'weights_unchanged': False, 'global_step': 1, 'checkpoints': []}
+OLDHEAD r1: {'error': 'DistributedContractError', 'weights_unchanged': True, 'global_step': 1, 'forged_calls': 0}
+
+== mutation probe subset (run_mutant_detail, 10 new + 5 retargeted; full 245 probe NOT run)
+M155 KILLED 4s killed_by=['test_nan_gradient_skips_step_and_keeps_weights', 'test_one_bad_step_is_skipped_the_others_train', 'test_overflowing_norm_of_finite_gradients_is_skipped', 'test_skip_with_mid_epoch_saves_keeps_the_record_consistent']
+M160 KILLED 4s killed_by=['test_disabled_grad_scaler_takes_the_no_scaler_path', 'test_nan_gradient_skips_step_and_keeps_weights', 'test_one_bad_step_is_skipped_the_others_train', 'test_overflowing_norm_of_finite_gradients_is_skipped']
+M201 KILLED 16s killed_by=['test_dtype_metadata_is_refused', 'test_numpy_bytes_sets_and_complex_values_are_seen', 'test_structured_dtypes_are_digested_by_their_schema']
+M202 KILLED 16s killed_by=['test_numpy_bytes_sets_and_complex_values_are_seen', 'test_structured_dtypes_are_digested_by_their_schema']
+M211 KILLED 16s killed_by=['test_numpy_bytes_sets_and_complex_values_are_seen']
+M235 KILLED 15s killed_by=['test_dtype_metadata_is_refused', 'test_structured_dtypes_are_digested_by_their_schema']
+M236 KILLED 15s killed_by=['test_structured_dtypes_are_digested_by_their_schema']
+M237 KILLED 14s killed_by=['test_structured_dtypes_are_digested_by_their_schema']
+M238 KILLED 15s killed_by=['test_dtype_metadata_is_refused']
+M239 KILLED 14s killed_by=['test_digest_carries_the_schema_version']
+M240 KILLED 44s killed_by=['test_behaviour_patch_on_one_rank_stops_every_rank_before_any_step', 'test_scheduler_patch_on_one_rank_is_refused_before_scheduler_step', 'test_state_digest_error_on_one_rank_is_agreed']
+M241 KILLED 5s killed_by=['test_patch_after_construction_is_refused_before_the_step', 'test_unscale_error_is_agreed_before_the_step']
+M242 KILLED 4s killed_by=['test_unscale_error_is_agreed_before_the_step']
+M243 KILLED 14s killed_by=['test_behaviour_patch_on_one_rank_stops_every_rank_before_any_step']
+M244 KILLED 13s killed_by=['test_scheduler_patch_on_one_rank_is_refused_before_scheduler_step']

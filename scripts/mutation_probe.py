@@ -478,7 +478,8 @@ MUTANTS = (
     # DDP_RUNNER v1.2 section 3.7 / NTK-R5-NR03: a non-finite gradient norm skips the
     # update (no NaN weights, EMA or checkpoints), a non-finite parameter after the
     # step stops the run, and the ranks must agree that all or none skipped.
-    Mutant(RU, "            if not math.isfinite(grad_norm_val):\n", "            if False:\n", NF),
+    # R12 phase 2: the no-scaler skip reads the shared ``take`` (retargeted, same guard)
+    Mutant(RU, "            if not take:\n", "            if False:\n", NF),
     Mutant(RU, "            self._check_parameters_finite()\n", "            pass\n", NF),
     Mutant(RU, "                if not stepped:\n"
                "                    self._record_skipped_update(batch, loss_val, grad_norm_val)\n",
@@ -491,7 +492,7 @@ MUTANTS = (
            "            backoff = self.grad_scaler.get_scale() != scale_before\n", NF),
     # third round (HX102-02/-04): a non-finite norm unscale_ did not see skips scaler.step,
     # and only a scale backoff is routine (no capsule)
-    Mutant(RU, "            take = math.isfinite(grad_norm_val)\n", "            take = True\n", NF),
+    Mutant(RU, "        take = math.isfinite(grad_norm_val)\n", "        take = True\n", NF),
     # (the replacement called _scaler_active(), removed in 40ff255: the mutant then died of
     # an AttributeError, not of a test; it now says what the removed helper said)
     Mutant(RU, "        if self._scaler_backoff:\n", "        if self.grad_scaler is not None:\n", NF),
@@ -592,10 +593,11 @@ MUTANTS = (
            expect=('test_sparse_tensors_digest_canonically',)),
     Mutant(RU, "        _update_tensor_digest(h, s.values())\n", "", SD,
            expect=('test_sparse_tensors_digest_canonically',)),
-    Mutant(RU, '            h.update(f"A|{a.dtype.str}|{a.shape}|".encode("utf-8"))\n',
+    Mutant(RU, '            h.update(f"A|{_dtype_token(a.dtype)}|{a.shape}|".encode("utf-8"))\n',
            '            h.update(b"A|")\n', SD,
            expect=('test_numpy_bytes_sets_and_complex_values_are_seen',)),
-    Mutant(RU, '            h.update(f"g|{a.dtype.str}|".encode("utf-8"))\n            h.update(a.tobytes())\n',
+    Mutant(RU, '            h.update(f"g|{_dtype_token(a.dtype)}|".encode("utf-8"))\n'
+               '            h.update(a.tobytes())\n',
            '            h.update(b"g|")\n', SD,
            expect=('test_numpy_bytes_sets_and_complex_values_are_seen',)),
     Mutant(RU, '        h.update(f"c{value.real.hex()},{value.imag.hex()};".encode("utf-8"))\n',
@@ -623,7 +625,8 @@ MUTANTS = (
     Mutant("scripts/mutation_probe.py", "    if any(name not in killed_by for name in expect):\n",
            "    if False:\n", "test_hex_timestep_contract.TestMutationProbeKilledBy",
            expect=("test_verdicts",)),
-    Mutant(RU, '            h.update(b"g|object|")\n            _update_state_digest(h, value.item())\n',
+    Mutant(RU, '            h.update(f"g|{_dtype_token(a.dtype)}|".encode("utf-8"))\n'
+           '            _update_state_digest(h, value.item())\n',
            '            h.update(a.tobytes())\n', SD,
            expect=('test_numpy_bytes_sets_and_complex_values_are_seen',)),
     # R8 (2026-11-11, cross-family GPT-6 R8-01 / A7-R2): comparable states by class
@@ -697,6 +700,34 @@ MUTANTS = (
     Mutant(RU, '        grad_scaler = _comparable_state(self.grad_scaler, _TRUSTED_GRAD_SCALERS, "GradScaler")\n',
            "        grad_scaler = None if self.grad_scaler is None else self.grad_scaler.state_dict()\n", W1,
            expect=('test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler',)),
+    # R12 phase 2 (DDP_RUNNER v1.4, 007acc2 R11): typed NumPy schema digest, schema id,
+    # behaviour check agreed before the step (no rank steps), scheduler checked before step.
+    Mutant(RU, "    if dtype.names is not None:\n", "    if False:\n", SD,
+           expect=("test_structured_dtypes_are_digested_by_their_schema",)),
+    Mutant(RU, '            fields.append(f"{len(name)}:{name}|{label}|@{offset}|{_dtype_token(sub)}")\n',
+           '            fields.append(f"{label}|@{offset}|{_dtype_token(sub)}")\n', SD,
+           expect=("test_structured_dtypes_are_digested_by_their_schema",)),
+    Mutant(RU, '            fields.append(f"{len(name)}:{name}|{label}|@{offset}|{_dtype_token(sub)}")\n',
+           '            fields.append(f"{len(name)}:{name}|{label}|{_dtype_token(sub)}")\n', SD,
+           expect=("test_structured_dtypes_are_digested_by_their_schema",)),
+    Mutant(RU, "    if dtype.metadata:\n", "    if False:\n", SD,
+           expect=("test_dtype_metadata_is_refused",)),
+    Mutant(RU, "    h = hashlib.sha256(_DIGEST_SCHEMA)\n    _update_state_digest(h, state)\n",
+           "    h = hashlib.sha256()\n    _update_state_digest(h, state)\n", SD,
+           expect=("test_digest_carries_the_schema_version",)),
+    Mutant(RU, "            failed = self.dist.any_true(error is not None)\n",
+           "            failed = error is not None\n", T2,
+           expect=("test_behaviour_patch_on_one_rank_stops_every_rank_before_any_step",)),
+    Mutant(RU, "            self._agree_before_step(error, take)\n", "            pass\n", W1,
+           expect=("test_unscale_error_is_agreed_before_the_step",)),
+    Mutant(RU, "                    if exc is self._agreed_pre_step_error:\n", "                    if False:\n", W1,
+           expect=("test_unscale_error_is_agreed_before_the_step",)),
+    Mutant(RU, "        if take:\n            _admit_behaviour(self.optimizer,",
+           "        if False:\n            _admit_behaviour(self.optimizer,", T2,
+           expect=("test_behaviour_patch_on_one_rank_stops_every_rank_before_any_step",)),
+    Mutant(RU, "            if self.dist is not None:\n                # The scheduler must still behave as held",
+           "            if False:\n                # The scheduler must still behave as held", T2,
+           expect=("test_scheduler_patch_on_one_rank_is_refused_before_scheduler_step",)),
 )
 
 

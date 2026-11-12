@@ -19,6 +19,7 @@ Three layers:
 """
 from __future__ import annotations
 
+import contextlib
 import errno
 import gc
 import json
@@ -67,8 +68,10 @@ from runner_hex_v3 import (
     RunnerConfig,
     _admit_behaviour,
     _comparable_state,
+    _DIGEST_SCHEMA,
     _module_digest,
     _state_digest,
+    _update_state_digest,
 )
 
 # ------------------------------------------------------------------
@@ -429,6 +432,56 @@ class TestResumeStateDigest(unittest.TestCase):
         self.assertEqual(_state_digest(first), _state_digest(second))
         self.assertNotEqual(_state_digest(first), _state_digest(np.array([(1, "b")], dtype=rec)[0]))
         self.assertEqual(_state_digest(np.array([3.0, -0.0])), _state_digest(np.array([3.0, -0.0])))
+
+    def test_structured_dtypes_are_digested_by_their_schema(self) -> None:
+        # 007acc2 R11 HX-R11-NUMPY, reproduced on 4e6bcf0: dtype.str is "|V8" for every
+        # 8-byte structured dtype, so field names, order, offsets and types fell out
+        # of the digest and equal bytes of different meaning digested alike.
+        def rec(dtype: Any) -> np.ndarray:
+            return np.zeros(2, dtype=dtype)
+
+        base = rec([("x", "<i4"), ("y", "<i4")])
+        others = [
+            rec([("u", "<i4"), ("v", "<i4")]),  # field names
+            rec([("y", "<i4"), ("x", "<i4")]),  # field order
+            rec([("x", "<f4"), ("y", "<i4")]),  # field type, same size
+            rec([("x", "<i4"), ("y", "<i2"), ("z", "<i2")]),  # field split
+            rec(np.dtype({"names": ["x", "y"], "formats": ["<i4", "<i4"], "offsets": [4, 0]})),  # offsets
+            rec(np.dtype({"names": ["x", "y"], "formats": ["<i4", "<i4"], "titles": ["X", None]})),  # title
+            rec([("x", "<i2", (2,)), ("y", "<i4")]),  # subarray field
+            rec("V8"),  # unstructured void
+        ]
+        for other in others:
+            with self.subTest(dtype=other.dtype):
+                self.assertEqual(other.tobytes(), base.tobytes())  # the premise: equal bytes
+                self.assertNotEqual(_state_digest(other), _state_digest(base))
+                self.assertNotEqual(_state_digest(other[0]), _state_digest(base[0]))  # scalars too
+        # positive controls: the same schema and value agree, whatever the memory layout
+        self.assertEqual(_state_digest(base), _state_digest(rec([("x", "<i4"), ("y", "<i4")])))
+        strided = np.zeros(4, dtype=base.dtype)[::2]
+        self.assertFalse(strided.flags.c_contiguous)
+        self.assertEqual(_state_digest(strided), _state_digest(base))
+        # an object field keeps its name in the digest too
+        named = [("n", np.int64), ("o", object)]
+        renamed = [("m", np.int64), ("o", object)]
+        self.assertNotEqual(_state_digest(np.array([(1, "a")], dtype=named)),
+                            _state_digest(np.array([(1, "a")], dtype=renamed)))
+
+    def test_dtype_metadata_is_refused(self) -> None:
+        # metadata is arbitrary Python state outside the bytes (007acc2 R11)
+        tagged = np.dtype("<f8", metadata={"unit": "m"})
+        for value in (np.zeros(2, dtype=tagged), np.zeros(1, dtype=[("x", tagged)])):
+            with self.subTest(dtype=value.dtype), self.assertRaisesRegex(TypeError, "metadata"):
+                _state_digest(value)
+
+    def test_digest_carries_the_schema_version(self) -> None:
+        # a new encoding is a new schema: ranks on different encodings disagree
+        import hashlib
+
+        plain = hashlib.sha256()
+        _update_state_digest(plain, {"a": 1})
+        self.assertNotEqual(_state_digest({"a": 1}), plain.digest())
+        self.assertTrue(_DIGEST_SCHEMA.startswith(b"hexantk/shared-state-digest/v"))
 
     def test_set_digest_is_independent_of_the_ranks_hash_seed(self) -> None:
         # str hashing is randomised per process (PYTHONHASHSEED), so a set of
@@ -1234,8 +1287,10 @@ class TestWorldSizeOne(unittest.TestCase):
                       " ".join(caught.exception.__notes__))
         self.assertIn("Traceback", logs.output[0])
 
-    def test_unscale_error_is_held_too(self) -> None:
-        # GradScaler.unscale_ runs after DDP's gradient all-reduce as well.
+    def test_unscale_error_is_agreed_before_the_step(self) -> None:
+        # GradScaler.unscale_ runs after DDP's gradient all-reduce as well. Since R12
+        # phase 2 it is agreed at once (_agree_before_step) instead of held: every
+        # rank reaches that agreement, so every rank raises before any rank steps.
         class _Scaler:
             def scale(self, loss: torch.Tensor) -> torch.Tensor:
                 return loss
@@ -1246,15 +1301,16 @@ class TestWorldSizeOne(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runner = self._runner(Path(tmp), distributed=True, num_epochs=1)
             runner.grad_scaler = _Scaler()
-            with self.assertLogs("runner_hex_v3", level="ERROR") as logs:
-                _, healthy, _ = runner._train_one_step(next(iter(runner.train_loader)))
-            self.assertFalse(healthy)
-            self.assertIn("held until the next agreement point", " ".join(logs.output))
-            self.assertRegex(str(runner._post_step_error), "unscale_ failed")
-            runner.global_step = 1
+            weights = [p.detach().clone() for p in runner.raw_model.parameters()]
             with self.assertRaisesRegex(RuntimeError, "unscale_ failed") as caught:
-                runner._agreed_next(iter(runner.train_loader))
-            self.assertIn("training step 0 after backward", " ".join(caught.exception.__notes__))
+                runner._train_one_step(next(iter(runner.train_loader)))
+            notes = " ".join(caught.exception.__notes__)
+            self.assertIn("training step 0 before the optimizer step", notes)
+            self.assertIn("agreed failure on rank(s) [0]", notes)
+            self.assertIsNone(runner._post_step_error)  # raised, not held
+            self.assertIsNone(runner._agreed_pre_step_error)
+            for before, after in zip(weights, runner.raw_model.parameters()):
+                self.assertTrue(torch.equal(before, after.detach()))
 
     def test_error_recording_a_skipped_update_is_held_too(self) -> None:
         # HX102-01: the capsule and FailureSignature of a skipped update are written
@@ -2176,6 +2232,49 @@ def _sc_state_dict_error_rank1(rank: int, world: int, out: Path) -> Any:
     return {"error": None, "message": "", "seconds": time.monotonic() - t0}
 
 
+def _behaviour_patch_outcome(runner: HexTrainingRunner, out: Path, patch: Any) -> Dict[str, Any]:
+    """Run under ``patch`` (a context manager, or None); report the outcome and whether the weights moved."""
+    before = [p.detach().clone() for p in runner.raw_model.parameters()]
+    lr_before = [g["lr"] for g in runner.optimizer.param_groups]
+    with patch if patch is not None else contextlib.nullcontext():
+        outcome = _post_step_outcome(runner, out)
+    outcome["weights_unchanged"] = all(
+        torch.equal(b, a.detach()) for b, a in zip(before, runner.raw_model.parameters()))
+    outcome["lr_unchanged"] = [g["lr"] for g in runner.optimizer.param_groups] == lr_before
+    outcome["global_step"] = runner.global_step
+    return outcome
+
+
+def _sc_optimizer_patch_rank1(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """R12 phase 2: after the initial agreement rank 1's SGD._init_group is replaced
+    (A2). Before, rank 1 refused and held its error while rank 0 stepped, so the
+    weights differed until the next agreement point; now no rank steps."""
+    runner = _failing_step_runner(rank, world, out, failing_rank=-1, fail_at=-1, num_epochs=1)
+    calls = [0]
+
+    def forged(self: Any, *a: Any) -> bool:
+        calls[0] += 1
+        return False
+
+    patch = mock.patch.object(torch.optim.SGD, "_init_group", forged) if rank == 1 else None
+    outcome = _behaviour_patch_outcome(runner, out, patch)
+    outcome["forged_calls"] = calls[0]
+    return outcome
+
+
+def _sc_scheduler_patch_rank1(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """R12 phase 2: after the initial agreement rank 1's StepLR.get_lr is replaced.
+    Before, scheduler.step() ran unchecked: the ranks' learning rates parted silently."""
+    model = DDP(_model())
+    opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+    sched = torch.optim.lr_scheduler.StepLR(opt, step_size=1, gamma=0.5)
+    runner = HexTrainingRunner(_config(out, distributed=True, is_main_process=rank == 0, num_epochs=1),
+                               model, opt, _train_loader(rank, world), _exact_val_loader(), scheduler=sched)
+    patch = (mock.patch.object(torch.optim.lr_scheduler.StepLR, "get_lr", lambda self: [0.5 for _ in self.base_lrs])
+             if rank == 1 else None)
+    return _behaviour_patch_outcome(runner, out, patch)
+
+
 def _bump_momentum(payload: Dict[str, Any]) -> None:
     for state in payload["optimizer_state_dict"]["state"].values():
         state["momentum_buffer"].add_(1.0)
@@ -2253,21 +2352,22 @@ class _StepFailure(RuntimeError):
 
 
 def _fail_optimizer_step(runner: HexTrainingRunner, *, fail_at: int) -> None:
-    """The runner's ``fail_at``-th optimizer step raises (1-based; -1 never), before the step.
+    """The runner's ``fail_at``-th optimizer step raises (1-based; -1 never), as the step.
 
-    Injected on the runner right after its pre-step behaviour check, not as a
-    subclass (refused since R8) and not as a step pre-hook (refused since R12: a
-    hook changes the update outside the state) -- the place a pre-hook raised."""
-    check = runner._admit_step_behaviour
+    Injected on the runner's step call (after the agreed pre-step check, R12
+    phase 2), not as a subclass (refused since R8) and not as a step pre-hook
+    (refused since R12: a hook changes the update outside the state) -- the
+    place a pre-hook raised."""
+    step = runner._step_optimizer
     calls = [0]
 
-    def check_then_fail() -> None:
-        check()
+    def fail_or_step() -> None:
         calls[0] += 1
         if calls[0] == fail_at:
             raise _StepFailure(f"optimizer step {calls[0]} failed (injected)")
+        step()
 
-    runner._admit_step_behaviour = check_then_fail  # type: ignore[method-assign]
+    runner._step_optimizer = fail_or_step  # type: ignore[method-assign]
 
 
 def _post_step_outcome(runner: HexTrainingRunner, out: Path) -> Dict[str, Any]:
@@ -2406,19 +2506,22 @@ def _grad_skip_split(save_every_n_steps: int) -> Callable[[int, int, Path], Dict
     def scenario(rank: int, world: int, out: Path) -> Dict[str, Any]:
         runner = _failing_step_runner(rank, world, out, failing_rank=-1, fail_at=-1, num_epochs=1,
                                       save_every_n_steps=save_every_n_steps)
-        if rank == 1:
-            original = runner._apply_update
-            calls = {"n": 0}
+        if rank != 1:
+            return _post_step_outcome(runner, out)
+        # Through the real update path (R12 phase 2): rank 1's first gradient norm
+        # reads NaN, so it skips while still taking part in the pre-step agreement.
+        # Replacing _apply_update on one rank would bypass that collective, a
+        # schedule no real run has.
+        real = torch.nn.utils.clip_grad_norm_
+        calls = {"n": 0}
 
-            def split() -> Any:
-                calls["n"] += 1
-                if calls["n"] == 1:
-                    runner.optimizer.zero_grad(set_to_none=True)
-                    return float("nan"), False
-                return original()
+        def split(*args: Any, **kwargs: Any) -> torch.Tensor:
+            norm = real(*args, **kwargs)
+            calls["n"] += 1
+            return torch.tensor(float("nan")) if calls["n"] == 1 else norm
 
-            runner._apply_update = split
-        return _post_step_outcome(runner, out)
+        with mock.patch.object(torch.nn.utils, "clip_grad_norm_", split):
+            return _post_step_outcome(runner, out)
 
     return scenario
 
@@ -2538,6 +2641,8 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "skip_record_error_rank1": _sc_skip_record_error_rank1,
     "skip_limit_both": _skip_limit("grad", 0),
     "skip_limit_desync_rank1": _skip_limit("loss", 1),
+    "optimizer_patch_rank1": _sc_optimizer_patch_rank1,
+    "scheduler_patch_rank1": _sc_scheduler_patch_rank1,
     # very last: unfixed it desynchronises the job (rank 0 times out), and every
     # later scenario would fail with it -- the mutation probe's killed_by showed
     # 6 unrelated tests red for that mutant before this moved here
@@ -2942,6 +3047,35 @@ class TestTwoRanks(_MultiRankJob):
         self.assertIn("failed on rank(s) [1]", r0["message"])
         # agreed at once, not after the 30 s process-group timeout of this job
         self.assertLess(r0["seconds"], 15.0)
+
+    def test_behaviour_patch_on_one_rank_stops_every_rank_before_any_step(self) -> None:
+        # R12 phase 2 (007acc2 R11 "all_reduce(MIN) vor dem Schritt"): rank 1's
+        # optimizer was patched after the initial agreement. The refusal is agreed
+        # before the step, so NO rank steps -- before, rank 0 stepped while rank 1
+        # held its refusal (the weights differed until the next agreement point).
+        r0, r1 = self._ok("optimizer_patch_rank1")
+        self.assertEqual(r1["error"], "DistributedContractError", r1)
+        self.assertIn("optimizer before step", r1["message"])
+        self.assertIn("training step 0 before the optimizer step", " ".join(r1["notes"]))
+        self.assertEqual(r0["error"], "PeerRankError", r0)
+        self.assertIn("before the optimizer step", r0["message"])
+        self.assertIn("failed on rank(s) [1]", r0["message"])
+        for r in (r0, r1):
+            self.assertTrue(r["weights_unchanged"], r)
+            self.assertEqual(r["global_step"], 0, r)
+            self.assertEqual(r["checkpoints"], [], r)
+        self.assertEqual(r1["forged_calls"], 0)  # the forged helper never ran
+
+    def test_scheduler_patch_on_one_rank_is_refused_before_scheduler_step(self) -> None:
+        # R12 phase 2: scheduler.step() is checked too, agreed once per epoch
+        r0, r1 = self._ok("scheduler_patch_rank1")
+        self.assertEqual(r1["error"], "DistributedContractError", r1)
+        self.assertIn("scheduler before step", r1["message"])
+        self.assertEqual(r0["error"], "PeerRankError", r0)
+        self.assertIn("scheduler behaviour check at the end of epoch 0", r0["message"])
+        for r in (r0, r1):
+            self.assertTrue(r["lr_unchanged"], r)  # no rank ran the forged schedule
+            self.assertEqual(r["checkpoints"], [], r)
 
     def test_resume_with_equal_scaler_state_runs(self) -> None:
         # positive control: the same file on both ranks, GradScaler included

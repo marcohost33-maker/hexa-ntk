@@ -152,7 +152,7 @@ def _module_digest(module: nn.Module) -> bytes:
     other state value and refused if opaque (R8); before, it was skipped, so
     ranks with other extra state agreed.
     """
-    h = hashlib.sha256()
+    h = hashlib.sha256(_DIGEST_SCHEMA)
     for name, value in module.state_dict(keep_vars=False).items():
         h.update(f"{name}|".encode("utf-8"))
         if torch.is_tensor(value):
@@ -177,12 +177,51 @@ _DIGESTIBLE_TYPES: Tuple[type, ...] = (
 # id() of a live, held object is unique: identity without calling a metaclass __eq__
 _DIGESTIBLE_TYPE_IDS = frozenset(id(t) for t in _DIGESTIBLE_TYPES)
 
+# Version of the encoding below, fed first into every shared-state digest. The
+# digests are compared between ranks at run time only (never persisted), so a new
+# version needs no migration; ranks running different encodings disagree, which is
+# a refusal, never a false agreement (007acc2 R11: "Schema-ID erhoehen").
+# v2 (R12 phase 2): NumPy dtypes encoded by their full schema (_dtype_token).
+_DIGEST_SCHEMA = b"hexantk/shared-state-digest/v2\n"
+
+
+def _dtype_token(dtype: np.dtype) -> str:
+    """A canonical, typed encoding of a NumPy dtype: equal tokens mean equal meaning of equal bytes.
+
+    ``dtype.str`` is not that: every structured dtype of one itemsize is ``|V<n>``,
+    so ``[('x', i4), ('y', i4)]`` and ``[('u', i4), ('v', i4)]`` -- or two fields
+    in another order, at other offsets, of other types -- digested alike with the
+    same bytes (007acc2 R11, HX-R11-NUMPY; reproduced on 4e6bcf0). Encoded here:
+    byte order, kind and size (``dtype.str``, which also carries datetime units);
+    for a structured dtype its itemsize, alignment flag and every field in order
+    with name, title, offset and (recursively) dtype; for a subarray its shape and
+    base. A dtype with ``metadata`` is refused (TypeError): metadata is arbitrary
+    Python state outside the bytes, not part of a canonical encoding.
+    """
+    if dtype.metadata:
+        raise TypeError(
+            f"state value with NumPy dtype metadata ({dtype!r}) cannot be compared between ranks "
+            "(metadata is not part of the bytes)"
+        )
+    if dtype.names is not None:
+        fields = []
+        for name in dtype.names:
+            sub, offset, *title = dtype.fields[name]
+            label = repr(title[0]) if title else ""
+            fields.append(f"{len(name)}:{name}|{label}|@{offset}|{_dtype_token(sub)}")
+        aligned = "a" if dtype.isalignedstruct else ""
+        return f"R{dtype.itemsize}{aligned}{{{';'.join(fields)}}}"
+    if dtype.subdtype is not None:
+        base, shape = dtype.subdtype
+        return f"U{shape}{_dtype_token(base)}"
+    return dtype.str
+
 
 def _update_state_digest(h: Any, value: Any) -> None:
     """Feed a canonical, rank-independent encoding of a ``state_dict`` value into ``h``.
 
     Exact for what optimizer, scheduler and GradScaler states hold: tensors and
-    NumPy arrays (dtype, shape, bytes), NumPy scalars (dtype, bytes), floats
+    NumPy arrays (dtype schema, shape, bytes), NumPy scalars (dtype schema, bytes), floats
     (``float.hex``, so -0.0, NaN and every ulp count), complex numbers, ints,
     bools, strings, bytes, None, and dicts/lists/tuples/sets of them (dict keys
     and set elements sorted by their encoding). Every value is typed: 1, 1.0,
@@ -202,19 +241,19 @@ def _update_state_digest(h: Any, value: Any) -> None:
         _update_tensor_digest(h, value)
     elif isinstance(value, np.ndarray):
         if value.dtype.hasobject:  # object arrays: their elements, not pointers
-            h.update(f"A|object|{value.shape}|".encode("utf-8"))
+            h.update(f"A|{_dtype_token(value.dtype)}|{value.shape}|".encode("utf-8"))
             _update_state_digest(h, value.reshape(-1).tolist())
         else:
             a = np.ascontiguousarray(value)
-            h.update(f"A|{a.dtype.str}|{a.shape}|".encode("utf-8"))
+            h.update(f"A|{_dtype_token(a.dtype)}|{a.shape}|".encode("utf-8"))
             h.update(a.tobytes())
     elif isinstance(value, np.generic):
         a = np.asarray(value)
         if a.dtype.hasobject:
-            h.update(b"g|object|")
+            h.update(f"g|{_dtype_token(a.dtype)}|".encode("utf-8"))
             _update_state_digest(h, value.item())
         else:
-            h.update(f"g|{a.dtype.str}|".encode("utf-8"))
+            h.update(f"g|{_dtype_token(a.dtype)}|".encode("utf-8"))
             h.update(a.tobytes())
     elif isinstance(value, bool) or value is None:
         h.update(f"{value!r};".encode("utf-8"))
@@ -259,7 +298,7 @@ def _update_state_digest(h: Any, value: Any) -> None:
 
 def _state_digest(state: Any) -> bytes:
     """SHA-256 of a ``state_dict`` (see ``_update_state_digest``); pass None for an absent component."""
-    h = hashlib.sha256()
+    h = hashlib.sha256(_DIGEST_SCHEMA)
     _update_state_digest(h, state)
     return h.digest()
 
@@ -1291,6 +1330,9 @@ class HexTrainingRunner:
         # on this rank, held until the next
         # agreement point so that every rank raises there (spec section 3.6).
         self._post_step_error: Optional[BaseException] = None
+        # Distributed: the exception _agree_before_step just raised on this rank
+        # (agreed with every rank, so _train_one_step raises it instead of holding it).
+        self._agreed_pre_step_error: Optional[BaseException] = None
         # Distributed: this rank skipped its last update for a non-finite
         # gradient norm. Checked at the same agreement points (section 3.7):
         # every rank reads the same all-reduced gradients, so all or none skip.
@@ -1782,6 +1824,12 @@ class HexTrainingRunner:
                         self._record_skipped_update(batch, loss_val, grad_norm_val)
                         self._count_skip(batch, loss_val, counts=not self._routine_backoff())
                 except Exception as exc:
+                    if exc is self._agreed_pre_step_error:
+                        # Already agreed before the step (_agree_before_step): every
+                        # rank raises right here, so nothing is held. An OOM goes on
+                        # to the rescue below (the outer handler).
+                        self._agreed_pre_step_error = None
+                        raise
                     # After the gradient all-reduce: the peers have finished
                     # backward and head for the next agreement point. Raising
                     # here alone would leave them waiting there (or, worse, let
@@ -1832,30 +1880,42 @@ class HexTrainingRunner:
         The EMA update is skipped with any skip (an EMA step on unchanged
         weights still moves the average).
         After a step every parameter must be finite, else NonFiniteParameterError
-        (before the EMA update). Distributed, every call site runs after DDP's
-        gradient all-reduce, so nothing here is a collective; an error is held
-        by _train_one_step and agreed later.
+        (before the EMA update). Distributed, every call runs after DDP's
+        gradient all-reduce; its one collective is ``_agree_before_step``
+        (after unscale/clipping, before the step: an error there or a refused
+        behaviour check raises on every rank before any rank steps). An error
+        after that point (the step, the EMA update) is held by _train_one_step
+        and agreed later (spec section 3.6).
         """
-        if self.grad_scaler is not None:
-            # Unscale BEFORE clipping (PyTorch AMP requirement)
-            self.grad_scaler.unscale_(self.optimizer)
-        grad_norm = torch.nn.utils.clip_grad_norm_(
-            self.model.parameters(),
-            max_norm=self.config.grad_clip_max_norm,
-        )
-        grad_norm_val = float(grad_norm.item()) if torch.is_tensor(grad_norm) else float(grad_norm)
+        error: Optional[BaseException] = None
+        grad_norm_val = math.nan
+        try:
+            if self.grad_scaler is not None:
+                # Unscale BEFORE clipping (PyTorch AMP requirement)
+                self.grad_scaler.unscale_(self.optimizer)
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(),
+                max_norm=self.config.grad_clip_max_norm,
+            )
+            grad_norm_val = float(grad_norm.item()) if torch.is_tensor(grad_norm) else float(grad_norm)
+        except Exception as exc:
+            if self.dist is None:
+                raise
+            error = exc  # agreed right below, before any rank steps
+        # A non-finite norm skips the step (with a GradScaler too, before
+        # scaler.step: unscale_ checks the gradients BEFORE it unscales them, so
+        # finite gradients whose fp32 norm overflows (HX102-02) or that become NaN
+        # by the 1/0 of a zero scale (HX102-04) pass its inf check and the scaler
+        # would step).
+        take = math.isfinite(grad_norm_val)
+        if self.dist is not None:
+            self._agree_before_step(error, take)
 
         self._scaler_backoff = False
         if self.grad_scaler is not None:
             scale_before = self.grad_scaler.get_scale()
-            # A non-finite norm is skipped here as well, before scaler.step: unscale_
-            # checks the gradients BEFORE it unscales them, so finite gradients whose
-            # fp32 norm overflows (HX102-02) or that become NaN by the 1/0 of a zero
-            # scale (HX102-04) pass its inf check and the scaler would step.
-            take = math.isfinite(grad_norm_val)
             if take:
-                self._admit_step_behaviour()
-                self.grad_scaler.step(self.optimizer)
+                self._step_optimizer()
             self.grad_scaler.update()
             backoff = self.grad_scaler.get_scale() < scale_before
             if backoff or not take:
@@ -1863,11 +1923,10 @@ class HexTrainingRunner:
                 self.optimizer.zero_grad(set_to_none=True)
                 return grad_norm_val, False
         else:
-            if not math.isfinite(grad_norm_val):
+            if not take:
                 self.optimizer.zero_grad(set_to_none=True)
                 return grad_norm_val, False
-            self._admit_step_behaviour()
-            self.optimizer.step()
+            self._step_optimizer()
         if self.config.check_finite_params:
             self._check_parameters_finite()
 
@@ -1875,22 +1934,63 @@ class HexTrainingRunner:
             self.ema_model.update_parameters(self.raw_model)
         return grad_norm_val, True
 
-    def _admit_step_behaviour(self) -> None:
+    def _agree_before_step(self, error: Optional[BaseException], take: bool) -> None:
+        """Distributed: one agreement after unscale/clipping and the behaviour check, before any rank steps.
+
+        Every rank reaches this point once per update, after DDP's gradient
+        all-reduce: the errors of unscale_ and clipping are caught on the way here
+        (``error``), so no rank is elsewhere. Then the behaviour check
+        (``_admit_step_behaviour``) and one int64 all-reduce (``any_true``): if
+        any rank failed or refused, every rank raises now -- the failing rank its
+        own exception, the others PeerRankError -- and NO rank has stepped
+        (007acc2 R11 / R12 phase 2: before, a rank whose check refused held its
+        error while its peers stepped, so the ranks' weights differed until the
+        run stopped at the next agreement point). Cost: one short all-reduce per
+        update; the check itself runs once (about 0.6 ms on CPU for SGD).
+        """
+        if error is None:
+            try:
+                self._admit_step_behaviour(take)
+            except Exception as exc:  # re-raised below, after the peers know
+                error = exc
+        with self.dist.keeping(error):
+            failed = self.dist.any_true(error is not None)
+        try:
+            self.dist.raise_agreed_failure(
+                error, failed,
+                f"training step {self.global_step} before the optimizer step (unscale, clipping or "
+                "the behaviour check of optimizer/GradScaler)",
+            )
+        except Exception as exc:
+            self._agreed_pre_step_error = exc
+            raise
+
+    def _admit_step_behaviour(self, take: bool = True) -> None:
         """Distributed: the optimizer (and GradScaler) must still behave as held, immediately before the step.
 
         The shared-state agreement checks it at construction and resume; a change
         after that (a patch between two steps) would otherwise reach the next step
-        unseen (007acc2 R11: checking once at the start is not enough). Raised
-        here, before the step, the error is held and agreed like any error after
-        backward (``_train_one_step``). Single-process runs are not checked: the
-        contract is that equal states mean equal training on every rank.
+        unseen (007acc2 R11: checking once at the start is not enough). Called by
+        ``_agree_before_step``, so a refusal on one rank stops every rank before
+        any of them steps. The optimizer is checked when the step will be taken
+        (``take``), the GradScaler whenever there is one (``update`` runs on a
+        skip too). Single-process runs are not checked: the contract is that
+        equal states mean equal training on every rank.
         """
         if self.dist is None:
             return
-        _admit_behaviour(self.optimizer, _TRUSTED_OPTIMIZERS, "optimizer before step",
-                         tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
+        if take:
+            _admit_behaviour(self.optimizer, _TRUSTED_OPTIMIZERS, "optimizer before step",
+                             tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
         if self.grad_scaler is not None:
             _admit_behaviour(self.grad_scaler, _TRUSTED_GRAD_SCALERS, "GradScaler before step")
+
+    def _step_optimizer(self) -> None:
+        """The optimizer step, through the GradScaler when there is one (after the agreement)."""
+        if self.grad_scaler is not None:
+            self.grad_scaler.step(self.optimizer)
+        else:
+            self.optimizer.step()
 
     def _check_parameters_finite(self) -> None:
         """Raise NonFiniteParameterError if the step left a NaN/Inf parameter.
@@ -2195,6 +2295,15 @@ class HexTrainingRunner:
 
         # Scheduler step (per epoch)
         if self.scheduler is not None:
+            if self.dist is not None:
+                # The scheduler must still behave as held (R12 phase 2): a patch
+                # after the initial agreement would change the learning rate on
+                # one rank only. Every rank reaches the epoch's end together (the
+                # end is agreed in _agreed_next), so one agreement per epoch.
+                self.dist.run_agreed(
+                    lambda: _admit_behaviour(self.scheduler, _TRUSTED_SCHEDULERS, "scheduler before step"),
+                    what=f"the scheduler behaviour check at the end of epoch {epoch}",
+                )
             self.scheduler.step()
 
         # No healthy step means no measurement: NaN, not a perfect 0.0.
