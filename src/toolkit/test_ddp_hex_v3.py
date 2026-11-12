@@ -27,6 +27,7 @@ import os
 import random
 import tempfile
 import time
+import types
 import unittest
 from datetime import timedelta
 from pathlib import Path
@@ -37,6 +38,8 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
+import torch.optim.optimizer as _optim_impl
+import torch.optim.sgd as _sgd_impl
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset, DistributedSampler, IterableDataset
 
@@ -53,12 +56,16 @@ from ddp_hex_v3 import (
 from failure_signature_hex_v3 import FailureSignature
 from operator_adapter_hex_v3 import OperatorAdapterV3
 from runner_hex_v3 import (
+    _HELD,
     _OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED,
+    _PINS_MISSING,
+    _REQUIRED_PINS,
     _TRUSTED_GRAD_SCALERS,
     _TRUSTED_OPTIMIZERS,
     _TRUSTED_SCHEDULERS,
     HexTrainingRunner,
     RunnerConfig,
+    _admit_behaviour,
     _comparable_state,
     _module_digest,
     _state_digest,
@@ -604,15 +611,24 @@ class TestComparableState(unittest.TestCase):
             self._refused(opt, _TRUSTED_OPTIMIZERS, "replaced since import", tolerated=frozenset({"step"}))
         finally:
             torch.optim.SGD.step = original  # type: ignore[method-assign]
-        # negative control: a patch on a base method StepLR overrides does not reach
-        # StepLR's behaviour and must not cause a false refusal
+        # R12: a patch on a base method StepLR overrides is refused as well -- a
+        # ``super()`` call reaches a shadowed base method, so the whole MRO is held
+        # (before R12 this was admitted as a negative control)
         base = torch.optim.lr_scheduler.LRScheduler
         original = base.__dict__["get_lr"]
         try:
             base.get_lr = lambda self: []  # type: ignore[method-assign]
-            self._admitted(torch.optim.lr_scheduler.StepLR(self._opt(), step_size=1), _TRUSTED_SCHEDULERS)
+            self._refused(torch.optim.lr_scheduler.StepLR(self._opt(), step_size=1), _TRUSTED_SCHEDULERS,
+                          "replaced since import")
         finally:
             base.get_lr = original  # type: ignore[method-assign]
+        # negative control: a patch on a class outside SGD's MRO does not refuse SGD
+        original = torch.optim.Adam.__dict__["step"]
+        try:
+            torch.optim.Adam.step = lambda self, *a, **k: None  # type: ignore[method-assign]
+            self._admitted(self._opt(), _TRUSTED_OPTIMIZERS, tolerated=frozenset({"step"}))
+        finally:
+            torch.optim.Adam.step = original  # type: ignore[method-assign]
         # negative control: after restoring, the genuine classes pass again
         self._admitted(self._opt(), _TRUSTED_OPTIMIZERS, tolerated=frozenset({"step"}))
         self._admitted(torch.optim.lr_scheduler.StepLR(self._opt(), step_size=1), _TRUSTED_SCHEDULERS)
@@ -749,6 +765,189 @@ class TestComparableState(unittest.TestCase):
                     self.assertTrue(torch.equal(a, b))
 
 
+def _same_code_factory(func: Any) -> Any:
+    """A function with one free variable, for an in-place ``__code__`` swap on a held one-cell function."""
+    def _use_grad(self: Any, *args: Any, **kwargs: Any) -> Any:
+        return None if func is None else None
+
+    return _use_grad
+
+
+class TestBehaviourGuardR12(unittest.TestCase):
+    """R12 (007acc2 R10.1 HX-R10-01/02, R11, issue #106 A1-A4/B): the optimizer runs
+    exactly the functions held at import -- code, globals, defaults, closure cells,
+    the module functions they load, every MRO helper -- with no registered step
+    hook; torch's own wrappers (profile_hook_step, dynamo's disable) are admitted
+    by an explicit code + globals + closure rule."""
+
+    TOL = _OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED
+
+    @staticmethod
+    def _opt() -> torch.optim.SGD:
+        return torch.optim.SGD(nn.Linear(2, 1).parameters(), lr=0.1, momentum=0.9)
+
+    def _admitted(self, obj: Any, trusted: Any = _TRUSTED_OPTIMIZERS) -> None:
+        try:
+            _admit_behaviour(obj, trusted, "component", tolerated=self.TOL)
+        except DistributedContractError as exc:
+            self.fail(f"false refusal of a genuine {type(obj).__qualname__}: {exc}")
+
+    def _refused(self, obj: Any, pattern: str, trusted: Any = _TRUSTED_OPTIMIZERS) -> None:
+        with self.assertRaisesRegex(DistributedContractError, pattern):
+            _admit_behaviour(obj, trusted, "component", tolerated=self.TOL)
+
+    @staticmethod
+    def _held(owner: type, name: str) -> Any:
+        return _HELD[torch.optim.SGD][2][(owner, name)][1]
+
+    def test_positive_control_untouched_optimizer_and_torch_wrappers(self) -> None:
+        self.assertEqual(_PINS_MISSING, [])  # every function R11 named is held
+        self.assertEqual(len(_REQUIRED_PINS), 8)
+        opt = self._opt()
+        sched = torch.optim.lr_scheduler.StepLR(opt, step_size=1)
+        current = torch.optim.SGD.__dict__["step"]
+        # premises: torch's own wrappers are in place, so identity alone would refuse
+        self.assertIsNot(current, self._held(torch.optim.SGD, "step"))
+        self.assertEqual(current.__code__.co_name, "wrapper")
+        self.assertTrue(getattr(vars(opt)["step"], "_wrapped_by_lr_sched", False))
+        self._admitted(opt)
+        for p in opt.param_groups[0]["params"]:
+            p.grad = torch.ones_like(p)
+        opt.step()
+        opt.zero_grad()
+        sched.step()
+        self._admitted(opt)
+        self._admitted(_cpu_scaler(), _TRUSTED_GRAD_SCALERS)
+        self._admitted(sched, _TRUSTED_SCHEDULERS)
+
+    def test_negative_control_lr_change_is_state_not_behaviour(self) -> None:
+        opt = self._opt()
+        before = _state_digest(opt.state_dict())
+        opt.param_groups[0]["lr"] = 0.5
+        self._admitted(opt)  # a legitimate state change is no behaviour change
+        self.assertNotEqual(_state_digest(opt.state_dict()), before)  # the digest carries it
+
+    def test_a1_sgd_module_function_replaced_is_refused(self) -> None:
+        opt = self._opt()
+        with mock.patch.object(_sgd_impl, "_single_tensor_sgd", lambda *a, **k: None):
+            self._refused(opt, r"torch\.optim\.sgd\.sgd global _single_tensor_sgd \(changed in place\)")
+        self._admitted(opt)
+
+    def test_a2_init_group_replaced_is_refused(self) -> None:
+        opt = self._opt()
+        with mock.patch.object(torch.optim.SGD, "_init_group", lambda self, *a: False):
+            self.assertIs(type(opt), torch.optim.SGD)  # identity alone still passes
+            self._refused(opt, r"replaced since import.*SGD\._init_group")
+        self._admitted(opt)
+
+    def test_a3_closure_cell_changed_in_place_is_refused(self) -> None:
+        opt = self._opt()
+        held = self._held(torch.optim.SGD, "step")
+        cell = held.__closure__[0]
+        original = cell.cell_contents
+        try:
+            cell.cell_contents = lambda self, *a, **k: None
+            self.assertIs(self._held(torch.optim.SGD, "step"), held)  # every identity unchanged
+            self._refused(opt, r"changed in place")
+        finally:
+            cell.cell_contents = original
+        self._admitted(opt)
+
+    def test_a4_grad_scaler_maybe_opt_step_replaced_is_refused(self) -> None:
+        scaler = _cpu_scaler()
+        self._admitted(scaler, _TRUSTED_GRAD_SCALERS)
+        with mock.patch.object(torch.amp.GradScaler, "_maybe_opt_step", lambda self, *a, **k: None):
+            self._refused(scaler, r"GradScaler\._maybe_opt_step", _TRUSTED_GRAD_SCALERS)
+        self._admitted(scaler, _TRUSTED_GRAD_SCALERS)
+
+    def test_wrapper_with_foreign_globals_is_refused(self) -> None:
+        # HX-R10-01: torch's step wrapper rebuilt with the same code and the same
+        # closure cells, only its globals dict is a copy the forger controls
+        opt = self._opt()
+        current = torch.optim.SGD.__dict__["step"]
+        forged = types.FunctionType(current.__code__, dict(current.__globals__), current.__name__,
+                                    None, current.__closure__)
+        self.assertIs(forged.__code__, current.__code__)
+        self.assertTrue(all(a is b for a, b in zip(forged.__closure__, current.__closure__)))
+        with mock.patch.object(torch.optim.SGD, "step", forged):
+            self._refused(opt, r"replaced since import.*SGD\.step")
+        self._admitted(opt)
+
+    def test_held_step_code_replaced_in_place_is_refused(self) -> None:
+        opt = self._opt()
+        held = self._held(torch.optim.SGD, "step")
+        original = held.__code__
+        try:
+            held.__code__ = _same_code_factory(None).__code__
+            self.assertIs(self._held(torch.optim.SGD, "step"), held)
+            self._refused(opt, r"changed in place")
+        finally:
+            held.__code__ = original
+        self._admitted(opt)
+
+    def test_global_step_pre_hook_is_refused(self) -> None:
+        opt = self._opt()
+        handle = _optim_impl.register_optimizer_step_pre_hook(lambda *a: None)
+        try:
+            self._refused(opt, r"step hooks are registered \(_global_optimizer_pre_hooks\)")
+        finally:
+            handle.remove()
+        self._admitted(opt)
+
+    def test_instance_step_hook_is_refused(self) -> None:
+        opt = self._opt()
+        handle = opt.register_step_post_hook(lambda *a: None)
+        self._refused(opt, r"step hooks are registered \(_optimizer_step_post_hooks\)")
+        handle.remove()
+        self._admitted(opt)
+
+    def test_instance_step_override_is_refused(self) -> None:
+        opt = self._opt()
+        torch.optim.lr_scheduler.StepLR(opt, step_size=1)
+        self._admitted(opt)  # torch's LR-scheduler wrapper is admitted
+        opt.step = lambda *a, **k: None  # type: ignore[method-assign]
+        self._refused(opt, r"overrides step")
+
+    def test_dynamo_disable_cache_replaced_is_refused(self) -> None:
+        # torch._disable_dynamo calls fn.__dynamo_disable, a plain function attribute
+        opt = self._opt()
+        opt.zero_grad()  # torch fills the cache on the first call
+        inner = torch.optim.Optimizer.__dict__["zero_grad"].__closure__[0].cell_contents
+        cache = vars(inner).get("__dynamo_disable")
+        self.assertIsNotNone(cache)
+        try:
+            vars(inner)["__dynamo_disable"] = lambda *a, **k: None
+            self._refused(opt, r"changed in place")
+        finally:
+            vars(inner)["__dynamo_disable"] = cache
+        self._admitted(opt)
+
+    def test_b_dynamo_disable_around_foreign_function_is_refused(self) -> None:
+        opt = self._opt()
+        import torch._dynamo
+        forged = torch._dynamo.disable(lambda self, *a: False)
+        with mock.patch.object(torch.optim.SGD, "_init_group", forged):
+            self._refused(opt, r"replaced since import.*SGD\._init_group")
+        self._admitted(opt)
+
+    def test_b_torch_compile_is_admitted(self) -> None:
+        # B: torch.compile patches every optimizer's _init_group and the _fused_*
+        # module functions with dynamo's disable wrapper (TorchPatcher.patch)
+        try:
+            out = torch.compile(lambda x: x * 2 + 1, backend="eager")(torch.ones(2))
+        except Exception as exc:  # pragma: no cover - platform without dynamo
+            self.skipTest(f"torch.compile(backend='eager') not runnable here: {type(exc).__name__}: {exc}")
+        self.assertEqual(out.tolist(), [3.0, 3.0])
+        self.assertTrue(getattr(torch.optim.SGD.__dict__["_init_group"], "_torchdynamo_disable", False))
+        self.assertTrue(getattr(_sgd_impl._fused_sgd, "_torchdynamo_disable", False))
+        opt = self._opt()
+        self._admitted(opt)
+        for p in opt.param_groups[0]["params"]:
+            p.grad = torch.ones_like(p)
+        opt.step()
+        self._admitted(opt)
+
+
 class TestWorldSizeOne(unittest.TestCase):
     """The distributed path under coverage; world 1 must equal no DDP at all."""
 
@@ -783,6 +982,27 @@ class TestWorldSizeOne(unittest.TestCase):
             train,
             val,
         )
+
+    def test_patch_after_construction_is_refused_before_the_step(self) -> None:
+        # R12 / 007acc2 R11: the check runs immediately before every step, not only
+        # at construction -- a patch between construction and the first step is caught
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = self._runner(Path(tmp), distributed=True)  # passes the initial agreement
+            weights = [p.detach().clone() for p in runner.raw_model.parameters()]
+            calls = [0]
+
+            def forged(self: Any, *a: Any) -> bool:
+                calls[0] += 1
+                return False
+
+            with mock.patch.object(torch.optim.SGD, "_init_group", forged):
+                with self.assertRaises(Exception) as caught:
+                    runner.run()
+            text = " ".join([str(caught.exception), *getattr(caught.exception, "__notes__", [])])
+            self.assertIn("optimizer before step", text)
+            self.assertEqual(calls[0], 0)  # the forged helper never ran
+            for before, after in zip(weights, runner.raw_model.parameters()):
+                self.assertTrue(torch.equal(before, after.detach()))
 
     def test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler(self) -> None:
         # R8 at the runner: each component goes through the identity check, at
@@ -2016,21 +2236,22 @@ class _StepFailure(RuntimeError):
     """Injected error after backward (optimizer step / EMA update)."""
 
 
-def _failing_sgd(params: Any, *, fail_at: int, **kw: Any) -> torch.optim.SGD:
-    """A genuine SGD whose ``fail_at``-th step raises (1-based; -1 never).
+def _fail_optimizer_step(runner: HexTrainingRunner, *, fail_at: int) -> None:
+    """The runner's ``fail_at``-th optimizer step raises (1-based; -1 never), before the step.
 
-    Injected by a step pre-hook, not a subclass: since R8 the shared-state check
-    refuses an optimizer that is not exactly a built-in class."""
-    opt = torch.optim.SGD(params, **kw)
+    Injected on the runner right after its pre-step behaviour check, not as a
+    subclass (refused since R8) and not as a step pre-hook (refused since R12: a
+    hook changes the update outside the state) -- the place a pre-hook raised."""
+    check = runner._admit_step_behaviour
     calls = [0]
 
-    def fail(optimizer: Any, args: Any, kwargs: Any) -> None:
+    def check_then_fail() -> None:
+        check()
         calls[0] += 1
         if calls[0] == fail_at:
             raise _StepFailure(f"optimizer step {calls[0]} failed (injected)")
 
-    opt.register_step_pre_hook(fail)
-    return opt
+    runner._admit_step_behaviour = check_then_fail  # type: ignore[method-assign]
 
 
 def _post_step_outcome(runner: HexTrainingRunner, out: Path) -> Dict[str, Any]:
@@ -2046,12 +2267,14 @@ def _post_step_outcome(runner: HexTrainingRunner, out: Path) -> Dict[str, Any]:
 def _failing_step_runner(rank: int, world: int, out: Path, *, failing_rank: int, fail_at: int,
                          **kw: Any) -> HexTrainingRunner:
     model = DDP(_model())
-    return HexTrainingRunner(
+    runner = HexTrainingRunner(
         _config(out, distributed=True, is_main_process=rank == 0, **kw),
         model,
-        _failing_sgd(model.parameters(), fail_at=fail_at if rank == failing_rank else -1, lr=0.1),
+        torch.optim.SGD(model.parameters(), lr=0.1),
         _train_loader(rank, world), _exact_val_loader(),
     )
+    _fail_optimizer_step(runner, fail_at=fail_at if rank == failing_rank else -1)
+    return runner
 
 
 def _sc_step_error_last_step_rank1(rank: int, world: int, out: Path) -> Dict[str, Any]:

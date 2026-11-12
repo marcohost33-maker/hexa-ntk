@@ -450,13 +450,33 @@ loaded state); a class whose behaviour-carrying methods (`step`, `state_dict`,
 held at import (R8.1, Quella F2-A 2026-11-11: `type(obj) is SGD` still holds after
 `SGD.step = ...`). torch's own `profile_hook_step` wrapper around `step` is admitted
 only if its code object is torch's wrapper and its closure holds the function held at
-import. The refusal is a
+import. **R12 (007acc2 R10.1/R11, issue #106) replaces the method list by a behaviour
+graph** (`_HELD`, `_behaviour_changed`): every callable or descriptor of every class of
+the MRO (except `object`), the MRO and the metaclass; for every function reached, its
+code object, globals dict, defaults, kwdefaults, closure cells and the value of every
+name its code may load as a global (`co_names`, also names absent at import), followed
+without a depth limit; and torch's lazy `fn.__dynamo_disable` cache. A function that
+differs from the held one passes only as torch's own wrapper around it, by code object
+AND globals dict AND the wrapped cell (`profile_hook_step`; dynamo's `DisableContext`
+wrapper with `callback=None`, installed by `torch.compile`); the instance-level `step`
+only as torch's LR-scheduler wrapper of the held class step for this optimizer. A
+registered optimizer step pre/post hook, global or on the instance, is refused. The
+graph must hold `SGD._init_group`, `Optimizer._optimizer_step_code`,
+`Optimizer.profile_hook_step`, `GradScaler._maybe_opt_step` and
+`torch.optim.sgd.{sgd,_single_tensor_sgd,_multi_tensor_sgd,_fused_sgd}` (`_REQUIRED_PINS`),
+else every admission is refused. The check runs at the shared-state agreement AND
+immediately before every optimizer step of a distributed run (`_admit_step_behaviour`).
+The refusal is a
 `DistributedContractError` inside the agreed digest computation, so a refusal on one
 rank stops every rank (2-rank job: `lambda_lr_other_function_on_rank1`,
-`forged_step_lr_on_rank1`, `state_dict_error_rank1`). Not covered: a class patched
-before the runner module was imported, torch itself (in-process identity is no supply-chain attestation: pin
-and verify the wheel), optimizer step hooks and the instance-level optimizer `step`
-(they change no state), and the model class (user code; its weights are compared).
+`forged_step_lr_on_rank1`, `state_dict_error_rank1`); before a step it is held and
+agreed like any error after backward (the other ranks may have taken that step; the
+run stops on every rank). Not covered: a class patched before the runner module was
+imported, torch itself (in-process identity is no supply-chain attestation: pin and
+verify the wheel), C/ATen kernels and builtins (except module globals shadowing them),
+attributes reached through a module or class object that is not held (`torch.foo`),
+mutable data (state, not behaviour), hostile code inside the rank process (no
+isolation), and the model class (user code; its weights are compared).
 Rank-local state is
 excluded by design: RNG streams and loader generators (restored per rank above), the
 anomaly history, and mid-epoch rank buffers (copied in after this check,

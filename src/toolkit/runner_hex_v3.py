@@ -59,14 +59,18 @@ import json
 import logging
 import math
 import statistics
+import types
 import uuid
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
+import torch._dynamo.eval_frame as _dynamo_eval_frame  # the B rule (torch.compile) needs its wrapper code
 import torch.nn as nn
+import torch.optim.sgd as _sgd_impl
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, IterableDataset
 
@@ -288,7 +292,8 @@ _TRUSTED_OPTIMIZERS: Tuple[type, ...] = tuple(
 )
 _TRUSTED_GRAD_SCALERS: Tuple[type, ...] = (torch.amp.GradScaler,)
 # Instance-level step: torch's own LR schedulers wrap optimizer.step on the
-# instance (lr_scheduler.patch_track_step_called), so it cannot be refused there.
+# instance (lr_scheduler.patch_track_step_called). Tolerated only as exactly that
+# wrapper around the class's held step (_instance_step_admitted, R12).
 _OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED = frozenset({"step"})
 # Hooks that rewrite an optimizer's exported or loaded state
 # (Optimizer.register_state_dict_*_hook, register_load_state_dict_*_hook).
@@ -298,37 +303,361 @@ _OPTIMIZER_EXPORT_HOOKS = (
 )
 # Identity of the class alone does not pin its behaviour: a method can be replaced
 # on the class process-wide (``torch.optim.SGD.step = ...``) and still pass
-# ``type(obj) is SGD`` (Quella F2-A, 2026-11-11). The behaviour-carrying methods
-# are therefore held at import, resolved through the MRO like an instance lookup,
-# and compared by identity before a state is admitted.
-_BEHAVIOUR_METHODS = (
-    "step", "state_dict", "load_state_dict", "get_lr", "_get_closed_form_lr",
-    "get_last_lr", "zero_grad", "update", "scale", "unscale_",
+# ``type(obj) is SGD`` (Quella F2-A, 2026-11-11). Identity of the methods does not
+# pin it either (007acc2 R10.1/R11, R12): a function keeps its identity while its
+# ``__code__``, defaults, globals or closure cells change in place; a method calls
+# helpers nobody listed (``SGD._init_group``, ``GradScaler._maybe_opt_step``) and
+# module functions (``torch.optim.sgd._single_tensor_sgd``); torch's own step
+# wrapper can be rebuilt around the held function with foreign ``__globals__``.
+#
+# The behaviour is therefore held at import as a graph and compared by identity
+# at every leaf (_HELD, _behaviour_changed):
+#
+# - every callable or descriptor in the ``__dict__`` of every class of the MRO
+#   (except ``object``) of each trusted class, plus the MRO and the metaclass; an
+#   added or removed entry is a change, also on a base class (``super()`` calls
+#   reach base methods an override shadows);
+# - for every function reached: code object, globals dict, defaults, kwdefaults,
+#   the value of every name its code (and nested code) may load as a global
+#   (``co_names``, a superset; also names absent at import, so a module global
+#   added later that shadows a builtin is a change), and every closure cell;
+#   functions found there are followed without a depth limit (cycles once);
+# - the lazy dynamo cache ``fn.__dynamo_disable`` (torch._disable_dynamo calls
+#   it instead of ``fn``) must be torch's disable wrapper around ``fn``.
+#
+# A function that differs from the held one is admitted only as one of torch's
+# own wrappers around it (_WRAPPER_RULES): same code object AND same globals dict
+# as torch's wrapper (both taken from torch's source code objects, not built), no
+# defaults, and the wrapped cell holding the held function (or another admitted
+# wrapper of it). Rule 1: Optimizer.profile_hook_step, installed by torch on the
+# first instance (Optimizer._patch_step_function). Rule 2: torch._dynamo's
+# DisableContext wrapper, installed by torch.compile (TorchPatcher.patch:
+# ``_init_group`` of every optimizer, ``torch.optim.<opt>._fused_<opt>``) with a
+# DisableContext whose callback is None.
+#
+# Not covered (named limits): a change before this module is imported; C/ATen
+# kernels and builtins (only module globals that shadow them); attributes reached
+# through a module or class object that is not held (``torch.foo``); mutable data
+# (class constants, list defaults changed in place) is state, not behaviour; and
+# this is a same-process predicate, no isolation against hostile code in the rank.
+_MISSING = object()
+_EMPTY_CELL = object()
+_DESCRIPTORS = (staticmethod, classmethod, property, types.MethodType)
+
+
+def _cell_value(cell: Any) -> Any:
+    try:
+        return cell.cell_contents
+    except ValueError:  # an empty cell
+        return _EMPTY_CELL
+
+
+def _global_names(code: types.CodeType) -> Tuple[str, ...]:
+    """Every name ``code`` or code nested in it may load as a global (``co_names`` is a superset)."""
+    names: set = set()
+    stack = [code]
+    while stack:
+        current = stack.pop()
+        names.update(current.co_names)
+        stack.extend(c for c in current.co_consts if isinstance(c, types.CodeType))
+    return tuple(sorted(names))
+
+
+def _nested_code(code: Optional[types.CodeType], path: Tuple[str, ...]) -> Optional[types.CodeType]:
+    """The code object of the definition nested in ``code`` along ``path``; None unless unique."""
+    for name in path:
+        found = [c for c in (code.co_consts if code is not None else ())
+                 if isinstance(c, types.CodeType) and c.co_name == name]
+        if len(found) != 1:
+            return None
+        code = found[0]
+    return code
+
+
+def _is_behaviour(value: Any) -> bool:
+    return callable(value) or hasattr(type(value), "__get__")
+
+
+def _class_items(cls: type) -> Dict[Tuple[type, str], Any]:
+    owners = [owner for owner in cls.__mro__ if owner is not object]
+    return {(owner, name): value for owner in owners for name, value in vars(owner).items()
+            if _is_behaviour(value)}
+
+
+class _Graph:
+    """Held functions (by id) and, per root, the ids reachable from it in snapshot order."""
+
+    def __init__(self) -> None:
+        self.nodes: Dict[int, Tuple[Any, ...]] = {}
+
+    @staticmethod
+    def _inner(value: Any) -> List[Any]:
+        """Functions a descriptor carries (their attributes are read-only, the functions are held)."""
+        if not isinstance(value, _DESCRIPTORS):
+            return []
+        return [i for i in (getattr(value, a, None) for a in ("__func__", "fget", "fset", "fdel")) if i is not None]
+
+    def _edge(self, value: Any, pending: List[Any]) -> Tuple[str, Any]:
+        if isinstance(value, types.FunctionType):
+            if id(value) not in self.nodes:
+                self.nodes[id(value)] = ()  # reserved: each function is recorded once (cycles)
+                pending.append(value)
+            return ("fn", value)
+        for inner in self._inner(value):
+            self._edge(inner, pending)
+        return ("leaf", value)
+
+    def _reachable(self, edges: List[Tuple[str, Any]]) -> List[int]:
+        """Ids of every held function reachable from ``edges`` (also through nodes held for other roots)."""
+        seen: Dict[int, None] = {}
+        stack = [value for _, value in edges]
+        while stack:
+            value = stack.pop()
+            stack.extend(self._inner(value))
+            if not isinstance(value, types.FunctionType) or id(value) in seen:
+                continue
+            seen[id(value)] = None
+            _, _, _, _, defaults, _, kws, refs, cells = self.nodes[id(value)]
+            stack.extend(v for _, v in defaults)
+            stack.extend(e[1] for _, e in kws)
+            stack.extend(e[1] for _, e in refs)
+            stack.extend(v for _, v in cells)
+        return list(seen)
+
+    def hold(self, roots: List[Any]) -> Tuple[List[Tuple[str, Any]], List[int]]:
+        pending: List[Any] = []
+        edges = [self._edge(root, pending) for root in roots]
+        while pending:
+            fn = pending.pop()
+            glb = fn.__globals__
+            kwd = fn.__kwdefaults__
+            self.nodes[id(fn)] = (
+                fn, fn.__code__, glb, fn.__defaults__,
+                tuple(self._edge(d, pending) for d in fn.__defaults__ or ()),
+                kwd, tuple((k, self._edge(v, pending)) for k, v in sorted((kwd or {}).items())),
+                tuple((n, self._edge(dict.get(glb, n, _MISSING), pending)) for n in _global_names(fn.__code__)),
+                tuple(self._edge(_cell_value(c), pending) for c in fn.__closure__ or ()),
+            )
+        return edges, self._reachable(edges)
+
+
+_GRAPH = _Graph()
+
+
+def _rule_env(code: Optional[types.CodeType], glb: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
+    """A wrapper code object with the names it loads from ``glb``, held like a function's."""
+    if code is None:
+        return None
+    names = _global_names(code)
+    edges, reach = _GRAPH.hold([dict.get(glb, n, _MISSING) for n in names])
+    return (code, glb, tuple(zip(names, edges)), reach)
+
+
+_PROFILE_HOOK_STEP = inspect.getattr_static(torch.optim.Optimizer, "profile_hook_step").__func__
+_DISABLE_CALL = _dynamo_eval_frame.DisableContext.__call__
+_SCHEDULER_INIT = torch.optim.lr_scheduler.LRScheduler.__init__
+_PROFILE_ENV = _rule_env(_nested_code(_PROFILE_HOOK_STEP.__code__, ("wrapper",)), _PROFILE_HOOK_STEP.__globals__)
+_DISABLE_ENV = _rule_env(_nested_code(_DISABLE_CALL.__code__, ("_fn",)), _DISABLE_CALL.__globals__)
+_SCHED_STEP_ENV = _rule_env(
+    _nested_code(_SCHEDULER_INIT.__code__, ("patch_track_step_called", "wrap_step", "wrapper")),
+    _SCHEDULER_INIT.__globals__,
 )
 
 
-def _method_snapshot(cls: type) -> Dict[str, Any]:
-    return {name: inspect.getattr_static(cls, name, None) for name in _BEHAVIOUR_METHODS}
+def _disable_context_admitted(cells: Dict[str, Any]) -> bool:
+    ctx = cells.get("self", _MISSING)
+    return (type(ctx) is _dynamo_eval_frame.DisableContext and type(vars(ctx)) is dict
+            and dict.get(vars(ctx), "callback", _MISSING) is None)
 
 
-_METHODS_AT_IMPORT: Dict[type, Dict[str, Any]] = {
-    cls: _method_snapshot(cls)
-    for cls in (*_TRUSTED_SCHEDULERS, *_TRUSTED_OPTIMIZERS, *_TRUSTED_GRAD_SCALERS)
+# (env, name of the cell holding the wrapped function, check of the other cells)
+_WRAPPER_RULES = tuple(
+    (env, inner, admit) for env, inner, admit in (
+        (_PROFILE_ENV, "func", lambda cells: True),
+        (_DISABLE_ENV, "fn", _disable_context_admitted),
+    ) if env is not None
+)
+
+
+def _wrapper_cells(fn: Any, env: Optional[Tuple[Any, ...]]) -> Optional[Dict[str, Any]]:
+    """The closure of ``fn`` by name if ``fn`` is a function made from ``env``'s code in ``env``'s globals."""
+    if env is None or type(fn) is not types.FunctionType:
+        return None
+    code = env[0]
+    if fn.__code__ is not code or fn.__globals__ is not env[1]:
+        return None
+    if fn.__defaults__ is not None or fn.__kwdefaults__ is not None:
+        return None
+    return dict(zip(code.co_freevars, (_cell_value(c) for c in fn.__closure__ or ())))
+
+
+def _wraps(current: Any, held: Any) -> bool:
+    """``current`` is ``held`` or a chain of torch's own wrappers (_WRAPPER_RULES) around it."""
+    seen: set = set()
+    while current is not held:
+        if id(current) in seen:
+            return False
+        seen.add(id(current))
+        for env, inner, admit in _WRAPPER_RULES:
+            cells = _wrapper_cells(current, env)
+            if cells is not None and admit(cells):
+                current = cells.get(inner, _MISSING)
+                break
+        else:
+            return False
+    return True
+
+
+def _edge_intact(edge: Tuple[str, Any], current: Any) -> bool:
+    kind, held = edge
+    return current is held or (kind == "fn" and _wraps(current, held))
+
+
+def _changed_ref(glb: Dict[str, Any], refs: Tuple[Tuple[str, Tuple[str, Any]], ...]) -> Optional[str]:
+    return next((name for name, edge in refs if not _edge_intact(edge, dict.get(glb, name, _MISSING))), None)
+
+
+def _refs_intact(glb: Dict[str, Any], refs: Tuple[Tuple[str, Tuple[str, Any]], ...]) -> bool:
+    return _changed_ref(glb, refs) is None
+
+
+def _node_problem(node: Tuple[Any, ...]) -> Optional[str]:
+    """What of a held function changed (None: nothing)."""
+    fn, code, glb, defaults, default_edges, kwd, kw_edges, refs, cells = node
+    if fn.__code__ is not code:
+        return "__code__"
+    if fn.__globals__ is not glb:
+        return "__globals__"
+    if fn.__defaults__ is not defaults or not all(_edge_intact(e, d) for e, d in zip(default_edges, defaults or ())):
+        return "__defaults__"
+    if fn.__kwdefaults__ is not kwd or (kwd is not None and (
+            len(kwd) != len(kw_edges) or not all(_edge_intact(e, dict.get(kwd, k, _MISSING)) for k, e in kw_edges))):
+        return "__kwdefaults__"
+    name = _changed_ref(glb, refs)
+    if name is not None:
+        return f"global {name}"
+    closure = fn.__closure__ or ()
+    if len(closure) != len(cells) or not all(_edge_intact(e, _cell_value(c)) for e, c in zip(cells, closure)):
+        return "closure cell"
+    # torch._disable_dynamo calls fn.__dynamo_disable (a lazy cache it sets on the first call)
+    attrs = vars(fn)
+    cache = dict.get(attrs, "__dynamo_disable", _MISSING) if type(attrs) is dict else _EMPTY_CELL
+    if cache is not _MISSING and (cache is fn or not _wraps(cache, fn)):
+        return "__dynamo_disable"
+    return None
+
+
+def _node_intact(node: Tuple[Any, ...]) -> bool:
+    return _node_problem(node) is None
+
+
+def _snapshot(cls: type) -> Tuple[Any, ...]:
+    items = _class_items(cls)
+    edges, reach = _GRAPH.hold(list(items.values()))
+    return (cls.__mro__, type(cls), dict(zip(items, edges)), reach)
+
+
+_HELD: Dict[type, Tuple[Any, ...]] = {
+    cls: _snapshot(cls)
+    for cls in (*_TRUSTED_SCHEDULERS, *_TRUSTED_OPTIMIZERS, *_TRUSTED_GRAD_SCALERS,
+                _dynamo_eval_frame.DisableContext)
 }
-# torch replaces ``cls.step`` itself on the first instance
-# (Optimizer._patch_step_function -> profile_hook_step, torch/optim/optimizer.py).
-# Only that wrapper is admitted: same code object as torch's wrapper AND the held
-# function in its closure (``__wrapped__``/``hooked`` are plain, settable attributes).
-_TORCH_STEP_WRAPPER_CODE = torch.optim.Optimizer.profile_hook_step(lambda *a, **k: None).__code__
+# 007acc2 R11 named these; the graph must hold them, else every admission is refused.
+_REQUIRED_PINS: Tuple[Tuple[type, Any, str], ...] = (
+    (torch.optim.SGD, torch.optim.SGD, "_init_group"),
+    (torch.optim.SGD, torch.optim.Optimizer, "_optimizer_step_code"),
+    (torch.optim.SGD, torch.optim.Optimizer, "profile_hook_step"),
+    (torch.amp.GradScaler, torch.amp.GradScaler, "_maybe_opt_step"),
+    *((torch.optim.SGD, _sgd_impl, name) for name in ("sgd", "_single_tensor_sgd", "_multi_tensor_sgd", "_fused_sgd")),
+)
 
 
-def _method_unchanged(cls: type, method: str, held: Any) -> bool:
-    current = inspect.getattr_static(cls, method, None)
-    if current is held:
-        return True
-    if method != "step" or getattr(current, "__code__", None) is not _TORCH_STEP_WRAPPER_CODE:
+def _missing_pins() -> List[str]:
+    missing = []
+    for root, owner, name in _REQUIRED_PINS:
+        _, _, items, reach = _HELD[root]
+        if isinstance(owner, type):
+            held = (owner, name) in items
+        else:
+            value = vars(owner).get(name, _MISSING)
+            held = isinstance(value, types.FunctionType) and id(value) in reach
+        if not held:
+            missing.append(f"<not held: {getattr(owner, '__name__', owner)}.{name}>")
+    for label, env in (("profile_hook_step", _PROFILE_ENV), ("DisableContext", _DISABLE_ENV),
+                       ("LRScheduler step", _SCHED_STEP_ENV)):
+        if env is None:
+            missing.append(f"<no {label} wrapper code in this torch>")
+    return missing
+
+
+_PINS_MISSING = _missing_pins()
+
+
+def _label(owner: Any, name: str) -> str:
+    return f"{getattr(owner, '__qualname__', owner)}.{name}"
+
+
+def _behaviour_changed(cls: type) -> List[str]:
+    """What of ``cls``'s held behaviour differs now; empty if nothing does."""
+    held = _HELD.get(cls)
+    if held is None:
+        return ["<no snapshot>"]
+    mro, meta, items, reach = held
+    out = list(_PINS_MISSING)
+    if len(cls.__mro__) != len(mro) or any(a is not b for a, b in zip(cls.__mro__, mro)):
+        out.append("<mro>")
+    if type(cls) is not meta:
+        out.append("<metaclass>")
+    current = _class_items(cls)
+    for key in sorted(set(current) | set(items), key=lambda k: _label(*k)):
+        if key not in items:
+            out.append(_label(*key) + " (added)")
+        elif key not in current:
+            out.append(_label(*key) + " (removed)")
+        elif not _edge_intact(items[key], current[key]):
+            out.append(_label(*key))
+    nodes = _GRAPH.nodes
+    for i in reach:
+        problem = _node_problem(nodes[i])
+        if problem is not None:
+            fn = nodes[i][0]
+            out.append(f"{getattr(fn, '__module__', '?')}.{fn.__qualname__} {problem} (changed in place)")
+    for label, env in (("profile_hook_step wrapper", _PROFILE_ENV), ("DisableContext wrapper", _DISABLE_ENV)):
+        if env is not None and not (_refs_intact(env[1], env[2])
+                                    and all(_node_intact(nodes[i]) for i in env[3])):
+            out.append(f"<{label} globals>")
+    return out
+
+
+def _instance_step_admitted(obj: Any, cls: type) -> bool:
+    """An instance-level ``step`` is admitted only as torch's LR-scheduler wrapper of this object's class step."""
+    step = dict.get(vars(obj), "step", _MISSING)
+    cells = _wrapper_cells(step, _SCHED_STEP_ENV)
+    if cells is None or not (_refs_intact(_SCHED_STEP_ENV[1], _SCHED_STEP_ENV[2])
+                             and all(_node_intact(_GRAPH.nodes[i]) for i in _SCHED_STEP_ENV[3])):
         return False
-    return any(cell.cell_contents is held for cell in (current.__closure__ or ()))
+    ref = cells.get("opt_ref", _MISSING)
+    if type(ref) is not weakref.ReferenceType or ref() is not obj:
+        return False
+    owner = next((o for o in cls.__mro__ if (o, "step") in _HELD[cls][2]), None)
+    return owner is not None and _edge_intact(_HELD[cls][2][(owner, "step")], cells.get("func", _MISSING))
+
+
+# Optimizer step hooks change the update without changing its state_dict
+# (007acc2 HX-R10-02): a registered hook, global or on the instance, is refused.
+_GLOBAL_STEP_HOOKS = ("_global_optimizer_pre_hooks", "_global_optimizer_post_hooks")
+_INSTANCE_STEP_HOOKS = ("_optimizer_step_pre_hooks", "_optimizer_step_post_hooks")
+
+
+def _step_hooks(obj: Any) -> List[str]:
+    """The registered step hooks the wrapper would call; a registry that is not an empty OrderedDict counts."""
+    found = []
+    for scope, names in ((_PROFILE_HOOK_STEP.__globals__, _GLOBAL_STEP_HOOKS), (vars(obj), _INSTANCE_STEP_HOOKS)):
+        for key in names:
+            registry = dict.get(scope, key, _MISSING)
+            if type(registry) is not collections.OrderedDict or len(registry):
+                found.append(key)
+    return found
 
 
 def _is_method(attr: Any) -> bool:
@@ -341,27 +670,42 @@ def _comparable_state(
 ) -> Any:
     """``obj.state_dict()`` if equal states mean equal behaviour on every rank; None for None.
 
-    Refused with DistributedContractError, before ``state_dict()`` runs:
+    Refused with DistributedContractError before ``state_dict()`` runs, by
+    ``_admit_behaviour`` (also called immediately before every optimizer step).
+    """
+    if obj is None:
+        return None
+    _admit_behaviour(obj, trusted, what, tolerated=tolerated)
+    return obj.state_dict()
+
+
+def _admit_behaviour(
+    obj: Any, trusted: Tuple[type, ...], what: str, *, tolerated: frozenset = frozenset()
+) -> None:
+    """DistributedContractError unless ``obj`` behaves as the built-in class held at import.
+
+    Refused:
 
     - a class that is not exactly one of ``trusted`` (identity, not names, not
       isinstance: a subclass or look-alike may read hidden attributes, and a
       metaclass ``__eq__`` or a ``__class__`` property can fake equality);
+    - a class whose held behaviour changed since import (``_behaviour_changed``):
+      a method replaced, added or removed on any class of the MRO, a function
+      reached from them changed in place (code, globals, defaults, closure cells)
+      or a module global it loads rebound (``torch.optim.sgd._single_tensor_sgd``),
+      except torch's own wrappers around the held function (_WRAPPER_RULES);
     - an instance attribute that shadows a method of the class (an instance-level
       ``state_dict``, ``step`` or ``get_lr``: the state then says nothing about the
-      behaviour), except the instance-level ``step`` torch puts on an optimizer;
-    - an optimizer with a state_dict pre/post hook (it rewrites the exported state);
+      behaviour), an instance ``__dict__`` that is not a dict; the instance-level
+      ``step`` only as torch's LR-scheduler wrapper of the held class step;
+    - an optimizer with a registered step pre/post hook, global or on the
+      instance (they change the update, not the state);
+    - an optimizer with a state_dict or load_state_dict pre/post hook;
     - a SequentialLR/ChainedScheduler whose inner schedulers fail any of this.
 
-    - a class whose behaviour-carrying methods (``_BEHAVIOUR_METHODS``) were replaced
-      since import, also on a base class (``torch.optim.SGD.step = ...``);
-    - an optimizer with a load_state_dict pre/post hook.
-
-    Not covered: a patch applied before this module was imported, and torch itself
-    (identity is no supply-chain attestation); hooks that change ``step`` (they do
-    not alter the state).
+    Not covered: the named limits above ``_MISSING`` (before import, C kernels,
+    same-process code).
     """
-    if obj is None:
-        return None
     cls = type(obj)
     name = f"{cls.__module__}.{cls.__qualname__}"
     if not any(cls is allowed for allowed in trusted):
@@ -371,15 +715,24 @@ def _comparable_state(
             "(subclasses and classes that only carry a built-in name are refused; LambdaLR, "
             "MultiplicativeLR and CyclicLR keep functions outside their state)"
         )
-    snapshot = _METHODS_AT_IMPORT.get(cls)
-    patched = sorted(
-        method for method, held in (snapshot or {}).items()
-        if not _method_unchanged(cls, method, held)
-    ) if snapshot is not None else ["<no snapshot>"]
+    patched = _behaviour_changed(cls)
     if patched:
         raise DistributedContractError(
-            f"{what}: {name} has methods replaced since import ({', '.join(patched)}); "
-            "its state_dict() would not describe its behaviour"
+            f"{what}: {name} has behaviour replaced since import or changed in place "
+            f"({', '.join(patched)}); its state_dict() would not describe its behaviour"
+        )
+    if type(vars(obj)) is not dict:
+        raise DistributedContractError(f"{what}: this {name} instance has a __dict__ that is not a dict")
+    if "step" in tolerated and dict.__contains__(vars(obj), "step") and not _instance_step_admitted(obj, cls):
+        raise DistributedContractError(
+            f"{what}: this {name} instance overrides step with something other than torch's "
+            "LR-scheduler wrapper around the held class step"
+        )
+    hooks = _step_hooks(obj) if any(cls is c for c in _TRUSTED_OPTIMIZERS) else []
+    if hooks:
+        raise DistributedContractError(
+            f"{what}: step hooks are registered ({', '.join(hooks)}); they change the update "
+            "and are not part of its state_dict()"
         )
     shadowing = sorted(
         attr for attr in vars(obj)
@@ -400,8 +753,7 @@ def _comparable_state(
         if type(inner) is not list and type(inner) is not tuple:
             raise DistributedContractError(f"{what}: {name} holds its schedulers in an unknown container")
         for child in inner:
-            _comparable_state(child, trusted, f"{what} (inside {cls.__qualname__})", tolerated=tolerated)
-    return obj.state_dict()
+            _admit_behaviour(child, trusted, f"{what} (inside {cls.__qualname__})", tolerated=tolerated)
 
 
 def _is_oom(exc: BaseException) -> bool:
@@ -1490,6 +1842,7 @@ class HexTrainingRunner:
             # scale (HX102-04) pass its inf check and the scaler would step.
             take = math.isfinite(grad_norm_val)
             if take:
+                self._admit_step_behaviour()
                 self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()
             backoff = self.grad_scaler.get_scale() < scale_before
@@ -1501,6 +1854,7 @@ class HexTrainingRunner:
             if not math.isfinite(grad_norm_val):
                 self.optimizer.zero_grad(set_to_none=True)
                 return grad_norm_val, False
+            self._admit_step_behaviour()
             self.optimizer.step()
         if self.config.check_finite_params:
             self._check_parameters_finite()
@@ -1508,6 +1862,23 @@ class HexTrainingRunner:
         if self.ema_model is not None:
             self.ema_model.update_parameters(self.raw_model)
         return grad_norm_val, True
+
+    def _admit_step_behaviour(self) -> None:
+        """Distributed: the optimizer (and GradScaler) must still behave as held, immediately before the step.
+
+        The shared-state agreement checks it at construction and resume; a change
+        after that (a patch between two steps) would otherwise reach the next step
+        unseen (007acc2 R11: checking once at the start is not enough). Raised
+        here, before the step, the error is held and agreed like any error after
+        backward (``_train_one_step``). Single-process runs are not checked: the
+        contract is that equal states mean equal training on every rank.
+        """
+        if self.dist is None:
+            return
+        _admit_behaviour(self.optimizer, _TRUSTED_OPTIMIZERS, "optimizer before step",
+                         tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
+        if self.grad_scaler is not None:
+            _admit_behaviour(self.grad_scaler, _TRUSTED_GRAD_SCALERS, "GradScaler before step")
 
     def _check_parameters_finite(self) -> None:
         """Raise NonFiniteParameterError if the step left a NaN/Inf parameter.
