@@ -930,6 +930,15 @@ class TestBehaviourGuardR12(unittest.TestCase):
             self._refused(opt, r"replaced since import.*SGD\._init_group")
         self._admitted(opt)
 
+    def test_b_disable_context_class_callback_is_refused(self) -> None:
+        # the B rule trusts a DisableContext with callback None; a class-level
+        # property would override that None for every admitted wrapper
+        opt = self._opt()
+        import torch._dynamo.eval_frame as eval_frame
+        with mock.patch.object(eval_frame.DisableContext, "callback", property(lambda self: print), create=True):
+            self._refused(opt, r"DisableContext\.callback \(added\)")
+        self._admitted(opt)
+
     def test_b_torch_compile_is_admitted(self) -> None:
         # B: torch.compile patches every optimizer's _init_group and the _fused_*
         # module functions with dynamo's disable wrapper (TorchPatcher.patch)
@@ -946,6 +955,13 @@ class TestBehaviourGuardR12(unittest.TestCase):
             p.grad = torch.ones_like(p)
         opt.step()
         self._admitted(opt)
+        # issue #106 B: TorchPatcher also wraps LBFGS.step and SparseAdam.step
+        for cls in (torch.optim.LBFGS, torch.optim.SparseAdam):
+            with self.subTest(optimizer=cls.__name__):
+                self.assertTrue(getattr(cls.__dict__["step"], "_torchdynamo_disable", False)
+                                or getattr(cls.__dict__["step"].__closure__[0].cell_contents,
+                                           "_torchdynamo_disable", False))
+                self._admitted(_build_optimizer(cls, 0.1)[1])
 
 
 class TestWorldSizeOne(unittest.TestCase):

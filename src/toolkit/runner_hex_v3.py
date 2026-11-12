@@ -598,12 +598,28 @@ def _label(owner: Any, name: str) -> str:
 
 
 def _behaviour_changed(cls: type) -> List[str]:
-    """What of ``cls``'s held behaviour differs now; empty if nothing does."""
-    held = _HELD.get(cls)
-    if held is None:
+    """What of ``cls``'s held behaviour differs now; empty if nothing does.
+
+    DisableContext is checked with every class: the B rule admits its wrappers,
+    and ``_fn`` reads ``self.callback`` through the class (a class-level property
+    added later would override the instance's None).
+    """
+    if cls not in _HELD:
         return ["<no snapshot>"]
-    mro, meta, items, reach = held
-    out = list(_PINS_MISSING)
+    out = list(_PINS_MISSING) + _class_drift(cls)
+    if cls is not _dynamo_eval_frame.DisableContext:
+        out += _class_drift(_dynamo_eval_frame.DisableContext)
+    nodes = _GRAPH.nodes
+    for label, env in (("profile_hook_step wrapper", _PROFILE_ENV), ("DisableContext wrapper", _DISABLE_ENV)):
+        if env is not None and not (_refs_intact(env[1], env[2])
+                                    and all(_node_intact(nodes[i]) for i in env[3])):
+            out.append(f"<{label} globals>")
+    return out
+
+
+def _class_drift(cls: type) -> List[str]:
+    mro, meta, items, reach = _HELD[cls]
+    out: List[str] = []
     if len(cls.__mro__) != len(mro) or any(a is not b for a, b in zip(cls.__mro__, mro)):
         out.append("<mro>")
     if type(cls) is not meta:
@@ -622,10 +638,6 @@ def _behaviour_changed(cls: type) -> List[str]:
         if problem is not None:
             fn = nodes[i][0]
             out.append(f"{getattr(fn, '__module__', '?')}.{fn.__qualname__} {problem} (changed in place)")
-    for label, env in (("profile_hook_step wrapper", _PROFILE_ENV), ("DisableContext wrapper", _DISABLE_ENV)):
-        if env is not None and not (_refs_intact(env[1], env[2])
-                                    and all(_node_intact(nodes[i]) for i in env[3])):
-            out.append(f"<{label} globals>")
     return out
 
 
