@@ -975,3 +975,4 @@
 | 0FB88BE1E8CE868D | 2026-11-13 11:29 | src/toolkit | DDP_RUNNER v1.5 WP2: torch's profile_hook_step wrapper around the held SGD.step, made while __builtins__ pointed at a forged mapping, is refused; the genuine wrapper of torch passes (negative control): test_ddp_hex_v3.py |
 | CEE7BDCFCBCD456B | 2026-11-13 11:29 | scripts | DDP_RUNNER v1.5 WP2: 1 new mutant (builtins identity check removed from _wrapper_cells) (253): mutation_probe.py |
 | D6197D28146BF433 | 2026-11-13 11:29 | spec | DDP_RUNNER v1.5: version note (WP1 shared-state agreement at every epoch end and before every mid-epoch save, buffers left out mid-epoch), section 6 and section 7 collectives: DDP_RUNNER_v1.md |
+| 9D9E4253C7AFAFA3 | 2026-11-13 11:44 | spec | DDP_RUNNER v1.5 evidence (section 8): WP1 red on 47cda7f, WP2 forged-builtins wrapper, DK-20261113T103102-a4e0c31550f0 6/6 at c06834b, 233 passed + 298 subtests; full probe (253) not run: DDP_RUNNER_v1.md |

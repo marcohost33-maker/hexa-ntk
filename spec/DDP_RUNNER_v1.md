@@ -644,6 +644,18 @@ or the mid-epoch save. All multi-rank jobs also pass under
 1- vs 2-element all-reduce) is reported there at once as "Detected mismatch between
 collectives", where plain gloo waits for the timeout.
 
+v1.5 (2026-11-13, Windows, Python 3.12.10, torch 2.6.0+cpu, 2- and 3-rank gloo): WP1 red
+on 47cda7f (rank 1 halves its gradients after the all-reduce: clip_grad_norm_ patch, a DDP
+comm hook on one rank, before a mid-epoch save, the middle rank of 3; the ranks trained
+apart to the end and rank 0 saved), green on 7d8875e with unpatched positive controls. WP2:
+a profile_hook_step wrapper around the held `SGD.step`, made in the same globals while
+`__builtins__` pointed at a forged mapping, was admitted; now refused, torch's own wrapper
+still passes. Discrimination DK-20261113T103102-a4e0c31550f0 at c06834b: 6/6 (the
+buffers-included mutant fails the mid-epoch resume test before its 4 subtests, by the
+intended false refusal). `test_ddp_hex_v3.py`, `test_runner_hex_v3.py`,
+`test_mid_epoch_resume_hex_v3.py` at c06834b: 233 passed, 298 subtests passed. The full
+mutation probe (253) has not been run for v1.5.
+
 v1.4 (R12 phase 2, 2026-11-12, Linux container, Python 3.12, torch 2.6.0): six new or
 changed tests, all red against 4e6bcf0 (run there with the new test file and a
 two-name import shim, the shim only in a scratch worktree): the structured-dtype
