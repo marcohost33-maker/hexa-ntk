@@ -1,0 +1,24 @@
+# Codex P2 on aac364f (field titles, buffer aliases) + CI bookkeeping -- 2026-11-13T10:59Z; base aac364f, change committed with this log
+# env: Linux container, Python 3.12.3, torch 2.6.0+cu124 (CPU), numpy 2.5.3, ruff 0.17.3, coverage 7.17.0
+== ruff 0, compileall 0, verify_sources PASS, engine_gate 49/49 PASS (this session, same tree)
+== coverage run -m unittest discover
+Ran 1177 tests in 74.764s
+
+OK (skipped=7)
+coverage: TOTAL                                           6582    273   2526    216    94%
+== TORCH_DISTRIBUTED_DEBUG=DETAIL W1+T2+T3: OK
+== negative-first vs aac364f (scratch worktree, new test file)
+FAIL: test_buffer_aliases_are_left_out_of_the_buffer_free_digest (test_ddp_hex_v3.TestWorldSizeOne.test_buffer_aliases_are_left_out_of_the_buffer_free_digest)
+FAIL: test_non_string_field_title_is_refused (test_ddp_hex_v3.TestResumeStateDigest.test_non_string_field_title_is_refused) (seed='1')
+FAIL: test_non_string_field_title_is_refused (test_ddp_hex_v3.TestResumeStateDigest.test_non_string_field_title_is_refused) (seed='2')
+Ran 2 tests in 6.665s
+FAILED (failures=3)
+== title repro at aac364f: PYTHONHASHSEED 1/2/3 -> digests 09250dfcef8c058a / 2ef3b2e9acc7e510 / d93b6b8543ef579b for the same state
+== mutants (run_mutant_detail; full 256 probe NOT run)
+M107 KILLED 14s expect=('test_resume_with_other_weights_on_one_rank_fails_both',) killed_by=['test_ranks_applying_other_gradients_stop_before_any_checkpoint', 'test_resume_with_other_weights_on_one_rank_fails_both']
+M190 KILLED 14s expect=('test_resume_with_other_shared_state_on_one_rank_fails_both',) killed_by=['test_resume_with_other_shared_state_on_one_rank_fails_both']
+M198 KILLED 43s expect=('test_state_digest_error_on_one_rank_is_agreed',) killed_by=['test_amp_grad_scaler_under_ddp_reproduces_the_single_process_run', 'test_amp_nan_gradient_on_one_rank_backs_off_on_both', 'test_behaviour_patch_on_one_rank_stops_every_rank_before_any_step']
+M252 KILLED 14s expect=('test_ranks_applying_other_gradients_stop_before_any_checkpoint',) killed_by=['test_ranks_applying_other_gradients_stop_before_any_checkpoint']
+M254 KILLED 21s expect=('test_non_string_field_title_is_refused',) killed_by=['test_non_string_field_title_is_refused']
+M255 KILLED 4s expect=('test_buffer_aliases_are_left_out_of_the_buffer_free_digest',) killed_by=['test_buffer_aliases_are_left_out_of_the_buffer_free_digest']
+M256 KILLED 4s expect=('test_buffer_aliases_are_left_out_of_the_buffer_free_digest',) killed_by=['test_buffer_aliases_are_left_out_of_the_buffer_free_digest']

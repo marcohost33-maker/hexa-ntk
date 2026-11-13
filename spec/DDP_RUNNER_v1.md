@@ -45,6 +45,46 @@ Third round the same day (self-review of f173c56): computing the digests is agre
 waited in the digest broadcast until the timeout (red: 30.1 s, gloo `RuntimeError`
 instead of `PeerRankError`); sparse tensors are digested by value instead of crashing
 (also in the weights digest).
+**Version 1.4** (2026-11-12, R12 phase 2; 007acc2 R11 HX-R11-DISTRIBUTED/-NUMPY): the
+optimizer/GradScaler behaviour check of section 6 is agreed BEFORE the step (one
+1-element all-reduce per update, section 3 item 6): a refusal on one rank stops every
+rank before any rank steps. Red on 4e6bcf0 with a 2-rank gloo job: rank 1's
+`SGD._init_group` patched after the initial agreement, rank 1 refused and held its
+error, rank 0 stepped (its weights changed, rank 1's did not) until the next agreement
+point stopped both. `unscale_` and clipping errors are agreed at the same point (raised
+at once, no longer held). `scheduler.step()` gets the same check, agreed once per epoch.
+The state digest encodes NumPy dtypes by their full schema (structured field names,
+order, offsets, titles, subarrays; red on 4e6bcf0: `[('x',i4),('y',i4)]` and
+`[('u',i4),('v',i4)]` digested alike, both `|V8`), refuses dtype metadata and carries a
+schema id (`hexantk/shared-state-digest/v2`). No change to what a healthy run computes.
+Self-review the same day (of 3b11876): the pre-step all-reduce now also carries the
+skip decision (2 elements, same single collective): a split of the norm-based skip
+is refused before any rank steps (red on 3b11876: rank 0 stepped, the split was
+caught one step later with differing weights); a failure of the pre-step collective
+itself (a dead peer, the timeout) is raised at once instead of held into the next
+collective on a broken group (red on 3b11876: held); the `GradScaler` check on a
+skipped step is pinned by a test; a 3-rank job covers a refusal on the middle rank;
+CI runs the multi-rank jobs under `TORCH_DISTRIBUTED_DEBUG=DETAIL` (every collective's
+sequence number, type, shapes and dtypes compared across ranks).
+**Version 1.5** (2026-11-13, WP1 of the A7 round-2 follow-up on #107): the shared-state
+agreement of section 6 also runs at the end of every epoch (after validation, before any
+checkpoint of that epoch) and before every mid-epoch save. DDP all-reduces the gradients,
+but nothing checked what each rank then does with them: a `clip_grad_norm_` that differs
+on one rank, or a DDP comm hook that scales one rank's gradients, trained the ranks apart
+to the end of the run, and rank 0 wrote its own weights as the run's (red on 47cda7f).
+Now every rank stops with `DistributedContractError` naming the component
+(`end-of-epoch-<e> state differs from rank 0 on at least one rank: model weights`) and no
+checkpoint of the differing state is written. At a mid-epoch save the model's and the EMA
+module's buffers are left out (rank-local between two validations, section 5); they are
+digested as skipped names, so the key set must still agree, and the EMA's `n_averaged`
+stays in. No change to what a healthy run computes.
+Codex P2 on aac364f (2026-11-13): every name a buffer is registered under is left out
+(`named_buffers(remove_duplicate=False)`; `state_dict()` exports an aliased buffer, e.g. a
+BatchNorm registered twice, under each name, the default enumeration only under the
+first: red on aac364f, the alias kept its rank-local statistics in the digest); a
+structured NumPy dtype with a non-`str` field title is refused (`TypeError`): NumPy admits
+any object as a title and `repr()` of a `frozenset` follows `PYTHONHASHSEED`, so equal
+states digested differently on two ranks (red on aac364f).
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -146,7 +186,21 @@ checkpoint keys carry no `module.` prefix, and validation runs no DDP collective
    ranks' healthy steps divided by their count. `n_batches` (healthy steps) and
    `n_anomalies` (skipped steps) are per rank and equal on every rank because the
    skips are agreed.
-6. **After backward (v1.1).** `GradScaler.unscale_` (AMP), clipping, the optimizer
+6. **After backward (v1.1; v1.4 pre-step agreement).** Since v1.4 one agreement sits
+   between clipping and the step (`_agree_before_step`, one 1-element int64
+   all-reduce per update): every rank reaches it after DDP's gradient all-reduce, with
+   the errors of `unscale_` and clipping caught on the way, then runs the behaviour
+   check of section 6 (`_admit_step_behaviour`: the optimizer if the step will be
+   taken, the `GradScaler` whenever there is one). The all-reduce carries two
+   counts, ranks that failed or refused and ranks that would take the step. If any
+   rank failed or refused, every rank raises there -- the failing rank its own
+   exception with a note, the others `PeerRankError` -- and no rank has stepped. If
+   only some ranks would take the step (a split of the skip decision of item 7),
+   every rank raises `DistributedContractError` there, again before any step.
+   Whatever leaves this agreement, also a failure of its own collective, is raised
+   at once, never held (holding it would send the rank into the next collective on
+   a broken group). What follows (the step, the
+   EMA update, the skip record) is held as described next. `GradScaler.unscale_` (AMP), clipping, the optimizer
    (or `GradScaler`) step, the EMA update and, for a skipped update (item 7), its
    replay capsule and `FailureSignature` run per rank after DDP's gradient
    all-reduce has completed; none of them is a collective. (The skip record was
@@ -399,13 +453,21 @@ config digest (section 2): the same `RunnerConfig` does not make the same state,
 an optimizer built with another learning rate or momentum, another scheduler, or a
 pre-loaded optimizer state or loss scale on one rank would diverge the ranks from the
 first step (`initial state differs from rank 0 on at least one rank: optimizer state,
-scheduler state` -- a learning rate also shows in the scheduler's `base_lrs`). The
+scheduler state` -- a learning rate also shows in the scheduler's `base_lrs`). Since
+v1.5 it also runs at the end of every epoch and before every mid-epoch save (buffers
+left out there, see the version note): every rank reaches both points, because the epoch
+ends and the step count are agreed, so the collectives keep one order on every rank. The
 optimizer/scheduler/scaler digest is canonical and exact and every value is typed:
-tensors (any device, any dtype incl. bf16/fp8/complex/bool) and NumPy arrays by dtype,
-shape and bytes, sparse tensors (COO, CSR, CSC, BSR, BSC) by their coalesced COO indices
+tensors (any device, any dtype incl. bf16/fp8/complex/bool) by dtype, shape and bytes,
+NumPy arrays by their dtype schema (v1.4, `_dtype_token`: byte order, kind and size;
+for a structured dtype the itemsize, alignment and every field in order with name,
+title (`str` only; any other title object is refused, its `repr()` is not canonical),
+offset and dtype; for a subarray its shape and base -- `dtype.str` alone is
+`|V<n>` for every structured dtype of one size), shape and bytes; a dtype carrying
+`metadata` raises `TypeError` (arbitrary Python state outside the bytes), sparse tensors (COO, CSR, CSC, BSR, BSC) by their coalesced COO indices
 and values (an uncoalesced tensor equals its coalesced form, CSR equals COO of the same
 value) (object arrays by their elements),
-NumPy scalars by dtype and bytes, floats by `float.hex` (one ulp and -0.0 count),
+NumPy scalars by dtype schema and bytes, floats by `float.hex` (one ulp and -0.0 count),
 complex numbers by both parts, ints, bools, strings, bytes and `None`; dict keys and
 set elements sorted by their encoding (string hashing and with it set order differ
 between processes: `PYTHONHASHSEED`). Values are admitted by the identity of their
@@ -469,9 +531,11 @@ immediately before every optimizer step of a distributed run (`_admit_step_behav
 The refusal is a
 `DistributedContractError` inside the agreed digest computation, so a refusal on one
 rank stops every rank (2-rank job: `lambda_lr_other_function_on_rank1`,
-`forged_step_lr_on_rank1`, `state_dict_error_rank1`); before a step it is held and
-agreed like any error after backward (the other ranks may have taken that step; the
-run stops on every rank). Not covered: a class patched before the runner module was
+`forged_step_lr_on_rank1`, `state_dict_error_rank1`); before a step it is agreed
+before any rank steps (v1.4, section 3 item 6; until v1.4 it was held, so the other
+ranks had taken that step when the run stopped -- 2-rank job `optimizer_patch_rank1`),
+and before `scheduler.step()` at every epoch's end it is agreed the same way
+(`run_agreed`; 2-rank job `scheduler_patch_rank1`). Not covered: a class patched before the runner module was
 imported, torch itself (in-process identity is no supply-chain attestation: pin and
 verify the wheel), C/ATen kernels and builtins (except module globals shadowing them),
 attributes reached through a module or class object that is not held (`torch.foo`),
@@ -490,13 +554,16 @@ NCCL backend on the runner's CUDA device (`device="cuda:k"`), else on the curren
 CUDA device (`torch.cuda.set_device(local_rank)` first). Only the default process
 group is used. Cost per training step: a 4-element and a 1-element all-reduce (v1.0: 2 + 1;
 the third element is the held-step-error count, section 3.6, the fourth the
-skipped-update count, section 3.7). Per mid-epoch save: one more 2-element all-reduce
+skipped-update count, section 3.7), plus one 2-element all-reduce before the update
+(v1.4, section 3 item 6; with the behaviour check about 0.6 ms on CPU for SGD, the
+check measured with torch 2.6.0 on the container CPU). Per epoch with a scheduler:
+one 1-element all-reduce before `scheduler.step()` (v1.4). Per mid-epoch save: one more 2-element all-reduce
 before the gathers. Per agreed failure (error path only): one
 all-reduce of `world_size` int64 to name the failing ranks. Per validation:
 broadcast of every buffer of the model and the EMA copy;
 one all-reduce of `len(dataset)` int64 counts (8 bytes per sample), a few
-1-element flags, one all-reduce + broadcast of 4 float64. Once at construction and
-once per resume: a 1-element all-reduce (digest computation agreed), a 160-byte
+1-element flags, one all-reduce + broadcast of 4 float64. Once at construction, once
+per resume and (v1.5) once per epoch end and per mid-epoch save: a 1-element all-reduce (digest computation agreed), a 160-byte
 broadcast and a 5-element int64 all-reduce (the shared state, section 6). Their local cost is hashing: every rank copies its weights, EMA,
 optimizer and scheduler state to the CPU one tensor at a time and runs SHA-256 over
 it -- measured 2026-11-10 on the container CPU (torch 2.6.0, fp32, 50.4M parameters,
@@ -548,7 +615,7 @@ the forward-error, NaN-skip and post-step-error agreements end on all three rank
 Review round (same day): with 2 and 3 ranks every peer's `PeerRankError` names the
 failing rank (`[1]`, also the middle rank of three, which pins the one-hot index),
 the failing rank's own exception carries the note; with world size 1 an injected
-`unscale_` error is held, and an agreement collective that raises leaves the own
+`unscale_` error is held (since v1.4 agreed before the step and raised at once), and an agreement collective that raises leaves the own
 exception (with note) as what the caller sees. These tests were red against PR
 head 8448003 (22 failures, 5 errors) and are green now. Codex P2 on d2e7e9e: the
 rank-identification all-reduce ran outside `keeping`; a test injecting a failure
@@ -574,7 +641,46 @@ killed (`scripts/mutation_probe.py`, full probe 120/120 on 2026-10-30, exit 0; t
 first full probe after the review round left the two `len()` fast-fail mutants alive,
 the test now checks the fast fail's own message).
 
+v1.4 self-review (2026-11-12, same environment): `pre_step_collective failure` raised,
+not held, and the norm-split refused before any step (both red on 3b11876); the
+GradScaler check on a skipped step and the 3-rank middle-rank refusal (both red on
+4e6bcf0, green on 3b11876: they pin what 3b11876 introduced). The GradScaler's own
+skip inside `step()` on one rank (`scaler_skip_split_*`, 2 and 3 ranks) is only known
+after the step and is still caught by section 3.7's agreement before the next batch
+or the mid-epoch save. All multi-rank jobs also pass under
+`TORCH_DISTRIBUTED_DEBUG=DETAIL` (82 tests, no mismatch); a positive control (a
+1- vs 2-element all-reduce) is reported there at once as "Detected mismatch between
+collectives", where plain gloo waits for the timeout.
+
+v1.5 (2026-11-13, Windows, Python 3.12.10, torch 2.6.0+cpu, 2- and 3-rank gloo): WP1 red
+on 47cda7f (rank 1 halves its gradients after the all-reduce: clip_grad_norm_ patch, a DDP
+comm hook on one rank, before a mid-epoch save, the middle rank of 3; the ranks trained
+apart to the end and rank 0 saved), green on 7d8875e with unpatched positive controls. WP2:
+a profile_hook_step wrapper around the held `SGD.step`, made in the same globals while
+`__builtins__` pointed at a forged mapping, was admitted; now refused, torch's own wrapper
+still passes. Discrimination DK-20261113T103102-a4e0c31550f0 at c06834b: 6/6 (the
+buffers-included mutant fails the mid-epoch resume test before its 4 subtests, by the
+intended false refusal). `test_ddp_hex_v3.py`, `test_runner_hex_v3.py`,
+`test_mid_epoch_resume_hex_v3.py` at c06834b: 233 passed, 298 subtests passed. The full
+mutation probe (253) has not been run for v1.5.
+
+v1.4 (R12 phase 2, 2026-11-12, Linux container, Python 3.12, torch 2.6.0): six new or
+changed tests, all red against 4e6bcf0 (run there with the new test file and a
+two-name import shim, the shim only in a scratch worktree): the structured-dtype
+schema (8 collisions, all with equal bytes), dtype metadata refused, the schema id,
+the 2-rank `optimizer_patch_rank1` (red: rank 0 stepped, weights changed, rank 1
+did not; now neither steps and both report `global_step` 0), the 2-rank
+`scheduler_patch_rank1` (red: both ranks ran to the end, the learning rates parted),
+and the world-1 `unscale_` error agreed before the step (red: held). The 2-rank
+split-skip injection (section 3.7) now makes rank 1's gradient norm read NaN through
+the real update path; replacing `_apply_update` on one rank bypassed the new
+collective, a schedule no real run has. The failing-step harness injects at the step
+call (`_step_optimizer`) after the agreement.
+
 Not covered (open):
+- **Pre-step agreement window:** between the agreement and the step nothing runs but
+  the local return from the collective; a change made by another thread in that
+  window is not seen (in-process hostile code is out of scope, section 6).
 - **CUDA RNG per rank** (`torch_cuda_random_state_all` of rank 0 is restored on
   every rank's devices); DataLoader worker RNG; a custom (non-legacy) NumPy
   `Generator` held by user code.
