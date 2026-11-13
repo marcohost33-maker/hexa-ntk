@@ -27,6 +27,24 @@ finite gradients, a zero scale) is skipped too (section 3.7, HX102-02/-04);
 `RunnerConfig.max_consecutive_skips` (default 50, 0 = off) stops a run at the N-th
 skipped step in a row, agreed under DDP and carried across resume (section 3.7,
 HX102-03, owner decision E1109-06a).
+**Version 1.3** (2026-11-10): the post-resume agreement covers every state the ranks
+must share, not only the weights: optimizer, scheduler, `GradScaler` and EMA state
+(section 6). Measured red on main 22e6308: rank 1 resuming from a copy with equal
+weights but other momentum buffers (or another loss scale, or another EMA average)
+ran to the end on both ranks with different weights. First AMP-under-DDP evidence:
+a CPU `GradScaler` in the 2-rank gloo job (section 8). No change to what a healthy
+run computes.
+Review round the same day (self-review of 5c9d753): the same agreement now also runs
+at construction (section 2: ranks built with another learning rate or scheduler, red
+on 5c9d753 -- both ranks trained to the end with diverging weights); the digest no
+longer loses values of NumPy scalars/arrays, bytes, sets and complex numbers (they
+fell into the type-name branch: different values, equal digest); set elements are
+sorted because string hashing, and with it set order, differs between processes.
+Third round the same day (self-review of f173c56): computing the digests is agreed
+(`run_agreed`): a `state_dict()` that raised on one rank left it alone while its peers
+waited in the digest broadcast until the timeout (red: 30.1 s, gloo `RuntimeError`
+instead of `PeerRankError`); sparse tensors are digested by value instead of crashing
+(also in the weights digest).
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -73,6 +91,15 @@ would all-reduce scaled with unscaled gradients (review round 2). A different `n
 cadence would issue a different sequence of collectives (hang), a different best
 policy or `use_ema` would silently select differently, and `resume_from` on one
 rank only left the others in the first training collective (review finding 3).
+
+**Same state (v1.3).** Then the digests of the model state, optimizer, scheduler,
+`GradScaler` and EMA must equal rank 0's (section 6, the same check as after a
+resume), else `DistributedContractError` naming the components on every rank. An
+equal config does not imply equal state: an optimizer built with another learning
+rate on one rank passed every check before and trained the ranks apart. Since R8
+(2026-11-11) the optimizer, scheduler and `GradScaler` must also be built-in classes
+whose state determines their behaviour (section 6, "Which states are comparable"):
+a `LambdaLR`, a subclass or a look-alike class is refused here, on every rank.
 
 `distributed` and `is_main_process` must be `bool`. All checkpoints, the EMA copy,
 validation and replay capsules use the unwrapped module (`runner.raw_model`):
@@ -348,6 +375,112 @@ epoch boundary), the SHA-256 of the adopted `run_id`, and a SHA-256 over the
 names, dtypes, shapes and bytes of the loaded model state must equal rank 0's,
 else `DistributedContractError` on every rank (same path, different bytes: no
 shared file system, a stale copy).
+**v1.3: every shared state, named (at construction and after a resume).** The weights
+are not the whole state the ranks share. Equal weights with another optimizer state (momentum buffers), learning-rate
+schedule, EMA average or `GradScaler` state pass a weights-only check and diverge the
+ranks silently from the first step: DDP averages the gradients, each rank then
+applies them with its own momentum or rate; with unequal loss scales DDP even
+averages gradients scaled differently and each rank unscales them with its own
+scale. Five SHA-256 digests are now computed in one `run_agreed` (a failure on one rank --
+a `state_dict()` that raises, an OOM while copying a GPU state -- raises there and
+`PeerRankError` on the peers, instead of leaving them in the broadcast) and compared
+with rank 0's in one broadcast
+(160 bytes) and one 5-element int64 all-reduce (the count of ranks that differ, per
+component). Collectives per check: the 1-element all-reduce of `run_agreed`, the
+broadcast with its own 1-element flag all-reduce, the 5-element all-reduce (v1.2: the
+same without the `run_agreed` step; the first v1.3 text said "as many as before",
+which held until the third round added the agreement of the digest computation): the model state
+(as before), `optimizer.state_dict()`, `scheduler.state_dict()`,
+`grad_scaler.state_dict()` and the EMA module's state (`n_averaged` included). A
+component the run does not use is digested as `None` on every rank. The error
+names the components that differ (`resumed state differs from rank 0 on at least
+one rank: optimizer state`). The same agreement runs once at construction, after the
+config digest (section 2): the same `RunnerConfig` does not make the same state, and
+an optimizer built with another learning rate or momentum, another scheduler, or a
+pre-loaded optimizer state or loss scale on one rank would diverge the ranks from the
+first step (`initial state differs from rank 0 on at least one rank: optimizer state,
+scheduler state` -- a learning rate also shows in the scheduler's `base_lrs`). The
+optimizer/scheduler/scaler digest is canonical and exact and every value is typed:
+tensors (any device, any dtype incl. bf16/fp8/complex/bool) and NumPy arrays by dtype,
+shape and bytes, sparse tensors (COO, CSR, CSC, BSR, BSC) by their coalesced COO indices
+and values (an uncoalesced tensor equals its coalesced form, CSR equals COO of the same
+value) (object arrays by their elements),
+NumPy scalars by dtype and bytes, floats by `float.hex` (one ulp and -0.0 count),
+complex numbers by both parts, ints, bools, strings, bytes and `None`; dict keys and
+set elements sorted by their encoding (string hashing and with it set order differ
+between processes: `PYTHONHASHSEED`). Values are admitted by the identity of their
+exact type (R8, 2026-11-11): any other object -- also a subclass of an admitted type,
+whose `hex()`, `__format__` or `items()` may write other bytes -- raises `TypeError`
+(agreed like any digest failure). Before R8 it counted by its type name only (never by
+`repr`, which may carry a memory address): two classes of one name, or one class with
+other hidden attributes, agreed (cross-family GPT-6 A7-R2, "opaque fallback").
+`collections.Counter` is admitted (MultiStepLR keeps its milestones in one). The
+weights and EMA digests include a module's non-tensor `get_extra_state()` entries the
+same way (before R8 they were skipped). Measured without a false refusal: 6
+optimizers (SGD with Nesterov, Adam with AMSGrad, AdamW, centred RMSprop, Adagrad,
+LBFGS) x 11 schedulers (none, StepLR, MultiStepLR, LambdaLR, OneCycleLR,
+CosineAnnealingWarmRestarts, ReduceLROnPlateau, SequentialLR, ChainedScheduler,
+CyclicLR, PolynomialLR): equal state built twice or reloaded digests equally, one
+more step digests differently (a 6 x 6 subset is a unit test).
+
+**Which states are comparable (R8, 2026-11-11, cross-family GPT-6 R8-01).** Equal
+`state_dict()` bytes mean equal future training only if the state holds everything
+`step()` reads. Before the digest, `_comparable_state` therefore admits the optimizer,
+scheduler and `GradScaler` only if `type(obj)` *is* one of the built-in classes held as
+objects at import -- not by `__module__`/`__qualname__` (writable: a class built as
+`type('StepLR', ..., {'__module__': 'torch.optim.lr_scheduler'})` carries both names),
+not by `isinstance` (a subclass, or a `__class__` property), not by set membership (a
+metaclass `__eq__`/`__hash__`). Admitted: the optimizers Adadelta, Adafactor, Adagrad,
+Adam, Adamax, AdamW, ASGD, LBFGS, NAdam, RAdam, RMSprop, Rprop, SGD, SparseAdam; the
+schedulers StepLR, MultiStepLR, ConstantLR, LinearLR, ExponentialLR, PolynomialLR,
+CosineAnnealingLR, CosineAnnealingWarmRestarts, ReduceLROnPlateau, OneCycleLR,
+SequentialLR, ChainedScheduler (the inner schedulers of the last two pass the same check,
+in a plain list or tuple); `torch.amp.GradScaler`. Oracle (unit tests, torch 2.6.0): a
+state saved and loaded into an instance built with other arguments continues with the
+original's learning rates (every admitted scheduler) or updates (every admitted
+optimizer). Refused: `LambdaLR` and `MultiplicativeLR` (a function is not in their
+state: 0.0531 vs 0.0262 after 3 steps with two lambdas), `CyclicLR` (a custom
+`scale_fn` is not in its state), every subclass and look-alike; an instance attribute
+that shadows a method (`state_dict`, `get_lr`, `step`; for the optimizer the
+instance-level `step` that torch's own schedulers install is tolerated); an optimizer
+with a `state_dict` or `load_state_dict` pre/post hook (it rewrites the exported or
+loaded state); a class whose behaviour-carrying methods (`step`, `state_dict`,
+`load_state_dict`, `get_lr`, `_get_closed_form_lr`, `get_last_lr`, `zero_grad`,
+`update`, `scale`, `unscale_`, resolved through the MRO) are no longer the objects
+held at import (R8.1, Quella F2-A 2026-11-11: `type(obj) is SGD` still holds after
+`SGD.step = ...`). torch's own `profile_hook_step` wrapper around `step` is admitted
+only if its code object is torch's wrapper and its closure holds the function held at
+import. **R12 (007acc2 R10.1/R11, issue #106) replaces the method list by a behaviour
+graph** (`_HELD`, `_behaviour_changed`): every callable or descriptor of every class of
+the MRO (except `object`), the MRO and the metaclass; for every function reached, its
+code object, globals dict, defaults, kwdefaults, closure cells and the value of every
+name its code may load as a global (`co_names`, also names absent at import), followed
+without a depth limit; and torch's lazy `fn.__dynamo_disable` cache. A function that
+differs from the held one passes only as torch's own wrapper around it, by code object
+AND globals dict AND the wrapped cell (`profile_hook_step`; dynamo's `DisableContext`
+wrapper with `callback=None`, installed by `torch.compile`); the instance-level `step`
+only as torch's LR-scheduler wrapper of the held class step for this optimizer. A
+registered optimizer step pre/post hook, global or on the instance, is refused. The
+graph must hold `SGD._init_group`, `Optimizer._optimizer_step_code`,
+`Optimizer.profile_hook_step`, `GradScaler._maybe_opt_step` and
+`torch.optim.sgd.{sgd,_single_tensor_sgd,_multi_tensor_sgd,_fused_sgd}` (`_REQUIRED_PINS`),
+else every admission is refused. The check runs at the shared-state agreement AND
+immediately before every optimizer step of a distributed run (`_admit_step_behaviour`).
+The refusal is a
+`DistributedContractError` inside the agreed digest computation, so a refusal on one
+rank stops every rank (2-rank job: `lambda_lr_other_function_on_rank1`,
+`forged_step_lr_on_rank1`, `state_dict_error_rank1`); before a step it is held and
+agreed like any error after backward (the other ranks may have taken that step; the
+run stops on every rank). Not covered: a class patched before the runner module was
+imported, torch itself (in-process identity is no supply-chain attestation: pin and
+verify the wheel), C/ATen kernels and builtins (except module globals shadowing them),
+attributes reached through a module or class object that is not held (`torch.foo`),
+mutable data (state, not behaviour), hostile code inside the rank process (no
+isolation), and the model class (user code; its weights are compared).
+Rank-local state is
+excluded by design: RNG streams and loader generators (restored per rank above), the
+anomaly history, and mid-epoch rank buffers (copied in after this check,
+`spec/MID_EPOCH_RESUME_v1.md`).
 
 ## 7. Collectives used
 
@@ -362,7 +495,13 @@ before the gathers. Per agreed failure (error path only): one
 all-reduce of `world_size` int64 to name the failing ranks. Per validation:
 broadcast of every buffer of the model and the EMA copy;
 one all-reduce of `len(dataset)` int64 counts (8 bytes per sample), a few
-1-element flags, one all-reduce + broadcast of 4 float64. Per resume save: three
+1-element flags, one all-reduce + broadcast of 4 float64. Once at construction and
+once per resume: a 1-element all-reduce (digest computation agreed), a 160-byte
+broadcast and a 5-element int64 all-reduce (the shared state, section 6). Their local cost is hashing: every rank copies its weights, EMA,
+optimizer and scheduler state to the CPU one tensor at a time and runs SHA-256 over
+it -- measured 2026-11-10 on the container CPU (torch 2.6.0, fp32, 50.4M parameters,
+Adam): weights 0.17 s, Adam state 0.34 s (about 1.1 GB/s), linear in the bytes, plus the
+device-to-host copy on a GPU. Per resume save: three
 all-gathers of ~10 KB per rank. Rank 0's checkpoint write happens while the
 peers wait in the closing all-reduce: a write longer than the process-group
 timeout (gloo default 30 min, NCCL 10 min) ends the job.
@@ -443,8 +582,16 @@ Not covered (open):
   stops a run that skips every step. Still open: a GradScaler backoff to a positive
   scale never counts, so a run whose scale keeps dropping skips about 165 steps from
   65536 before the count starts; with `max_consecutive_skips=0` nothing stops it.
-- **NCCL/CUDA, more than 3 ranks, more than one host, AMP under DDP**: not run
-  (2 and 3 gloo ranks on one host are).
+- **NCCL/CUDA, more than 3 ranks, more than one host**: not run (2 and 3 gloo ranks
+  on one host are). **AMP under DDP** (v1.3, partly): the runner builds a
+  `GradScaler` and autocast only on CUDA; the 2-rank gloo job injects
+  `torch.amp.GradScaler("cpu", init_scale=1024, growth_interval=2)` on every rank.
+  Measured: both ranks end with bitwise equal weights, EMA and scale, equal to the
+  single-process run with the same scaler (<= 1e-12; the scale grew from 1024 to
+  8192); a NaN gradient on rank 1 only is spread by the all-reduce, both ranks
+  back off once (no capsule, counted as one skip) and stay bitwise equal; a resume
+  with a halved scale on rank 1 is refused on both ranks (section 6). Not covered:
+  autocast (fp16/bf16 forward) under DDP, a CUDA `GradScaler`, NCCL.
 - ~~**Mid-epoch resume**: resume stays at epoch boundaries.~~ Done 2026-10-30,
   `spec/MID_EPOCH_RESUME_v1.md` (this line had not been updated, v1.1).
 - **Errors before the forward are agreed (section 3.3), errors inside DDP's forward

@@ -1,0 +1,28 @@
+# R8.1 local gate (Quella F2-A): behaviour-carrying methods held at import, load_state_dict hooks refused
+# Windows 11, CI command chain of .github/workflows/ci.yml mirrored locally (GINO smoke lane and OpenBLAS kernel matrix NOT run).
+# This log is committed on top of the measured HEAD below; that commit adds only this file.
+HEAD 1db0738c00911de2bc80efede390c4c4e8ce3025
+python Python 3.12.10 torch 2.6.0+cpu numpy 2.5.3
+== ruff
+All checks passed!
+ruff exit=0
+== compileall
+compile exit=0
+== verify_sources
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+verify_sources exit=0
+== engine_gate
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+engine_gate exit=0
+== unittest discover
+suite exit=0
+Ran 1147 tests in 329.273s
+OK (skipped=15)
+== discrimination (G:/Meine Ablage/Vero/Tools/diskriminierung.py, ledger diskriminierung_runs.jsonl)
+  R8.1-01 method snapshot check removed                                                               DISKRIMINIERT  [subTest: 3 rot von ? beurteilt] (Zeilenenden angeglichen)
+  R8.1-02 torch wrapper admitted without closure binding                                              DISKRIMINIERT (Zeilenenden angeglichen)
+  R8.1-03 load_state_dict hooks not checked                                                           DISKRIMINIERT  [subTest: 2 rot von ? beurteilt] (Zeilenenden angeglichen)
+  R8.1-04 snapshot taken through MRO lookup replaced by own __dict__ only (base-class patch control)  DISKRIMINIERT  [subTest: 3 rot von ? beurteilt] (Zeilenenden angeglichen)
+4/4 diskriminieren.
+Lauf    -> run_id DK-20261111T021356-209e5df0ef2c
+# DK ran on the working tree of 1db0738 before commit (head c8706ad, dirty); runner/test bytes at DK time equal the committed ones (SOURCES prefixes A99940BD5E2E6C63 / 8059FF96136167A9).

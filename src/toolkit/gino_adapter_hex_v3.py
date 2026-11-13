@@ -305,13 +305,50 @@ def build_gino(config: GinoPhase1Config, training_lattice: HexLattice) -> Any:
 CONFIG_DIGEST_ATTR = "_hexantk_gino_config_digest"
 
 
-def _check_config_binding(model: Any, config: GinoPhase1Config) -> None:
+def _bound_digest(model: Any) -> Any:
+    """The config digest bound to ``model`` or to one of its submodules, else None.
+
+    A wrapper around a model built by build_gino (DistributedDataParallel, a
+    caller's nn.Module) keeps the binding of the model inside it; two different
+    bindings in one model are refused.
+    """
+    found = []
+    candidates = [model]
+    if isinstance(model, torch.nn.Module):
+        candidates.extend(model.modules())
+    for candidate in candidates:
+        value = getattr(candidate, CONFIG_DIGEST_ATTR, None)
+        if value is not None and not any(value is f or value == f for f in found):
+            found.append(value)
+    if len(found) > 1:
+        raise ValueError(f"model holds {len(found)} different config bindings; build one model per config")
+    return found[0] if found else None
+
+
+def _check_config_binding(model: Any, config: GinoPhase1Config, *, allow_unbound: bool) -> None:
     """A model built by build_gino carries its config digest; any other config is refused.
-    Models not built here (test doubles, foreign wrappers) carry no binding and pass."""
-    bound = getattr(model, CONFIG_DIGEST_ATTR, None)
-    if bound is not None and bound != config.digest():
+
+    A model without a binding (not built here: a test double, a foreign GINO) is
+    refused too unless the caller passes ``allow_unbound=True`` and so vouches for
+    its config itself. Before 2026-11-10 it passed silently, which let a run of a
+    foreign model be attributed to any config's digest (internal NR SF-R46-01:
+    a checker whose absence skips the guard is fail-open).
+    """
+    if not isinstance(allow_unbound, bool):
+        raise TypeError("allow_unbound must be bool")
+    bound = _bound_digest(model)
+    if bound is None:
+        if allow_unbound:
+            return
         raise ValueError(
-            f"model was built with config digest {bound[:16]}..., "
+            "model carries no config binding (it was not built by build_gino), so its "
+            "modes, channels and radius are unknown; pass allow_unbound=True only for a "
+            "test double or a model whose config the caller vouches for"
+        )
+    if not isinstance(bound, str) or bound != config.digest():
+        shown = bound[:16] if isinstance(bound, str) else repr(type(bound).__name__)
+        raise ValueError(
+            f"model was built with config digest {shown}..., "
             f"predict_gino got {config.digest()[:16]}...; use the construction config"
         )
 
@@ -353,9 +390,15 @@ def predict_gino(
     lattice: HexLattice,
     u0: Any,
     config: GinoPhase1Config,
+    *,
+    allow_unbound: bool = False,
 ) -> torch.Tensor:
-    """Run GINO and return shape (batch, num_nodes), failing closed on drift."""
-    _check_config_binding(model, config)
+    """Run GINO and return shape (batch, num_nodes), failing closed on drift.
+
+    The model must carry the digest of ``config`` (``build_gino``); a model
+    without one needs ``allow_unbound=True`` (see ``_check_config_binding``).
+    """
+    _check_config_binding(model, config, allow_unbound=allow_unbound)
     device, dtype = _model_device_dtype(model)
     batch = prepare_gino_batch(lattice, u0, config, dtype=dtype, device=device)
     out = model(**batch)
