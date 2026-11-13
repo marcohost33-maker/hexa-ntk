@@ -467,6 +467,29 @@ class TestResumeStateDigest(unittest.TestCase):
         self.assertNotEqual(_state_digest(np.array([(1, "a")], dtype=named)),
                             _state_digest(np.array([(1, "a")], dtype=renamed)))
 
+    def test_non_string_field_title_is_refused(self) -> None:
+        # Codex P2 on aac364f: NumPy admits any object as a field title, and repr() of
+        # a frozenset follows the process's PYTHONHASHSEED -- equal states digested
+        # differently on two ranks. Only str titles are encoded; others are refused.
+        import subprocess
+        import sys
+
+        code = ("import sys; sys.path.insert(0, %r); import numpy as np; "
+                "from runner_hex_v3 import _state_digest; "
+                "t = frozenset({'alpha', 'beta', 'gamma'}); "
+                "d = np.dtype({'names': ['x'], 'formats': ['<i4'], 'titles': [t]}); "
+                "_state_digest(np.zeros(1, dtype=d))") % str(Path(__file__).resolve().parent)
+        for seed in ("1", "2"):
+            done = subprocess.run([sys.executable, "-c", code], env=dict(os.environ, PYTHONHASHSEED=seed),
+                                  capture_output=True, text=True, timeout=120)
+            with self.subTest(seed=seed):
+                self.assertNotEqual(done.returncode, 0)
+                self.assertIn("field title of type frozenset", done.stderr)
+        # positive control: a str title is still part of the schema
+        titled = np.dtype({"names": ["x"], "formats": ["<i4"], "titles": ["X"]})
+        plain = np.dtype({"names": ["x"], "formats": ["<i4"]})
+        self.assertNotEqual(_state_digest(np.zeros(1, dtype=titled)), _state_digest(np.zeros(1, dtype=plain)))
+
     def test_dtype_metadata_is_refused(self) -> None:
         # metadata is arbitrary Python state outside the bytes (007acc2 R11)
         tagged = np.dtype("<f8", metadata={"unit": "m"})
@@ -1342,6 +1365,32 @@ class TestWorldSizeOne(unittest.TestCase):
             self.assertIsNone(runner._agreed_pre_step_error)
             for before, after in zip(weights, runner.raw_model.parameters()):
                 self.assertTrue(torch.equal(before, after.detach()))
+
+    def test_buffer_aliases_are_left_out_of_the_buffer_free_digest(self) -> None:
+        # Codex P2 on aac364f: state_dict() exports a buffer under every name it is
+        # registered under, named_buffers() by default under the first only. A shared
+        # BatchNorm registered twice kept its second name in the digest with its
+        # rank-local statistics, so a mid-epoch save of synchronised weights was refused.
+        with tempfile.TemporaryDirectory() as tmp:
+            model = _model()
+            shared = nn.BatchNorm1d(2, affine=False)  # buffers only, no parameters
+            model.alias_a = shared
+            model.alias_b = shared
+            runner = HexTrainingRunner(
+                _config(Path(tmp), distributed=True, num_epochs=1), DDP(model),
+                torch.optim.SGD(model.parameters(), lr=0.1),
+                DataLoader(_Data(8, seed=1), batch_size=4), DataLoader(_Data(5, seed=2), batch_size=2),
+            )
+            self.assertIn("alias_b.running_mean", runner.raw_model.state_dict())  # the premise
+            before = dict(runner._shared_state_digests(buffers=False))
+            with_buffers = dict(runner._shared_state_digests())
+            shared.running_mean.add_(1.0)  # a rank-local statistic moves (both names)
+            runner.ema_model.module.alias_a.running_mean.add_(1.0)  # the EMA copy keeps the alias
+            after = dict(runner._shared_state_digests(buffers=False))
+            self.assertEqual(after["model weights"], before["model weights"])
+            self.assertEqual(after["EMA state"], before["EMA state"])
+            # positive control: the full digest still sees buffers
+            self.assertNotEqual(dict(runner._shared_state_digests())["model weights"], with_buffers["model weights"])
 
     def test_failure_of_the_pre_step_collective_is_raised_not_held(self) -> None:
         # R12 phase 2 self-review: the pre-step agreement sits inside the held region

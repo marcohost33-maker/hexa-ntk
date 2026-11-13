@@ -78,6 +78,13 @@ checkpoint of the differing state is written. At a mid-epoch save the model's an
 module's buffers are left out (rank-local between two validations, section 5); they are
 digested as skipped names, so the key set must still agree, and the EMA's `n_averaged`
 stays in. No change to what a healthy run computes.
+Codex P2 on aac364f (2026-11-13): every name a buffer is registered under is left out
+(`named_buffers(remove_duplicate=False)`; `state_dict()` exports an aliased buffer, e.g. a
+BatchNorm registered twice, under each name, the default enumeration only under the
+first: red on aac364f, the alias kept its rank-local statistics in the digest); a
+structured NumPy dtype with a non-`str` field title is refused (`TypeError`): NumPy admits
+any object as a title and `repr()` of a `frozenset` follows `PYTHONHASHSEED`, so equal
+states digested differently on two ranks (red on aac364f).
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -454,7 +461,8 @@ optimizer/scheduler/scaler digest is canonical and exact and every value is type
 tensors (any device, any dtype incl. bf16/fp8/complex/bool) by dtype, shape and bytes,
 NumPy arrays by their dtype schema (v1.4, `_dtype_token`: byte order, kind and size;
 for a structured dtype the itemsize, alignment and every field in order with name,
-title, offset and dtype; for a subarray its shape and base -- `dtype.str` alone is
+title (`str` only; any other title object is refused, its `repr()` is not canonical),
+offset and dtype; for a subarray its shape and base -- `dtype.str` alone is
 `|V<n>` for every structured dtype of one size), shape and bytes; a dtype carrying
 `metadata` raises `TypeError` (arbitrary Python state outside the bytes), sparse tensors (COO, CSR, CSC, BSR, BSC) by their coalesced COO indices
 and values (an uncoalesced tensor equals its coalesced form, CSR equals COO of the same

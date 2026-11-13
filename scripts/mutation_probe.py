@@ -370,7 +370,7 @@ MUTANTS = (
            "        if True:\n            return self._save_checkpoints_local(", T2),
     Mutant(RU, "        if self.dist is not None:\n            self._require_equal_batch_count()\n", "", T2),
     # v1.3: the weights are one of five resume digests; the stop itself has its own mutant below
-    Mutant(RU, '            ("model weights", _module_digest(self.raw_model)),\n',
+    Mutant(RU, '            ("model weights", _module_digest(self.raw_model, model_skip)),\n',
            '            ("model weights", _state_digest(None)),\n', T2,
            expect=(RW,)),
     Mutant(RU, '        report = self.dist.run_agreed(self._resume_local, what="resume")\n',
@@ -559,7 +559,7 @@ MUTANTS = (
     Mutant(RU, '            ("GradScaler state", _state_digest(grad_scaler)),\n',
            '            ("GradScaler state", _state_digest(None)),\n', T2,
            expect=(RS,)),
-    Mutant(RU, '            ("EMA state", _module_digest(self.ema_model) if self.ema_model is not None\n',
+    Mutant(RU, '            ("EMA state", _module_digest(self.ema_model, ema_skip) if self.ema_model is not None\n',
            '            ("EMA state", _state_digest(None) if self.ema_model is not None\n', T2,
            expect=(RS,)),
     Mutant(RU, "        if names:\n            raise DistributedContractError(\n                f\"{when} state",
@@ -583,8 +583,9 @@ MUTANTS = (
            '    h.update(b"T|")\n', SD,
            expect=('test_every_value_change_is_seen',)),
     # round 3: digest failures agreed; sparse layouts by value
-    Mutant(RU, '        parts = self.dist.run_agreed(self._shared_state_digests, what=f"the {when} state digest")\n',
-           '        parts = self._shared_state_digests()\n', T2,
+    Mutant(RU, '        parts = self.dist.run_agreed(lambda: self._shared_state_digests(buffers=buffers),\n'
+           '                                     what=f"the {when} state digest")\n',
+           '        parts = self._shared_state_digests(buffers=buffers)\n', T2,
            expect=('test_state_digest_error_on_one_rank_is_agreed',)),
     Mutant(RU, "        s = (t.cpu() if t.layout == torch.sparse_coo else t.cpu().to_sparse_coo()).coalesce()\n",
            "        s = t.cpu() if t.layout == torch.sparse_coo else t.cpu().to_sparse_coo()\n", SD,
@@ -748,13 +749,23 @@ MUTANTS = (
     Mutant(RU, '            self._agree_shared_state(f"mid-epoch-save-step-{self.global_step}", buffers=False)\n',
            '            self._agree_shared_state(f"mid-epoch-save-step-{self.global_step}", buffers=True)\n', T2,
            expect=("test_mid_epoch_resume_reproduces_the_uninterrupted_run",)),
-    Mutant(RU, "            model_skip = frozenset(n for n, _ in self.raw_model.named_buffers())\n",
+    Mutant(RU, "            model_skip = frozenset(n for n, _ in "
+               "self.raw_model.named_buffers(remove_duplicate=False))\n",
            "            model_skip = frozenset(self.raw_model.state_dict())\n", T2,
            expect=(DV,)),
     # DDP_RUNNER v1.5 (WP2): a torch wrapper must also carry the builtins it was made with.
     Mutant(RU, " or fn.__globals__ is not env[1] or fn.__builtins__ is not env[4]:\n",
            " or fn.__globals__ is not env[1]:\n", "test_ddp_hex_v3.TestBehaviourGuardR12",
            expect=("test_wrapper_with_foreign_builtins_is_refused",)),
+    # Codex P2 on aac364f: non-str field titles refused; buffer aliases left out
+    Mutant(RU, "            if title and type(title[0]) is not str:\n", "            if False:\n", SD,
+           expect=("test_non_string_field_title_is_refused",)),
+    Mutant(RU, "named_buffers(remove_duplicate=False))\n            if self.ema_model is not None:",
+           "named_buffers())\n            if self.ema_model is not None:", W1,
+           expect=("test_buffer_aliases_are_left_out_of_the_buffer_free_digest",)),
+    Mutant(RU, "for n, _ in self.ema_model.module.named_buffers(remove_duplicate=False))",
+           "for n, _ in self.ema_model.module.named_buffers())", W1,
+           expect=("test_buffer_aliases_are_left_out_of_the_buffer_free_digest",)),
 )
 
 

@@ -212,6 +212,14 @@ def _dtype_token(dtype: np.dtype) -> str:
         fields = []
         for name in dtype.names:
             sub, offset, *title = dtype.fields[name]
+            if title and type(title[0]) is not str:
+                # NumPy admits any object as a field title; its repr() is not canonical
+                # (a frozenset's order follows the process's PYTHONHASHSEED), so equal
+                # states would digest differently on two ranks (Codex P2 on aac364f)
+                raise TypeError(
+                    f"state value with a NumPy field title of type {type(title[0]).__qualname__} "
+                    f"(field {name!r}) cannot be compared between ranks (only str titles are encoded)"
+                )
             label = repr(title[0]) if title else ""
             fields.append(f"{len(name)}:{name}|{label}|@{offset}|{_dtype_token(sub)}")
         aligned = "a" if dtype.isalignedstruct else ""
@@ -1521,11 +1529,15 @@ class HexTrainingRunner:
         model_skip: frozenset = frozenset()
         ema_skip: frozenset = frozenset()
         if not buffers:
-            model_skip = frozenset(n for n, _ in self.raw_model.named_buffers())
+            # remove_duplicate=False: state_dict() exports a buffer under every name it
+            # is registered under, named_buffers() by default under the first only, so
+            # an alias would stay in the digest with its rank-local value (Codex P2 on aac364f)
+            model_skip = frozenset(n for n, _ in self.raw_model.named_buffers(remove_duplicate=False))
             if self.ema_model is not None:
                 # the averaged module's buffers only; n_averaged (a buffer of the
                 # AveragedModel itself) is shared state and stays in
-                ema_skip = frozenset(f"module.{n}" for n, _ in self.ema_model.module.named_buffers())
+                ema_skip = frozenset(f"module.{n}"
+                                     for n, _ in self.ema_model.module.named_buffers(remove_duplicate=False))
         return [
             ("model weights", _module_digest(self.raw_model, model_skip)),
             ("optimizer state", _state_digest(optimizer)),
