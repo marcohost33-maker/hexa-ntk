@@ -2317,6 +2317,47 @@ def _sc_scheduler_patch_rank1(rank: int, world: int, out: Path) -> Dict[str, Any
     return _behaviour_patch_outcome(runner, out, patch)
 
 
+def _divergent_gradients(how: str, *, save_every_n_steps: int = 0) -> Callable[[int, int, Path], Dict[str, Any]]:
+    """v1.5: rank 1 applies other gradients than its peers after the all-reduce.
+
+    ``clip``: rank 1's ``torch.nn.utils.clip_grad_norm_`` halves every gradient
+    after clipping. ``comm_hook``: a DDP comm hook on rank 1 only halves the
+    all-reduced bucket (the collective itself is the same on every rank, so no
+    rank waits). ``none``: the positive control. Before v1.5 nothing compared
+    the states after construction: both ranks trained to the end with different
+    weights and rank 0 wrote its own as the run's."""
+
+    def scenario(rank: int, world: int, out: Path) -> Dict[str, Any]:
+        runner = _failing_step_runner(rank, world, out, failing_rank=-1, fail_at=-1, num_epochs=2,
+                                      save_every_n_steps=save_every_n_steps)
+        patch = None
+        if rank == 1 and how == "clip":
+            original = torch.nn.utils.clip_grad_norm_
+
+            def halving(parameters: Any, *a: Any, **kw: Any) -> Any:
+                parameters = list(parameters)
+                norm = original(parameters, *a, **kw)
+                for p in parameters:
+                    if p.grad is not None:
+                        p.grad.mul_(0.5)
+                return norm
+
+            patch = mock.patch.object(torch.nn.utils, "clip_grad_norm_", halving)
+        elif rank == 1 and how == "comm_hook":
+            # no annotations: register_comm_hook refuses a bucket annotated other
+            # than dist.GradBucket (and this module has postponed annotations)
+            def hook(state, bucket):  # type: ignore[no-untyped-def]
+                fut = dist.all_reduce(bucket.buffer().div_(world), async_op=True).get_future()
+                return fut.then(lambda f: f.value()[0].mul_(0.5))
+
+            runner.model.register_comm_hook(None, hook)
+        outcome = _behaviour_patch_outcome(runner, out, patch)
+        outcome["digest"] = _digest(runner.raw_model)
+        return outcome
+
+    return scenario
+
+
 def _bump_momentum(payload: Dict[str, Any]) -> None:
     for state in payload["optimizer_state_dict"]["state"].values():
         state["momentum_buffer"].add_(1.0)
@@ -2720,6 +2761,11 @@ _SCENARIOS: Dict[str, Callable[[int, int, Path], Any]] = {
     "skip_limit_desync_rank1": _skip_limit("loss", 1),
     "optimizer_patch_rank1": _sc_optimizer_patch_rank1,
     "scheduler_patch_rank1": _sc_scheduler_patch_rank1,
+    "divergent_control": _divergent_gradients("none"),
+    "divergent_control_mid_saves": _divergent_gradients("none", save_every_n_steps=1),
+    "clip_halved_rank1": _divergent_gradients("clip"),
+    "clip_halved_before_mid_save_rank1": _divergent_gradients("clip", save_every_n_steps=1),
+    "comm_hook_halved_rank1": _divergent_gradients("comm_hook"),
     # very last: unfixed it desynchronises the job (rank 0 times out), and every
     # later scenario would fail with it -- the mutation probe's killed_by showed
     # 6 unrelated tests red for that mutant before this moved here
@@ -2740,6 +2786,8 @@ _SCENARIOS_3: Dict[str, Callable[[int, int, Path], Any]] = {
     "grad_skip_split_rank1": _grad_skip_split(0),
     "scaler_skip_split_rank1": _scaler_skip_split(0),
     "optimizer_patch_rank1": _sc_optimizer_patch_rank1,
+    "divergent_control": _divergent_gradients("none"),
+    "clip_halved_rank1": _divergent_gradients("clip"),
     "construction_other_lr_on_rank1": _construction_differs("optimizer"),
     "state_dict_error_rank1": _sc_state_dict_error_rank1,
 }
@@ -2883,6 +2931,35 @@ class _MultiRankJob(unittest.TestCase):
         self.assertEqual(values[0]["checkpoints"], [])
         values = self._post_step("ema_error_rank0", 0, 0, "stopped before step 1")
         self.assertEqual(values[0]["checkpoints"], [])
+
+    def _check_divergent_states(self) -> None:
+        """v1.5: the shared states are compared at the end of every epoch and before every save."""
+        names = [n for n in ("divergent_control", "divergent_control_mid_saves") if n in _SUITES[self.SUITE]]
+        for name in names:
+            # positive control: the same job without the injection trains to the end, alike
+            values = self._ok(name)
+            for rank, value in enumerate(values):
+                with self.subTest(name, rank=rank):
+                    self.assertIsNone(value["error"], value)
+                    self.assertFalse(value["weights_unchanged"], value)  # it trained
+                    self.assertEqual(value["global_step"], values[0]["global_step"])
+                    self.assertEqual(value["digest"], values[0]["digest"])
+        expect = {"clip_halved_rank1": "end-of-epoch-0 state differs",
+                  "clip_halved_before_mid_save_rank1": "mid-epoch-save-step-1 state differs",
+                  "comm_hook_halved_rank1": "end-of-epoch-0 state differs"}
+        for name, where in expect.items():
+            if name not in _SUITES[self.SUITE]:
+                continue
+            values = self._ok(name)
+            for rank, value in enumerate(values):
+                with self.subTest(name, rank=rank):
+                    self.assertEqual(value["error"], "DistributedContractError", value)
+                    self.assertIn(where, value["message"])
+                    self.assertIn("model weights", value["message"])
+                    self.assertEqual(value["checkpoints"], [], value)  # stopped before any save
+                    self.assertEqual(value["global_step"], values[0]["global_step"])
+            # the injection really parted the weights (else the refusal would be a false one)
+            self.assertNotEqual(values[0]["digest"], values[1]["digest"], name)
 
     def _check_grad_skip_scenarios(self) -> None:
         """Section 3.7: a NaN gradient skips on every rank; a split skip stops every rank."""
@@ -3171,6 +3248,11 @@ class TestTwoRanks(_MultiRankJob):
             self.assertTrue(r["lr_unchanged"], r)  # no rank ran the forged schedule
             self.assertEqual(r["checkpoints"], [], r)
 
+    def test_ranks_applying_other_gradients_stop_before_any_checkpoint(self) -> None:
+        # v1.5 (WP1): clipping or a comm hook that halves rank 1's gradients after
+        # the all-reduce; before, both ranks trained to the end with other weights
+        self._check_divergent_states()
+
     def test_resume_with_equal_scaler_state_runs(self) -> None:
         # positive control: the same file on both ranks, GradScaler included
         r0, r1 = self._ok("resume_same_scaler_state")
@@ -3277,6 +3359,10 @@ class TestThreeRanks(_MultiRankJob):
         for rank in (0, 2):
             self.assertIn("failed on rank(s) [1]", values[rank]["message"])
             self.assertLess(values[rank]["seconds"], 15.0)
+
+    def test_middle_rank_applying_other_gradients_stops_all(self) -> None:
+        # v1.5 (WP1): the middle rank halves its clipped gradients
+        self._check_divergent_states()
 
 
 if __name__ == "__main__":

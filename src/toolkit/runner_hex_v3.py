@@ -145,15 +145,20 @@ def _update_tensor_digest(h: Any, tensor: torch.Tensor) -> None:
     h.update(t.reshape(-1).view(torch.uint8).numpy().tobytes())
 
 
-def _module_digest(module: nn.Module) -> bytes:
+def _module_digest(module: nn.Module, skip: frozenset = frozenset()) -> bytes:
     """SHA-256 over the names, dtypes, shapes and bytes of a module's state.
 
     A non-tensor entry (a module's ``get_extra_state()``) is digested like any
     other state value and refused if opaque (R8); before, it was skipped, so
-    ranks with other extra state agreed.
+    ranks with other extra state agreed. ``skip``: state names left out (the
+    rank-local buffers at a mid-epoch save, v1.5); every name skipped is
+    digested as a skipped name, so the key set still has to agree.
     """
     h = hashlib.sha256(_DIGEST_SCHEMA)
     for name, value in module.state_dict(keep_vars=False).items():
+        if name in skip:
+            h.update(f"{name}|skipped|".encode("utf-8"))
+            continue
         h.update(f"{name}|".encode("utf-8"))
         if torch.is_tensor(value):
             _update_tensor_digest(h, value)
@@ -1459,16 +1464,23 @@ class HexTrainingRunner:
         self._agree_shared_state("resumed")
         return report
 
-    def _agree_shared_state(self, when: str) -> None:
+    def _agree_shared_state(self, when: str, *, buffers: bool = True) -> None:
         """Every rank's shared state must be rank 0's, else DistributedContractError on all ranks.
 
         One broadcast of the five digests and one 5-element all-reduce of
         per-component mismatch counts, so every rank names the same components.
+        Runs at construction, after a resume, and (v1.5) at the end of every
+        epoch and before every mid-epoch save: every rank reaches each of these
+        points (epoch ends and the step count are agreed), so the collectives
+        are issued in the same order on every rank. ``buffers=False`` leaves the
+        model's and the EMA module's buffers out (mid-epoch: they are rank-local
+        between two validations, see ``_save_mid_epoch``).
         """
         # Computing the digests can fail on one rank only (a state_dict that
         # raises, an OOM while copying a GPU state to the CPU): agree on it, else
         # that rank leaves while its peers wait in the broadcast until the timeout.
-        parts = self.dist.run_agreed(self._shared_state_digests, what=f"the {when} state digest")
+        parts = self.dist.run_agreed(lambda: self._shared_state_digests(buffers=buffers),
+                                     what=f"the {when} state digest")
         mine = b"".join(digest for _, digest in parts)
         ref = self.dist.broadcast_bytes(mine if self.dist.rank == 0 else None, len(mine))
         differs = self.dist.sum_ints(
@@ -1480,7 +1492,7 @@ class HexTrainingRunner:
                 f"{when} state differs from rank 0 on at least one rank: {', '.join(names)}"
             )
 
-    def _shared_state_digests(self) -> List[Tuple[str, bytes]]:
+    def _shared_state_digests(self, *, buffers: bool = True) -> List[Tuple[str, bytes]]:
         """The states every rank must hold equally (at construction and after a resume), with digests.
 
         Rank-local state is excluded by design: RNG streams, loader generators,
@@ -1497,12 +1509,20 @@ class HexTrainingRunner:
                                       tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
         scheduler = _comparable_state(self.scheduler, _TRUSTED_SCHEDULERS, "scheduler")
         grad_scaler = _comparable_state(self.grad_scaler, _TRUSTED_GRAD_SCALERS, "GradScaler")
+        model_skip: frozenset = frozenset()
+        ema_skip: frozenset = frozenset()
+        if not buffers:
+            model_skip = frozenset(n for n, _ in self.raw_model.named_buffers())
+            if self.ema_model is not None:
+                # the averaged module's buffers only; n_averaged (a buffer of the
+                # AveragedModel itself) is shared state and stays in
+                ema_skip = frozenset(f"module.{n}" for n, _ in self.ema_model.module.named_buffers())
         return [
-            ("model weights", _module_digest(self.raw_model)),
+            ("model weights", _module_digest(self.raw_model, model_skip)),
             ("optimizer state", _state_digest(optimizer)),
             ("scheduler state", _state_digest(scheduler)),
             ("GradScaler state", _state_digest(grad_scaler)),
-            ("EMA state", _module_digest(self.ema_model) if self.ema_model is not None
+            ("EMA state", _module_digest(self.ema_model, ema_skip) if self.ema_model is not None
              else _state_digest(None)),
         ]
 
@@ -2631,6 +2651,13 @@ class HexTrainingRunner:
             return self._save_checkpoints_local(
                 epoch, val_report, train_report, save_state=save_state
             )
+        # v1.5 (end of every epoch, before any checkpoint of it): every shared
+        # state must still be rank 0's. DDP all-reduces gradients, nothing
+        # checks what each rank does with them: a clipping or a comm hook that
+        # scales one rank's gradients trained the ranks apart to the end of the
+        # run (red on 47cda7f), and rank 0 wrote its own weights as the run's.
+        # Runs after validation, whose buffer sync made the buffers rank 0's.
+        self._agree_shared_state(f"end-of-epoch-{epoch}")
         rank_rng = self._gather_rank_rng_states() if save_state else None
         return self.dist.run_agreed(
             lambda: self._save_checkpoints_local(
@@ -2668,6 +2695,11 @@ class HexTrainingRunner:
                 n_step_failed, n_grad_skipped = self.dist.sum_ints([step_error is not None, grad_skipped])
             self.dist.raise_agreed_failure(step_error, n_step_failed > 0, self._held_what("the mid-epoch save"))
             self._agreed_grad_skip(n_grad_skipped, "the mid-epoch save")
+            # v1.5: no rank writes a checkpoint of states that differ (as at the
+            # end of an epoch). Buffers are left out: they are rank-local between
+            # two validations (see below), the parameters, optimizer, scheduler,
+            # GradScaler and the EMA parameters with n_averaged are not.
+            self._agree_shared_state(f"mid-epoch-save-step-{self.global_step}", buffers=False)
         start = self._epoch_start_state
         rank_buffers = None
         if self.dist is None:

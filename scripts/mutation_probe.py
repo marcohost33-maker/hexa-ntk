@@ -78,6 +78,7 @@ _SHADOW_SITE = ("        if isinstance(attr, str) and attr not in tolerated"
 RS = "test_resume_with_other_shared_state_on_one_rank_fails_both"
 CO = "test_other_optimizer_or_scheduler_at_construction_fails_both"
 RW = "test_resume_with_other_weights_on_one_rank_fails_both"
+DV = "test_ranks_applying_other_gradients_stop_before_any_checkpoint"
 
 MUTANTS = (
     # #40 P3-2: non-main ranks store the raw metric object.
@@ -738,6 +739,18 @@ MUTANTS = (
     Mutant(RU, "        if self.grad_scaler is not None:\n            _admit_behaviour(self.grad_scaler,",
            "        if take and self.grad_scaler is not None:\n            _admit_behaviour(self.grad_scaler,", W1,
            expect=("test_grad_scaler_is_checked_when_the_step_is_skipped_too",)),
+    # DDP_RUNNER v1.5 (WP1): the shared states are compared at the end of every epoch
+    # and before every mid-epoch save; mid-epoch without the rank-local buffers.
+    Mutant(RU, '        self._agree_shared_state(f"end-of-epoch-{epoch}")\n', "", T2,
+           expect=(DV,)),
+    Mutant(RU, '            self._agree_shared_state(f"mid-epoch-save-step-{self.global_step}", buffers=False)\n',
+           "", T2, expect=(DV,)),
+    Mutant(RU, '            self._agree_shared_state(f"mid-epoch-save-step-{self.global_step}", buffers=False)\n',
+           '            self._agree_shared_state(f"mid-epoch-save-step-{self.global_step}", buffers=True)\n', T2,
+           expect=("test_mid_epoch_resume_reproduces_the_uninterrupted_run",)),
+    Mutant(RU, "            model_skip = frozenset(n for n, _ in self.raw_model.named_buffers())\n",
+           "            model_skip = frozenset(self.raw_model.state_dict())\n", T2,
+           expect=(DV,)),
 )
 
 
