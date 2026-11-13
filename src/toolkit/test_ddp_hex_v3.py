@@ -926,6 +926,37 @@ class TestBehaviourGuardR12(unittest.TestCase):
             self._refused(opt, r"replaced since import.*SGD\.step")
         self._admitted(opt)
 
+    def test_wrapper_with_foreign_builtins_is_refused(self) -> None:
+        # WP2 (v1.5): torch's profile_hook_step wrapper code in its own (SAME) globals
+        # dict around the held step itself -- a wrapper chain _wraps admits -- but
+        # made while __builtins__ pointed at a forged mapping (isinstance always
+        # true), which a function keeps for its lifetime
+        opt = self._opt()
+        current = torch.optim.SGD.__dict__["step"]
+        glb = current.__globals__
+        self.assertEqual(current.__code__.co_freevars, ("func",))
+        fake = dict(glb["__builtins__"] if isinstance(glb["__builtins__"], dict)
+                    else vars(glb["__builtins__"]))
+        fake["isinstance"] = lambda *a: True
+        saved = glb["__builtins__"]
+        glb["__builtins__"] = fake
+        try:
+            forged = types.FunctionType(current.__code__, glb, current.__name__, None,
+                                        (types.CellType(current),))
+        finally:
+            glb["__builtins__"] = saved
+        self.assertIs(forged.__globals__, current.__globals__)
+        self.assertIs(forged.__builtins__, fake)
+        self.assertIsNot(current.__builtins__, fake)
+        # negative control: the same wrapper made by torch itself (real builtins) passes
+        genuine = torch.optim.Optimizer.profile_hook_step(current)
+        self.assertIs(genuine.__code__, forged.__code__)
+        with mock.patch.object(torch.optim.SGD, "step", genuine):
+            self._admitted(opt)
+        with mock.patch.object(torch.optim.SGD, "step", forged):
+            self._refused(opt, r"replaced since import.*SGD\.step")
+        self._admitted(opt)
+
     def test_held_step_code_replaced_in_place_is_refused(self) -> None:
         opt = self._opt()
         held = self._held(torch.optim.SGD, "step")

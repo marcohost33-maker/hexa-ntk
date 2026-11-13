@@ -488,23 +488,31 @@ class _Graph:
 _GRAPH = _Graph()
 
 
-def _rule_env(code: Optional[types.CodeType], glb: Dict[str, Any]) -> Optional[Tuple[Any, ...]]:
-    """A wrapper code object with the names it loads from ``glb``, held like a function's."""
+def _rule_env(code: Optional[types.CodeType], owner: types.FunctionType) -> Optional[Tuple[Any, ...]]:
+    """A wrapper code object nested in ``owner`` with the names it loads from ``owner``'s
+    globals, held like a function's, and ``owner``'s builtins.
+
+    The builtins are part of what a wrapper runs with: a function made from the same
+    code in the same globals while ``__builtins__`` pointed elsewhere resolves
+    ``isinstance``/``len``/... through that other mapping (WP2, v1.5). A function's
+    ``__builtins__`` is fixed at creation and read-only, so identity suffices.
+    """
     if code is None:
         return None
+    glb = owner.__globals__
     names = _global_names(code)
     edges, reach = _GRAPH.hold([dict.get(glb, n, _MISSING) for n in names])
-    return (code, glb, tuple(zip(names, edges)), reach)
+    return (code, glb, tuple(zip(names, edges)), reach, owner.__builtins__)
 
 
 _PROFILE_HOOK_STEP = inspect.getattr_static(torch.optim.Optimizer, "profile_hook_step").__func__
 _DISABLE_CALL = _dynamo_eval_frame.DisableContext.__call__
 _SCHEDULER_INIT = torch.optim.lr_scheduler.LRScheduler.__init__
-_PROFILE_ENV = _rule_env(_nested_code(_PROFILE_HOOK_STEP.__code__, ("wrapper",)), _PROFILE_HOOK_STEP.__globals__)
-_DISABLE_ENV = _rule_env(_nested_code(_DISABLE_CALL.__code__, ("_fn",)), _DISABLE_CALL.__globals__)
+_PROFILE_ENV = _rule_env(_nested_code(_PROFILE_HOOK_STEP.__code__, ("wrapper",)), _PROFILE_HOOK_STEP)
+_DISABLE_ENV = _rule_env(_nested_code(_DISABLE_CALL.__code__, ("_fn",)), _DISABLE_CALL)
 _SCHED_STEP_ENV = _rule_env(
     _nested_code(_SCHEDULER_INIT.__code__, ("patch_track_step_called", "wrap_step", "wrapper")),
-    _SCHEDULER_INIT.__globals__,
+    _SCHEDULER_INIT,
 )
 
 
@@ -524,11 +532,12 @@ _WRAPPER_RULES = tuple(
 
 
 def _wrapper_cells(fn: Any, env: Optional[Tuple[Any, ...]]) -> Optional[Dict[str, Any]]:
-    """The closure of ``fn`` by name if ``fn`` is a function made from ``env``'s code in ``env``'s globals."""
+    """The closure of ``fn`` by name if ``fn`` is a function made from ``env``'s code in
+    ``env``'s globals with ``env``'s builtins."""
     if env is None or type(fn) is not types.FunctionType:
         return None
     code = env[0]
-    if fn.__code__ is not code or fn.__globals__ is not env[1]:
+    if fn.__code__ is not code or fn.__globals__ is not env[1] or fn.__builtins__ is not env[4]:
         return None
     if fn.__defaults__ is not None or fn.__kwdefaults__ is not None:
         return None

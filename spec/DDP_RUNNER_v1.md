@@ -66,6 +66,18 @@ collective on a broken group (red on 3b11876: held); the `GradScaler` check on a
 skipped step is pinned by a test; a 3-rank job covers a refusal on the middle rank;
 CI runs the multi-rank jobs under `TORCH_DISTRIBUTED_DEBUG=DETAIL` (every collective's
 sequence number, type, shapes and dtypes compared across ranks).
+**Version 1.5** (2026-11-13, WP1 of the A7 round-2 follow-up on #107): the shared-state
+agreement of section 6 also runs at the end of every epoch (after validation, before any
+checkpoint of that epoch) and before every mid-epoch save. DDP all-reduces the gradients,
+but nothing checked what each rank then does with them: a `clip_grad_norm_` that differs
+on one rank, or a DDP comm hook that scales one rank's gradients, trained the ranks apart
+to the end of the run, and rank 0 wrote its own weights as the run's (red on 47cda7f).
+Now every rank stops with `DistributedContractError` naming the component
+(`end-of-epoch-<e> state differs from rank 0 on at least one rank: model weights`) and no
+checkpoint of the differing state is written. At a mid-epoch save the model's and the EMA
+module's buffers are left out (rank-local between two validations, section 5); they are
+digested as skipped names, so the key set must still agree, and the EMA's `n_averaged`
+stays in. No change to what a healthy run computes.
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -434,7 +446,10 @@ config digest (section 2): the same `RunnerConfig` does not make the same state,
 an optimizer built with another learning rate or momentum, another scheduler, or a
 pre-loaded optimizer state or loss scale on one rank would diverge the ranks from the
 first step (`initial state differs from rank 0 on at least one rank: optimizer state,
-scheduler state` -- a learning rate also shows in the scheduler's `base_lrs`). The
+scheduler state` -- a learning rate also shows in the scheduler's `base_lrs`). Since
+v1.5 it also runs at the end of every epoch and before every mid-epoch save (buffers
+left out there, see the version note): every rank reaches both points, because the epoch
+ends and the step count are agreed, so the collectives keep one order on every rank. The
 optimizer/scheduler/scaler digest is canonical and exact and every value is typed:
 tensors (any device, any dtype incl. bf16/fp8/complex/bool) by dtype, shape and bytes,
 NumPy arrays by their dtype schema (v1.4, `_dtype_token`: byte order, kind and size;
@@ -539,8 +554,8 @@ before the gathers. Per agreed failure (error path only): one
 all-reduce of `world_size` int64 to name the failing ranks. Per validation:
 broadcast of every buffer of the model and the EMA copy;
 one all-reduce of `len(dataset)` int64 counts (8 bytes per sample), a few
-1-element flags, one all-reduce + broadcast of 4 float64. Once at construction and
-once per resume: a 1-element all-reduce (digest computation agreed), a 160-byte
+1-element flags, one all-reduce + broadcast of 4 float64. Once at construction, once
+per resume and (v1.5) once per epoch end and per mid-epoch save: a 1-element all-reduce (digest computation agreed), a 160-byte
 broadcast and a 5-element int64 all-reduce (the shared state, section 6). Their local cost is hashing: every rank copies its weights, EMA,
 optimizer and scheduler state to the CPU one tensor at a time and runs SHA-256 over
 it -- measured 2026-11-10 on the container CPU (torch 2.6.0, fp32, 50.4M parameters,

@@ -751,6 +751,10 @@ MUTANTS = (
     Mutant(RU, "            model_skip = frozenset(n for n, _ in self.raw_model.named_buffers())\n",
            "            model_skip = frozenset(self.raw_model.state_dict())\n", T2,
            expect=(DV,)),
+    # DDP_RUNNER v1.5 (WP2): a torch wrapper must also carry the builtins it was made with.
+    Mutant(RU, " or fn.__globals__ is not env[1] or fn.__builtins__ is not env[4]:\n",
+           " or fn.__globals__ is not env[1]:\n", "test_ddp_hex_v3.TestBehaviourGuardR12",
+           expect=("test_wrapper_with_foreign_builtins_is_refused",)),
 )
 
 
