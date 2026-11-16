@@ -240,3 +240,33 @@ covexit=0
 # python scripts/mutation_probe.py
 probeexit=0
 [MUTATION-PROBE] baseline green | 175/175 killed | PASS
+
+########################################################################################################
+# Check of the owner's HX102-03 head 41e0043 (Claude, Linux), 2026-11-09
+########################################################################################################
+# # head 41e0043, Linux, Python 3.12.3, torch 2.6.0+cu124, ruff 0.17.3
+# All checks passed!
+# [VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+# [ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+# unit exit=0
+# Ran 1114 tests in 48.877s
+# OK (skipped=7)
+#       1 skipped 'needs CUDA'
+#       6 skipped 'optional neuraloperator backend not installed'
+# probe exit=0
+# [MUTATION-PROBE] baseline green | 187/187 killed | PASS
+# -> M02 (POSIX-only test class, survives on Windows) is measured and killed on Linux: 187/187
+# Probe gap behind the 40ff255 false kill: run_mutant counted every red run as KILLED. Fix: static_invalid()
+#   (module parses, every self.<name> of a replacement defined) -> INVALID before running; catalogue checked in
+#   the unit gate. Applied to the 495ae48 catalogue + runner it flags exactly: M162 self._scaler_active.
+## End run (working tree of this commit)
+# All checks passed!
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+exit=0
+Ran 1116 tests in 48.049s
+OK (skipped=7)
+TOTAL                                           6145    250   2320    193    95%
+covexit=0
+# full probe not re-run: static_invalid returns None for all 187 current mutants (test above), so every
+#   classification equals the 187/187 run on 41e0043
