@@ -162,8 +162,15 @@ def finalize_bundle(
 def validate_bundle(
     bundle_dir: str | Path,
     *,
-    expected_source_sha: str | None = None,
+    expected_source_sha: str | None,
 ) -> dict[str, Any]:
+    """Validate a committed bundle; ``source_sha_verified`` says whether its source was bound.
+
+    ``expected_source_sha`` has no default (2026-11-10, internal NR SF-R46-01: an
+    optional checker whose absence skips the guard is fail-open): a caller states
+    the source it expects, or passes ``None`` and gets ``source_sha_verified=False``
+    instead of a silent ``valid`` for a bundle of any source.
+    """
     bundle_path = Path(bundle_dir)
     marker_path = bundle_path / "COMMITTED.json"
     manifest_path = bundle_path / "manifest.json"
@@ -229,6 +236,7 @@ def validate_bundle(
             raise RuntimeError(f"checkpoint digest mismatch: {entry['path']}")
     return {
         "valid": True,
+        "source_sha_verified": expected_source_sha is not None,
         "manifest": manifest,
         "manifest_sha256": actual_manifest_sha,
     }

@@ -86,6 +86,18 @@
     the D4 criterion. Which budget D4 uses, and whether a frozen order is acceptable, stay open owner
     questions; the preregistration is not changed.
 
+- **Amendment 2026-11-10 (config binding is fail-closed).** `predict_gino(model, lattice, u0, config,
+  *, allow_unbound=False)` requires the digest of `config` bound to the model by `build_gino`
+  (attribute `_hexantk_gino_config_digest`), found on the model or on any submodule, so a wrapper
+  (DistributedDataParallel, a caller's module) keeps the binding of the model inside it; two different
+  bindings in one model are refused. A model without a binding (a test double, a GINO built outside
+  `build_gino`) is refused unless the caller passes `allow_unbound=True` and vouches for its config.
+  Before, an unbound model passed silently, so a run of a foreign GINO (other modes, channels or radius)
+  could be attributed to any config's digest -- internal NR SF-R46-01 ("an optional checker whose absence
+  skips the guard is fail-open"; a docstring does not make it safe in a public API). Measured red on
+  0b3f21d with a foreign model under the default config; with the real neuraloperator 2.0.0 backend the
+  existing wrapper test passes without `allow_unbound`, five dtype tests on test doubles pass it explicitly.
+
 ## Testing and falsification
 
 - Construct a config with `(R=128, m=63, C=512, L=16)` without allocating neuraloperator; it MUST be rejected due to the combined budget even though every *individual* ceiling passes.
