@@ -695,6 +695,23 @@ intended false refusal). `test_ddp_hex_v3.py`, `test_runner_hex_v3.py`,
 `test_mid_epoch_resume_hex_v3.py` at c06834b: 233 passed, 298 subtests passed. The full
 mutation probe (253) has not been run for v1.5.
 
+DETAIL boundary (007acc2 R14 section 6, 2026-11-16, gate log
+`results/2026-11-16_r14-ddp-detail-isolation.log`): the SIGSEGV R14 saw under
+`TORCH_DISTRIBUTED_DEBUG=DETAIL` (Python 3.13.5, torch 2.10.0) is torch's, not the runner's.
+A minimal `DDP(nn.Linear)` without any Hexa code crashes in `_ddp_init_helper` under DETAIL
+on Linux torch 2.10.0 (exit -11 on both ranks) and Windows torch 2.12.1 (0xC0000005), and runs
+under OFF and INFO; plain gloo collectives run under all three. Cause, read in torch's
+`c10d/logger.cpp` (`Logger::set_env_variables`, identical in v2.6.0, v2.10.0 and main): it
+`static_cast`s the GLOO backend to `ProcessGroupGloo` and reads `getNumThreads()`, but under
+DETAIL that backend is a `_ProcessGroupWrapper` (measured: class before DDP construction).
+On torch 2.6.0 the same read is undefined but survives: DDP logs `gloo_num_threads` 0 and
+65609 instead of 2. CI therefore keeps torch 2.6.0 for the DETAIL step; a torch bump turns
+that step red (shown on Windows torch 2.12.1: 9/9 three-rank tests fail with the rank exit
+code), it does not pass silently. The step now also proves the order check is active:
+`TestCollectiveOrderCheck` (2 ranks) and `...ThreeRanks` (the middle rank deviates) assert the
+wrapped backend, "Detected mismatch between collectives" on every rank within 15 s, and a
+matching all-reduce afterwards; without DETAIL they are skipped.
+
 v1.4 (R12 phase 2, 2026-11-12, Linux container, Python 3.12, torch 2.6.0): six new or
 changed tests, all red against 4e6bcf0 (run there with the new test file and a
 two-name import shim, the shim only in a scratch worktree): the structured-dtype
@@ -784,7 +801,8 @@ Not covered (open):
   scale never counts, so a run whose scale keeps dropping skips about 165 steps from
   65536 before the count starts; with `max_consecutive_skips=0` nothing stops it.
 - **NCCL/CUDA, more than 3 ranks, more than one host**: not run (2 and 3 gloo ranks
-  on one host are). **AMP under DDP** (v1.3, partly): the runner builds a
+  on one host are; no GPU host exists for this repo, NCCL is not simulated).
+  `TORCH_DISTRIBUTED_DEBUG=DETAIL` with DDP is bound to torch 2.6.0 (DETAIL boundary above). **AMP under DDP** (v1.3, partly): the runner builds a
   `GradScaler` and autocast only on CUDA; the 2-rank gloo job injects
   `torch.amp.GradScaler("cpu", init_scale=1024, growth_interval=2)` on every rank.
   Measured: both ranks end with bitwise equal weights, EMA and scale, equal to the

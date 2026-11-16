@@ -111,4 +111,13 @@ jobs:
         working-directory: src/toolkit
         env:
           TORCH_DISTRIBUTED_DEBUG: DETAIL
-        run: python -m unittest test_ddp_hex_v3.TestWorldSizeOne test_ddp_hex_v3.TestTwoRanks test_ddp_hex_v3.TestThreeRanks
+        # TestCollectiveOrderCheck*: proves the check is really active in every rank
+        # (wrapped backend, a deviating all-reduce refused at once on 2 and 3 ranks);
+        # outside this step it is skipped. torch 2.6.0 is the version where DDP construction
+        # survives DETAIL: on 2.10 (Linux) and 2.12 (Windows) torch's own DDP logger segfaults
+        # there (results/2026-11-16_r14-ddp-detail-isolation.log); a bump then turns this
+        # step red, it does not pass silently.
+        run: >-
+          python -m unittest test_ddp_hex_v3.TestWorldSizeOne test_ddp_hex_v3.TestTwoRanks
+          test_ddp_hex_v3.TestThreeRanks test_ddp_hex_v3.TestCollectiveOrderCheck
+          test_ddp_hex_v3.TestCollectiveOrderCheckThreeRanks
