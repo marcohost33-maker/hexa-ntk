@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import functools
 import gc
 import json
 import math
@@ -41,6 +42,7 @@ import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.optim.optimizer as _optim_impl
 import torch.optim.sgd as _sgd_impl
+import runner_hex_v3 as _runner_mod
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset, DistributedSampler, IterableDataset
 
@@ -57,6 +59,9 @@ from ddp_hex_v3 import (
 from failure_signature_hex_v3 import FailureSignature
 from operator_adapter_hex_v3 import OperatorAdapterV3
 from runner_hex_v3 import (
+    _CARRIER,
+    _GRAPH,
+    _Graph,
     _HELD,
     _OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED,
     _PINS_MISSING,
@@ -67,7 +72,11 @@ from runner_hex_v3 import (
     HexTrainingRunner,
     RunnerConfig,
     _admit_behaviour,
+    _class_drift,
     _comparable_state,
+    _missing_pins,
+    _node_problem,
+    _snapshot,
     _DIGEST_SCHEMA,
     _module_digest,
     _state_digest,
@@ -1069,6 +1078,202 @@ class TestBehaviourGuardR12(unittest.TestCase):
                                 or getattr(cls.__dict__["step"].__closure__[0].cell_contents,
                                            "_torchdynamo_disable", False))
                 self._admitted(_build_optimizer(cls, 0.1)[1])
+
+
+class TestCarriersWP3(unittest.TestCase):
+    """WP3 (v1.6): an object that calls a function it carries -- functools.partial,
+    partialmethod, an lru_cache wrapper -- keeps its identity while what it carries is
+    replaced in place. The graph holds the carrier AND its parts; a behaviour-carrying
+    object of a kind it can neither follow nor treat as opaque by design is listed and
+    refuses every admission."""
+
+    @staticmethod
+    def _fn(tag: int) -> Callable[..., Any]:
+        def carried(*args: Any, **kwargs: Any) -> int:
+            return tag
+        return carried
+
+    @staticmethod
+    def _other_code() -> types.CodeType:
+        """Another code object with the free variable of ``_fn``'s function (it returns ``-tag``)."""
+        tag = 0
+
+        def other(*args: Any, **kwargs: Any) -> int:
+            return -tag
+        return other.__code__
+
+    @staticmethod
+    def _problems(graph: _Graph, reach: List[int]) -> List[str]:
+        return sorted(p for p in (_node_problem(graph.nodes[i]) for i in reach) if p is not None)
+
+    def _held(self, root: Any) -> Any:
+        graph = _Graph()
+        _, reach = graph.hold([root])
+        self.assertEqual(graph.unheld, [])
+        self.assertEqual(self._problems(graph, reach), [])  # positive control: untouched
+        return graph, reach
+
+    def test_real_graph_holds_every_carrier_and_has_none_unheld(self) -> None:
+        self.assertEqual(_GRAPH.unheld, [])
+        self.assertEqual(_PINS_MISSING, [])
+        carriers = [node for node in _GRAPH.nodes.values() if node[1] is _CARRIER]
+        # torch 2.6.0: the only carrier in the held graph is dynamo's lru_cache'd _lazy_import
+        self.assertTrue(carriers)
+        for node in carriers:
+            with self.subTest(carrier=type(node[0]).__qualname__):
+                self.assertIsNone(_node_problem(node))
+                kind, wrapped = node[2]
+                self.assertEqual(kind, "fn")  # the wrapped function is followed, not an identity leaf
+                self.assertIn(id(wrapped), _GRAPH.nodes)
+
+    def test_partial_function_replaced_in_place_is_a_change(self) -> None:
+        part = functools.partial(self._fn(1), 2, key=3)
+        graph, reach = self._held(part)
+        self.assertEqual(part(), 1)
+        part.__setstate__((self._fn(7), part.args, part.keywords, None))
+        self.assertEqual(part(), 7)  # premise: same object, other behaviour
+        self.assertEqual(self._problems(graph, reach), ["func"])
+
+    def test_partial_arguments_replaced_in_place_are_a_change(self) -> None:
+        part = functools.partial(lambda *a, **k: (a, k), 2, key=3)
+        graph, reach = self._held(part)
+        part.__setstate__((part.func, (5,), part.keywords, None))
+        self.assertEqual(part(), ((5,), {"key": 3}))
+        self.assertEqual(self._problems(graph, reach), ["args"])
+
+    def test_partial_keywords_changed_in_place_are_a_change(self) -> None:
+        cases = {
+            "value replaced": lambda kw: kw.__setitem__("key", 9),
+            "entry added": lambda kw: kw.__setitem__("other", 1),
+            "entry removed": lambda kw: kw.pop("key"),
+        }
+        for name, change in cases.items():
+            with self.subTest(case=name):
+                part = functools.partial(lambda **k: k, key=3)
+                graph, reach = self._held(part)
+                held_dict = part.keywords
+                change(part.keywords)
+                self.assertIs(part.keywords, held_dict)  # premise: the dict keeps its identity
+                self.assertEqual(self._problems(graph, reach), ["keywords"])
+        part = functools.partial(lambda **k: k, key=3)
+        graph, reach = self._held(part)
+        part.__setstate__((part.func, part.args, {"key": 3}, None))  # an equal dict, another object
+        self.assertEqual(self._problems(graph, reach), ["keywords"])
+
+    def test_function_carried_by_a_partial_changed_in_place_is_a_change(self) -> None:
+        for where in ("func", "args", "keywords"):
+            with self.subTest(carried_as=where):
+                carried = self._fn(1)
+                positional = {"func": (carried,), "args": (len, carried), "keywords": (len,)}[where]
+                part = functools.partial(*positional, **({"key": carried} if where == "keywords" else {}))
+                graph, reach = self._held(part)
+                self.assertIn(id(carried), reach)
+                carried.__code__ = self._other_code()
+                self.assertEqual(self._problems(graph, reach), ["__code__"])
+
+    def test_partialmethod_parts_rebound_are_a_change(self) -> None:
+        for attr, value in (("func", self._fn(7)), ("args", (5,)), ("keywords", {"key": 3})):
+            with self.subTest(attr=attr):
+                method = functools.partialmethod(self._fn(1), 2, key=3)
+                graph, reach = self._held(method)
+                setattr(method, attr, value)
+                self.assertEqual(self._problems(graph, reach), [attr])
+        method = functools.partialmethod(self._fn(1), 2, key=3)
+        graph, reach = self._held(method)
+        method.keywords["key"] = 9
+        self.assertEqual(self._problems(graph, reach), ["keywords"])
+
+    def test_function_behind_an_lru_cache_wrapper_changed_in_place_is_a_change(self) -> None:
+        wrapped = self._fn(1)
+        cached = functools.lru_cache(maxsize=None)(wrapped)
+        graph, reach = self._held(cached)
+        self.assertIn(id(wrapped), reach)
+        wrapped.__code__ = self._other_code()
+        self.assertEqual(cached(), -1)  # premise: the cache wrapper runs the changed code
+        self.assertEqual(self._problems(graph, reach), ["__code__"])
+
+    def test_carrier_that_carries_itself_is_held_without_recursion(self) -> None:
+        part = functools.partial(self._fn(1))
+        part.__setstate__((part.func, (part,), {"me": part}, None))
+        method = functools.partialmethod(self._fn(1))
+        method.func = method
+        cached = functools.lru_cache(maxsize=None)(self._fn(1))
+        cached.__wrapped__ = cached
+        for root in (part, method, cached):
+            with self.subTest(carrier=type(root).__qualname__):
+                graph = _Graph()
+                _, reach = graph.hold([root])  # must end (007acc2 R2-CF64-03: RecursionError there)
+                self.assertIn(id(root), reach)
+                self.assertEqual(self._problems(graph, reach), [])
+
+    def test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not(self) -> None:
+        class Callable_:
+            def __call__(self) -> int:
+                return 1
+
+        class Descriptor:
+            def __get__(self, obj: Any, owner: Any = None) -> int:
+                return 1
+
+        class PartialSubclass(functools.partial):  # may override __call__: not the held type
+            pass
+
+        class PropertySubclass(property):  # may override __get__
+            pass
+
+        unknown = (Callable_(), Descriptor(), PartialSubclass(len), PropertySubclass())
+        for value in unknown:
+            with self.subTest(unheld=type(value).__qualname__):
+                graph = _Graph()
+                graph.hold([value])
+                self.assertEqual(len(graph.unheld), 1)
+                self.assertIs(graph.unheld[0], value)
+        opaque = (len, int, str.join, [].append, int.__add__, type.__dict__["__dict__"], Dict, Optional, List[int],
+                  list[int], property(len), staticmethod(len), classmethod(len), unittest.TestCase, 3, "x", None,
+                  functools.partial(len), functools.partialmethod(len), functools.lru_cache(maxsize=None)(len))
+        graph = _Graph()
+        graph.hold(list(opaque))
+        self.assertEqual(graph.unheld, [])
+
+    def test_unheld_carrier_refuses_every_admission(self) -> None:
+        opt = torch.optim.SGD(nn.Linear(2, 1).parameters(), lr=0.1)
+        _admit_behaviour(opt, _TRUSTED_OPTIMIZERS, "component", tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
+
+        class Callable_:
+            def __call__(self) -> int:
+                return 1
+
+        # _missing_pins() is evaluated once at import (_PINS_MISSING). Called again after
+        # torch.compile ran in this process it also lists the module functions dynamo has
+        # wrapped since, so only what the unheld carrier adds is compared.
+        before = _missing_pins()
+        with mock.patch.object(_GRAPH, "unheld", [Callable_()]):
+            missing = [entry for entry in _missing_pins() if entry not in before]
+        self.assertEqual(len(missing), 1)
+        self.assertRegex(missing[0], r"^<unheld carrier: .*Callable_>$")
+        with mock.patch.object(_runner_mod, "_PINS_MISSING", missing):
+            with self.assertRaisesRegex(DistributedContractError, r"unheld carrier"):
+                _admit_behaviour(opt, _TRUSTED_OPTIMIZERS, "component",
+                                 tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
+        _admit_behaviour(opt, _TRUSTED_OPTIMIZERS, "component", tolerated=_OPTIMIZER_INSTANCE_OVERRIDES_TOLERATED)
+
+    def test_class_drift_reports_a_partial_changed_in_place(self) -> None:
+        # the production path (_snapshot -> _class_drift) on a class whose method is a partial
+        part = functools.partial(self._fn(1), 2)
+        holder = type("Holder", (), {"method": staticmethod(part), "bound": functools.partialmethod(self._fn(3))})
+        before = set(_GRAPH.nodes)
+        try:
+            with mock.patch.dict(_HELD, {holder: _snapshot(holder)}):
+                self.assertEqual(_GRAPH.unheld, [])
+                self.assertEqual(_class_drift(holder), [])
+                part.__setstate__((self._fn(7), part.args, part.keywords, None))
+                self.assertEqual(holder.method(), 7)
+                drift = _class_drift(holder)
+                self.assertEqual(len(drift), 1)
+                self.assertRegex(drift[0], r"functools\.partial func \(changed in place\)")
+        finally:
+            for key in set(_GRAPH.nodes) - before:
+                del _GRAPH.nodes[key]
 
 
 class TestWorldSizeOne(unittest.TestCase):
@@ -3242,8 +3447,13 @@ class TestTwoRanks(_MultiRankJob):
 
     def test_resume_with_other_weights_on_one_rank_fails_both(self) -> None:
         self.assertEqual(self._errors("resume_other_weights_on_rank1"), ["DistributedContractError"] * 2)
+        # refused AT the resume, before any step. Since v1.5 the end-of-epoch agreement
+        # would also stop this run, an epoch later and with a message that also ends in
+        # ": model weights" (full probe at 347abaf: the mutant without the post-resume
+        # agreement was KILLED_ELSEWHERE, this test stayed green).
         for res in self.results:
-            self.assertIn(": model weights", res.get("resume_other_weights_on_rank1", {}).get("message", ""))
+            self.assertEqual(res.get("resume_other_weights_on_rank1", {}).get("message", ""),
+                             "resumed state differs from rank 0 on at least one rank: model weights")
 
     def test_resume_with_other_shared_state_on_one_rank_fails_both(self) -> None:
         # equal weights, another optimizer / GradScaler / EMA state on rank 1: red
@@ -3257,7 +3467,7 @@ class TestTwoRanks(_MultiRankJob):
             for rank, res in enumerate(self.results):
                 with self.subTest(name, rank=rank):
                     message = res.get(name, {}).get("message", "")
-                    self.assertTrue(message.endswith(f"on at least one rank: {part}"), message)
+                    self.assertEqual(message, f"resumed state differs from rank 0 on at least one rank: {part}")
 
     def test_other_optimizer_or_scheduler_at_construction_fails_both(self) -> None:
         # same RunnerConfig, another learning rate / scheduler on rank 1: red before
