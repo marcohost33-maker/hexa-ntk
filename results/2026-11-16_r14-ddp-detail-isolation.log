@@ -64,3 +64,9 @@ TORCH_DISTRIBUTED_DEBUG=DETAIL python -m unittest test_ddp_hex_v3.TestWorldSizeO
   rc=0  Ran 77 tests in 56.776s  OK
 Scope: 2/3 gloo ranks on one CPU host. GPU, NCCL, more ranks/hosts and a fault matrix beyond the injected
 scenarios: NOT run (no GPU host) -- boundary, not simulated.
+
+== 6. Probe matrix (scripts/oracles/ddp_detail_isolation_probe.py from tree a55c7f5, --toolkit /work/src/toolkit), Linux
+torch 2.6.0+cpu: gloo DETAIL w2 [0,0]; gloo DETAIL w3 [0,0,0]; ddp INFO w2 [0,0]; ddp DETAIL w3 [0,0,0];
+                 runner OFF w2 [0,0]; runner DETAIL w2 [0,0]; runner DETAIL w3 [0,0,0]   (all rc=0)
+torch 2.10.0+cpu: gloo DETAIL w2 [0,0]; gloo DETAIL w3 [0,0,0] (rc=0); remaining 5 cases NOT_RUN (590 s container
+                 timeout, ~30-50 s per torch import on this host) -- not green. The 2.10.0 DDP DETAIL crash is section 1.
