@@ -22,6 +22,28 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **DDP_RUNNER v1.6: die offenen Punkte von #107 (2026-11-16, Linux-Container, Python 3.12.3, torch 2.6.0
+  als PyPI-CUDA-Wheel 2.6.0+cu124 auf der CPU -- der CPU-Wheel-Index war aus dem Container nicht erreichbar --,
+  numpy 2.5.3).** (1) _Volle Mutationsprobe_ am Kopf von #107 (347abaf, 256 Mutanten): 255/256, exit 1. M193
+  (Abgleich nach dem Resume entfernt) war KILLED_ELSEWHERE: seit v1.5 stoppt der Epochenend-Abgleich einen
+  Rank mit anderen Gewichten ebenfalls, eine Epoche spaeter, und `test_resume_with_other_weights_on_one_rank_fails_both`
+  nahm beide Meldungen an. Beide Resume-Tests verlangen jetzt die Meldung des Resume; M193 KILLED durch beide.
+  (2) _WP3_: der Verhaltensgraph haelt Traeger (`functools.partial`, `partialmethod`, `lru_cache`-Wrapper) mit
+  ihren Teilen; ein unbekannter Traeger verweigert jede Zulassung. 11 Tests, alle rot an 347abaf; 11 Mutanten,
+  alle KILLED durch ihre benannten Tests. Zensus torch 2.6.0: 312 Funktionen, 2 Traeger, 0 partials, 0 ungehalten.
+  (3) _Crash-Matrix am Original-Runner_ (007acc2 A7 R2-HX107-01, `scripts/oracles/ddp_crash_matrix_oracle.py`):
+  2 und 3 gloo-Ranks, ein Rank stirbt (`os._exit`) oder haengt an 7 Stellen der zweiten Epoche, danach Resume des
+  ganzen Jobs. 39/39 Faelle halten I1-I4 (kein Haenger, kein Erfolg eines Ueberlebenden, Checkpoint ladbar und aus
+  einer zulaessigen Epoche, Resume gleich dem ununterbrochenen Lauf), ohne und mit `TORCH_DISTRIBUTED_DEBUG=DETAIL`.
+  **Befund (Grenze, kein Runner-Fehler):** mit 3 Ranks ist ein fortgesetzter Lauf nicht bitgleich zum
+  ununterbrochenen (max. 1.4e-15 relativ; die Ranks untereinander bitgleich; mit 2 Ranks 16/16 bitgleich). Ursache
+  gemessen: gloos All-Reduce rundet je nach Pufferposition anders (3 Ranks: 4 verschiedene Ergebnisse an 6
+  Positionen, 2 Ranks: 1), und DDP baut seine Gradienten-Buckets nach der ersten Iteration um. In der Spec als
+  Grenze benannt (Abschnitt 8). Nicht gemessen: NCCL/CUDA, mehrere Hosts, Crash in backward.
+  Volle Mutationsprobe am neuen Stand 748326d: 267/267, exit 0.
+  _Evidenz:_ `results/2026-11-16_ddp-v1-6_local-gate.log`, `results/2026-11-16_full-probe-347abaf.log`,
+  `results/2026-11-16_full-probe-748326d.log`,
+  `results/2026-11-16_ddp-crash-matrix_gloo.json`, `results/2026-11-16_ddp-crash-matrix_gloo-detail.json`.
 - [x] **Internes NR-Wissen auf hexa-ntk uebertragen (2026-11-10, Linux-Container, Python 3.12.3, torch 2.6.0,
   neuraloperator 2.0.0).** Quellen: 007acc2-Wissens- und Auditdokumente (selbst als REVIEW_REQUIRED markiert,
   daher nichts ungeprueft uebernommen) und das NR-Register. Drei Regeln gegen das Repo geprueft:

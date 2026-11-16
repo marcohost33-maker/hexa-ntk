@@ -73,6 +73,7 @@ CS = "test_runner_hex_v3.TestConsecutiveSkips"
 SD = "test_ddp_hex_v3.TestResumeStateDigest"
 CS8 = "test_ddp_hex_v3.TestComparableState"
 W1 = "test_ddp_hex_v3.TestWorldSizeOne"
+W3 = "test_ddp_hex_v3.TestCarriersWP3"
 _SHADOW_SITE = ("        if isinstance(attr, str) and attr not in tolerated"
                 " and _is_method(inspect.getattr_static(cls, attr, None))\n")
 RS = "test_resume_with_other_shared_state_on_one_rank_fails_both"
@@ -766,6 +767,38 @@ MUTANTS = (
     Mutant(RU, "for n, _ in self.ema_model.module.named_buffers(remove_duplicate=False))",
            "for n, _ in self.ema_model.module.named_buffers())", W1,
            expect=("test_buffer_aliases_are_left_out_of_the_buffer_free_digest",)),
+    # DDP_RUNNER v1.6 (WP3): carriers (partial, partialmethod, lru_cache wrapper) are held
+    # with what they carry; an unknown carrier kind refuses every admission.
+    Mutant(RU, "    if not _edge_intact(func_edge, func):\n", "    if False:\n", W3,
+           expect=("test_partial_function_replaced_in_place_is_a_change",
+                   "test_partialmethod_parts_rebound_are_a_change")),
+    Mutant(RU, "    if now_args is not args:\n", "    if False:\n", W3,
+           expect=("test_partial_arguments_replaced_in_place_are_a_change",)),
+    Mutant(RU, "    if now_kwd is not kwd or (type(kwd) is dict and (\n",
+           "    if now_kwd is not kwd or (False and (\n", W3,
+           expect=("test_partial_keywords_changed_in_place_are_a_change",)),
+    Mutant(RU, "    if now_kwd is not kwd or (type(kwd) is dict and (\n", "    if (type(kwd) is dict and (\n", W3,
+           expect=("test_partial_keywords_changed_in_place_are_a_change",)),
+    Mutant(RU, "                stack.append(func[1])\n", "", W3,
+           expect=("test_function_carried_by_a_partial_changed_in_place_is_a_change",
+                   "test_function_behind_an_lru_cache_wrapper_changed_in_place_is_a_change")),
+    Mutant(RU, "                stack.extend(v for _, v in args)\n                stack.extend(e[1] for _, e in kws)\n"
+               "                continue\n", "                continue\n", W3,
+           expect=("test_function_carried_by_a_partial_changed_in_place_is_a_change",)),
+    Mutant(RU, "        if _is_behaviour(value) and not _opaque(value) and not any(value is u for u in self.unheld):\n",
+           "        if False:\n", W3,
+           expect=("test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not",)),
+    Mutant(RU, "    if kind is functools.partial:\n", "    if isinstance(value, functools.partial):\n", W3,
+           expect=("test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not",)),
+    Mutant(RU, "            or any(type(value) is d for d in _DESCRIPTORS) or isinstance(value, _OPAQUE_TYPES))",
+           "            or isinstance(value, _DESCRIPTORS) or isinstance(value, _OPAQUE_TYPES))", W3,
+           expect=("test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not",)),
+    Mutant(RU, "    for value in _GRAPH.unheld:\n", "    for value in ():\n", W3,
+           expect=("test_unheld_carrier_refuses_every_admission",)),
+    Mutant(RU, "            return (dict.get(attrs, \"__wrapped__\", _MISSING), (), None)\n",
+           "            return (_MISSING, (), None)\n", W3,
+           expect=("test_function_behind_an_lru_cache_wrapper_changed_in_place_is_a_change",
+                   "test_real_graph_holds_every_carrier_and_has_none_unheld")),
 )
 
 

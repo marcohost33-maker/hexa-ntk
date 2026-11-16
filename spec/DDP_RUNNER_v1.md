@@ -85,6 +85,22 @@ first: red on aac364f, the alias kept its rank-local statistics in the digest); 
 structured NumPy dtype with a non-`str` field title is refused (`TypeError`): NumPy admits
 any object as a title and `repr()` of a `frozenset` follows `PYTHONHASHSEED`, so equal
 states digested differently on two ranks (red on aac364f).
+**Version 1.6** (2026-11-16, the open points of #107): **WP3**, the behaviour graph of
+section 6 holds carriers -- `functools.partial`, `functools.partialmethod` and an
+`lru_cache` wrapper -- together with what they carry. A carrier keeps its identity while
+its parts are replaced in place (`partial.__setstate__`, a mutable keywords dict, the
+plain attributes of a `partialmethod`), and until v1.5 it was an identity leaf: red on
+347abaf, a partial whose function was swapped passed, and the function behind an
+`lru_cache` wrapper was not held at all. A behaviour-carrying object of any other kind
+that is not opaque by design refuses every admission (fail-closed; torch 2.6.0 has
+none). **Crash matrix** (section 8): the runner itself as a 2- and 3-rank gloo job with
+one rank killed or stalled at seven points, then the whole job resumed -- 39 cases, plain
+and under `TORCH_DISTRIBUTED_DEBUG=DETAIL`. It found one limit, now named: with 3 or more
+ranks a resumed run is not bitwise the uninterrupted one (section 8). **Full mutation
+probe** at 347abaf: 255/256, one mutant KILLED_ELSEWHERE -- since v1.5 a rank resumed
+with other weights was also stopped by the end-of-epoch agreement, an epoch later, and
+the test accepted either message; the test now pins the refusal to the resume. No change
+to what a healthy run computes.
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -526,7 +542,22 @@ registered optimizer step pre/post hook, global or on the instance, is refused. 
 graph must hold `SGD._init_group`, `Optimizer._optimizer_step_code`,
 `Optimizer.profile_hook_step`, `GradScaler._maybe_opt_step` and
 `torch.optim.sgd.{sgd,_single_tensor_sgd,_multi_tensor_sgd,_fused_sgd}` (`_REQUIRED_PINS`),
-else every admission is refused. The check runs at the shared-state agreement AND
+else every admission is refused. **Carriers (WP3, v1.6):** an object that calls a
+function it carries is held by identity AND by its parts -- `functools.partial` (function,
+the positional tuple by identity, the keywords dict by identity and entry by entry),
+`functools.partialmethod` (the same three attributes, read from the instance `__dict__`)
+and an `lru_cache` wrapper (`__wrapped__`); exactly these types, a subclass is no known
+carrier. The functions they carry are followed like any other; carriers are queued, not
+recursed into, so a partial that carries itself ends (007acc2 R2-CF64-03 was a
+`RecursionError` in another codebase). Every other behaviour-carrying object the graph
+reaches must be of a kind that is opaque by design -- a class, a C function or C
+descriptor, a typing alias, or a `staticmethod`/`classmethod`/`property`/bound method of
+exactly that type (their functions are followed). A callable instance or descriptor of
+any other type is listed (`_GRAPH.unheld`) and refuses every admission, because its
+type's `__call__`/`__get__` and its attributes decide what runs and nothing holds them
+(007acc2 R2-CF64-01: no implicit identity-only pass). Census at torch 2.6.0, Python
+3.12: 312 functions and 2 carriers held (both dynamo's `lru_cache`d `_lazy_import`), 0
+partials, 0 unheld. The check runs at the shared-state agreement AND
 immediately before every optimizer step of a distributed run (`_admit_step_behaviour`).
 The refusal is a
 `DistributedContractError` inside the agreed digest computation, so a refusal on one
@@ -694,7 +725,71 @@ the real update path; replacing `_apply_update` on one rank bypassed the new
 collective, a schedule no real run has. The failing-step harness injects at the step
 call (`_step_optimizer`) after the agreement.
 
+v1.6 (2026-11-16, Linux container, Python 3.12.3, torch 2.6.0 CUDA wheel run on the CPU
+-- `torch.__version__` 2.6.0+cu124, no GPU; the CPU wheel index was not reachable from
+this container -- numpy 2.5.3; gate log `results/2026-11-16_ddp-v1-6_local-gate.log`).
+WP3: 11 tests, all red against 347abaf (run there with the new test file and a shim for
+the three new names, in a scratch worktree only): function, arguments and keywords of a
+partial replaced in place (`__setstate__`, the dict in place: value replaced, entry
+added, entry removed, an equal dict as another object), a function carried as function,
+argument or keyword changed in place, the three attributes of a `partialmethod`
+rebound, the function behind an `lru_cache` wrapper, carriers that carry themselves,
+the unknown kinds listed and the opaque kinds not, the refusal of every admission, and
+the production path (`_snapshot`, `_class_drift`) on a class whose method is a partial.
+11 new mutants, each KILLED by its named tests.
+
+**Crash matrix** (`scripts/oracles/ddp_crash_matrix_oracle.py`, 007acc2 A7 R2-HX107-01;
+`results/2026-11-16_ddp-crash-matrix_gloo.json` and `..._gloo-detail.json`). The real
+runner (DDP model, SGD with momentum, StepLR, EMA, shuffling `DistributedSampler`, exact
+validation sampler, 4 epochs) as a 2- and a 3-rank gloo job on one host, process-group
+timeout 15 s. One rank dies without cleanup (`os._exit`) at one of seven points of the
+second epoch -- before a step, after backward before the step agreement, after the step
+agreement before the optimizer step, in validation, before the end-of-epoch state
+agreement, inside the agreed checkpoint save before and after the write -- every rank in
+turn (35 cases), or stalls (alive, silent; 4 cases). Checked per case: (I1) every
+surviving rank ends by itself, none has to be killed; (I2) every surviving rank ends in
+an exception, none reports a completed run; (I3) the `resume_last.pt` left behind loads
+and is from an epoch every rank had finished or rank 0 was just writing; (I4) the whole
+job restarted in the same output directory from that checkpoint runs to the end, the
+ranks bitwise equal to each other and equal to the uninterrupted run. Result: 39/39
+cases hold I1-I4, plain and under `TORCH_DISTRIBUTED_DEBUG=DETAIL`. A dead peer is seen
+by the survivors within 0.13 s (gloo `RuntimeError`, raised, not held), a stalled one at
+the 15 s timeout. Sensitivity control: a survivor that stopped early must not carry the
+reference's final weights. A fault that does not fire is a failure of the oracle.
+
+**Limit found by the matrix: with 3 or more ranks a resumed run is not bitwise the
+uninterrupted run.** With 2 ranks it is (16/16 recovered runs bitwise). With 3 ranks
+every recovered run differed from the uninterrupted one by at most 1.4e-15 relative
+(weights and EMA; learning rate and step count equal; the ranks bitwise equal to each
+other); every one of these resumes starts from an epoch-boundary checkpoint. Cause, measured by the oracle's
+premise probe in every run: gloo's all-reduce adds the ranks in an order that depends
+on where a value lies in the buffer (the same three per-rank values at 6 buffer
+positions: 4 distinct results with 3 ranks, 1 with 2 ranks, where the sum is
+commutative), and DDP rebuilds its gradient buckets after the first iteration of a
+process (the gradient of iteration 2-4 at the same weights and data differs from
+iteration 1 by 3.4e-16 relative with 3 ranks, not at all with 2). The first step after
+a resume therefore all-reduces in another layout than the same step of the
+uninterrupted job. This is a property of DDP + gloo, not of the checkpoint; the
+contract for 3 or more ranks is equality within rounding (the oracle checks 1e-9),
+bitwise equality between the ranks, and bitwise equality of two runs with the same
+restart history. Section 6's 2-rank resume evidence is unaffected. Not measured: NCCL
+(its reduction order is its own).
+
+**Full mutation probe** (`results/2026-11-16_full-probe-347abaf.log`): at 347abaf
+255/256, exit 1 -- M193 (the post-resume agreement removed) KILLED_ELSEWHERE: red in
+`test_resume_with_other_shared_state_on_one_rank_fails_both`, green in
+`test_resume_with_other_weights_on_one_rank_fails_both`, whose check (`": model
+weights"` in the message) the end-of-epoch agreement of v1.5 satisfies an epoch later.
+Both tests now require the message of the resume (`resumed state differs ...`); M193 is
+KILLED by both. The first full probe since 3e1d48a; it is what found this. Full probe
+at 748326d (267 mutants, the 11 of WP3 included): 267/267, exit 0
+(`results/2026-11-16_full-probe-748326d.log`).
+
 Not covered (open):
+- **Bitwise resume with 3 or more ranks** (v1.6, above): equal within rounding only.
+- **Crash matrix limits:** gloo, one host, CPU; no NCCL, no CUDA, no second host, no
+  network partition; a stall is a sleeping process; a crash inside backward is not
+  injected (the bullet on backward below); one fault per job.
 - **Pre-step agreement window:** between the agreement and the step nothing runs but
   the local return from the collective; a change made by another thread in that
   window is not seen (in-process hostile code is out of scope, section 6).

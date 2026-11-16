@@ -1,0 +1,67 @@
+# DDP_RUNNER v1.6 (WP3 carriers, crash matrix, full probes) -- local gate 2026-11-16; tree = commit 748326d
+# env: Linux container, Python 3.12.3, torch 2.6.0+cu124 (PyPI wheel run on the CPU, no GPU; download.pytorch.org not reachable from this container, CI uses 2.6.0+cpu), numpy 2.5.3, ruff 0.17.3, coverage 7.17.0
+== ruff check src scripts: All checks passed; compileall 0; verify_sources: 51 Toolkit + 18 Spec + 12 Script PASS; engine_gate: doctests 49/49, selftests_ok=True, PASS
+== coverage run -m unittest discover -s src/toolkit -t src/toolkit -p 'test_*.py'
+Ran 1188 tests in 54.188s
+OK (skipped=7)
+coverage: TOTAL                                           6640    274   2556    217    94%
+== TORCH_DISTRIBUTED_DEBUG=DETAIL TestWorldSizeOne+TestTwoRanks+TestThreeRanks (the CI step)
+Ran 85 tests in 16.084s
+OK
+== FV solver + reference case under OPENBLAS_CORETYPE Prescott/Sandybridge/Haswell/Zen: OK each
+== negative-first: TestCarriersWP3 against 347abaf (scratch worktree, new test file, shim for _CARRIER and _Graph.unheld appended to the old runner; never committed)
+FAIL: test_carrier_that_carries_itself_is_held_without_recursion (test_ddp_hex_v3.TestCarriersWP3.test_carrier_that_carries_itself_is_held_without_recursion) (carrier='_lru_cache_wrapper')
+FAIL: test_carrier_that_carries_itself_is_held_without_recursion (test_ddp_hex_v3.TestCarriersWP3.test_carrier_that_carries_itself_is_held_without_recursion) (carrier='partial')
+FAIL: test_carrier_that_carries_itself_is_held_without_recursion (test_ddp_hex_v3.TestCarriersWP3.test_carrier_that_carries_itself_is_held_without_recursion) (carrier='partialmethod')
+FAIL: test_class_drift_reports_a_partial_changed_in_place (test_ddp_hex_v3.TestCarriersWP3.test_class_drift_reports_a_partial_changed_in_place)
+FAIL: test_function_behind_an_lru_cache_wrapper_changed_in_place_is_a_change (test_ddp_hex_v3.TestCarriersWP3.test_function_behind_an_lru_cache_wrapper_changed_in_place_is_a_change)
+FAIL: test_function_carried_by_a_partial_changed_in_place_is_a_change (test_ddp_hex_v3.TestCarriersWP3.test_function_carried_by_a_partial_changed_in_place_is_a_change) (carried_as='args')
+FAIL: test_function_carried_by_a_partial_changed_in_place_is_a_change (test_ddp_hex_v3.TestCarriersWP3.test_function_carried_by_a_partial_changed_in_place_is_a_change) (carried_as='func')
+FAIL: test_function_carried_by_a_partial_changed_in_place_is_a_change (test_ddp_hex_v3.TestCarriersWP3.test_function_carried_by_a_partial_changed_in_place_is_a_change) (carried_as='keywords')
+FAIL: test_partial_arguments_replaced_in_place_are_a_change (test_ddp_hex_v3.TestCarriersWP3.test_partial_arguments_replaced_in_place_are_a_change)
+FAIL: test_partial_function_replaced_in_place_is_a_change (test_ddp_hex_v3.TestCarriersWP3.test_partial_function_replaced_in_place_is_a_change)
+FAIL: test_partial_keywords_changed_in_place_are_a_change (test_ddp_hex_v3.TestCarriersWP3.test_partial_keywords_changed_in_place_are_a_change)
+FAIL: test_partial_keywords_changed_in_place_are_a_change (test_ddp_hex_v3.TestCarriersWP3.test_partial_keywords_changed_in_place_are_a_change) (case='entry added')
+FAIL: test_partial_keywords_changed_in_place_are_a_change (test_ddp_hex_v3.TestCarriersWP3.test_partial_keywords_changed_in_place_are_a_change) (case='entry removed')
+FAIL: test_partial_keywords_changed_in_place_are_a_change (test_ddp_hex_v3.TestCarriersWP3.test_partial_keywords_changed_in_place_are_a_change) (case='value replaced')
+FAIL: test_partialmethod_parts_rebound_are_a_change (test_ddp_hex_v3.TestCarriersWP3.test_partialmethod_parts_rebound_are_a_change)
+FAIL: test_partialmethod_parts_rebound_are_a_change (test_ddp_hex_v3.TestCarriersWP3.test_partialmethod_parts_rebound_are_a_change) (attr='args')
+FAIL: test_partialmethod_parts_rebound_are_a_change (test_ddp_hex_v3.TestCarriersWP3.test_partialmethod_parts_rebound_are_a_change) (attr='func')
+FAIL: test_partialmethod_parts_rebound_are_a_change (test_ddp_hex_v3.TestCarriersWP3.test_partialmethod_parts_rebound_are_a_change) (attr='keywords')
+FAIL: test_real_graph_holds_every_carrier_and_has_none_unheld (test_ddp_hex_v3.TestCarriersWP3.test_real_graph_holds_every_carrier_and_has_none_unheld)
+FAIL: test_unheld_carrier_refuses_every_admission (test_ddp_hex_v3.TestCarriersWP3.test_unheld_carrier_refuses_every_admission)
+FAIL: test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not (test_ddp_hex_v3.TestCarriersWP3.test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not) (unheld='TestCarriersWP3.test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not.<locals>.Callable_')
+FAIL: test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not (test_ddp_hex_v3.TestCarriersWP3.test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not) (unheld='TestCarriersWP3.test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not.<locals>.Descriptor')
+FAIL: test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not (test_ddp_hex_v3.TestCarriersWP3.test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not) (unheld='TestCarriersWP3.test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not.<locals>.PartialSubclass')
+FAIL: test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not (test_ddp_hex_v3.TestCarriersWP3.test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not) (unheld='TestCarriersWP3.test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not.<locals>.PropertySubclass')
+FAILED (failures=24)
+Ran 11 tests in 0.005s
+== full mutation probe at 347abaf (256): 255/256, exit 1 -- results/2026-11-16_full-probe-347abaf.log
+# command: python scripts/mutation_probe.py   (exit 1: M193 KILLED_ELSEWHERE, see spec/DDP_RUNNER_v1.md section 8, v1.6)
+M193 KILLED_ELSEWHERE  runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_shared_state_on_one_rank_fails_both,test_resume_with_other_weights_on_one_rank_fails_both | killed_by test_resume_with_other_shared_state_on_one_rank_fails_both
+== full mutation probe at 748326d (267): results/2026-11-16_full-probe-748326d.log
+M193 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_shared_state_on_one_rank_fails_both,test_resume_with_other_weights_on_one_rank_fails_both | killed_by test_resume_with_other_shared_state_on_one_rank_fails_both,test_resume_with_other_weights_on_one_rank_fails_both
+M257 KILLED    runner_hex_v3.py -> TestCarriersWP3 | expect test_partial_function_replaced_in_place_is_a_change,test_partialmethod_parts_rebound_are_a_change | killed_by test_class_drift_reports_a_partial_changed_in_place,test_partial_function_replaced_in_place_is_a_change,test_partialmethod_parts_rebound_are_a_change
+M258 KILLED    runner_hex_v3.py -> TestCarriersWP3 | expect test_partial_arguments_replaced_in_place_are_a_change | killed_by test_partial_arguments_replaced_in_place_are_a_change,test_partialmethod_parts_rebound_are_a_change
+M259 KILLED    runner_hex_v3.py -> TestCarriersWP3 | expect test_partial_keywords_changed_in_place_are_a_change | killed_by test_partial_keywords_changed_in_place_are_a_change,test_partialmethod_parts_rebound_are_a_change
+M260 KILLED    runner_hex_v3.py -> TestCarriersWP3 | expect test_partial_keywords_changed_in_place_are_a_change | killed_by test_partial_keywords_changed_in_place_are_a_change,test_partialmethod_parts_rebound_are_a_change
+M261 KILLED    runner_hex_v3.py -> TestCarriersWP3 | expect test_function_carried_by_a_partial_changed_in_place_is_a_change,test_function_behind_an_lru_cache_wrapper_changed_in_place_is_a_change | killed_by test_function_behind_an_lru_cache_wrapper_changed_in_place_is_a_change,test_function_carried_by_a_partial_changed_in_place_is_a_change
+M262 KILLED    runner_hex_v3.py -> TestCarriersWP3 | expect test_function_carried_by_a_partial_changed_in_place_is_a_change | killed_by test_function_carried_by_a_partial_changed_in_place_is_a_change
+M263 KILLED    runner_hex_v3.py -> TestCarriersWP3 | expect test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not | killed_by test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not
+M264 KILLED    runner_hex_v3.py -> TestCarriersWP3 | expect test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not | killed_by test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not
+M265 KILLED    runner_hex_v3.py -> TestCarriersWP3 | expect test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not | killed_by test_unknown_carrier_kinds_are_listed_and_opaque_kinds_are_not
+M266 KILLED    runner_hex_v3.py -> TestCarriersWP3 | expect test_unheld_carrier_refuses_every_admission | killed_by test_unheld_carrier_refuses_every_admission
+M267 KILLED    runner_hex_v3.py -> TestCarriersWP3 | expect test_function_behind_an_lru_cache_wrapper_changed_in_place_is_a_change,test_real_graph_holds_every_carrier_and_has_none_unheld | killed_by test_function_behind_an_lru_cache_wrapper_changed_in_place_is_a_change,test_real_graph_holds_every_carrier_and_has_none_unheld
+[MUTATION-PROBE] baseline green | 267/267 killed | PASS
+== crash matrix (scripts/oracles/ddp_crash_matrix_oracle.py), plain: results/2026-11-16_ddp-crash-matrix_gloo.json
+premise   2 ranks: all-reduce gives 1 distinct results over 6 buffer positions (ranks agree: True); DDP gradient of iteration 1-4 equal to iteration 1: [True, True, True, True]
+premise   3 ranks: all-reduce gives 4 distinct results over 6 buffer positions (ranks agree: True); DDP gradient of iteration 1-4 equal to iteration 1: [True, False, False, False]
+[DDP-CRASH-MATRIX] torch 2.6.0+cu124, gloo, debug OFF | 39/39 cases hold I1-I4 | PASS
+exit=0
+== crash matrix, --detail: results/2026-11-16_ddp-crash-matrix_gloo-detail.json
+premise   2 ranks: all-reduce gives 1 distinct results over 6 buffer positions (ranks agree: True); DDP gradient of iteration 1-4 equal to iteration 1: [True, True, True, True]
+premise   3 ranks: all-reduce gives 4 distinct results over 6 buffer positions (ranks agree: True); DDP gradient of iteration 1-4 equal to iteration 1: [True, False, False, False]
+[DDP-CRASH-MATRIX] torch 2.6.0+cu124, gloo, debug DETAIL | 39/39 cases hold I1-I4 | PASS
+exit=0
+== census of the held behaviour graph (torch 2.6.0, Python 3.12.3): 312 functions, 2 carriers (functools._lru_cache_wrapper x2), 0 partial, 0 partialmethod, _GRAPH.unheld == [], _PINS_MISSING == []
+== not run: NCCL/CUDA (no GPU), more than one host, crash inside backward; Windows

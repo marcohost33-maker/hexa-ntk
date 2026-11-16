@@ -52,6 +52,7 @@ __all__ = [
 
 import collections
 import dataclasses
+import functools
 import gc
 import hashlib
 import inspect
@@ -60,6 +61,7 @@ import logging
 import math
 import statistics
 import types
+import typing
 import uuid
 import weakref
 from dataclasses import dataclass
@@ -375,7 +377,21 @@ _OPTIMIZER_EXPORT_HOOKS = (
 #   added later that shadows a builtin is a change), and every closure cell;
 #   functions found there are followed without a depth limit (cycles once);
 # - the lazy dynamo cache ``fn.__dynamo_disable`` (torch._disable_dynamo calls
-#   it instead of ``fn``) must be torch's disable wrapper around ``fn``.
+#   it instead of ``fn``) must be torch's disable wrapper around ``fn``;
+# - carriers (WP3, v1.6): an object that calls a function it carries is held by
+#   identity AND by what it carries, because the carried parts change in place
+#   while the carrier keeps its identity: ``functools.partial`` (``__setstate__``
+#   replaces func/args/keywords; the keywords dict is mutable),
+#   ``functools.partialmethod`` (plain attributes) and an ``lru_cache`` wrapper
+#   (``__wrapped__``). Exactly these types; they are queued like functions, so a
+#   partial that carries itself ends (no recursion);
+# - every other behaviour-carrying object reached must be of a kind that is
+#   opaque by design (_opaque: classes, C functions and descriptors, typing
+#   aliases, the descriptors of _DESCRIPTORS whose functions are followed). A
+#   callable instance or descriptor of any other type cannot be held (its type's
+#   ``__call__``/``__get__`` and its attributes decide what runs): it is listed
+#   in ``_GRAPH.unheld`` and every admission is refused (_PINS_MISSING). torch
+#   2.6.0: none.
 #
 # A function that differs from the held one is admitted only as one of torch's
 # own wrappers around it (_WRAPPER_RULES): same code object AND same globals dict
@@ -395,6 +411,14 @@ _OPTIMIZER_EXPORT_HOOKS = (
 _MISSING = object()
 _EMPTY_CELL = object()
 _DESCRIPTORS = (staticmethod, classmethod, property, types.MethodType)
+_CARRIER = object()  # second field of a carrier node (a function node has its code object there)
+_LRU_WRAPPER = type(functools.lru_cache(maxsize=None)(len))
+_OPAQUE_TYPES = (
+    types.BuiltinFunctionType, types.MethodDescriptorType, types.WrapperDescriptorType,
+    types.MethodWrapperType, types.ClassMethodDescriptorType, types.GetSetDescriptorType,
+    types.MemberDescriptorType, types.GenericAlias,
+    *(t for t in (getattr(typing, n, None) for n in ("_BaseGenericAlias", "_SpecialForm")) if isinstance(t, type)),
+)
 
 
 def _cell_value(cell: Any) -> Any:
@@ -430,6 +454,34 @@ def _is_behaviour(value: Any) -> bool:
     return callable(value) or hasattr(type(value), "__get__")
 
 
+def _carried(value: Any) -> Optional[Tuple[Any, Any, Any]]:
+    """``(func, args, keywords)`` as a carrier holds them now; None if ``value`` is no carrier.
+
+    Exact types only: a subclass may override ``__call__``/``__get__`` and is no
+    known carrier (it is listed as unheld). ``partial`` exposes its parts through
+    read-only members of the type; ``partialmethod`` and the ``lru_cache`` wrapper
+    keep them in the instance ``__dict__`` (read there, not through ``getattr``).
+    """
+    kind = type(value)
+    if kind is functools.partial:
+        return (value.func, value.args, value.keywords)
+    if kind is functools.partialmethod or kind is _LRU_WRAPPER:
+        attrs = vars(value)
+        if type(attrs) is not dict:
+            return (_MISSING, _MISSING, _MISSING)
+        if kind is _LRU_WRAPPER:
+            return (dict.get(attrs, "__wrapped__", _MISSING), (), None)
+        return tuple(dict.get(attrs, name, _MISSING) for name in ("func", "args", "keywords"))
+    return None
+
+
+def _opaque(value: Any) -> bool:
+    """A behaviour-carrying leaf that is held by identity alone, by design (named limit:
+    what a class, a C function or a typing alias does is not followed)."""
+    return (value is _MISSING or value is _EMPTY_CELL or isinstance(value, type)
+            or any(type(value) is d for d in _DESCRIPTORS) or isinstance(value, _OPAQUE_TYPES))
+
+
 def _class_items(cls: type) -> Dict[Tuple[type, str], Any]:
     owners = [owner for owner in cls.__mro__ if owner is not object]
     return {(owner, name): value for owner in owners for name, value in vars(owner).items()
@@ -441,6 +493,8 @@ class _Graph:
 
     def __init__(self) -> None:
         self.nodes: Dict[int, Tuple[Any, ...]] = {}
+        # behaviour-carrying leaves of a kind that can neither be followed nor is opaque by design
+        self.unheld: List[Any] = []
 
     @staticmethod
     def _inner(value: Any) -> List[Any]:
@@ -455,8 +509,15 @@ class _Graph:
                 self.nodes[id(value)] = ()  # reserved: each function is recorded once (cycles)
                 pending.append(value)
             return ("fn", value)
+        if _carried(value) is not None:
+            if id(value) not in self.nodes:
+                self.nodes[id(value)] = ()  # reserved like a function (a carrier may carry itself)
+                pending.append(value)
+            return ("leaf", value)
         for inner in self._inner(value):
             self._edge(inner, pending)
+        if _is_behaviour(value) and not _opaque(value) and not any(value is u for u in self.unheld):
+            self.unheld.append(value)
         return ("leaf", value)
 
     def _reachable(self, edges: List[Tuple[str, Any]]) -> List[int]:
@@ -466,10 +527,17 @@ class _Graph:
         while stack:
             value = stack.pop()
             stack.extend(self._inner(value))
-            if not isinstance(value, types.FunctionType) or id(value) in seen:
+            node = self.nodes.get(id(value))
+            if node is None or node[0] is not value or id(value) in seen:
                 continue
             seen[id(value)] = None
-            _, _, _, _, defaults, _, kws, refs, cells = self.nodes[id(value)]
+            if node[1] is _CARRIER:
+                _, _, func, _, args, _, kws = node
+                stack.append(func[1])
+                stack.extend(v for _, v in args)
+                stack.extend(e[1] for _, e in kws)
+                continue
+            _, _, _, _, defaults, _, kws, refs, cells = node
             stack.extend(v for _, v in defaults)
             stack.extend(e[1] for _, e in kws)
             stack.extend(e[1] for _, e in refs)
@@ -481,6 +549,16 @@ class _Graph:
         edges = [self._edge(root, pending) for root in roots]
         while pending:
             fn = pending.pop()
+            parts = _carried(fn)
+            if parts is not None:
+                func, args, kwd = parts
+                self.nodes[id(fn)] = (
+                    fn, _CARRIER, self._edge(func, pending),
+                    args, tuple(self._edge(a, pending) for a in (args if type(args) is tuple else ())),
+                    kwd, tuple((k, self._edge(v, pending)) for k, v in
+                               (sorted(kwd.items(), key=lambda kv: repr(kv[0])) if type(kwd) is dict else ())),
+                )
+                continue
             glb = fn.__globals__
             kwd = fn.__kwdefaults__
             self.nodes[id(fn)] = (
@@ -582,8 +660,29 @@ def _refs_intact(glb: Dict[str, Any], refs: Tuple[Tuple[str, Tuple[str, Any]], .
     return _changed_ref(glb, refs) is None
 
 
+def _carrier_problem(node: Tuple[Any, ...]) -> Optional[str]:
+    """What of a held carrier changed (None: nothing): its function, its positional
+    arguments (a tuple, compared by identity) or its keywords (the dict by identity
+    and every entry, since the dict changes in place)."""
+    obj, _, func_edge, args, _, kwd, kw_edges = node
+    parts = _carried(obj)
+    if parts is None:
+        return "type"
+    func, now_args, now_kwd = parts
+    if not _edge_intact(func_edge, func):
+        return "func"
+    if now_args is not args:
+        return "args"
+    if now_kwd is not kwd or (type(kwd) is dict and (
+            len(kwd) != len(kw_edges) or not all(_edge_intact(e, dict.get(kwd, k, _MISSING)) for k, e in kw_edges))):
+        return "keywords"
+    return None
+
+
 def _node_problem(node: Tuple[Any, ...]) -> Optional[str]:
-    """What of a held function changed (None: nothing)."""
+    """What of a held function or carrier changed (None: nothing)."""
+    if node[1] is _CARRIER:
+        return _carrier_problem(node)
     fn, code, glb, defaults, default_edges, kwd, kw_edges, refs, cells = node
     if fn.__code__ is not code:
         return "__code__"
@@ -648,6 +747,9 @@ def _missing_pins() -> List[str]:
                        ("LRScheduler step", _SCHED_STEP_ENV)):
         if env is None:
             missing.append(f"<no {label} wrapper code in this torch>")
+    for value in _GRAPH.unheld:
+        kind = type(value)
+        missing.append(f"<unheld carrier: {kind.__module__}.{kind.__qualname__}>")
     return missing
 
 
@@ -698,7 +800,8 @@ def _class_drift(cls: type) -> List[str]:
         problem = _node_problem(nodes[i])
         if problem is not None:
             fn = nodes[i][0]
-            out.append(f"{getattr(fn, '__module__', '?')}.{fn.__qualname__} {problem} (changed in place)")
+            name = getattr(fn, "__qualname__", None) or type(fn).__qualname__
+            out.append(f"{getattr(fn, '__module__', '?')}.{name} {problem} (changed in place)")
     return out
 
 
