@@ -2872,7 +2872,43 @@ _SCENARIOS_3: Dict[str, Callable[[int, int, Path], Any]] = {
     "state_dict_error_rank1": _sc_state_dict_error_rank1,
 }
 
-_SUITES: Dict[str, Dict[str, Callable[[int, int, Path], Any]]] = {"two": _SCENARIOS, "three": _SCENARIOS_3}
+def _sc_collective_order(rank: int, world: int, out: Path) -> Dict[str, Any]:
+    """007acc2 R14 P1, collective order: is torch's order check really active in this rank?
+
+    Under TORCH_DISTRIBUTED_DEBUG=DETAIL torch wraps the gloo backend in a
+    ProcessGroupWrapper that compares every collective's fingerprint (sequence
+    number, op, shapes, dtypes) across the ranks before running it. Rank 1 issues
+    an all-reduce of another shape than its peers: with the check active every rank
+    raises "Detected mismatch between collectives" at once and none runs it. A
+    matching all-reduce afterwards shows the group survived the refusal.
+    """
+    level = dist.get_debug_level()
+    result: Dict[str, Any] = {
+        "debug_level": str(level),
+        "backend": type(dist.group.WORLD._get_backend(torch.device("cpu"))).__name__,
+        "mismatch": None,
+        "seconds": None,
+        "after": None,
+    }
+    if level != dist.DebugLevel.DETAIL:
+        return result  # without the check the deviating collective would hang or reduce garbage
+    start = time.monotonic()
+    try:
+        dist.all_reduce(torch.zeros(2 if rank == 1 else 1, dtype=torch.float64))
+    except RuntimeError as exc:
+        result["mismatch"] = str(exc)[:300]
+    result["seconds"] = time.monotonic() - start
+    after = torch.ones(1, dtype=torch.float64)
+    dist.all_reduce(after)
+    result["after"] = after.item()
+    return result
+
+
+_SUITES: Dict[str, Dict[str, Callable[[int, int, Path], Any]]] = {
+    "two": _SCENARIOS,
+    "three": _SCENARIOS_3,
+    "order": {"collective_order": _sc_collective_order},
+}
 
 
 def _write_atomic(path: Path, data: Dict[str, Any]) -> None:
@@ -3443,6 +3479,48 @@ class TestThreeRanks(_MultiRankJob):
     def test_middle_rank_applying_other_gradients_stops_all(self) -> None:
         # v1.5 (WP1): the middle rank halves its clipped gradients
         self._check_divergent_states()
+
+
+class TestCollectiveOrderCheck(_MultiRankJob):
+    """007acc2 R14 P1 (2026-11-12), collective order, 2 ranks.
+
+    CI runs the multi-rank jobs a second time under TORCH_DISTRIBUTED_DEBUG=DETAIL so
+    that a rank skipping or adding a collective is reported at once. Their green
+    result says nothing about collective order unless the check is really active in
+    every rank: this job proves it is (wrapped backend, a deviating collective refused
+    on every rank within seconds, the group still usable). It runs only in that CI
+    step; without DETAIL it is skipped, never passed.
+    """
+
+    WORLD = 2
+    SUITE = "order"
+    DEADLINE_S = 120
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if os.environ.get("TORCH_DISTRIBUTED_DEBUG") != "DETAIL":
+            raise unittest.SkipTest("collective order is checked only under TORCH_DISTRIBUTED_DEBUG=DETAIL")
+        super().setUpClass()
+
+    @staticmethod
+    def _reference(out: Path) -> Dict[str, Any]:
+        return {}
+
+    def test_deviating_collective_is_refused_on_every_rank_at_once(self) -> None:
+        values = self._ok("collective_order")
+        for rank, value in enumerate(values):
+            with self.subTest(rank=rank):
+                self.assertEqual(value["backend"], "_ProcessGroupWrapper", value)
+                self.assertIn("Detected mismatch between collectives", value["mismatch"] or "", value)
+                self.assertLess(value["seconds"], 15.0, value)  # at once, not after the 30 s gloo timeout
+                # positive control: a matching all-reduce still runs on the same group
+                self.assertEqual(value["after"], float(self.WORLD), value)
+
+
+class TestCollectiveOrderCheckThreeRanks(TestCollectiveOrderCheck):
+    """The same with 3 ranks: only the middle rank deviates, every rank must refuse."""
+
+    WORLD = 3
 
 
 if __name__ == "__main__":
