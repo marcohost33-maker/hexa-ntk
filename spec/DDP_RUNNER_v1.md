@@ -764,7 +764,9 @@ restart history. Section 6's 2-rank resume evidence is unaffected. Not measured:
 `test_resume_with_other_weights_on_one_rank_fails_both`, whose check (`": model
 weights"` in the message) the end-of-epoch agreement of v1.5 satisfies an epoch later.
 Both tests now require the message of the resume (`resumed state differs ...`); M193 is
-KILLED by both. The first full probe since 3e1d48a; it is what found this.
+KILLED by both. The first full probe since 3e1d48a; it is what found this. Full probe
+at 748326d (267 mutants, the 11 of WP3 included): 267/267, exit 0
+(`results/2026-11-16_full-probe-748326d.log`).
 
 Not covered (open):
 - **Bitwise resume with 3 or more ranks** (v1.6, above): equal within rounding only.

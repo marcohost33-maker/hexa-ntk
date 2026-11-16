@@ -40,7 +40,9 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   gemessen: gloos All-Reduce rundet je nach Pufferposition anders (3 Ranks: 4 verschiedene Ergebnisse an 6
   Positionen, 2 Ranks: 1), und DDP baut seine Gradienten-Buckets nach der ersten Iteration um. In der Spec als
   Grenze benannt (Abschnitt 8). Nicht gemessen: NCCL/CUDA, mehrere Hosts, Crash in backward.
+  Volle Mutationsprobe am neuen Stand 748326d: 267/267, exit 0.
   _Evidenz:_ `results/2026-11-16_ddp-v1-6_local-gate.log`, `results/2026-11-16_full-probe-347abaf.log`,
+  `results/2026-11-16_full-probe-748326d.log`,
   `results/2026-11-16_ddp-crash-matrix_gloo.json`, `results/2026-11-16_ddp-crash-matrix_gloo-detail.json`.
 - [x] **Internes NR-Wissen auf hexa-ntk uebertragen (2026-11-10, Linux-Container, Python 3.12.3, torch 2.6.0,
   neuraloperator 2.0.0).** Quellen: 007acc2-Wissens- und Auditdokumente (selbst als REVIEW_REQUIRED markiert,

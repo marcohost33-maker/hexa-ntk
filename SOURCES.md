@@ -985,3 +985,4 @@
 | CCA3203BC4783B92 | 2026-11-16 19:01 | spec | DDP_RUNNER v1.6: WP3 carriers (section 6), crash matrix 39/39 plain and DETAIL, limit named: resume with 3 or more ranks not bitwise (gloo all-reduce order, DDP bucket rebuild), full probe 255/256 at 347abaf and the M193 test fix (section 8): DDP_RUNNER_v1.md |
 | 64963EEC7FDD914E | 2026-11-16 19:01 | scripts | DDP_RUNNER v1.6 WP3: 11 new mutants (carrier func/args/keywords checks, reach through carriers, unknown-kind listing, exact carrier/descriptor types, unheld refusal, lru __wrapped__) (267): mutation_probe.py |
 | 61AC06F1D6F8C7E2 | 2026-11-16 19:01 | scripts/oracles | new 2026-11-16 (in-repo, no external source): crash/stall fault matrix of the real runner as a 2- and 3-rank gloo job, invariants I1-I4, all-reduce order premise probe (007acc2 A7 R2-HX107-01): ddp_crash_matrix_oracle.py |
+| EF1BD53ADE38208D | 2026-11-16 19:32 | spec | DDP_RUNNER v1.6 evidence: full probe 267/267 at 748326d: DDP_RUNNER_v1.md |
