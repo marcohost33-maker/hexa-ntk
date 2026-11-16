@@ -1,0 +1,66 @@
+# 007acc2 R14 (GPT-6, 2026-11-12) section 6 / section 8 P1 "Hexa #107 Original-DDP-E3" -- 2026-11-16
+# branch claude/hexa-ntk-neural-operator-2yj01a, remote head 347abaf6de5670d76018675194913b56c6ce644b;
+# local merge of origin/main 18ab389b67e0b6d1bba793060b83fb69553bc371 -> 0bed6c617d1e6b610fa7c121e11c9ce50fe60924
+# (tree 724a910e identical to 347abaf: the merge brings no content); tests/spec/CI change a55c7f5daf63c2e1b20283820e97ddeb10180eb9
+# Linux: Docker Desktop 29.4.3, image python:3.12-slim (Python 3.12.16), numpy 2.5.3,
+#   torch 2.6.0+cpu (download.pytorch.org/whl/cpu) and torch 2.10.0+cpu (wheel sha256 ee40b8a4b4b2cf06..., equal to the index),
+#   --network none, GLOO_SOCKET_IFNAME=lo, tree from `git archive <sha>` (no bind-mounted working copy)
+# Windows: Python 3.14.4, torch 2.12.1+cpu
+# probe: scripts/oracles/ddp_detail_isolation_probe.py (gloo = all_reduce only; ddp = DDP(nn.Linear), no Hexa code;
+#   runner = DDP + the original HexTrainingRunner from src/toolkit)
+
+== 1. DETAIL SIGSEGV isolated (probe, world 2 unless stated; exit codes per rank)
+torch 2.10.0+cpu Linux  ddp    DETAIL  [-11, -11]  faulthandler: torch/nn/parallel/distributed.py:1265 _ddp_init_helper <- :877 __init__
+torch 2.10.0+cpu Linux  ddp    OFF     [0, 0]      gloo_num_threads 2, backend ProcessGroupGloo
+torch 2.6.0+cpu  Linux  ddp    DETAIL  [0, 0]      gloo_num_threads 0 (rank 0) / 65609 (rank 1), backend _ProcessGroupWrapper
+torch 2.6.0+cpu  Linux  ddp    INFO    [0, 0]      gloo_num_threads 2, backend ProcessGroupGloo
+torch 2.6.0+cpu  Linux  ddp    OFF     [0, 0]      gloo_num_threads 2, backend ProcessGroupGloo
+torch 2.12.1+cpu Win    gloo   OFF/INFO/DETAIL  [0, 0] each
+torch 2.12.1+cpu Win    ddp    OFF/INFO [0, 0]; DETAIL [3221225477, 3221225477] (0xC0000005) at distributed.py:1421 _ddp_init_helper
+torch 2.12.1+cpu Win    runner OFF/INFO [0, 0]; DETAIL [3221225477, 3221225477], same frame: the crash is inside DDP(...), before the runner exists
+torch 2.12.1+cpu Win    ddp    DETAIL  gloo backend class before DDP: _ProcessGroupWrapper (OFF: ProcessGroupGloo)
+
+Cause (torch source, raw.githubusercontent.com/pytorch/pytorch/<tag>/torch/csrc/distributed/c10d/logger.cpp):
+Logger::set_env_variables, called from set_construction_data_and_log in DDP's constructor, does
+  auto gloo_pg = static_cast<c10d::ProcessGroupGloo*>(reducer_->process_group_->getBackend(BackendType::GLOO).get());
+  auto n_threads = gloo_pg->getNumThreads();          // ProcessGroupGloo.hpp: return options_->threads;
+identical in v2.6.0 (lines 106-110), v2.10.0 (103-107) and main (103-107) as fetched 2026-11-16.
+Under TORCH_DISTRIBUTED_DEBUG=DETAIL the GLOO backend is a _ProcessGroupWrapper, so the cast is undefined
+behaviour: on 2.6.0 it reads garbage (0 / 65609 instead of 2) and survives; on 2.10.0 (Linux) and 2.12.1
+(Windows) it segfaults. Verdict: upstream torch bug, latent in the CI pin 2.6.0. No Hexa code is involved
+(the minimal DDP case has none). Versions 2.7-2.9 not measured.
+
+== 2. CI keeps 2.6.0 for the DETAIL step; a crash is red, not silent
+Windows torch 2.12.1, TORCH_DISTRIBUTED_DEBUG=DETAIL python -m unittest test_ddp_hex_v3.TestThreeRanks (tree 0bed6c6 == 347abaf):
+  Ran 9 tests, FAILED (failures=9), rc=1 -- "ProcessExitedException: process 0 terminated with exit code 3221225477"
+GitHub Actions run 43413458313 (head 347abaf, foreign run, read via gh api): torch-2.6.0+cpu, DETAIL step
+  "Ran 85 tests ... OK"; main unittest step "Ran 1177 tests ... OK (skipped=7)".
+
+== 3. Collective order: new TestCollectiveOrderCheck (2 ranks) / TestCollectiveOrderCheckThreeRanks (a55c7f5)
+Windows torch 2.12.1, DETAIL: Ran 2 tests OK; per rank: backend _ProcessGroupWrapper, "Detected mismatch between
+  collectives on ranks. Rank 1 is running collective: CollectiveFingerPrint(SequenceNumber=0, OpType=ALLREDUCE,
+  TensorShape=[2] ..." after 0.12-0.17 s on every rank, the matching all-reduce afterwards gives 2.0 / 3.0.
+Without DETAIL: Ran 0 tests, OK (skipped=2).
+Discrimination DK-20261116T173917-e42c076ce1a7 (diskriminierung.py, head a55c7f5, provenance VOLL, Windows torch 2.12.1,
+  TORCH_DISTRIBUTED_DEBUG=DETAIL): 3/3 discriminate --
+  F1/F1b ranks run with dist.set_debug_level(OFF) although the environment says DETAIL (2 and 3 ranks): red;
+  F2 the middle rank's deviating all-reduce removed: red; baseline green.
+
+== 4. Original runner, real gloo, torch 2.6.0 Linux (tree a55c7f5)
+cd src/toolkit; TORCH_DISTRIBUTED_DEBUG=<L> python -m unittest test_ddp_hex_v3.TestWorldSizeOne test_ddp_hex_v3.TestTwoRanks
+  test_ddp_hex_v3.TestThreeRanks test_ddp_hex_v3.TestCollectiveOrderCheck test_ddp_hex_v3.TestCollectiveOrderCheckThreeRanks
+  (import path /work/src/toolkit/runner_hex_v3.py)
+L=DETAIL  rc=0  Ran 87 tests in 504.149s  OK
+L=INFO    rc=0  Ran 85 tests in 442.706s  OK (skipped=2)
+L=OFF     rc=0  Ran 85 tests in 531.342s  OK (skipped=2)
+Scenarios in these jobs (test_ddp_hex_v3.py): AMP GradScaler("cpu") under DDP equal to the single-process run and
+NaN backoff on both ranks; EMA error on rank 0 agreed; resume (epoch and mid-epoch, rank RNG, shared state incl.
+GradScaler scale and EMA mean, refused on mismatch); 3-rank equivalence, middle-rank refusals.
+
+== 5. Post-merge witness #104 on origin/main 18ab389b67e0b6d1bba793060b83fb69553bc371 (007acc2 A7 R4 line 77), torch 2.6.0+cpu Linux
+cd src/toolkit; python -m unittest test_ddp_hex_v3 test_runner_hex_v3 test_mid_epoch_resume_hex_v3
+  rc=0  Ran 222 tests in 271.434s  OK
+TORCH_DISTRIBUTED_DEBUG=DETAIL python -m unittest test_ddp_hex_v3.TestWorldSizeOne test_ddp_hex_v3.TestTwoRanks test_ddp_hex_v3.TestThreeRanks
+  rc=0  Ran 77 tests in 56.776s  OK
+Scope: 2/3 gloo ranks on one CPU host. GPU, NCCL, more ranks/hosts and a fault matrix beyond the injected
+scenarios: NOT run (no GPU host) -- boundary, not simulated.
