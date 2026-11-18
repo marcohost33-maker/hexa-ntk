@@ -60,7 +60,17 @@ class TestValidateBundle(unittest.TestCase):
     def test_committed_bundle_is_valid(self) -> None:
         report = bundle.validate_bundle(self.bdir, expected_source_sha=SHA)
         self.assertTrue(report["valid"])
+        self.assertTrue(report["source_sha_verified"])
         self.assertEqual(len(report["manifest"]["files"]), 2)
+
+    def test_source_binding_must_be_stated(self) -> None:
+        # internal NR SF-R46-01: without the argument the source check was skipped
+        # and a bundle of any source was reported valid without saying so
+        with self.assertRaises(TypeError):
+            bundle.validate_bundle(self.bdir)
+        report = bundle.validate_bundle(self.bdir, expected_source_sha=None)
+        self.assertTrue(report["valid"])
+        self.assertFalse(report["source_sha_verified"])
 
     def test_marker_state_must_be_committed(self) -> None:
         marker = json.loads((self.bdir / "COMMITTED.json").read_text(encoding="utf-8"))
@@ -69,20 +79,20 @@ class TestValidateBundle(unittest.TestCase):
                 marker["state"] = state
                 (self.bdir / "COMMITTED.json").write_bytes(bundle.json_bytes(marker))
                 with self.assertRaisesRegex(RuntimeError, "not 'COMMITTED'"):
-                    bundle.validate_bundle(self.bdir)
+                    bundle.validate_bundle(self.bdir, expected_source_sha=SHA)
 
     def test_empty_or_missing_inventory_is_rejected(self) -> None:
         for mutate in (lambda m: m.__setitem__("files", []), lambda m: m.pop("files")):
             with self.subTest(mutate=mutate):
                 _rewrite_manifest(self.bdir, mutate)
                 with self.assertRaisesRegex(RuntimeError, "no checkpoint files"):
-                    bundle.validate_bundle(self.bdir)
+                    bundle.validate_bundle(self.bdir, expected_source_sha=SHA)
 
     def test_inventory_without_dcp_metadata_is_rejected(self) -> None:
         _rewrite_manifest(self.bdir, lambda m: m.__setitem__(
             "files", [f for f in m["files"] if not f["path"].endswith(".metadata")]))
         with self.assertRaisesRegex(RuntimeError, r"\.metadata"):
-            bundle.validate_bundle(self.bdir)
+            bundle.validate_bundle(self.bdir, expected_source_sha=SHA)
 
     def _add_entry(self, rel: str, file_path: Path, *, replace_metadata: bool = False) -> None:
         data = file_path.read_bytes()
@@ -100,7 +110,7 @@ class TestValidateBundle(unittest.TestCase):
         outside.write_bytes(b"x")
         self._add_entry(outside.resolve().as_posix(), outside)
         with self.assertRaisesRegex(RuntimeError, "manifest path"):
-            bundle.validate_bundle(self.bdir)
+            bundle.validate_bundle(self.bdir, expected_source_sha=SHA)
 
     def test_traversal_manifest_path_is_rejected(self) -> None:
         escaped = self.bdir / "outside.bin"
@@ -110,7 +120,7 @@ class TestValidateBundle(unittest.TestCase):
                 self._rewrite_files_without(rel)
                 self._add_entry(rel, escaped)
                 with self.assertRaisesRegex(RuntimeError, "manifest path"):
-                    bundle.validate_bundle(self.bdir)
+                    bundle.validate_bundle(self.bdir, expected_source_sha=SHA)
 
     def _rewrite_files_without(self, rel: str) -> None:
         _rewrite_manifest(self.bdir, lambda m: m.__setitem__(
@@ -127,7 +137,7 @@ class TestValidateBundle(unittest.TestCase):
             self.skipTest(f"symlinks not available here: {exc}")
         self._add_entry("dcp/link.bin", outside)
         with self.assertRaisesRegex(RuntimeError, "escapes dcp/"):
-            bundle.validate_bundle(self.bdir)
+            bundle.validate_bundle(self.bdir, expected_source_sha=SHA)
 
     def test_decoy_metadata_outside_dcp_is_rejected(self) -> None:
         decoy = self.bdir / "other" / ".metadata"
@@ -135,7 +145,7 @@ class TestValidateBundle(unittest.TestCase):
         decoy.write_bytes(b"meta")
         self._add_entry("other/.metadata", decoy, replace_metadata=True)
         with self.assertRaisesRegex(RuntimeError, "manifest path must lie under dcp/"):
-            bundle.validate_bundle(self.bdir)
+            bundle.validate_bundle(self.bdir, expected_source_sha=SHA)
 
     def test_nested_decoy_metadata_inside_dcp_is_rejected(self) -> None:
         decoy = self.bdir / "dcp" / "sub" / ".metadata"
@@ -143,7 +153,7 @@ class TestValidateBundle(unittest.TestCase):
         decoy.write_bytes(b"meta")
         self._add_entry("dcp/sub/.metadata", decoy, replace_metadata=True)
         with self.assertRaisesRegex(RuntimeError, "exactly the DCP metadata file"):
-            bundle.validate_bundle(self.bdir)
+            bundle.validate_bundle(self.bdir, expected_source_sha=SHA)
 
     def test_unlisted_shard_is_rejected(self) -> None:
         # Manifest lists only dcp/.metadata (consistent digest + marker) while a
@@ -151,7 +161,7 @@ class TestValidateBundle(unittest.TestCase):
         _rewrite_manifest(self.bdir, lambda m: m.__setitem__(
             "files", [f for f in m["files"] if f["path"] == "dcp/.metadata"]))
         with self.assertRaisesRegex(RuntimeError, "missing from the manifest"):
-            bundle.validate_bundle(self.bdir)
+            bundle.validate_bundle(self.bdir, expected_source_sha=SHA)
 
     def test_source_sha_mismatch_is_rejected(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "source_sha"):
