@@ -52,6 +52,42 @@ The computation then runs on a private read-only copy of the factory lattice.
 The read-only flag alone is advisory, so a lattice changed after construction
 is rejected as well.
 
+**Nesting (amendment 2026-11-05, D-T1-2).** For `k` a power of two, node
+`(i, j)` of the lattice `N` is node `(k i, k j)` of the lattice `k N` of the
+same domain: on the triangle `i, j >= 1, i + j <= N - 1` maps into
+`k i, k j >= k, k (i + j) <= k N - 1`, on the torus the index identification
+scales with `k`. `nested_node_index(coarse, fine)` returns the fine index of
+every coarse node (read-only `int64`), so `u_fine[nested_node_index(coarse,
+fine)]` is the injection of a fine field onto the coarse nodes. The coordinates
+of the nested nodes are **bitwise** the coarse ones, and the function checks
+it: `h_f = 1/(kN)` is `h_c / k` exactly (scaling by a power of two commutes
+with rounding) and `k (i + j/2)` is exact, so each coordinate is the same single
+rounding. For any other ratio they would agree only up to rounding, so `fine.n
+= k coarse.n` with `k` not a power of two, a `fine.n` that is no multiple, two
+domains, or a non-factory lattice (lattice contract) raise `ValueError` /
+`TypeError`. Consumer: the refined baseline curve of
+`spec/PHASE1_PROTOCOL_v1.md` section 2a.
+
+**Prolongation (amendment 2026-11-05, D-T1-2).** `prolongate_linear(u, coarse,
+fine)` is the piecewise-linear (P1) interpolant of a coarse field on the coarse
+triangulation, evaluated at the fine nodes: a nested node keeps its value, the
+midpoint of a coarse edge gets the mean of the two ends, a Dirichlet boundary
+node counts as value 0 (so the three corner-adjacent fine nodes of the
+triangle, whose coarse edge joins two boundary nodes, get 0). Each halving step
+reaches every fine node as a nested node or as half a step along one of the
+six slots from a nested node (an edge whose other end is a boundary node is
+reached from its interior end only; an edge between two interior nodes is
+written from both ends with the same value, `0.5 (a + b) == 0.5 (b + a)`).
+`k > 2` iterates the halving steps; that is the same interpolant evaluated on
+finer nodes (linear interpolation of a linear function changes nothing), so
+the restriction of the `4N` prolongation to the `2N` nodes is the `2N`
+prolongation bitwise (test). Verified bitwise against an independent
+index-parity implementation on both domains and second order in `h` on a
+smooth field (ratios 3.95 to 4.00, test). It is the generic prolongation a
+practitioner with a field on `N` alone can use: it knows no basis of the task.
+Consumer: `prolongation="linear"` of the refined baseline curve
+(`spec/PHASE1_PROTOCOL_v1.md` section 2a).
+
 ## 3. Operator
 
 Two-point-flux FV Laplacian with symmetric edge conductances `c`:

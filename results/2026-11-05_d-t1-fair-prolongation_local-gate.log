@@ -1,0 +1,96 @@
+# Local gate 2026-11-05 -- D-T1-2 round 2: fair prolongation (timed) vs. oracle initial condition, Richardson in h
+# Branch claude/hexa-ntk-neural-operator-2rwqdx; base origin/main cd5f6dc; code commit b92b53c (round 1: 85225ae)
+# Linux cloud container (4 CPUs), Python 3.13.18 (CI runs 3.12), torch 2.6.0+cu124 (PyPI wheel, CPU execution,
+# no CUDA device; download.pytorch.org is blocked from the container), numpy 2.5.3, coverage 7.17.0, ruff 0.17.2;
+# neuraloperator not installed (optional GINO lane, runs in CI)
+# Source of the round: self-review of 85225ae / 520702d. The refined solve started from the exact fine initial
+# condition of the mode coefficients, untimed -- information the model never sees (it gets u0 on N). The 16x
+# floor gain of round 1 was therefore an oracle upper bound, not the fair baseline.
+
+## Instrument checks before the tests were written (scratch run on the working tree, 2026-11-05)
+# nested exact initial condition vs u0 on the nested nodes: max deviation 0.0 ulp (bitwise) on both domains, k = 2, 4
+# prolongate_linear vs an independent index-parity oracle: bitwise equal on both domains, n = 4, 8, 16
+# prolongate_linear second order on a smooth field: ratios 3.95 / 3.99 / 4.00 (triangle), 3.92 / 3.98 / 4.00 (torus)
+# iterated (N -> 2N -> 4N) restricted to 2N == direct N -> 2N: bitwise
+# N = 16, steps 64, mean rel_l2 (3 samples):   linear k=1,2,4: 1.73e-2 / 8.57e-3 / 1.40e-2   richardson: 1.61e-2 / 1.59e-2
+#                                               exact  k=1,2,4: 1.73e-2 / 4.23e-3 / 1.04e-3   richardson: 1.87e-4 / 3.37e-5
+# (torus analogous: linear 1.04e-2 / 7.08e-3 / 1.06e-2, exact 1.04e-2 / 2.52e-3 / 6.16e-4, exact richardson 1.77e-4 / 2.62e-5)
+
+## End run (working tree of code commit b92b53c)
+# ruff check src scripts
+All checks passed!
+ruffexit=0
+# python -m compileall src
+compileexit=0
+# python scripts/engine_gate.py
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+engexit=0
+# python scripts/verify_sources.py
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 12 Script-Eintraege | Dateiliste: git (81 Dateien) | PASS
+vsexit=0
+# (a verify_sources run while the mutation probe had a toolkit file mutated in place reported FAIL, as it must;
+#  the PASS above is on the restored tree)
+# python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+Ran 1128 tests in 54.402s
+OK (skipped=7)
+exit=0
+# skips: 6 x 'optional neuraloperator backend not installed' (GINO lane runs in CI), 1 x 'needs CUDA'
+# the run above was made before the README counts were updated: the 4 TestDocsContract count tests were red
+# against the stale README (1115 tests, 169 mutants); after the update: python -m unittest test_hex_timestep_contract -> OK
+# 13 new tests: TestProlongateLinear (5), TestFairRefinementAndRichardson (7), test_scheme_and_prolongation_are_bound (1)
+# python -m coverage report
+src/toolkit/hex_fv_solver_hex_v3.py              454      8    176      6    98%
+src/toolkit/linear_baseline_hex_v3.py            151      1     64      1    99%
+src/toolkit/phase1_protocol_hex_v3.py           1018     10    402      8    99%
+TOTAL                                           6285    246   2356    192    95%
+covexit=0
+
+## Mutation probe (python scripts/mutation_probe.py)
+[MUTATION-PROBE] baseline green | 175/175 killed | PASS
+exit=0
+# 16 min 9 s wall. Two round-1 sites moved by the restructuring (exact-input identity check, injection in
+# solve) and were re-targeted; every site checked to apply exactly once before the run. 6 new mutants:
+M167 KILLED    hex_fv_solver_hex_v3.py -> TestProlongateLinear          (midpoint rule -> coarse value)
+M168 KILLED    hex_fv_solver_hex_v3.py -> TestProlongateLinear          (boundary node read as node 0)
+M169 KILLED    phase1_protocol_hex_v3.py -> TestFairRefinementAndRichardson (Richardson formula -> fine solve)
+M170 KILLED    phase1_protocol_hex_v3.py -> TestFairRefinementAndRichardson (k = 1 block labelled with the mode)
+M171 KILLED    phase1_protocol_hex_v3.py -> TestRefinedCurveInTheDecision (scheme binding off)
+M172 KILLED    phase1_protocol_hex_v3.py -> TestRefinedCurveInTheDecision (prolongation binding off)
+
+## Pilot measurement r2 (bound): python scripts/oracles/t1_baseline_refinement_pilot.py --threads 4
+#   --domains <domain> --output results/2026-11-05_t1-baseline-refinement-pilot_r2_<domain>.json  (one run per domain;
+#   a first single run of both domains was killed by a container restart before it finished, nothing of it is used)
+# run in a clean git worktree at b92b53c (source.bound = true, worktree_dirty = false), OMP/OpenBLAS/MKL and
+# torch pinned to 4 threads (recorded in environment.thread_env), no other load during the run
+[T1-REFINEMENT] triangle_dirichlet N=32: floor k=1 3.471e-03; gains: exact_k124 x16.17, exact_k124_richardson x95.77, linear_k124 x1.54, linear_k124_richardson x1.54; prolongation error budget {'2': 0.010834349716831117, '4': 0.011164452385612226, 'order_ratio_N_to_2N_over_2N_to_4N': {'min': 3.981184597969065, 'max': 3.987671950175819, 'mean': 3.983937556825346}}; exact map 4.1e-16 at 4.80e-06 s; checks {'exact_map_reproduces_truth': True, 'exact_initial_condition_is_u0_on_nested_nodes': True, 'k1_block_identical_errors_under_every_prolongation': True, 'oracle_second_order_in_h_at_steps64': True, 'linear_prolongation_second_order_on_the_inputs': True}
+[T1-REFINEMENT] passed=True bound=True | PASS
+exit=0
+# 2026-11-05_t1-baseline-refinement-pilot_r2_triangle_dirichlet.json sha256 0231bbcf70aff020ac84f3325400ce111c72b8f2753ea2f99275fa3c857d6649
+# wall: curve linear 505 s, exact 428 s; real	15m38.111s
+# triangle_dirichlet linear steps=64 mean rel_l2: cn:128 3.908e-03, cn:32 5.387e-03, cn:64 2.254e-03, cn_richardson_h:128 4.485e-03, cn_richardson_h:64 4.505e-03
+# triangle_dirichlet exact steps=64 mean rel_l2: cn:128 3.044e-04, cn:32 5.387e-03, cn:64 1.315e-03, cn_richardson_h:128 3.624e-05, cn_richardson_h:64 5.024e-05
+# floors: exact_k124 2.147e-04, exact_k124_richardson 3.624e-05, linear_k124 2.254e-03, linear_k124_richardson 2.254e-03, registered_k1 3.471e-03
+# decision map exact_k124: same 1432, undecidable/H0->advantage 452, advantage->H0 2, floor evaluated 492, equal-runtime evaluable 782
+# decision map exact_k124_richardson: same 1400, undecidable/H0->advantage 484, advantage->H0 2, floor evaluated 820, equal-runtime evaluable 920
+# decision map linear_k124: same 1569, undecidable/H0->advantage 317, advantage->H0 0, floor evaluated 82, equal-runtime evaluable 552
+# decision map linear_k124_richardson: same 1569, undecidable/H0->advantage 317, advantage->H0 0, floor evaluated 82, equal-runtime evaluable 552
+# Gesamtbericht example (20 ms, upper 1e-3): registered H0; fair k=1,2,4 advantage (upper IQM bound 0.001 < baseline error 0.0025605 at 0.02 s); oracle advantage (upper IQM bound 0.001 < baseline error 0.0010153 at 0.02 s)
+[T1-REFINEMENT] torus_periodic N=32: floor k=1 2.093e-03; gains: exact_k124 x16.11, exact_k124_richardson x116.83, linear_k124 x1.09, linear_k124_richardson x1.09; prolongation error budget {'2': 0.00802373528375198, '4': 0.008268278106149982, 'order_ratio_N_to_2N_over_2N_to_4N': {'min': 3.9827221183734447, 'max': 3.9880517417255628, 'mean': 3.985358106446823}}; exact map 6.3e-16 at 1.19e-05 s; checks {'exact_map_reproduces_truth': True, 'exact_initial_condition_is_u0_on_nested_nodes': True, 'k1_block_identical_errors_under_every_prolongation': True, 'oracle_second_order_in_h_at_steps64': True, 'linear_prolongation_second_order_on_the_inputs': True}
+[T1-REFINEMENT] passed=True bound=True | PASS
+exit=0
+# 2026-11-05_t1-baseline-refinement-pilot_r2_torus_periodic.json sha256 55e6ad338b248aedf7627aef71963a0f32dc602659a565227fe3c2fd41189200
+# wall: curve linear 1126 s, exact 930 s; real	34m20.709s
+# torus_periodic linear steps=64 mean rel_l2: cn:128 2.969e-03, cn:32 2.985e-03, cn:64 1.913e-03, cn_richardson_h:128 3.332e-03, cn_richardson_h:64 3.339e-03
+# torus_periodic exact steps=64 mean rel_l2: cn:128 1.715e-04, cn:32 2.985e-03, cn:64 7.318e-04, cn_richardson_h:128 1.791e-05, cn_richardson_h:64 2.429e-05
+# floors: exact_k124 1.299e-04, exact_k124_richardson 1.791e-05, linear_k124 1.913e-03, linear_k124_richardson 1.913e-03, registered_k1 2.093e-03
+# decision map exact_k124: same 1425, undecidable/H0->advantage 455, advantage->H0 6, floor evaluated 492, equal-runtime evaluable 828
+# decision map exact_k124_richardson: same 1387, undecidable/H0->advantage 493, advantage->H0 6, floor evaluated 861, equal-runtime evaluable 920
+# decision map linear_k124: same 1591, undecidable/H0->advantage 295, advantage->H0 0, floor evaluated 41, equal-runtime evaluable 552
+# decision map linear_k124_richardson: same 1591, undecidable/H0->advantage 295, advantage->H0 0, floor evaluated 41, equal-runtime evaluable 552
+# Gesamtbericht example (20 ms, upper 1e-3): registered H0; fair k=1,2,4 advantage (upper IQM bound 0.001 < baseline error 0.00202576 at 0.02 s); oracle H0 (upper IQM bound 0.001 >= baseline error 0.000892658 at 0.02 s)
+
+## Not run here
+# the D5 machine (all times are this container's); N_eval = 16, 64, 128 (only the ID lattice N = 32 of both
+# domains); N_solve = 256 / 512; POD-ridge on T1 data (no model on T1 before approval: the fitted comparator is
+# tested on synthetic linear data only); a higher-order generic prolongation (spectral zero-padding in the lattice
+# eigenbasis) -- named as an open instrument in spec section 2a and ADR-003; the neuraloperator lane (CI)

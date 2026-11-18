@@ -8,6 +8,9 @@ spec/HEX_FV_SOLVER_v1.md). Verified by the Reality Anchor reference cases
 
 Lattices: the unit equilateral triangle with homogeneous Dirichlet boundary
 nodes (slot -1 = boundary node with value 0) and the doubly periodic hex torus.
+``nested_node_index`` maps the nodes of N into the lattice k N (k a power of
+two, bitwise equal coordinates) and ``prolongate_linear`` interpolates a field
+of N onto k N piecewise linearly (amendment 2026-11-05).
 Operator: two-point-flux FV Laplacian
 
     (L_c u)_i = w * sum_s c_{i,s} (u_{n(i,s)} - u_i),   w = 2 / (3 h^2)
@@ -29,6 +32,8 @@ __all__ = [
     "HexLattice",
     "triangle_hex_lattice",
     "torus_hex_lattice",
+    "nested_node_index",
+    "prolongate_linear",
     "edge_conductances",
     "apply_hex_laplacian",
     "assemble_hex_operator",
@@ -267,6 +272,107 @@ def _check_lattice(lattice: Any) -> HexLattice:
             "(h, coords or neighbors differ); build it with triangle_hex_lattice or torus_hex_lattice"
         )
     return canonical
+
+
+def _node_ij(domain: str, n: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Axial indices ``(i, j)`` of every node, in the factory order of the lattice (section 2)."""
+    if domain == "triangle_dirichlet":
+        # triangle_hex_lattice: for j in 1..n-2, for i in 1..n-j-1.
+        ii = np.concatenate([np.arange(1, n - j, dtype=np.int64) for j in range(1, n - 1)])
+        jj = np.concatenate([np.full(n - j - 1, j, dtype=np.int64) for j in range(1, n - 1)])
+        return ii, jj
+    # torus_hex_lattice: node index i * n + j.
+    ii, jj = (a.ravel() for a in np.meshgrid(np.arange(n, dtype=np.int64), np.arange(n, dtype=np.int64),
+                                            indexing="ij"))
+    return ii, jj
+
+
+@functools.lru_cache(maxsize=16)
+def _nested_node_index(domain: str, coarse_n: int, fine_n: int) -> np.ndarray:
+    coarse = _canonical_lattice(domain, coarse_n)
+    fine = _canonical_lattice(domain, fine_n)
+    k = fine_n // coarse_n
+    ci, cj = _node_ij(domain, coarse_n)
+    fi, fj = _node_ij(domain, fine_n)
+    table = np.full((fine_n + 1, fine_n + 1), -1, dtype=np.int64)
+    table[fi, fj] = np.arange(fi.size, dtype=np.int64)
+    index = table[k * ci, k * cj]
+    # Proof check, not a tolerance: for k = 2^m the fine coordinates of the nested nodes are
+    # bitwise the coarse ones (h_f = h_c / 2^m and k (i + j/2) are exact, one rounding each).
+    if np.any(index < 0) or not np.array_equal(fine.coords[index], coarse.coords):
+        raise ValueError(  # pragma: no cover - would mean a platform that breaks IEEE scaling
+            f"nested_node_index: the {domain} nodes of n={coarse_n} are not bitwise nodes of n={fine_n}")
+    index.flags.writeable = False
+    return index
+
+
+def nested_node_index(coarse: HexLattice, fine: HexLattice) -> np.ndarray:
+    """Index of every ``coarse`` node in the ``fine`` lattice of the same domain (section 2, nesting).
+
+    ``fine.n`` must be ``k * coarse.n`` with ``k`` a power of two (1, 2, 4, ...): node
+    ``(i, j)`` of ``coarse`` is node ``(k i, k j)`` of ``fine``, at bitwise the same
+    coordinates (checked). ``u_fine[nested_node_index(coarse, fine)]`` is the injection
+    (restriction by point evaluation) of a fine field onto the coarse nodes. Both lattices
+    must be factory lattices (lattice contract); the result is a read-only int64 array.
+    Other ratios are refused: their coordinates differ in the last bits, so the nodes would
+    coincide only up to rounding (amendment 2026-11-05, D-T1-2).
+    """
+    coarse = _check_lattice(coarse)
+    fine = _check_lattice(fine)
+    if coarse.domain != fine.domain:
+        raise ValueError(f"nested_node_index: lattices of different domains ({coarse.domain!r}, {fine.domain!r})")
+    if fine.n % coarse.n:
+        raise ValueError(f"nested_node_index: fine n={fine.n} is not a multiple of coarse n={coarse.n}")
+    k = fine.n // coarse.n
+    if k & (k - 1):
+        raise ValueError(
+            f"nested_node_index: the refinement ratio {k} is not a power of two; only 1, 2, 4, ... keep the "
+            "nested coordinates bitwise equal")
+    return _nested_node_index(coarse.domain, coarse.n, fine.n)
+
+
+def _prolongate_once(u: np.ndarray, coarse: HexLattice, fine: HexLattice) -> np.ndarray:
+    """Piecewise-linear prolongation N -> 2N on the nested triangulation (section 2, prolongation)."""
+    index = _nested_node_index(coarse.domain, coarse.n, fine.n)
+    out = np.zeros(fine.num_nodes, dtype=np.float64)
+    out[index] = u
+    # Every other fine node is the midpoint of one coarse edge: half a step along a slot from a
+    # nested node. All six slots: an edge whose other end is a Dirichlet boundary node (value 0,
+    # not a coarse unknown) is reached from its interior end only. An edge between two interior
+    # nodes is written from both ends with the same value (0.5 * (a + b) == 0.5 * (b + a)).
+    # Fine nodes on an edge between two boundary nodes (the three corner-adjacent nodes of the
+    # triangle) keep the interpolant's value 0.
+    for slot in range(6):
+        partner = coarse.neighbors[:, slot]
+        partner_value = np.where(partner >= 0, u[np.maximum(partner, 0)], 0.0)
+        out[fine.neighbors[index, slot]] = 0.5 * (u + partner_value)
+    return out
+
+
+def prolongate_linear(u: Any, coarse: HexLattice, fine: HexLattice) -> np.ndarray:
+    """Piecewise-linear interpolation of a ``coarse`` field onto the nested ``fine`` lattice (section 2).
+
+    The P1 interpolant on the coarse triangulation (Dirichlet boundary nodes at value 0),
+    evaluated at the fine nodes: a nested node keeps its value, the midpoint of a coarse edge
+    gets the mean of the two ends. ``fine.n = k coarse.n`` with ``k`` a power of two; ``k > 2``
+    iterates the halving steps, which is the same interpolant evaluated on finer nodes (linear
+    interpolation of a linear function changes nothing). Exact for the coarse data at the nested
+    nodes, second order in ``h`` for a smooth field (test). The generic prolongation a practitioner
+    with ``u`` on ``N`` alone can use; it knows no basis of the task. Consumer:
+    ``spec/PHASE1_PROTOCOL_v1.md`` section 2a (``prolongation="linear"``).
+    """
+    coarse = _check_lattice(coarse)
+    fine = _check_lattice(fine)
+    index = nested_node_index(coarse, fine)   # validates the ratio and the domains
+    del index
+    values = _check_field(u, coarse, name="u")
+    current = coarse
+    out = values
+    while current.n < fine.n:
+        nxt = _canonical_lattice(current.domain, 2 * current.n)
+        out = _prolongate_once(out, current, nxt)
+        current = nxt
+    return out
 
 
 def _check_field(u: Any, lattice: HexLattice, *, name: str = "u") -> np.ndarray:
