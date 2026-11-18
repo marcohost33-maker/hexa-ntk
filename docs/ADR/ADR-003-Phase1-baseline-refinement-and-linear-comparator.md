@@ -1,6 +1,12 @@
-# ADR-003 — Phase-1-Baseline: Raumverfeinerung (D-T1-2) und linearer Vergleichsmassstab (D-T1-1) (Entscheidung ausstehend)
+# ADR-003 — Phase-1-Baseline: Raumverfeinerung (D-T1-2) und linearer Vergleichsmassstab (D-T1-1) (E1 entschieden, Rest offen)
 
-**Status: PROPOSED / NOT APPROVED** · 2026-11-05, zweite Fassung nach Selbstpruefung · betrifft
+**Status: E1 ACCEPTED (Option A), E1b / E1c / E2 PROPOSED** · Owner-Entscheid 2026-11-08
+(ENTSCHEIDE_LOG E1108-01, Wortlaut: "#98 ADR-003 E1 Option A (faire lineare Prolongation k in (1,2))
+-> PENDING-ACTION Welle 2 (Statuszeile spec, Survey-Rerun D5 vor erstem Fit)"). Der Entscheid ist
+**noch nicht umgesetzt**: `spec/PREREGISTRATION_PHASE1_v1.md` bleibt DRAFT, der Textbaustein unten
+ist nicht eingetragen und `_REGISTERED_REFINEMENTS` ist unveraendert (beides gehoert laut
+Code-Folge in einen PR mit Abweichungsvermerk, nach #91 und dieser Linie auf `main`); kein Fit auf
+T1-Daten. Erste Fassung 2026-11-05 (zweite Fassung nach Selbstpruefung), Status damals PROPOSED / NOT APPROVED · betrifft
 `spec/PREREGISTRATION_PHASE1_v1.md` Abschnitte 4-6 und 8 (DRAFT) sowie den Freigabekandidaten
 Draft-PR #91. Entscheider: Owner `[M]`.
 
