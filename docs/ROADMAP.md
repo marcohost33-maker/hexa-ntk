@@ -52,7 +52,7 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   der Epoche, mit und ohne EMA; `best.pt`/`last.pt` laden mit `weights_only=True`; zwei Builds mit einem
   Seed trainieren auf dieselben Bits. 34 neue Tests (27 ohne Backend mit einem Stellvertreter, der die
   Aufrufsignatur und den `_metadata`-Eintrag des Backends hat; 7 mit dem echten GINO), Modul-Abdeckung 100 %;
-  22 neue Mutanten, jeder von seinem benannten Test getoetet. CI: der GINO-Schritt in `gate` und der
+  22 neue Mutanten, jeder von seinem benannten Test getoetet; volle Probe 257/257 an 6a74ea9, exit 0. CI: der GINO-Schritt in `gate` und der
   Smoke-Job fahren jetzt `test_gino_*_hex_v3.py` (vorher nur den Adapter-Test), sonst liefen die 7
   Backend-Tests nirgends.
   Eigene Fehler unterwegs: (a) der erste Entwurf nahm an, torch reiche `strict` an `_load_from_state_dict`
