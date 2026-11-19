@@ -41,7 +41,7 @@ jobs:
             pip install -r requirements-operator.txt
             python -c "import importlib.metadata; assert importlib.metadata.version('neuraloperator') == '2.0.0'"
             python -c "import neuralop.models; assert hasattr(neuralop.models, 'GINO')"
-            python -m unittest discover -s src/toolkit -t src/toolkit -p "test_gino_adapter_hex_v3.py" -v
+            python -m unittest discover -s src/toolkit -t src/toolkit -p "test_gino_*_hex_v3.py" -v
           fi
 
   tests:

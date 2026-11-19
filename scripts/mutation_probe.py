@@ -73,6 +73,13 @@ CS = "test_runner_hex_v3.TestConsecutiveSkips"
 SD = "test_ddp_hex_v3.TestResumeStateDigest"
 CS8 = "test_ddp_hex_v3.TestComparableState"
 W1 = "test_ddp_hex_v3.TestWorldSizeOne"
+GT = "gino_training_hex_v3.py"
+GM = "test_gino_training_hex_v3.TestGinoRunnerModule"
+GL = "test_gino_training_hex_v3.TestRelativeL2Loss"
+GD = "test_gino_training_hex_v3.TestRunnerPairDataset"
+GS = "test_gino_training_hex_v3.TestMeanRelL2"
+GB = "test_gino_training_hex_v3.TestBuildPhase1Runner"
+GR = "test_gino_training_hex_v3.TestPhase1TrainingRecipe"
 _SHADOW_SITE = ("        if isinstance(attr, str) and attr not in tolerated"
                 " and _is_method(inspect.getattr_static(cls, attr, None))\n")
 RS = "test_resume_with_other_shared_state_on_one_rank_fails_both"
@@ -697,6 +704,58 @@ MUTANTS = (
     Mutant(RU, '        grad_scaler = _comparable_state(self.grad_scaler, _TRUSTED_GRAD_SCALERS, "GradScaler")\n',
            "        grad_scaler = None if self.grad_scaler is None else self.grad_scaler.state_dict()\n", W1,
            expect=('test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler',)),
+    # GINO through the runner (spec/GINO_TRAINING_PHASE1_v1.md, 2026-11-19): one guard off per mutant
+    Mutant(GT, "            del state[_BACKEND_METADATA_KEY]\n", "            pass\n", GM,
+           expect=("test_backend_state_holds_a_function_and_the_module_state_does_not",)),
+    Mutant(GT, "        had_metadata = destination is not None and _BACKEND_METADATA_KEY in destination\n",
+           "        had_metadata = False\n", GM,
+           expect=("test_metadata_of_another_module_in_the_destination_is_kept",)),
+    Mutant(GT, "        if foreign:\n", "        if False:\n", GM,
+           expect=("test_other_non_tensor_backend_state_is_refused",)),
+    Mutant(GT, "        destination[prefix + CONFIG_DIGEST_KEY] = _digest_tensor(self.config.digest())\n",
+           "        pass\n", GM,
+           expect=("test_backend_state_holds_a_function_and_the_module_state_does_not",)),
+    Mutant(GT, "        elif (not isinstance(saved, torch.Tensor) or saved.dtype != torch.uint8\n",
+           "        elif False and (not isinstance(saved, torch.Tensor) or saved.dtype != torch.uint8\n", GM,
+           expect=("test_load_checks_the_config_binding",)),
+    Mutant(GT, " or saved.dtype != torch.uint8\n", " or False\n", GM,
+           expect=("test_load_checks_the_config_binding",)),
+    Mutant(GT, "            missing_keys.append(key)\n", "            pass\n", GM,
+           expect=("test_load_checks_the_config_binding",)),
+    Mutant(GT, "        if x.dtype != self.input_geom.dtype:\n", "        if False:\n", GM,
+           expect=("test_forward_is_predict_gino_and_refuses_other_inputs",)),
+    Mutant(GT, "        self.gino.eval()\n", "        pass\n", GM,
+           expect=("test_predict_runs_in_eval_mode_and_restores_the_mode",)),
+    Mutant(GT, "            self.gino.train(was_training)\n", "            pass\n", GM,
+           expect=("test_predict_runs_in_eval_mode_and_restores_the_mode",)),
+    Mutant(GT, "        if bool((reference == 0).any()):\n", "        if False:\n", GL,
+           expect=("test_gradient_and_refusals",)),
+    Mutant(GT, "        return (torch.linalg.vector_norm(pred - target, dim=1) / reference).mean()\n",
+           "        return torch.linalg.vector_norm(pred - target) / torch.linalg.vector_norm(target)\n", GL,
+           expect=("test_equals_the_task_metric",)),
+    Mutant(GT, "        if np.any((field != 0.0) & (narrow == 0.0)):\n", "        if False:\n", GD,
+           expect=("test_lossy_or_malformed_fields_are_refused",)),
+    Mutant(GT, "        if not np.all(np.isfinite(narrow)):\n", "        if False:\n", GD,
+           expect=("test_lossy_or_malformed_fields_are_refused",)),
+    Mutant(GT, "        model.train(was_training)\n", "        pass\n", GS,
+           expect=("test_mode_is_restored_and_inputs_are_checked",)),
+    Mutant(GT, "    return math.fsum(values) / len(values)\n",
+           "    return math.fsum(values[:-1]) / (len(values) - 1)\n", GS,
+           expect=("test_is_the_mean_of_the_per_sample_metric",)),
+    Mutant(GT, "        grad_clip_max_norm=float(recipe.grad_clip_max_norm),\n", "", GB,
+           expect=("test_runner_is_built_from_the_recipe_alone",)),
+    Mutant(GT, "        use_ema=recipe.use_ema,\n", "", GB,
+           expect=("test_runner_is_built_from_the_recipe_alone",)),
+    Mutant(GT, "    torch.manual_seed(recipe.seed)\n", "    pass\n", GB,
+           expect=("test_the_seed_fixes_the_run",)),
+    Mutant(GT, "        optimizer, T_max=recipe.epochs, eta_min=float(recipe.cosine_eta_min)\n",
+           "        optimizer, T_max=recipe.epochs + 1, eta_min=float(recipe.cosine_eta_min)\n", GB,
+           expect=("test_learning_rate_follows_the_cosine_per_epoch",)),
+    Mutant(GT, "        if not isinstance(data, RunnerPairDataset) or data.num_nodes != lattice.num_nodes:\n",
+           "        if not isinstance(data, RunnerPairDataset):\n", GB,
+           expect=("test_inputs_are_checked",)),
+    Mutant(GT, '            "weight_decay": float(self.weight_decay).hex(),\n', "", GR,
+           expect=("test_digest_binds_every_setting",)),
 )
 
 
