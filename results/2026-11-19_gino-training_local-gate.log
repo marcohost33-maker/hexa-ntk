@@ -1,0 +1,378 @@
+# Local gate 2026-11-19 -- GINO through HexTrainingRunner (spec/GINO_TRAINING_PHASE1_v1.md)
+# Branch claude/hexa-ntk-neural-operator-p7i2nl; base origin/main 18ab389; code under test: 6a74ea9
+# Linux cloud container, Python 3.12.3 (venv), torch 2.6.0+cu124 (PyPI wheel, CPU execution, no CUDA device;
+# download.pytorch.org is blocked in this environment), numpy 2.5.3, neuraloperator 2.0.0, ruff 0.17.3,
+# coverage 7.17.0, 4 torch threads. Synthetic tensors only; no T1 data generated, loaded or fit.
+
+## Baseline: main 18ab389, before any change
+# ruff: All checks passed | verify_sources: 51 + 18 + 11, PASS | engine_gate: doctests 49/49, overall=PASS
+# python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+# Ran 1164 tests in 75.266s, OK (skipped=1) | coverage TOTAL 94%
+
+## Findings at main 18ab389 with the smallest wrapper that makes the runner's model(x) call possible
+## (scratch probes; re-measured from the repo by the oracle below, part "plain")
+# EMA on (runner default), first checkpoint:
+#   runner_hex_v3.py _ema_state_snapshot: AttributeError: 'dict' object has no attribute 'detach'
+# EMA off: run completes, checkpoints/ holds best.pt, last.pt, resume_last.pt
+#   torch.load(best.pt | last.pt, weights_only=True):
+#   WeightsUnpickler error: Unsupported global: GLOBAL torch._C._nn.gelu was not an allowed global by default
+# EMA off, resume with resume_trusted=True:
+#   RuntimeError: Error(s) in loading state_dict for W: Unexpected key(s) in state_dict: "_metadata".
+# state_dict() of the backend: non-tensor entries {'_metadata': 'dict'} (constructor arguments incl. F.gelu),
+#   written without the module prefix.
+
+## Chain at 6a74ea9 (working tree = commit)
+All checks passed!
+compile-ok
+[VERIFY-SOURCES] 53 Toolkit-Eintraege + 19 Spec-Eintraege + 12 Script-Eintraege | Dateiliste: git (84 Dateien) | PASS
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+----------------------------------------------------------------------
+Ran 1198 tests in 98.425s
+
+OK (skipped=1)
+TOTAL                                           6716    269   2566    210    95%
+Ran 61 tests in 24.067s
+
+OK
+# (the last block is the GINO lane: -p "test_gino_*_hex_v3.py", adapter 27 + runner connection 34)
+
+## New module as the tests (cpu) job sees it (backend hidden: importlib.util.find_spec -> None, sys.modules["neuralop"] = None)
+# Ran 34 tests in 2.035s, OK (skipped=7) | coverage of gino_training_hex_v3.py: 198 stmts, 72 branches, 100%
+## With the backend: Ran 34 tests, OK | coverage of gino_training_hex_v3.py 100%
+
+## FV solver + reference case across OpenBLAS kernels (CI step; modules unchanged by this branch)
+== OPENBLAS_CORETYPE=Prescott Ran 117 tests in 6.942s  OK 
+== OPENBLAS_CORETYPE=Sandybridge Ran 117 tests in 61.142s  OK 
+== OPENBLAS_CORETYPE=Haswell Ran 117 tests in 39.704s  OK 
+== OPENBLAS_CORETYPE=Zen Ran 117 tests in 40.809s  OK 
+== OPENBLAS_CORETYPE=SkylakeX Ran 117 tests in 24.026s  OK 
+
+## Evidence writer at 6a74ea9 (clean work tree):
+## python scripts/oracles/gino_runner_integration_oracle.py --output results/2026-11-19_gino_runner_integration.json
+[GINO-RUNNER] plain  ema_run                  AttributeError       as recorded
+[GINO-RUNNER] plain  no_ema_run               ok                   as recorded
+[GINO-RUNNER] plain  weights_only_load_best   UnpicklingError      as recorded
+[GINO-RUNNER] plain  weights_only_load_last   UnpicklingError      as recorded
+[GINO-RUNNER] plain  trusted_resume           RuntimeError         as recorded
+[GINO-RUNNER] module forward_equals_predict_gino_bitwise          PASS
+[GINO-RUNNER] module state_is_tensors_only                        PASS
+[GINO-RUNNER] module no_ema_run_completes                         PASS
+[GINO-RUNNER] module no_ema_weights_moved                         PASS
+[GINO-RUNNER] module no_ema_weights_only_load_best                PASS
+[GINO-RUNNER] module no_ema_weights_only_load_last                PASS
+[GINO-RUNNER] module no_ema_mean_rel_l2_finite                    PASS
+[GINO-RUNNER] module no_ema_resume_at_epoch_boundary_bitwise      PASS
+[GINO-RUNNER] module no_ema_resume_inside_epoch_bitwise           PASS
+[GINO-RUNNER] module ema_run_completes                            PASS
+[GINO-RUNNER] module ema_weights_moved                            PASS
+[GINO-RUNNER] module ema_weights_only_load_best                   PASS
+[GINO-RUNNER] module ema_weights_only_load_last                   PASS
+[GINO-RUNNER] module ema_mean_rel_l2_finite                       PASS
+[GINO-RUNNER] module ema_resume_at_epoch_boundary_bitwise         PASS
+[GINO-RUNNER] module ema_resume_inside_epoch_bitwise              PASS
+[GINO-RUNNER] PASS
+# exit 0 | source: git_sha 6a74ea97c7017f7c59c1366182c12511920e1158, worktree_dirty False, bound True
+
+## The 22 new mutants, run one by one with the probe's own functions (run_mutant_detail), at 6a74ea9
+catalog 257 mine 22
+baseline TestBuildPhase1Runner green
+baseline TestGinoRunnerModule green
+baseline TestMeanRelL2 green
+baseline TestPhase1TrainingRecipe green
+baseline TestRelativeL2Loss green
+baseline TestRunnerPairDataset green
+M236 KILLED           expect test_backend_state_holds_a_function_and_the_module_state_does_not | killed_by test_backend_state_holds_a_function_and_the_module_state_does_not,test_load_checks_the_config_binding,test_state_inside_a_wrapper_keeps_the_prefix_and_drops_the_metadata,test_state_is_loadable_with_weights_only,test_weights_move_between_lattices_and_the_geometry_is_not_saved
+M237 KILLED           expect test_metadata_of_another_module_in_the_destination_is_kept | killed_by test_metadata_of_another_module_in_the_destination_is_kept
+M238 KILLED           expect test_other_non_tensor_backend_state_is_refused | killed_by test_other_non_tensor_backend_state_is_refused
+M239 KILLED           expect test_backend_state_holds_a_function_and_the_module_state_does_not | killed_by test_backend_state_holds_a_function_and_the_module_state_does_not,test_load_checks_the_config_binding,test_metadata_of_another_module_in_the_destination_is_kept,test_state_inside_a_wrapper_keeps_the_prefix_and_drops_the_metadata,test_weights_move_between_lattices_and_the_geometry_is_not_saved
+M240 KILLED           expect test_load_checks_the_config_binding | killed_by test_load_checks_the_config_binding,test_state_inside_a_wrapper_keeps_the_prefix_and_drops_the_metadata
+M241 KILLED           expect test_load_checks_the_config_binding | killed_by test_load_checks_the_config_binding
+M242 KILLED           expect test_load_checks_the_config_binding | killed_by test_load_checks_the_config_binding
+M243 KILLED           expect test_forward_is_predict_gino_and_refuses_other_inputs | killed_by test_forward_is_predict_gino_and_refuses_other_inputs
+M244 KILLED           expect test_predict_runs_in_eval_mode_and_restores_the_mode | killed_by test_predict_runs_in_eval_mode_and_restores_the_mode
+M245 KILLED           expect test_predict_runs_in_eval_mode_and_restores_the_mode | killed_by test_predict_runs_in_eval_mode_and_restores_the_mode
+M246 KILLED           expect test_gradient_and_refusals | killed_by test_gradient_and_refusals
+M247 KILLED           expect test_equals_the_task_metric | killed_by test_equals_the_task_metric
+M248 KILLED           expect test_lossy_or_malformed_fields_are_refused | killed_by test_lossy_or_malformed_fields_are_refused
+M249 KILLED           expect test_lossy_or_malformed_fields_are_refused | killed_by test_lossy_or_malformed_fields_are_refused
+M250 KILLED           expect test_mode_is_restored_and_inputs_are_checked | killed_by test_mode_is_restored_and_inputs_are_checked
+M251 KILLED           expect test_is_the_mean_of_the_per_sample_metric | killed_by test_is_the_mean_of_the_per_sample_metric
+M252 KILLED           expect test_runner_is_built_from_the_recipe_alone | killed_by test_runner_is_built_from_the_recipe_alone
+M253 KILLED           expect test_runner_is_built_from_the_recipe_alone | killed_by test_runner_is_built_from_the_recipe_alone
+M254 KILLED           expect test_the_seed_fixes_the_run | killed_by test_resume_at_an_epoch_boundary_is_bitwise,test_resume_inside_an_epoch_is_bitwise,test_the_seed_fixes_the_run
+M255 KILLED           expect test_learning_rate_follows_the_cosine_per_epoch | killed_by test_learning_rate_follows_the_cosine_per_epoch,test_runner_is_built_from_the_recipe_alone
+M256 KILLED           expect test_inputs_are_checked | killed_by test_inputs_are_checked
+M257 KILLED           expect test_digest_binds_every_setting | killed_by test_digest_binds_every_setting
+22/22 killed
+
+## Full mutation probe, first attempt: copy of the tree without .git -> INVALID, does not count
+# [BASELINE RED] test_phase1_protocol_hex_v3.TestIssue82Residuals
+# [MUTATION-PROBE] baseline red - no mutant result is valid | FAIL
+# exit 3
+# Cause: test_source_revision_fits_into_the_manifest calls git; the copy was no git work tree.
+
+## Full mutation probe at 6a74ea9 (separate git worktree): python scripts/mutation_probe.py
+M01 KILLED    checkpoint_integration_hex_v3.py -> TestNonMainRankStoresValidatedFloat
+M02 KILLED    checkpoint_integration_hex_v3.py -> TestDurabilityErrorAfterReplace
+M03 KILLED    checkpoint_integration_hex_v3.py -> TestBestGenerationPin
+M04 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M05 KILLED    resume_utils_hex_v3.py -> TestResumeEmaState
+M06 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M07 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M08 KILLED    resume_utils_hex_v3.py -> TestEmaDecayContract
+M09 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M10 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M11 KILLED    checkpoint_integration_hex_v3.py -> TestResumeRestoresBestMetric
+M12 KILLED    checkpoint_integration_hex_v3.py -> TestBestGenerationPin
+M13 KILLED    checkpoint_integration_hex_v3.py -> TestBestGenerationPin
+M14 KILLED    checkpoint_integration_hex_v3.py -> TestBestGenerationPin
+M15 KILLED    checkpoint_integration_hex_v3.py -> TestBestGenerationPin
+M16 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M17 KILLED    resume_utils_hex_v3.py -> TestAsStepCount
+M18 KILLED    runner_hex_v3.py -> TestDetectorContract
+M19 KILLED    runner_hex_v3.py -> TestFullResumeEquivalence
+M20 KILLED    runner_hex_v3.py -> TestCheckpointSchedule
+M21 KILLED    runner_hex_v3.py -> TestEmptyValidationAndTrainEpoch
+M22 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M23 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M24 KILLED    dataset_split_hex_v3.py -> TestTrajectoryIdContractIssue40
+M25 KILLED    warmstart_utils_hex_v3.py -> TestPrefixTransforms
+M26 KILLED    ema_hex_v3.py -> TestDecayContract
+M27 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestShardContentDurabilityIssue59
+M28 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestShardContentDurabilityIssue59
+M29 KILLED    benchmark_hex_v3.py -> TestPublicApiMatchesMetricSpecV4
+M30 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M31 KILLED    dataset_split_hex_v3.py -> TestDtPrecisionSplitIssue42
+M32 KILLED    hex_fv_solver_hex_v3.py -> TestLameModesAreExactDiscreteEigenvectors
+M33 KILLED    reference_case_hex_v3.py -> TestConvergenceAnalysis
+M34 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M35 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M36 KILLED    reference_case_hex_v3.py -> TestGateDiscrimination
+M37 KILLED    hex_fv_solver_hex_v3.py -> TestPositivityGateIssue60
+M38 KILLED    hex_fv_solver_hex_v3.py -> TestPositivityGateIssue60
+M39 KILLED    hex_fv_solver_hex_v3.py -> TestTorusLattice
+M40 KILLED    hex_fv_solver_hex_v3.py -> TestEdgeConductances
+M41 KILLED    hex_fv_solver_hex_v3.py -> TestEdgeConductances
+M42 KILLED    hex_fv_solver_hex_v3.py -> TestConjugateGradient
+M43 KILLED    hex_fv_solver_hex_v3.py -> TestSteadySolve
+M44 KILLED    reference_case_hex_v3.py -> TestHexMmsTriStudyGate
+M45 KILLED    reference_case_hex_v3.py -> TestMmsGateDiscrimination
+M46 KILLED    reference_case_hex_v3.py -> TestMmsGateDiscrimination
+M47 KILLED    reference_case_hex_v3.py -> TestHexHeatTorusStudyGate
+M48 KILLED    hex_fv_solver_hex_v3.py -> TestCrankNicolson
+M49 KILLED    hex_fv_solver_hex_v3.py -> TestConjugateGradient
+M50 KILLED    hex_fv_solver_hex_v3.py -> TestConjugateGradient
+M51 KILLED    heat_operator_task_hex_v3.py -> TestBasis
+M52 KILLED    heat_operator_task_hex_v3.py -> TestPriorAndTruth
+M53 KILLED    heat_operator_task_hex_v3.py -> TestManifest
+M54 KILLED    heat_operator_task_hex_v3.py -> TestMetrics
+M55 KILLED    heat_operator_task_hex_v3.py -> TestMetrics
+M56 KILLED    phase1_protocol_hex_v3.py -> TestDigestStringsAreWholeStrings
+M57 KILLED    phase1_protocol_hex_v3.py -> TestDigestStringsAreWholeStrings
+M58 KILLED    phase1_protocol_hex_v3.py -> TestBreakEvenRange
+M59 KILLED    ntk_trajectory_hex_v3.py -> TestFailClosed
+M60 KILLED    ntk_trajectory_hex_v3.py -> TestRepeatedStates
+M61 KILLED    ntk_trajectory_hex_v3.py -> TestRepeatedStates
+M62 KILLED    ntk_trajectory_hex_v3.py -> TestRepeatedStates
+M63 KILLED    ntk_trajectory_hex_v3.py -> TestRepeatedStates
+M64 KILLED    ntk_trajectory_hex_v3.py -> TestRecordCheck
+M65 KILLED    ntk_trajectory_hex_v3.py -> TestRecordCheck
+M66 KILLED    ntk_trajectory_hex_v3.py -> TestFailClosed
+M67 KILLED    ntk_trajectory_hex_v3.py -> TestFailClosed
+M68 KILLED    ntk_trajectory_hex_v3.py -> TestFailClosed
+M69 KILLED    ntk_trajectory_hex_v3.py -> TestClosedForms
+M70 KILLED    ntk_trajectory_hex_v3.py -> TestBinding
+M71 KILLED    ntk_trajectory_hex_v3.py -> TestClosedForms
+M72 KILLED    ntk_trajectory_hex_v3.py -> TestClosedForms
+M73 KILLED    ntk_trajectory_hex_v3.py -> TestClosedForms
+M74 KILLED    ntk_trajectory_hex_v3.py -> TestClosedForms
+M75 KILLED    ntk_trajectory_hex_v3.py -> TestBinding
+M76 KILLED    ntk_trajectory_hex_v3.py -> TestBinding
+M77 KILLED    ntk_trajectory_hex_v3.py -> TestConstructorMetadata
+M78 KILLED    ntk_trajectory_hex_v3.py -> TestPreflightBinding
+M79 KILLED    ntk_trajectory_hex_v3.py -> TestMetadataAliasing
+M80 KILLED    ntk_trajectory_hex_v3.py -> TestMetadataAliasing
+M81 KILLED    ntk_trajectory_hex_v3.py -> TestDriftRange
+M82 KILLED    ntk_trajectory_hex_v3.py -> TestDriftRange
+M83 KILLED    ntk_trajectory_hex_v3.py -> TestConstructorMetadata
+M84 KILLED    ntk_trajectory_hex_v3.py -> TestCrossFamilyR88R98
+M85 KILLED    ntk_trajectory_hex_v3.py -> TestCrossFamilyR88R98
+M86 KILLED    ntk_trajectory_hex_v3.py -> TestCrossFamilyR88R98
+M87 KILLED    ntk_trajectory_hex_v3.py -> TestCrossFamilyR88R98
+M88 KILLED    ntk_trajectory_hex_v3.py -> TestCrossFamilyR88R98
+M89 KILLED    ntk_trajectory_hex_v3.py -> TestCrossFamilyR88R98
+M90 KILLED    runner_hex_v3.py -> TestTwoRanks
+M91 KILLED    ddp_hex_v3.py -> TestTwoRanks
+M92 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M93 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M94 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M95 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M96 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M97 KILLED    runner_hex_v3.py -> TestTwoRanks
+M98 KILLED    runner_hex_v3.py -> TestTwoRanks
+M99 KILLED    runner_hex_v3.py -> TestTwoRanks
+M100 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M101 KILLED    runner_hex_v3.py -> TestTwoRanks
+M102 KILLED    runner_hex_v3.py -> TestTwoRanks
+M103 KILLED    runner_hex_v3.py -> TestTwoRanks
+M104 KILLED    runner_hex_v3.py -> TestTwoRanks
+M105 KILLED    runner_hex_v3.py -> TestTwoRanks
+M106 KILLED    runner_hex_v3.py -> TestTwoRanks
+M107 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_weights_on_one_rank_fails_both | killed_by test_resume_with_other_weights_on_one_rank_fails_both
+M108 KILLED    runner_hex_v3.py -> TestTwoRanks
+M109 KILLED    runner_hex_v3.py -> TestTwoRanks
+M110 KILLED    runner_hex_v3.py -> TestTwoRanks
+M111 KILLED    ddp_hex_v3.py -> TestTwoRanks
+M112 KILLED    ddp_hex_v3.py -> TestTwoRanks
+M113 KILLED    runner_hex_v3.py -> TestTwoRanks
+M114 KILLED    runner_hex_v3.py -> TestTwoRanks
+M115 KILLED    runner_hex_v3.py -> TestTwoRanks
+M116 KILLED    runner_hex_v3.py -> TestTwoRanks
+M117 KILLED    runner_hex_v3.py -> TestTwoRanks
+M118 KILLED    runner_hex_v3.py -> TestTwoRanks
+M119 KILLED    ddp_hex_v3.py -> TestTwoRanks
+M120 KILLED    ddp_hex_v3.py -> TestTwoRanks
+M121 KILLED    runner_hex_v3.py -> TestTwoRanks
+M122 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M123 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M124 KILLED    runner_hex_v3.py -> TestTwoRanks
+M125 KILLED    runner_hex_v3.py -> TestTwoRanks
+M126 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M127 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M128 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M129 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M130 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M131 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M132 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M133 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M134 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M135 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M136 KILLED    runner_hex_v3.py -> TestTwoRanks
+M137 KILLED    runner_hex_v3.py -> TestTwoRanks
+M138 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M139 KILLED    runner_hex_v3.py -> TestTwoRanks
+M140 KILLED    runner_hex_v3.py -> TestTwoRanks
+M141 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M142 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M143 KILLED    runner_hex_v3.py -> TestLoaderGeneratorResume
+M144 KILLED    runner_hex_v3.py -> TestMidEpochResume
+M145 KILLED    runner_hex_v3.py -> TestMidEpochRecord
+M146 KILLED    runner_hex_v3.py -> TestMidEpochRecord
+M147 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M148 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M149 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M150 KILLED    ddp_hex_v3.py -> TestRunnerWithoutProcessGroup
+M151 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M152 KILLED    runner_hex_v3.py -> TestRunnerWithoutProcessGroup
+M153 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M154 KILLED    ddp_hex_v3.py -> TestWorldSizeOne
+M155 KILLED    ddp_hex_v3.py -> TestExactDistributedEvalSampler
+M156 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M157 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M158 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M159 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M160 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M161 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M162 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M163 KILLED    runner_hex_v3.py -> TestWorldSizeOne
+M164 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M165 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M166 KILLED    runner_hex_v3.py -> TestNonFiniteGradient
+M167 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M168 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M169 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M170 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M171 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M172 KILLED    runner_hex_v3.py -> TestTwoRanks
+M173 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M174 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M175 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M176 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M177 KILLED    runner_hex_v3.py -> TestConsecutiveSkips
+M178 KILLED    runner_hex_v3.py -> TestTwoRanks
+M179 KILLED    runner_hex_v3.py -> TestTwoRanks
+M180 KILLED    runner_hex_v3.py -> TestTwoRanks
+M181 KILLED    runner_hex_v3.py -> TestTwoRanks
+M182 KILLED    runner_hex_v3.py -> TestTwoRanks
+M183 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
+M184 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
+M185 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
+M186 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
+M187 KILLED    phase1_protocol_hex_v3.py -> TestIssue82Residuals
+M188 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_shared_state_on_one_rank_fails_both,test_other_optimizer_or_scheduler_at_construction_fails_both | killed_by test_other_optimizer_or_scheduler_at_construction_fails_both,test_resume_with_other_shared_state_on_one_rank_fails_both
+M189 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_shared_state_on_one_rank_fails_both | killed_by test_resume_with_other_shared_state_on_one_rank_fails_both
+M190 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_shared_state_on_one_rank_fails_both | killed_by test_resume_with_other_shared_state_on_one_rank_fails_both
+M191 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_shared_state_on_one_rank_fails_both,test_other_optimizer_or_scheduler_at_construction_fails_both,test_resume_with_other_weights_on_one_rank_fails_both | killed_by test_other_optimizer_or_scheduler_at_construction_fails_both,test_resume_with_other_shared_state_on_one_rank_fails_both,test_resume_with_other_weights_on_one_rank_fails_both
+M192 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_other_optimizer_or_scheduler_at_construction_fails_both | killed_by test_other_optimizer_or_scheduler_at_construction_fails_both,test_state_digest_error_on_one_rank_is_agreed,test_untrusted_scheduler_is_refused_on_both_ranks
+M193 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_resume_with_other_shared_state_on_one_rank_fails_both,test_resume_with_other_weights_on_one_rank_fails_both | killed_by test_resume_with_other_shared_state_on_one_rank_fails_both,test_resume_with_other_weights_on_one_rank_fails_both
+M194 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_every_value_change_is_seen | killed_by test_every_value_change_is_seen
+M195 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_equal_state_gives_equal_digest_independent_of_dict_order | killed_by test_equal_state_gives_equal_digest_independent_of_dict_order
+M196 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_opaque_state_values_are_refused_not_named | killed_by test_module_extra_state_is_digested_and_opaque_extra_state_refused,test_opaque_state_values_are_refused_not_named
+M197 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_every_value_change_is_seen | killed_by test_every_value_change_is_seen
+M198 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_state_digest_error_on_one_rank_is_agreed | killed_by test_amp_grad_scaler_under_ddp_reproduces_the_single_process_run,test_amp_nan_gradient_on_one_rank_backs_off_on_both,test_consecutive_skip_limit_stops_both_ranks_alike,test_error_after_backward_on_one_rank_fails_both,test_error_recording_a_skipped_update_on_one_rank_fails_both,test_non_finite_gradient_skips_on_both_and_a_split_stops_both,test_state_digest_error_on_one_rank_is_agreed,test_untrusted_scheduler_is_refused_on_both_ranks
+M199 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_sparse_tensors_digest_canonically | killed_by test_sparse_tensors_digest_canonically
+M200 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_sparse_tensors_digest_canonically | killed_by test_sparse_tensors_digest_canonically
+M201 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_sparse_tensors_digest_canonically | killed_by test_sparse_tensors_digest_canonically
+M202 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_numpy_bytes_sets_and_complex_values_are_seen | killed_by test_numpy_bytes_sets_and_complex_values_are_seen
+M203 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_numpy_bytes_sets_and_complex_values_are_seen | killed_by test_numpy_bytes_sets_and_complex_values_are_seen
+M204 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_numpy_bytes_sets_and_complex_values_are_seen | killed_by test_numpy_bytes_sets_and_complex_values_are_seen
+M205 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_set_digest_is_independent_of_the_ranks_hash_seed | killed_by test_set_digest_is_independent_of_the_ranks_hash_seed
+M206 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_numpy_bytes_sets_and_complex_values_are_seen | killed_by test_numpy_bytes_sets_and_complex_values_are_seen,test_opaque_state_values_are_refused_not_named
+M207 KILLED    gino_adapter_hex_v3.py -> TestGinoPhase1Adapter | expect test_unbound_model_is_refused_unless_explicitly_allowed | killed_by test_unbound_model_is_refused_unless_explicitly_allowed
+M208 KILLED    gino_adapter_hex_v3.py -> TestGinoPhase1Adapter | expect test_unbound_model_is_refused_unless_explicitly_allowed | killed_by test_unbound_model_is_refused_unless_explicitly_allowed
+M209 KILLED    gino_adapter_hex_v3.py -> TestGinoPhase1Adapter | expect test_unbound_model_is_refused_unless_explicitly_allowed | killed_by test_unbound_model_is_refused_unless_explicitly_allowed
+M210 KILLED    scripts/oracles/distributed_checkpoint_bundle_v1.py -> TestValidateBundle | expect test_source_binding_must_be_stated | killed_by test_source_binding_must_be_stated
+M211 KILLED    scripts/mutation_probe.py -> TestMutationProbeKilledBy | expect test_verdicts | killed_by test_every_mutation_site_occurs_exactly_once,test_verdicts
+M212 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_numpy_bytes_sets_and_complex_values_are_seen | killed_by test_numpy_bytes_sets_and_complex_values_are_seen
+M213 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_opaque_state_values_are_refused_not_named | killed_by test_opaque_state_values_are_refused_not_named
+M214 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_opaque_state_values_are_refused_not_named | killed_by test_opaque_state_values_are_refused_not_named
+M215 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_module_extra_state_is_digested_and_opaque_extra_state_refused | killed_by test_module_extra_state_is_digested_and_opaque_extra_state_refused
+M216 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_module_extra_state_is_digested_and_opaque_extra_state_refused | killed_by test_module_extra_state_is_digested_and_opaque_extra_state_refused
+M217 KILLED    runner_hex_v3.py -> TestResumeStateDigest | expect test_module_extra_state_is_digested_and_opaque_extra_state_refused | killed_by test_module_extra_state_is_digested_and_opaque_extra_state_refused
+M218 KILLED    runner_hex_v3.py -> TestComparableState | expect test_forged_scheduler_class_is_refused,test_lambda_multiplicative_and_custom_cyclic_lr_are_refused,test_forged_optimizer_and_grad_scaler_are_refused | killed_by test_composite_scheduler_with_forged_or_overridden_child_is_refused,test_forged_optimizer_and_grad_scaler_are_refused,test_forged_scheduler_class_is_refused,test_lambda_multiplicative_and_custom_cyclic_lr_are_refused
+M219 KILLED    runner_hex_v3.py -> TestComparableState | expect test_forged_scheduler_class_is_refused,test_forged_optimizer_and_grad_scaler_are_refused | killed_by test_composite_scheduler_with_forged_or_overridden_child_is_refused,test_forged_optimizer_and_grad_scaler_are_refused,test_forged_scheduler_class_is_refused
+M220 KILLED    runner_hex_v3.py -> TestComparableState | expect test_forged_scheduler_class_is_refused | killed_by test_composite_scheduler_with_forged_or_overridden_child_is_refused,test_forged_optimizer_and_grad_scaler_are_refused,test_forged_scheduler_class_is_refused
+M221 KILLED    runner_hex_v3.py -> TestComparableState | expect test_forged_scheduler_class_is_refused | killed_by test_forged_scheduler_class_is_refused
+M222 KILLED    runner_hex_v3.py -> TestComparableState | expect test_instance_override_of_state_export_or_behaviour_is_refused | killed_by test_composite_scheduler_with_forged_or_overridden_child_is_refused,test_forged_optimizer_and_grad_scaler_are_refused,test_instance_override_of_state_export_or_behaviour_is_refused
+M223 KILLED    runner_hex_v3.py -> TestComparableState | expect test_instance_override_of_state_export_or_behaviour_is_refused | killed_by test_composite_scheduler_with_forged_or_overridden_child_is_refused,test_forged_optimizer_and_grad_scaler_are_refused,test_instance_override_of_state_export_or_behaviour_is_refused
+M224 KILLED    runner_hex_v3.py -> TestComparableState | expect test_every_trusted_component_is_compared | killed_by test_every_trusted_component_is_compared
+M225 KILLED    runner_hex_v3.py -> TestComparableState | expect test_instance_override_of_state_export_or_behaviour_is_refused | killed_by test_instance_override_of_state_export_or_behaviour_is_refused,test_optimizer_load_state_dict_hook_is_refused
+M226 KILLED    runner_hex_v3.py -> TestComparableState | expect test_instance_override_of_state_export_or_behaviour_is_refused | killed_by test_instance_override_of_state_export_or_behaviour_is_refused
+M227 KILLED    runner_hex_v3.py -> TestComparableState | expect test_optimizer_load_state_dict_hook_is_refused | killed_by test_optimizer_load_state_dict_hook_is_refused
+M228 KILLED    runner_hex_v3.py -> TestComparableState | expect test_instance_override_of_state_export_or_behaviour_is_refused | killed_by test_instance_override_of_state_export_or_behaviour_is_refused,test_optimizer_load_state_dict_hook_is_refused
+M229 KILLED    runner_hex_v3.py -> TestComparableState | expect test_composite_scheduler_with_forged_or_overridden_child_is_refused | killed_by test_composite_scheduler_with_forged_or_overridden_child_is_refused
+M230 KILLED    runner_hex_v3.py -> TestComparableState | expect test_composite_scheduler_with_forged_or_overridden_child_is_refused | killed_by test_composite_scheduler_with_forged_or_overridden_child_is_refused
+M231 KILLED    runner_hex_v3.py -> TestComparableState | expect test_composite_scheduler_with_forged_or_overridden_child_is_refused | killed_by test_composite_scheduler_with_forged_or_overridden_child_is_refused
+M232 KILLED    runner_hex_v3.py -> TestWorldSizeOne | expect test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler | killed_by test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler
+M233 KILLED    runner_hex_v3.py -> TestWorldSizeOne | expect test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler | killed_by test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler
+M234 KILLED    runner_hex_v3.py -> TestTwoRanks | expect test_untrusted_scheduler_is_refused_on_both_ranks | killed_by test_state_digest_error_on_one_rank_is_agreed,test_untrusted_scheduler_is_refused_on_both_ranks
+M235 KILLED    runner_hex_v3.py -> TestWorldSizeOne | expect test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler | killed_by test_shared_state_refuses_untrusted_optimizer_scheduler_and_scaler
+M236 KILLED    gino_training_hex_v3.py -> TestGinoRunnerModule | expect test_backend_state_holds_a_function_and_the_module_state_does_not | killed_by test_backend_state_holds_a_function_and_the_module_state_does_not,test_load_checks_the_config_binding,test_state_inside_a_wrapper_keeps_the_prefix_and_drops_the_metadata,test_state_is_loadable_with_weights_only,test_weights_move_between_lattices_and_the_geometry_is_not_saved
+M237 KILLED    gino_training_hex_v3.py -> TestGinoRunnerModule | expect test_metadata_of_another_module_in_the_destination_is_kept | killed_by test_metadata_of_another_module_in_the_destination_is_kept
+M238 KILLED    gino_training_hex_v3.py -> TestGinoRunnerModule | expect test_other_non_tensor_backend_state_is_refused | killed_by test_other_non_tensor_backend_state_is_refused
+M239 KILLED    gino_training_hex_v3.py -> TestGinoRunnerModule | expect test_backend_state_holds_a_function_and_the_module_state_does_not | killed_by test_backend_state_holds_a_function_and_the_module_state_does_not,test_load_checks_the_config_binding,test_metadata_of_another_module_in_the_destination_is_kept,test_state_inside_a_wrapper_keeps_the_prefix_and_drops_the_metadata,test_weights_move_between_lattices_and_the_geometry_is_not_saved
+M240 KILLED    gino_training_hex_v3.py -> TestGinoRunnerModule | expect test_load_checks_the_config_binding | killed_by test_load_checks_the_config_binding,test_state_inside_a_wrapper_keeps_the_prefix_and_drops_the_metadata
+M241 KILLED    gino_training_hex_v3.py -> TestGinoRunnerModule | expect test_load_checks_the_config_binding | killed_by test_load_checks_the_config_binding
+M242 KILLED    gino_training_hex_v3.py -> TestGinoRunnerModule | expect test_load_checks_the_config_binding | killed_by test_load_checks_the_config_binding
+M243 KILLED    gino_training_hex_v3.py -> TestGinoRunnerModule | expect test_forward_is_predict_gino_and_refuses_other_inputs | killed_by test_forward_is_predict_gino_and_refuses_other_inputs
+M244 KILLED    gino_training_hex_v3.py -> TestGinoRunnerModule | expect test_predict_runs_in_eval_mode_and_restores_the_mode | killed_by test_predict_runs_in_eval_mode_and_restores_the_mode
+M245 KILLED    gino_training_hex_v3.py -> TestGinoRunnerModule | expect test_predict_runs_in_eval_mode_and_restores_the_mode | killed_by test_predict_runs_in_eval_mode_and_restores_the_mode
+M246 KILLED    gino_training_hex_v3.py -> TestRelativeL2Loss | expect test_gradient_and_refusals | killed_by test_gradient_and_refusals
+M247 KILLED    gino_training_hex_v3.py -> TestRelativeL2Loss | expect test_equals_the_task_metric | killed_by test_equals_the_task_metric
+M248 KILLED    gino_training_hex_v3.py -> TestRunnerPairDataset | expect test_lossy_or_malformed_fields_are_refused | killed_by test_lossy_or_malformed_fields_are_refused
+M249 KILLED    gino_training_hex_v3.py -> TestRunnerPairDataset | expect test_lossy_or_malformed_fields_are_refused | killed_by test_lossy_or_malformed_fields_are_refused
+M250 KILLED    gino_training_hex_v3.py -> TestMeanRelL2 | expect test_mode_is_restored_and_inputs_are_checked | killed_by test_mode_is_restored_and_inputs_are_checked
+M251 KILLED    gino_training_hex_v3.py -> TestMeanRelL2 | expect test_is_the_mean_of_the_per_sample_metric | killed_by test_is_the_mean_of_the_per_sample_metric
+M252 KILLED    gino_training_hex_v3.py -> TestBuildPhase1Runner | expect test_runner_is_built_from_the_recipe_alone | killed_by test_runner_is_built_from_the_recipe_alone
+M253 KILLED    gino_training_hex_v3.py -> TestBuildPhase1Runner | expect test_runner_is_built_from_the_recipe_alone | killed_by test_runner_is_built_from_the_recipe_alone
+M254 KILLED    gino_training_hex_v3.py -> TestBuildPhase1Runner | expect test_the_seed_fixes_the_run | killed_by test_resume_at_an_epoch_boundary_is_bitwise,test_resume_inside_an_epoch_is_bitwise,test_the_seed_fixes_the_run
+M255 KILLED    gino_training_hex_v3.py -> TestBuildPhase1Runner | expect test_learning_rate_follows_the_cosine_per_epoch | killed_by test_learning_rate_follows_the_cosine_per_epoch,test_runner_is_built_from_the_recipe_alone
+M256 KILLED    gino_training_hex_v3.py -> TestBuildPhase1Runner | expect test_inputs_are_checked | killed_by test_inputs_are_checked
+M257 KILLED    gino_training_hex_v3.py -> TestPhase1TrainingRecipe | expect test_digest_binds_every_setting | killed_by test_digest_binds_every_setting
+[MUTATION-PROBE] baseline green | 257/257 killed | PASS
+exit 0
+
+## GitHub CI at 6a74ea9 (PR #111): gate, tests (cpu), stacked gate, stacked tests (cpu), GINO smoke, zizmor: success.
+# gate job, GINO step (torch 2.6.0+cpu): Ran 61 tests in 20.103s, OK -- TestRealBackend ran, not skipped.
+
+## Not run: CUDA, DDP with the real GINO, cost of a real training run, any fit on T1 data.

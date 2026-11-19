@@ -960,3 +960,8 @@
 | DE1BE3D274265F36 | 2026-11-12 14:30 | spec | R12: section 6 behaviour graph, wrapper rules, step hooks refused, pre-step check, limits: DDP_RUNNER_v1.md |
 | D7F88B9D26A105DF | 2026-11-12 14:45 | src/toolkit | R12 self-check (the guard's own class turned on itself): DisableContext's class entries are checked with every admission (a class-level callback property would override the None the B rule trusts): runner_hex_v3.py |
 | 981D3EA254638232 | 2026-11-12 14:45 | src/toolkit | R12: DisableContext class-level callback refused; B also admits LBFGS/SparseAdam after torch.compile (#106 B): test_ddp_hex_v3.py |
+| 0D1F3395EA0D17E3 | 2026-11-19 23:55 | src/toolkit | in-repo neu 2026-11-19 (GINO durch den Runner, spec/GINO_TRAINING_PHASE1_v1.md): GinoRunnerModule (tensor-only state bound to the config digest), RelativeL2Loss, RunnerPairDataset, Phase1TrainingRecipe, build_phase1_runner, mean_rel_l2: gino_training_hex_v3.py |
+| 2CAB5C1DCF51489D | 2026-11-19 23:55 | src/toolkit | in-repo neu 2026-11-19: 34 tests on synthetic tensors (27 with a stand-in backend, 7 with neuraloperator 2.0.0), resume bitwise at the epoch boundary and inside an epoch: test_gino_training_hex_v3.py |
+| 0D58563A091E527D | 2026-11-19 23:55 | spec | in-repo neu 2026-11-19 (PROPOSED): the pinned GINO through the training runner, findings at main 18ab389, open owner questions: GINO_TRAINING_PHASE1_v1.md |
+| 614D398F8E05D83F | 2026-11-19 23:55 | scripts | GINO through the runner: 22 new mutants (one guard off each, expect = its test) -> 257: mutation_probe.py |
+| 6BAE69D1B3ACCB44 | 2026-11-19 23:55 | scripts/oracles | in-repo neu 2026-11-19: evidence writer, real GINO through the runner without the module (failures as recorded) and with it: gino_runner_integration_oracle.py |
