@@ -1,0 +1,53 @@
+# R12 phase 2 self-review local gate -- 2026-11-12T15:40Z; base: 3b11876 (PR #107 head) + the self-review change committed with this log
+# env: Linux container, Python 3.12.3, torch 2.6.0+cu124 (CPU), numpy 2.5.3, ruff 0.17.3, coverage 7.17.0
+
+== ruff check src scripts
+All checks passed!
+exit=0
+
+== compileall
+exit=0
+
+== verify_sources
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 11 Script-Eintraege | Dateiliste: git (80 Dateien) | PASS
+exit=0
+
+== engine_gate
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+exit=0
+
+== coverage run -m unittest discover (run of 15:40Z earlier in this session, same tree)
+Ran 1172 tests in 143.761s
+
+OK (skipped=7)
+
+== coverage report
+TOTAL                                           6568    272   2518    214    94%
+
+== TORCH_DISTRIBUTED_DEBUG=DETAIL: TestWorldSizeOne + TestTwoRanks + TestThreeRanks
+Ran 82 tests in 21.138s
+OK
+mismatch lines: 0
+positive control (1- vs 2-element all_reduce, 2 gloo ranks): with DETAIL 'Detected mismatch between collectives' at once; without DETAIL gloo timeout after 20 s
+
+== negative-first vs 3b11876 (new test file in a scratch worktree)
+FAIL: test_failure_of_the_pre_step_collective_is_raised_not_held (test_ddp_hex_v3.TestWorldSizeOne.test_failure_of_the_pre_step_collective_is_raised_not_held)
+FAIL: test_non_finite_gradient_skips_on_both_and_a_split_stops_both (test_ddp_hex_v3.TestTwoRanks.test_non_finite_gradient_skips_on_both_and_a_split_stops_both) [grad_skip_split_rank1] (rank=0)
+FAIL: test_non_finite_gradient_skips_on_both_and_a_split_stops_both (test_ddp_hex_v3.TestTwoRanks.test_non_finite_gradient_skips_on_both_and_a_split_stops_both) [grad_skip_split_rank1] (rank=1)
+FAIL: test_non_finite_gradient_skips_on_both_and_a_split_stops_both (test_ddp_hex_v3.TestTwoRanks.test_non_finite_gradient_skips_on_both_and_a_split_stops_both) [grad_skip_split_before_mid_save_rank1]
+FAIL: test_non_finite_gradient_skips_on_both_and_a_split_stops_both (test_ddp_hex_v3.TestTwoRanks.test_non_finite_gradient_skips_on_both_and_a_split_stops_both) [grad_skip_split_before_mid_save_rank1]
+FAIL: test_non_finite_gradient_skips_on_all_and_a_split_stops_all (test_ddp_hex_v3.TestThreeRanks.test_non_finite_gradient_skips_on_all_and_a_split_stops_all) [grad_skip_split_rank1] (rank=0)
+FAIL: test_non_finite_gradient_skips_on_all_and_a_split_stops_all (test_ddp_hex_v3.TestThreeRanks.test_non_finite_gradient_skips_on_all_and_a_split_stops_all) [grad_skip_split_rank1] (rank=1)
+FAIL: test_non_finite_gradient_skips_on_all_and_a_split_stops_all (test_ddp_hex_v3.TestThreeRanks.test_non_finite_gradient_skips_on_all_and_a_split_stops_all) [grad_skip_split_rank1] (rank=2)
+Ran 5 tests in 15.294s
+FAILED (failures=8)
+
+== negative-first vs 4e6bcf0 (pinning tests; scratch worktree, two-name shim)
+FAIL: test_grad_scaler_is_checked_when_the_step_is_skipped_too (test_ddp_hex_v3.TestWorldSizeOne.test_grad_scaler_is_checked_when_the_step_is_skipped_too)
+FAIL: test_behaviour_patch_on_the_middle_rank_stops_all_before_any_step (test_ddp_hex_v3.TestThreeRanks.test_behaviour_patch_on_the_middle_rank_stops_all_before_any_step) (rank=0)
+FAIL: test_behaviour_patch_on_the_middle_rank_stops_all_before_any_step (test_ddp_hex_v3.TestThreeRanks.test_behaviour_patch_on_the_middle_rank_stops_all_before_any_step) (rank=1)
+FAIL: test_behaviour_patch_on_the_middle_rank_stops_all_before_any_step (test_ddp_hex_v3.TestThreeRanks.test_behaviour_patch_on_the_middle_rank_stops_all_before_any_step) (rank=2)
+Ran 2 tests in 4.870s
+FAILED (failures=4)
+
+== mutation probe: full 248 run in progress at commit time (isolated copy); result in a follow-up commit
