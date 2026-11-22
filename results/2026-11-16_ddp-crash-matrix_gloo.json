@@ -1,0 +1,1082 @@
+{
+ "allreduce_order_premise": {
+  "2": {
+   "allreduce_distinct_results_over_6_buffer_positions": 1,
+   "ddp_gradient_equal_to_first_iteration": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "ddp_gradient_max_rel_diff_to_first_iteration": [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ranks_agree_bitwise": true
+  },
+  "3": {
+   "allreduce_distinct_results_over_6_buffer_positions": 4,
+   "ddp_gradient_equal_to_first_iteration": [
+    true,
+    false,
+    false,
+    false
+   ],
+   "ddp_gradient_max_rel_diff_to_first_iteration": [
+    0.0,
+    3.3940532091672203e-16,
+    3.3940532091672203e-16,
+    3.3940532091672203e-16
+   ],
+   "ranks_agree_bitwise": true
+  }
+ },
+ "cases": [
+  {
+   "case": "w2_before_step_rank0_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "before_step",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.015
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    3
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_before_step_rank1_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "before_step",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.018
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    3
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_after_backward_before_step_agreement_rank0_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "after_backward_before_step_agreement",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.012
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    3
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_after_backward_before_step_agreement_rank1_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "after_backward_before_step_agreement",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.014
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    3
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_after_step_agreement_before_optimizer_step_rank0_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "after_step_agreement_before_optimizer_step",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.013
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_after_step_agreement_before_optimizer_step_rank1_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "after_step_agreement_before_optimizer_step",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.015
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_in_validation_rank0_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "in_validation",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.013
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_in_validation_rank1_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "in_validation",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.016
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_before_epoch_end_state_agreement_rank0_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "before_epoch_end_state_agreement",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.016
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_before_epoch_end_state_agreement_rank1_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "before_epoch_end_state_agreement",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.02
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_inside_agreed_checkpoint_save_before_write_rank0_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "inside_agreed_checkpoint_save_before_write",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.019
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_inside_agreed_checkpoint_save_before_write_rank1_exit",
+   "checkpoint_epoch": 1,
+   "fault_global_step": 4,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "inside_agreed_checkpoint_save_before_write",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.021
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_inside_agreed_checkpoint_save_after_write_rank0_exit",
+   "checkpoint_epoch": 1,
+   "fault_global_step": 4,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "inside_agreed_checkpoint_save_after_write",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.023
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_inside_agreed_checkpoint_save_after_write_rank1_exit",
+   "checkpoint_epoch": 1,
+   "fault_global_step": 4,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "inside_agreed_checkpoint_save_after_write",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.021
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_before_step_rank1_stall",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 1,
+   "kind": "stall",
+   "point": "before_step",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    15.008
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    3
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w2_before_epoch_end_state_agreement_rank1_stall",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 1,
+   "kind": "stall",
+   "point": "before_epoch_end_state_agreement",
+   "recovered_bitwise_equal_to_reference": true,
+   "recovered_max_rel_diff_to_reference": 0.0,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    15.011
+   ],
+   "survivor_errors": [
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4
+   ],
+   "violations": [],
+   "world": 2
+  },
+  {
+   "case": "w3_before_step_rank0_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "before_step",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.014,
+    0.014
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    3,
+    3
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_before_step_rank1_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "before_step",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.04,
+    0.039
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    3,
+    3
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_before_step_rank2_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 2,
+   "kind": "exit",
+   "point": "before_step",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.036,
+    0.016
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    3,
+    3
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_after_backward_before_step_agreement_rank0_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "after_backward_before_step_agreement",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.022,
+    0.024
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    3,
+    3
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_after_backward_before_step_agreement_rank1_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "after_backward_before_step_agreement",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.014,
+    0.013
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    3,
+    3
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_after_backward_before_step_agreement_rank2_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 2,
+   "kind": "exit",
+   "point": "after_backward_before_step_agreement",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.04,
+    0.019
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    3,
+    3
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_after_step_agreement_before_optimizer_step_rank0_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "after_step_agreement_before_optimizer_step",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.033,
+    0.014
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_after_step_agreement_before_optimizer_step_rank1_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "after_step_agreement_before_optimizer_step",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.019,
+    0.019
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_after_step_agreement_before_optimizer_step_rank2_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 2,
+   "kind": "exit",
+   "point": "after_step_agreement_before_optimizer_step",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.022,
+    0.022
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_in_validation_rank0_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "in_validation",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.017,
+    0.016
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_in_validation_rank1_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "in_validation",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.022,
+    0.021
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_in_validation_rank2_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 2,
+   "kind": "exit",
+   "point": "in_validation",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.128,
+    0.036
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_before_epoch_end_state_agreement_rank0_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "before_epoch_end_state_agreement",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.038,
+    0.038
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_before_epoch_end_state_agreement_rank1_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "before_epoch_end_state_agreement",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.023,
+    0.022
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_before_epoch_end_state_agreement_rank2_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 2,
+   "kind": "exit",
+   "point": "before_epoch_end_state_agreement",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.035,
+    0.015
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_inside_agreed_checkpoint_save_before_write_rank0_exit",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "inside_agreed_checkpoint_save_before_write",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.091,
+    0.092
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_inside_agreed_checkpoint_save_before_write_rank1_exit",
+   "checkpoint_epoch": 1,
+   "fault_global_step": 4,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "inside_agreed_checkpoint_save_before_write",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.028,
+    0.027
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_inside_agreed_checkpoint_save_before_write_rank2_exit",
+   "checkpoint_epoch": 1,
+   "fault_global_step": 4,
+   "fault_rank": 2,
+   "kind": "exit",
+   "point": "inside_agreed_checkpoint_save_before_write",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.08,
+    0.038
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_inside_agreed_checkpoint_save_after_write_rank0_exit",
+   "checkpoint_epoch": 1,
+   "fault_global_step": 4,
+   "fault_rank": 0,
+   "kind": "exit",
+   "point": "inside_agreed_checkpoint_save_after_write",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.014,
+    0.013
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_inside_agreed_checkpoint_save_after_write_rank1_exit",
+   "checkpoint_epoch": 1,
+   "fault_global_step": 4,
+   "fault_rank": 1,
+   "kind": "exit",
+   "point": "inside_agreed_checkpoint_save_after_write",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.063,
+    0.066
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_inside_agreed_checkpoint_save_after_write_rank2_exit",
+   "checkpoint_epoch": 1,
+   "fault_global_step": 4,
+   "fault_rank": 2,
+   "kind": "exit",
+   "point": "inside_agreed_checkpoint_save_after_write",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    0.058,
+    0.021
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_before_step_rank2_stall",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 3,
+   "fault_rank": 2,
+   "kind": "stall",
+   "point": "before_step",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    15.021,
+    15.021
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    3,
+    3
+   ],
+   "violations": [],
+   "world": 3
+  },
+  {
+   "case": "w3_before_epoch_end_state_agreement_rank2_stall",
+   "checkpoint_epoch": 0,
+   "fault_global_step": 4,
+   "fault_rank": 2,
+   "kind": "stall",
+   "point": "before_epoch_end_state_agreement",
+   "recovered_bitwise_equal_to_reference": false,
+   "recovered_max_rel_diff_to_reference": 1.3966810988848219e-15,
+   "recovered_ranks_bitwise_equal": true,
+   "status": "PASS",
+   "survivor_end_after_fault_s": [
+    15.018,
+    15.017
+   ],
+   "survivor_errors": [
+    "RuntimeError",
+    "RuntimeError"
+   ],
+   "survivor_global_steps": [
+    4,
+    4
+   ],
+   "violations": [],
+   "world": 3
+  }
+ ],
+ "environment": {
+  "backend": "gloo",
+  "cuda": false,
+  "hosts": 1,
+  "numpy": "2.5.3",
+  "platform": "Linux-6.18.44-fc-v470-x86_64-with-glibc2.39",
+  "python": "3.12.3",
+  "torch": "2.6.0+cu124",
+  "torch_distributed_debug": "OFF"
+ },
+ "job": {
+  "deadline_slack_s": 60,
+  "epochs": 4,
+  "points": {
+   "after_backward_before_step_agreement": [
+    "_apply_update",
+    "entry",
+    4
+   ],
+   "after_step_agreement_before_optimizer_step": [
+    "_step_optimizer",
+    "entry",
+    4
+   ],
+   "before_epoch_end_state_agreement": [
+    "_agree_shared_state",
+    "entry",
+    2
+   ],
+   "before_step": [
+    "_train_one_step",
+    "entry",
+    4
+   ],
+   "in_validation": [
+    "_validate_local",
+    "entry",
+    2
+   ],
+   "inside_agreed_checkpoint_save_after_write": [
+    "_save_checkpoints_local",
+    "exit",
+    2
+   ],
+   "inside_agreed_checkpoint_save_before_write": [
+    "_save_checkpoints_local",
+    "entry",
+    2
+   ]
+  },
+  "process_group_timeout_s": 15
+ },
+ "references": {
+  "2": {
+   "ema": "f14b9aa6e247aae28f37f900fb8d1008c7f463ba06602a68a69220b9c6b896a3",
+   "global_step": 8,
+   "lr": [
+    0.024009999999999997
+   ],
+   "weights": "48c4001f8ae1f6a1e27a883d2ad6d6c570b8790ee690c4d0bef6fb24ad3c0faf"
+  },
+  "3": {
+   "ema": "5ee50f5cff109be44ae08e7053725f64f207b74ed8867df1413484e8942caad2",
+   "global_step": 8,
+   "lr": [
+    0.024009999999999997
+   ],
+   "weights": "6f7b398e4e1af3e467ec97ebaa41465a827d07ffb738336b7d18cbb470035806"
+  }
+ },
+ "rel_tol_3_ranks": 1e-09,
+ "schema": "hexantk/ddp-crash-matrix/v1",
+ "summary": {
+  "cases": 39,
+  "not_fired": 0,
+  "passed": 39,
+  "wall_s": 146.2
+ }
+}
