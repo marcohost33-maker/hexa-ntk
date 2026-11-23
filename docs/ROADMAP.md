@@ -60,6 +60,8 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   Code); (b) die erste volle Mutationsprobe lief in einer Kopie ohne `.git` und brach mit roter Baseline ab
   (`TestIssue82Residuals` braucht git) -> im git-Worktree wiederholt.
   Grenzen: kein T1-Fit, kein Kostenmass eines echten Laufs, CUDA und DDP mit echtem GINO nicht gelaufen.
+  _Nachtrag 2026-11-23:_ DDP mit echtem GINO inzwischen gemessen -- auf gloo (torch 2.6.0) nicht
+  konstruierbar (komplexe Spektralgewichte), siehe den offenen Punkt "GINO unter DDP auf gloo" und Spec Abschnitt 8a.
   _Evidenz:_ `results/2026-11-19_gino-training_local-gate.log`,
   `results/2026-11-19_gino_runner_integration.json` (quellgebunden, exit 0).
   Offen fuer den Owner (Spec Abschnitt 7): die freigegebene Vorregistrierung sollte Clipping, EMA,
@@ -772,6 +774,23 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   (`spec/DDP_RUNNER_v1.md` 3.6/6) und unter der R14-Reihenfolgepruefung nicht gemessen sind. Owner-Entscheid
   (Spec Abschnitt 7, Frage 7): braucht Phase 1 je datenparallele CPU-Laeufe? NCCL nicht gelaufen.
   _Evidenz:_ `results/2026-11-23_gino_ddp_gloo.json` (quellgebunden).
+  _Zweite Runde (Selbstpruefung, gleicher Tag, Spec v1.2):_ (a) Mechanismus im torch-2.6.0-Quelltext gelesen:
+  `all_reduce`/`all_gather`/`scatter` wandeln komplexe Tensoren in Python per `view_as_real`, `broadcast` und
+  DDPs `_broadcast_coalesced` nicht. (b) Die Adam-Erklaerung getestet statt angenommen (Orakel Teil D, ganz ohne
+  Verteilung: Gradient des 4er-Batches gegen den aus zwei Haelften akkumulierten): SGD 3.7e-9, Adam 6.1e-4 --
+  eine andere float32-Summationsreihenfolge allein verschiebt Adam-Gewichte nach 6 Schritten um ~1e-3, "bitgleich"
+  gilt also nur bei gleicher Batch-Aufteilung und Thread-Einstellung. (c) Naheliegende dritte Option falsifiziert
+  (Orakel Teil E): `init_sync=False` (in 2.6.0 nicht vorhanden, in der aktuellen Doku schon) per No-op-Ersatz von
+  `_sync_module_states` emuliert -- DDP konstruiert, aber das erste `backward` scheitert mit demselben Fehler, weil
+  DDPs Reducer den komplexen Gradienten-Bucket ebenfalls ohne reelle Sicht an gloo gibt; ein torch-Upgrade nur um
+  `init_sync` loest den Befund also nicht. (d) Praemisse im `gate`-Job auch mit dem offiziellen CPU-Wheel
+  torch 2.6.0+cpu bestaetigt. (e) Review-Befunde der Gemini-Linie vom 2026-11-21 ("Hexa-NTK Validierung und
+  Haertung") am Code geprueft: `LATTICE_SLOTS`-Duplikat und `nb > 0`-Maske gibt es im Code nicht (Code: `nb >= 0`),
+  `RelativeL2Loss` ist so ungewichtet wie `relative_l2` (gleiche Zellflaechen), die G4-Lesart `m/2 = 5.5` trifft
+  die Spec nicht (`m` wird gerade gerundet) -- neu gegen das echte Backend getestet
+  (`test_spectral_budget_formula_bounds_the_real_spectral_weights`) und in `spec/GINO_ADAPTER_PHASE1_v2.md`
+  (Amendment 2026-11-23) klargestellt, dort auch: DDP als Wrapper des echten GINO ist auf gloo nicht moeglich.
+  _Evidenz:_ `results/2026-11-23_gino_ddp_gloo_r2.json`.
 
 - [ ] **Engine `load_raw(expected_semantics=None)` ueberspringt die Semantik-Pruefung (NR-Sweep
   2026-11-10).** Gleiches Muster wie SF-R46-01 (Typverwechslung last/best/resume nur geprueft, wenn der

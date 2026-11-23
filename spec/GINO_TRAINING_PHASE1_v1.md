@@ -1,6 +1,7 @@
 # GINO_TRAINING_PHASE1_v1 — the pinned GINO through the training runner
 
-**Version:** 1.1 (2026-11-23; 1.0 of 2026-11-19 plus section 8a, DDP on gloo measured)
+**Version:** 1.2 (2026-11-23; 1.0 of 2026-11-19, 1.1 added section 8a, 1.2 sharpened 8a: mechanism at
+source level, rounding control, emulated `init_sync=False`)
 **Status:** PROPOSED. Training code only. No model is fit, tuned or evaluated on T1 data
 under this contract; `spec/PREREGISTRATION_PHASE1_v1.md` (lines 14-15) forbids that until
 the owner approves it and allows "writing training code and running smoke tests on
@@ -13,7 +14,8 @@ the backend; `TestRealBackend` with neuraloperator 2.0.0); 22 mutants in
 through the runner without this module (the failures of section 1) and with it, and writes
 `results/2026-11-19_gino_runner_integration.json`, bound to the source revision.
 `scripts/oracles/gino_ddp_gloo_oracle.py` measures the module under DDP on gloo (section 8a) and
-writes `results/2026-11-23_gino_ddp_gloo.json`.
+writes `results/2026-11-23_gino_ddp_gloo.json` (parts A-C) and `results/2026-11-23_gino_ddp_gloo_r2.json`
+(parts A-E, current).
 **Depends on:** `spec/GINO_ADAPTER_PHASE1_v2.md` (model, geometry, config digest),
 `spec/DDP_RUNNER_v1.md` and `spec/MID_EPOCH_RESUME_v1.md` (runner), `spec/HEAT_OPERATOR_TASK_v1.md`
 (metric `rel_l2`).
@@ -175,14 +177,20 @@ the plain reading as default. The approved preregistration should state:
 Version 1.0 listed "DDP with the real GINO" as not run and assumed it would work because
 the module adds no collective. Measured on Linux, Python 3.12.3, torch 2.6.0 (PyPI wheel
 2.6.0+cu124 on the CPU), neuraloperator 2.0.0, by `scripts/oracles/gino_ddp_gloo_oracle.py`
-(`results/2026-11-23_gino_ddp_gloo.json`): it does not.
+(`results/2026-11-23_gino_ddp_gloo.json`, parts A-E in `results/2026-11-23_gino_ddp_gloo_r2.json`): it does not.
 
 **Finding.** `DistributedDataParallel(GinoRunnerModule(...))` raises
 `RuntimeError: Invalid scalar type` on every rank at construction, before any step. The
 pinned GINO holds its two spectral-convolution weights (`gino.fno_blocks.convs.{0,1}.weight.tensor`,
 shape `[8, 8, 4, 3]` at the test configuration) as `complex64` parameters; DDP broadcasts every
 parameter from rank 0 at construction; torch 2.6.0's gloo backend refuses to broadcast a
-complex tensor, while it all-reduces one (as its real view). Already one rank reproduces it,
+complex tensor, while it all-reduces one. Mechanism, read in torch 2.6.0
+`torch/distributed/distributed_c10d.py`: `all_reduce`, `all_gather`, `scatter` and others view a
+complex tensor as real (`torch.view_as_real`) in Python before the backend sees it; `broadcast`
+does not, and DDP's construction sync (`_sync_module_states` -> `_broadcast_coalesced`) hands the
+complex parameters to the backend as they are. gloo's dtype dispatch has no complex case and
+raises "Invalid scalar type". The `gate` job confirms the premise with the official CPU wheel
+torch 2.6.0+cpu (the local measurements used the PyPI wheel 2.6.0+cu124 on the CPU). Already one rank reproduces it,
 so `TestRealBackend.test_ddp_on_gloo_refuses_the_complex_spectral_weights` pins the premise
 in the `gate` job (with a negative control: the same module with the complex parameters
 excluded from DDP is accepted). The same error with a complex `nn.Parameter` under DDP is
@@ -212,12 +220,27 @@ affected. The runner's `distributed=True` path is unchanged and still requires a
    on the real weights DDP reduces itself (9.6e-4 there, 7.4e-5 on the complex ones). Adam
    divides by the root of the second moment and so turns the float32 rounding difference
    between "mean of 4" and "mean of two means of 2" in near-zero gradient entries into steps of
-   the order of the learning rate; with SGD the same rounding stays at 1e-9.
+   the order of the learning rate; with SGD the same rounding stays at 1e-9. Tested, not
+   assumed (oracle part D, no distribution at all): one process, the gradient of the batch of 4
+   against the gradient accumulated from its two halves, otherwise identical runs: SGD 3.7e-9
+   (complex weights exactly equal), Adam 6.1e-4. A float32 summation order alone therefore moves
+   Adam weights by about 1e-3 within 6 steps here; "the same bits" (section 5) holds only with
+   the same batch split and thread setting, which bears on any comparison across machines.
    Not adopted because it adds collectives outside DDP's reducer that the runner's
    agreement points (`spec/DDP_RUNNER_v1.md` sections 3.6 and 6) do not know about: their
    order relative to DDP's bucket all-reduces, a failure inside the hook, and the collective
    order check under `TORCH_DISTRIBUTED_DEBUG=DETAIL` (R14) are not measured. If the owner
    wants data-parallel CPU runs, this option needs its own contract and its own tests.
+3. *Skip the construction broadcast* (`DistributedDataParallel(..., init_sync=False)`, present in
+   the current PyTorch documentation, absent in 2.6.0; the first release that has it was not
+   determined, the documentation host is not reachable from the measuring container). The
+   runner already compares the weights of all ranks at construction (`spec/DDP_RUNNER_v1.md`
+   section 6), so the broadcast itself would not be missed. Emulated on 2.6.0 (oracle part E:
+   `_sync_module_states` replaced by a no-op in the rank processes, measurement only): DDP
+   constructs, and the first `backward` fails with the same "Invalid scalar type", because DDP's
+   reducer hands the complex gradient bucket to gloo without the real view. A torch bump that
+   only adds `init_sync` therefore does not remove the finding; whether a newer reducer views
+   complex buckets as real is not measured.
 
 ## 9. Sources
 

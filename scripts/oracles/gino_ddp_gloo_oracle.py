@@ -25,10 +25,28 @@ post-accumulate-grad hook. Two gloo ranks with per-rank batch 2 against the
 single process with batch 4, through HexTrainingRunner, 3 epochs, once with SGD
 and once with Adam (learning rate 1e-2, no clipping, no EMA).
 
+Part D, "rounding control" (added 2026-11-23, no distribution at all): one
+process, one model, the same 3 epochs, once with the gradient of the batch of 4
+and once with the gradient accumulated from its two halves (each half loss
+divided by 2). Mathematically the same gradient; the runs differ only in float32
+rounding. With SGD they stay at the rounding level; with Adam the gap is of the
+size part C measured. This tests the explanation of part C's Adam gap instead of
+assuming it.
+
+Part E, "init_sync=False" (added 2026-11-23): newer torch releases let DDP skip
+the construction broadcast (``init_sync``; absent in 2.6.0). Emulated here by
+replacing ``torch.nn.parallel.distributed._sync_module_states`` with a no-op in
+the rank processes (measurement only, nothing in the toolkit does this). With
+equal seeds the ranks start equal, yet the first backward fails: DDP's reducer
+hands the complex gradient bucket to gloo without the real view. So a torch
+bump that only adds ``init_sync`` would not make part A pass.
+
 Exit 0 only if part A fails as recorded on both ranks, part B is refused as
 recorded, part C ends on both ranks with bitwise equal weights and, with SGD,
-within 1e-6 of the single-process run, the backend is neuraloperator 2.0.0 and
-the source revision is bound (clean work tree, verified HEAD); otherwise 1.
+within 1e-6 of the single-process run, part D shows SGD within 1e-6 and Adam
+above 1e-6, part E fails in backward as recorded on both ranks, the backend is
+neuraloperator 2.0.0 and the source revision is bound (clean work tree,
+verified HEAD); otherwise 1.
 
     python scripts/oracles/gino_ddp_gloo_oracle.py --output results/<name>.json
 """
@@ -150,7 +168,23 @@ def _worker(rank: int, root: str, part: str, optimizer: str) -> None:
     dist.init_process_group("gloo", init_method=(Path(root) / "rendezvous").as_uri(), rank=rank,
                             world_size=_WORLD, timeout=timedelta(seconds=120))
     try:
-        if part == "premise":
+        if part == "nosync":
+            import torch.nn.parallel.distributed as ddp_module
+            ddp_module._sync_module_states = lambda **kwargs: None  # emulated init_sync=False, measurement only
+
+            def construct_and_step() -> dict:
+                model = DDP(_module())
+                train, _ = _data()
+                batch = torch.stack([train[i]["input"] for i in (2 * rank, 2 * rank + 1)])
+                stage = {"constructed": True}
+                try:
+                    model(batch).pow(2).mean().backward()
+                    stage["backward"] = "ok"
+                except Exception as exc:  # recorded, judged by the parent
+                    stage.update(backward="failed", error_type=type(exc).__name__, error=str(exc)[:300])
+                return stage
+            result = {"run": _outcome(construct_and_step)}
+        elif part == "premise":
             def premise() -> dict:
                 values = torch.ones(2, dtype=torch.complex64)
                 dist.all_reduce(values)
@@ -246,6 +280,47 @@ def _exclude_and_average_report() -> dict:
     return report
 
 
+def _accumulated_run(optimizer: str, halves: bool) -> torch.Tensor:
+    """Part D: the step's gradient from the batch of 4, or accumulated from its two halves."""
+    module = _module()
+    params = module.parameters()
+    opt = torch.optim.SGD(params, lr=_LR) if optimizer == "sgd" else torch.optim.Adam(params, lr=_LR)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=_EPOCHS)
+    loss_fn = RelativeL2Loss()
+    train, _ = _data()
+    for _ in range(_EPOCHS):
+        for batch in DataLoader(train, batch_size=_WORLD * _PER_RANK):
+            opt.zero_grad(set_to_none=True)
+            if halves:
+                for part in (slice(0, _PER_RANK), slice(_PER_RANK, None)):
+                    (loss_fn(module(batch["input"][part]), batch["target"][part]) / 2).backward()
+            else:
+                loss_fn(module(batch["input"]), batch["target"]).backward()
+            opt.step()
+        scheduler.step()
+    return _flat(module).double()
+
+
+def _rounding_control_report() -> dict:
+    mask = _complex_mask(_module())
+    report = {}
+    for optimizer in ("sgd", "adam"):
+        diff = (_accumulated_run(optimizer, halves=False) - _accumulated_run(optimizer, halves=True)).abs()
+        report[optimizer] = {"max_abs_full_vs_halves": float(diff.max()),
+                             "max_abs_complex": float(diff[mask].max()), "max_abs_real": float(diff[~mask].max())}
+    report["holds"] = bool(report["sgd"]["max_abs_full_vs_halves"] <= _SGD_TOLERANCE
+                           < report["adam"]["max_abs_full_vs_halves"])
+    return report
+
+
+def _init_sync_false_report() -> dict:
+    ranks = _job("nosync")
+    as_recorded = all(
+        r["run"]["ok"] and r["run"]["value"].get("constructed") and r["run"]["value"].get("backward") == "failed"
+        and _PREMISE_ERROR in r["run"]["value"].get("error", "") for r in ranks)
+    return {"ranks": ranks, "as_recorded": as_recorded}
+
+
 def build_report() -> dict:
     return {
         "source": _source_revision(),
@@ -260,6 +335,8 @@ def build_report() -> dict:
         "premise": _premise_report(),
         "parametrize": _parametrize_report(),
         "exclude_and_average": _exclude_and_average_report(),
+        "rounding_control": _rounding_control_report(),
+        "init_sync_false": _init_sync_false_report(),
     }
 
 
@@ -279,6 +356,8 @@ def main(argv: list[str] | None = None) -> int:
         "premise_as_recorded": report["premise"]["as_recorded"],
         "parametrize_refused_as_recorded": report["parametrize"]["as_recorded"],
         "exclude_and_average_holds": report["exclude_and_average"]["holds"],
+        "rounding_control_holds": report["rounding_control"]["holds"],
+        "init_sync_false_as_recorded": report["init_sync_false"]["as_recorded"],
     }
     for name, passed in checks.items():
         print(f"[GINO-DDP] {name:34s} {'PASS' if passed else 'FAIL'}", file=sys.stderr)
