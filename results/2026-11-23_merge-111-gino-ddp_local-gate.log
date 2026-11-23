@@ -1,0 +1,73 @@
+# Local gate 2026-11-23 -- merge of #111 (GINO through HexTrainingRunner, head b6466f7) with main 75fdc57 (DDP_RUNNER v1.6),
+# plus the measured finding "GINO under DDP on gloo" (spec/GINO_TRAINING_PHASE1_v1.md section 8a)
+# Branch claude/hexa-ntk-neuronale-operatoren-ly6bnl; merge commit 42a377d; finding cdae665; oracle result d10b039
+# Linux cloud container, Python 3.12.3 (venv), torch 2.6.0+cu124 (PyPI wheel, CPU execution, no CUDA device;
+# download.pytorch.org is blocked in this environment), numpy 2.5.3, neuraloperator 2.0.0, ruff 0.17.3,
+# coverage 7.17.0, 4 CPUs / 4 torch threads. Synthetic tensors only; no T1 data generated, loaded or fit.
+
+## Merge: conflicts and resolution
+# Conflicts only in README.md, SOURCES.md, docs/ROADMAP.md, scripts/mutation_probe.py (catalogue + class constants);
+# both sides kept everywhere. SOURCES: one new row for the merged mutation_probe.py (3BEEC5BCAEB5839C).
+# verify_sources on the raw merge before that row: [FAIL] scripts/mutation_probe.py: SHA 3BEEC5BCAEB5839C != SOURCES 614D398F8E05D83F
+# Full suite on the raw merge, before the README was merged by hand: Ran 1222 tests, FAILED (failures=5, skipped=3),
+# all 5 in TestDocsContract (README counts found twice, one per side); every other test OK, coverage TOTAL 95%.
+
+## CI lanes on the merged tree (+ the new premise test)
+== OPENBLAS_CORETYPE=Prescott
+Ran 117 tests in 5.637s
+
+OK
+== OPENBLAS_CORETYPE=Sandybridge
+Ran 117 tests in 10.539s
+
+OK
+== OPENBLAS_CORETYPE=Haswell
+Ran 117 tests in 5.232s
+
+OK
+== OPENBLAS_CORETYPE=Zen
+Ran 117 tests in 5.631s
+
+OK
+== OPENBLAS_CORETYPE=SkylakeX
+Ran 117 tests in 6.008s
+
+OK
+== DETAIL multi-rank step
+Ran 87 tests in 25.251s
+
+OK
+== GINO lane
+Ran 62 tests in 24.009s
+
+OK
+
+## Full mutation probe of the merged tree (tree fe800d8 = merge commit 42a377d except the README mutation row)
+# [MUTATION-PROBE] baseline green | 289/289 killed | PASS   (real 32m34s, exit 0) -> results/2026-11-23_full-probe-merge-111.log
+
+## Finding: GINO under DDP on gloo (exploratory scratch probes first, then re-measured from the repo by the oracle)
+# DDP(GinoRunnerModule) with 2 gloo ranks: both ranks RuntimeError: Invalid scalar type in _sync_module_states/_broadcast_coalesced
+# parameters: 36 float32 + 2 complex64 (gino.fno_blocks.convs.{0,1}.weight.tensor, [8, 8, 4, 3]); buffers: 2 float32
+# minimal: gloo broadcast(complex64) -> Invalid scalar type; all_reduce(complex64) -> ok; DDP(complex nn.Parameter) -> Invalid scalar type;
+#   DDP(..., init_sync=False) -> TypeError (no such argument in torch 2.6.0); world_size 1 reproduces all of it
+# parametrize + view_as_complex: TypeError FactorizedTensor.__init_subclass__() missing 'name' (tltorch DenseTensor)
+# exclude-and-average (complex weights ignored by DDP, real-view broadcast, all-reduce in post-accumulate hook), runner, 3 epochs:
+#   SGD : ranks bitwise equal, max |w_ddp - w_single| 3.7e-9 (complex 0.0, real 3.7e-9), max |w| 1.0
+#   Adam: ranks bitwise equal, max |w_ddp - w_single| 9.6e-4 (complex 7.4e-5, real 9.6e-4), max |w| 1.03
+# oracle at cdae665 (clean tree): python scripts/oracles/gino_ddp_gloo_oracle.py --output results/2026-11-23_gino_ddp_gloo.json
+[GINO-DDP] backend_is_2.0.0                   PASS
+[GINO-DDP] premise_as_recorded                PASS
+[GINO-DDP] parametrize_refused_as_recorded    PASS
+[GINO-DDP] exclude_and_average_holds          PASS
+[GINO-DDP] PASS
+exit=0
+
+## Chain on the final tree (README mutation row filled in)
+All checks passed!
+compile-ok
+[VERIFY-SOURCES] 53 Toolkit-Eintraege + 19 Spec-Eintraege + 15 Script-Eintraege | Dateiliste: git (87 Dateien) | PASS
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+Ran 1223 tests in 79.592s
+
+OK (skipped=3)
+TOTAL                                           6838    274   2628    216    95%
