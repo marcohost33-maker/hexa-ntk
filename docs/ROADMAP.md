@@ -754,6 +754,25 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   `grad.coalesce().values()` selbst berechnen, oder Sparse-Gradienten bei der Konstruktion klar ablehnen.
   Owner-Entscheid; Phase 1 (GINO) braucht keine Sparse-Gradienten.
 
+- [ ] **GINO unter DDP auf gloo nicht lauffaehig (Befund 2026-11-23, Linux-Container, Python 3.12.3,
+  torch 2.6.0, neuraloperator 2.0.0; `spec/GINO_TRAINING_PHASE1_v1.md` Abschnitt 8a).** Die Spec v1.0 fuehrte
+  "DDP mit dem echten GINO" als nicht gelaufen und nahm an, es gehe, weil das Modul keinen Kollektiv-Aufruf
+  hinzufuegt. Gemessen: `DistributedDataParallel(GinoRunnerModule(...))` wirft auf jedem Rank schon bei der
+  Konstruktion `RuntimeError: Invalid scalar type` -- die zwei Spektralgewichte sind `complex64`-Parameter,
+  DDP broadcastet bei der Konstruktion jeden Parameter, und gloo (torch 2.6.0) broadcastet keine komplexen
+  Tensoren (All-Reduce geht). Schon 1 Rank reproduziert es: Praemissen-Test
+  `TestRealBackend.test_ddp_on_gloo_refuses_the_complex_spectral_weights` (mit Negativkontrolle) laeuft im
+  `gate`-Job. Phase 1 ist nicht betroffen (D5: eine CPU-Maschine, ein Prozess). Gemessene Optionen fuer den
+  Owner, keine uebernommen: (1) Gewicht per `parametrize` reell halten -- scheitert an tltorchs
+  `FactorizedTensor`; (2) komplexe Gewichte aus DDP ausnehmen, einmal als reelle Sicht broadcasten,
+  Gradienten per Hook mitteln -- 2 Ranks bitgleich, mit SGD 3.7e-9 vom Einzelprozess (komplexe Gewichte
+  exakt gleich), mit Adam 9.6e-4 (Adam verstaerkt float32-Rundung in fast-null Gradienten; gleich gross auf
+  den von DDP selbst reduzierten reellen Gewichten, also nicht vom Hook). Nicht uebernommen, weil die
+  zusaetzlichen Kollektive ausserhalb von DDPs Reducer an den Abstimmungspunkten des Runners
+  (`spec/DDP_RUNNER_v1.md` 3.6/6) und unter der R14-Reihenfolgepruefung nicht gemessen sind. Owner-Entscheid
+  (Spec Abschnitt 7, Frage 7): braucht Phase 1 je datenparallele CPU-Laeufe? NCCL nicht gelaufen.
+  _Evidenz:_ `results/2026-11-23_gino_ddp_gloo.json` (quellgebunden).
+
 - [ ] **Engine `load_raw(expected_semantics=None)` ueberspringt die Semantik-Pruefung (NR-Sweep
   2026-11-10).** Gleiches Muster wie SF-R46-01 (Typverwechslung last/best/resume nur geprueft, wenn der
   Aufrufer es verlangt). Nicht geaendert: `src/hexantk_v3.py` ist kanonisch und wird nach coworker-dde

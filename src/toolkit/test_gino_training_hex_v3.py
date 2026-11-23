@@ -20,9 +20,13 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from pathlib import Path
+
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import Subset
 
 import gino_training_hex_v3 as gt
@@ -648,6 +652,35 @@ class TestRealBackend(unittest.TestCase):
         for use_ema in (False, True):
             with self.subTest(use_ema=use_ema):
                 _interrupted_equals_uninterrupted(self, use_ema=use_ema, mid_epoch=True)
+
+    def test_ddp_on_gloo_refuses_the_complex_spectral_weights(self) -> None:
+        """Premise of spec section 8a (torch 2.6.0): gloo broadcasts no complex tensor, DDP broadcasts every
+        parameter at construction, and the spectral weights are complex64. If this test turns red, the
+        premise has changed (another torch or backend): re-measure with scripts/oracles/gino_ddp_gloo_oracle.py."""
+        if not dist.is_available() or not dist.is_gloo_available():
+            self.skipTest("gloo backend not available")
+        if dist.is_initialized():
+            self.skipTest("a process group is already initialized in this process")
+        module = GinoRunnerModule(_CFG, _LATTICE)
+        complex_names = sorted(n for n, p in module.named_parameters() if p.is_complex())
+        self.assertEqual(complex_names, ["gino.fno_blocks.convs.0.weight.tensor",
+                                         "gino.fno_blocks.convs.1.weight.tensor"])
+        self.assertEqual({p.dtype for n, p in module.named_parameters() if n in complex_names}, {torch.complex64})
+        with tempfile.TemporaryDirectory() as tmp:
+            dist.init_process_group("gloo", init_method=Path(tmp, "rendezvous").as_uri(), rank=0, world_size=1)
+            try:
+                values = torch.ones(2, dtype=torch.complex64)
+                dist.all_reduce(values)  # all-reduce takes complex tensors (as their real view)
+                self.assertTrue(torch.equal(values, torch.ones(2, dtype=torch.complex64)))
+                with self.assertRaisesRegex(RuntimeError, "Invalid scalar type"):
+                    dist.broadcast(torch.ones(2, dtype=torch.complex64), 0)
+                with self.assertRaisesRegex(RuntimeError, "Invalid scalar type"):
+                    DistributedDataParallel(module)
+                # negative control: the same module without its complex parameters is accepted
+                DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(module, complex_names)
+                DistributedDataParallel(module)
+            finally:
+                dist.destroy_process_group()
 
     def test_two_builds_with_one_seed_train_to_the_same_bits(self) -> None:
         states = []

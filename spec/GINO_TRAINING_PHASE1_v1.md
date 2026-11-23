@@ -1,6 +1,6 @@
 # GINO_TRAINING_PHASE1_v1 — the pinned GINO through the training runner
 
-**Version:** 1.0 (2026-11-19)
+**Version:** 1.1 (2026-11-23; 1.0 of 2026-11-19 plus section 8a, DDP on gloo measured)
 **Status:** PROPOSED. Training code only. No model is fit, tuned or evaluated on T1 data
 under this contract; `spec/PREREGISTRATION_PHASE1_v1.md` (lines 14-15) forbids that until
 the owner approves it and allows "writing training code and running smoke tests on
@@ -12,6 +12,8 @@ the backend; `TestRealBackend` with neuraloperator 2.0.0); 22 mutants in
 **Evidence:** `scripts/oracles/gino_runner_integration_oracle.py` runs the real backend
 through the runner without this module (the failures of section 1) and with it, and writes
 `results/2026-11-19_gino_runner_integration.json`, bound to the source revision.
+`scripts/oracles/gino_ddp_gloo_oracle.py` measures the module under DDP on gloo (section 8a) and
+writes `results/2026-11-23_gino_ddp_gloo.json`.
 **Depends on:** `spec/GINO_ADAPTER_PHASE1_v2.md` (model, geometry, config digest),
 `spec/DDP_RUNNER_v1.md` and `spec/MID_EPOCH_RESUME_v1.md` (runner), `spec/HEAT_OPERATOR_TASK_v1.md`
 (metric `rel_l2`).
@@ -151,12 +153,13 @@ the plain reading as default. The approved preregistration should state:
 3. weight decay, Adam betas and eps, `eta_min` (defaults: torch's, 0);
 4. that the evaluated model is the last epoch, not `best.pt`;
 5. that selection uses `mean_rel_l2`, not the runner's `val_loss` or `val_nrmse`;
-6. the run manifest should carry `Phase1TrainingRecipe.digest()` and `GinoPhase1Config.digest()`.
+6. the run manifest should carry `Phase1TrainingRecipe.digest()` and `GinoPhase1Config.digest()`;
+7. whether Phase 1 ever runs data-parallel on CPU (gloo). D5 names one CPU machine, so a
+   single process needs nothing here; if more processes are wanted, section 8a needs a decision.
 
 ## 8. Limits
 
-- Not run: CUDA, DDP with the real GINO (the module adds no collective; the constant
-  geometry buffers are equal on every rank), AMP (excluded by the recipe).
+- Not run: CUDA, NCCL, AMP (excluded by the recipe). DDP on gloo: measured, section 8a.
 - "The same bits" holds on one machine, one software stack and one thread setting, as in
   `spec/MID_EPOCH_RESUME_v1.md`.
 - The stand-in for the backend has the backend's call signature and its `"_metadata"`
@@ -167,6 +170,55 @@ the plain reading as default. The approved preregistration should state:
 - A checkpoint written by a raw GINO or by another wrapper carries no config binding and
   is refused by a strict load.
 
+## 8a. DDP on gloo (measured 2026-11-23)
+
+Version 1.0 listed "DDP with the real GINO" as not run and assumed it would work because
+the module adds no collective. Measured on Linux, Python 3.12.3, torch 2.6.0 (PyPI wheel
+2.6.0+cu124 on the CPU), neuraloperator 2.0.0, by `scripts/oracles/gino_ddp_gloo_oracle.py`
+(`results/2026-11-23_gino_ddp_gloo.json`): it does not.
+
+**Finding.** `DistributedDataParallel(GinoRunnerModule(...))` raises
+`RuntimeError: Invalid scalar type` on every rank at construction, before any step. The
+pinned GINO holds its two spectral-convolution weights (`gino.fno_blocks.convs.{0,1}.weight.tensor`,
+shape `[8, 8, 4, 3]` at the test configuration) as `complex64` parameters; DDP broadcasts every
+parameter from rank 0 at construction; torch 2.6.0's gloo backend refuses to broadcast a
+complex tensor, while it all-reduces one (as its real view). Already one rank reproduces it,
+so `TestRealBackend.test_ddp_on_gloo_refuses_the_complex_spectral_weights` pins the premise
+in the `gate` job (with a negative control: the same module with the complex parameters
+excluded from DDP is accepted). The same error with a complex `nn.Parameter` under DDP is
+reported by other users (PyTorch forum, "Error in DistributedDataParallel when parameters are
+torch.cfloat"; pytorch/pytorch#55375). NCCL was not run.
+
+**Consequence.** No code in this repo is wrong; a data-parallel CPU run of the pinned GINO
+is not possible with the runner as it is. Phase 1 (D5: one CPU machine, one process) is not
+affected. The runner's `distributed=True` path is unchanged and still requires a DDP model.
+
+**Options measured for the owner (not adopted).**
+
+1. *Hold the complex weight as a real parameter* (`torch.nn.utils.parametrize` with
+   `view_as_complex`): refused at registration. tltorch's `FactorizedTensor`, the class that
+   holds the weight, rejects the subclass parametrize injects (`TypeError:
+   FactorizedTensor.__init_subclass__() missing 1 required positional argument: 'name'`).
+   Any other way to make the weight real changes the backend's state layout and with it the
+   checkpoints and `ntk_trajectory_hex_v3`.
+2. *Exclude and average*: the complex parameters are excluded from DDP
+   (`DDP._set_params_and_buffers_to_ignore_for_model`, a private API), broadcast once as their
+   real view, and their gradients are averaged by an all-reduce in a
+   `register_post_accumulate_grad_hook`. Through `HexTrainingRunner` with `distributed=True`,
+   2 gloo ranks with per-rank batch 2 against one process with batch 4, 3 epochs, synthetic
+   data: both ranks end with bitwise equal weights; with SGD (learning rate 1e-2) the weights
+   are within 3.7e-9 of the single process (largest weight about 1.0; the complex weights
+   exactly equal), with Adam within 9.6e-4. The Adam gap is not from the hook: it is as large
+   on the real weights DDP reduces itself (9.6e-4 there, 7.4e-5 on the complex ones). Adam
+   divides by the root of the second moment and so turns the float32 rounding difference
+   between "mean of 4" and "mean of two means of 2" in near-zero gradient entries into steps of
+   the order of the learning rate; with SGD the same rounding stays at 1e-9.
+   Not adopted because it adds collectives outside DDP's reducer that the runner's
+   agreement points (`spec/DDP_RUNNER_v1.md` sections 3.6 and 6) do not know about: their
+   order relative to DDP's bucket all-reduces, a failure inside the hook, and the collective
+   order check under `TORCH_DISTRIBUTED_DEBUG=DETAIL` (R14) are not measured. If the owner
+   wants data-parallel CPU runs, this option needs its own contract and its own tests.
+
 ## 9. Sources
 
 - PyTorch, "Serialization semantics" (`torch.load` uses `weights_only=True` by default
@@ -174,3 +226,7 @@ the plain reading as default. The approved preregistration should state:
   https://pytorch.org/docs/2.6/notes/serialization.html
 - neuraloperator 2.0.0, `neuralop/models/base_model.py`, `BaseModel.state_dict` and
   `BaseModel.load_state_dict` (read from the installed package).
+- Section 8a: PyTorch forum, "Error in DistributedDataParallel when parameters are torch.cfloat",
+  https://discuss.pytorch.org/t/error-in-distributeddataparallel-when-parameters-are-torch-cfloat/157430;
+  pytorch/pytorch issue 55375 (complex parameters and the DDP broadcast),
+  https://github.com/pytorch/pytorch/issues/55375; the measurement itself is the oracle above.
