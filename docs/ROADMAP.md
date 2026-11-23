@@ -22,6 +22,50 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
 
 ## Erledigt (verifiziert)
 
+- [x] **GINO durch den Runner: Anbindung fuer Phase 1, vor der Freigabe gebaut und nur auf synthetischen
+  Tensoren gemessen (2026-11-19, Linux-Container, Python 3.12.3, torch 2.6.0, numpy 2.5.3, neuraloperator 2.0.0).**
+  Ausgangsfrage: was passiert, wenn nach der Owner-Freigabe der erste Phase-1-Lauf startet? Adapter
+  (`gino_adapter_hex_v3.py`) und Runner (`runner_hex_v3.py`) waren je fuer sich gehaertet, aber nirgends
+  verbunden; die einzige Trainingsschleife mit dem echten GINO ist eine Handschleife im Kosten-Orakel von PR #91.
+  Gemessen an main 18ab389 mit dem kleinsten Wrapper, der den Aufruf ueberhaupt moeglich macht
+  (`_PlainWrapper` im Orakel): (1) kein Aufrufpfad -- der Runner ruft `model(x)`, `OperatorAdapterV3` ruft
+  `model(x, coords_cart=...)`, das Backend nimmt `input_geom, latent_queries, output_queries, x`; (2) mit EMA
+  (Runner-Standard) bricht der Lauf am ersten Checkpoint ab (`'dict' object has no attribute 'detach'`);
+  (3) ohne EMA laeuft er durch und schreibt `best.pt`/`last.pt`, die sich mit `weights_only=True` nicht lesen
+  lassen (`Unsupported global: torch._C._nn.gelu`); (4) ein Resume per Pickle liest die Datei und scheitert
+  dann am Laden (`Unexpected key(s) in state_dict: "_metadata"`). Ursache von (2)-(4): neuraloperator 2.0.0
+  legt seine Konstruktor-Argumente samt der Funktion `gelu` als `"_metadata"` in den State-Dict, ohne
+  Modul-Praefix (der Befund vom 2026-10-22 hatte das fuer die NTK-Trajektorie behandelt, nicht fuer den Runner).
+  (5) Der Aufgaben-Datensatz liefert `{"u0", "uT"}` in float64, der Runner liest `{"input", "target"}`.
+  (6) Die Runner-Standards (Clipping 1.0, EMA 0.9999, Bestmodell nach gepooltem `val_nrmse`) nennt die
+  Vorregistrierung nicht.
+  Jetzt (`spec/GINO_TRAINING_PHASE1_v1.md`, PROPOSED; `src/toolkit/gino_training_hex_v3.py`, der Runner ist
+  unveraendert): `GinoRunnerModule` (Vorwaertslauf bitgleich zu `predict_gino`; Zustand nur aus Tensoren;
+  der Config-Digest steht als `uint8[32]` im Zustand und wird beim Laden geprueft -- `radius_factor` aendert
+  keine Tensor-Form, Gewichte von 2.5 luden vorher still in ein Modell mit 2.25; Geometrie als
+  nicht-persistente Buffer, damit dieselben Gewichte auf jedem Gitter laden), `RelativeL2Loss` (Mittel der
+  Quotienten, == `relative_l2` bis 1e-15), `RunnerPairDataset` (float64 -> float32 geprueft),
+  `Phase1TrainingRecipe` + `build_phase1_runner` (jede Trainingseinstellung explizit und in einem Digest),
+  `mean_rel_l2` (die vorregistrierte Auswahlstatistik; `val_loss` des Runners ist das Mittel der Batch-Mittel,
+  `val_nrmse` gepoolt -- beides andere Zahlen, im Test gezeigt).
+  Beleg mit dem echten Backend: unterbrochen == ununterbrochen bitgleich an der Epochengrenze und mitten in
+  der Epoche, mit und ohne EMA; `best.pt`/`last.pt` laden mit `weights_only=True`; zwei Builds mit einem
+  Seed trainieren auf dieselben Bits. 34 neue Tests (27 ohne Backend mit einem Stellvertreter, der die
+  Aufrufsignatur und den `_metadata`-Eintrag des Backends hat; 7 mit dem echten GINO), Modul-Abdeckung 100 %;
+  22 neue Mutanten, jeder von seinem benannten Test getoetet; volle Probe 257/257 an 6a74ea9, exit 0. CI: der GINO-Schritt in `gate` und der
+  Smoke-Job fahren jetzt `test_gino_*_hex_v3.py` (vorher nur den Adapter-Test), sonst liefen die 7
+  Backend-Tests nirgends.
+  Eigene Fehler unterwegs: (a) der erste Entwurf nahm an, torch reiche `strict` an `_load_from_state_dict`
+  durch -- torch uebergibt dort immer `True` und wendet `strict` danach an (Test korrigiert, Kommentar im
+  Code); (b) die erste volle Mutationsprobe lief in einer Kopie ohne `.git` und brach mit roter Baseline ab
+  (`TestIssue82Residuals` braucht git) -> im git-Worktree wiederholt.
+  Grenzen: kein T1-Fit, kein Kostenmass eines echten Laufs, CUDA und DDP mit echtem GINO nicht gelaufen.
+  _Evidenz:_ `results/2026-11-19_gino-training_local-gate.log`,
+  `results/2026-11-19_gino_runner_integration.json` (quellgebunden, exit 0).
+  Offen fuer den Owner (Spec Abschnitt 7): die freigegebene Vorregistrierung sollte Clipping, EMA,
+  Weight-Decay/Betas/eps/`eta_min`, "letzte Epoche statt best.pt" und `mean_rel_l2` als Auswahlstatistik
+  benennen; das Rezept setzt bis dahin die schlichte Lesart (kein Clipping, keine EMA, torch-Standards).
+
 - [x] **DDP_RUNNER v1.6: die offenen Punkte von #107 (2026-11-16, Linux-Container, Python 3.12.3, torch 2.6.0
   als PyPI-CUDA-Wheel 2.6.0+cu124 auf der CPU -- der CPU-Wheel-Index war aus dem Container nicht erreichbar --,
   numpy 2.5.3).** (1) _Volle Mutationsprobe_ am Kopf von #107 (347abaf, 256 Mutanten): 255/256, exit 1. M193
@@ -649,6 +693,10 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   sind als Instrument festgelegt (`spec/PHASE1_PROTOCOL_v1.md`, oben unter Erledigt); offen bleiben
   D4 (Raster, <= 8 Konfigurationen; Radius-Tie-Tabelle als Entscheidungshilfe in
   `results/2026-10-19_gino_radius_tie_survey.json`) und die D5-Maschine.
+  Nachtrag 2026-11-19: die Trainings-Anbindung steht (`spec/GINO_TRAINING_PHASE1_v1.md`, oben unter
+  Erledigt). Sie zeigt sechs Einstellungen, die der Vorregistrierungstext nicht nennt (Clipping, EMA,
+  Weight-Decay, Adam-Betas/eps, `eta_min`, letzte Epoche vs. `best.pt`) und dass die Auswahlstatistik
+  nicht `val_nrmse` des Runners ist -- vor der Freigabe zu benennen (Spec Abschnitt 7).
 - [x] ~~**ReferenceSpec v1 (#33), Review-Befund.** `ConvergenceStudy.observed_order` wird nur auf
   endlich/positiv geprueft, nicht gegen die Werte der Levels nachgerechnet.~~ Ueberholt (Hinweis
   cross-family GPT-6 R88/R91-09, nachgemessen 2026-10-26): seit #61 (2c82d77) rechnet

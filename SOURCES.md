@@ -991,3 +991,9 @@
 | EF1BD53ADE38208D | 2026-11-16 19:32 | spec | DDP_RUNNER v1.6 evidence: full probe 267/267 at 748326d: DDP_RUNNER_v1.md |
 | FCD78D0AEB502638 | 2026-11-16 19:45 | src/toolkit | merge of the base branch (R14 collective-order tests, 9372baa) with DDP_RUNNER v1.6 (TestCarriersWP3, resume message): test_ddp_hex_v3.py |
 | 547648448D1FEED9 | 2026-11-16 19:45 | spec | merge of the base branch (R14 DETAIL boundary, 9372baa) with DDP_RUNNER v1.6: DDP_RUNNER_v1.md |
+| 0D1F3395EA0D17E3 | 2026-11-19 23:55 | src/toolkit | in-repo neu 2026-11-19 (GINO durch den Runner, spec/GINO_TRAINING_PHASE1_v1.md): GinoRunnerModule (tensor-only state bound to the config digest), RelativeL2Loss, RunnerPairDataset, Phase1TrainingRecipe, build_phase1_runner, mean_rel_l2: gino_training_hex_v3.py |
+| 2CAB5C1DCF51489D | 2026-11-19 23:55 | src/toolkit | in-repo neu 2026-11-19: 34 tests on synthetic tensors (27 with a stand-in backend, 7 with neuraloperator 2.0.0), resume bitwise at the epoch boundary and inside an epoch: test_gino_training_hex_v3.py |
+| 0D58563A091E527D | 2026-11-19 23:55 | spec | in-repo neu 2026-11-19 (PROPOSED): the pinned GINO through the training runner, findings at main 18ab389, open owner questions: GINO_TRAINING_PHASE1_v1.md |
+| 614D398F8E05D83F | 2026-11-19 23:55 | scripts | GINO through the runner: 22 new mutants (one guard off each, expect = its test) -> 257: mutation_probe.py |
+| 6BAE69D1B3ACCB44 | 2026-11-19 23:55 | scripts/oracles | in-repo neu 2026-11-19: evidence writer, real GINO through the runner without the module (failures as recorded) and with it: gino_runner_integration_oracle.py |
+| 3BEEC5BCAEB5839C | 2026-11-23 13:00 | scripts | merge of #111 (22 GINO-runner mutants) with main 75fdc57 (DDP_RUNNER v1.6, 267 mutants): both catalogue blocks kept, constants W3 and GT..GR side by side -> 289: mutation_probe.py |

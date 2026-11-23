@@ -1,0 +1,81 @@
+{
+  "data": "synthetic standard-normal tensors on the N = 32 triangle lattice; no T1 data",
+  "environment": {
+    "neuraloperator": "2.0.0",
+    "numpy": "2.5.3",
+    "platform": "Linux-6.18.44-fc-v653-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.6.0+cu124",
+    "torch_threads": 4
+  },
+  "gino_config": {
+    "backend": "neuraloperator==2.0.0",
+    "geometry_semantics": "shared-euclidean-v1",
+    "hidden_channels": 8,
+    "latent_resolution": 16,
+    "n_layers": 2,
+    "n_modes": 4,
+    "radius_factor": 2.5,
+    "resource_policy": "GINO_ADAPTER_PHASE1_v2"
+  },
+  "module": {
+    "ema_mean_rel_l2_finite": true,
+    "ema_resume_at_epoch_boundary_bitwise": true,
+    "ema_resume_inside_epoch_bitwise": true,
+    "ema_run_completes": true,
+    "ema_weights_moved": true,
+    "ema_weights_only_load_best": true,
+    "ema_weights_only_load_last": true,
+    "forward_equals_predict_gino_bitwise": true,
+    "no_ema_mean_rel_l2_finite": true,
+    "no_ema_resume_at_epoch_boundary_bitwise": true,
+    "no_ema_resume_inside_epoch_bitwise": true,
+    "no_ema_run_completes": true,
+    "no_ema_weights_moved": true,
+    "no_ema_weights_only_load_best": true,
+    "no_ema_weights_only_load_last": true,
+    "state_is_tensors_only": true
+  },
+  "plain_wrapper": {
+    "ema_run": {
+      "as_recorded": true,
+      "error": "'dict' object has no attribute 'detach'",
+      "error_type": "AttributeError",
+      "expected_error_contains": "'dict' object has no attribute 'detach'",
+      "ok": false
+    },
+    "no_ema_run": {
+      "as_recorded": true,
+      "error": null,
+      "error_type": null,
+      "ok": true
+    },
+    "trusted_resume": {
+      "as_recorded": true,
+      "error": "Error(s) in loading state_dict for _PlainWrapper:\n\tUnexpected key(s) in state_dict: \"_metadata\". ",
+      "error_type": "RuntimeError",
+      "expected_error_contains": "Unexpected key(s) in state_dict: \"_metadata\"",
+      "ok": false
+    },
+    "weights_only_load_best": {
+      "as_recorded": true,
+      "error": "Weights only load failed. This file can still be loaded, to do so you have two options, \u001b[1mdo those steps only if you trust the source of the checkpoint\u001b[0m. \n\t(1) In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, but it can result in arbitrary code execution. Do it only if you got the file from a trusted source.\n\t(2) Alternatively, to load with `weights_only=True` please check the recommended steps in the following error message.\n\tWeightsUnpickler error: Unsupported global: GLOBAL torch._C._nn.gelu was not an allowed global by default. Please use `torch.serialization.add_safe_globals([gelu])` or the `torch.serialization.safe_globals([gelu])` context manager to allowlist this global if you trust this class/function.\n\nCheck the documentation of torch.load to learn more about types accepted by default with weights_only https://pytorch.org/docs/stable/generated/torch.load.html.",
+      "error_type": "UnpicklingError",
+      "expected_error_contains": "torch._C._nn.gelu",
+      "ok": false
+    },
+    "weights_only_load_last": {
+      "as_recorded": true,
+      "error": "Weights only load failed. This file can still be loaded, to do so you have two options, \u001b[1mdo those steps only if you trust the source of the checkpoint\u001b[0m. \n\t(1) In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, but it can result in arbitrary code execution. Do it only if you got the file from a trusted source.\n\t(2) Alternatively, to load with `weights_only=True` please check the recommended steps in the following error message.\n\tWeightsUnpickler error: Unsupported global: GLOBAL torch._C._nn.gelu was not an allowed global by default. Please use `torch.serialization.add_safe_globals([gelu])` or the `torch.serialization.safe_globals([gelu])` context manager to allowlist this global if you trust this class/function.\n\nCheck the documentation of torch.load to learn more about types accepted by default with weights_only https://pytorch.org/docs/stable/generated/torch.load.html.",
+      "error_type": "UnpicklingError",
+      "expected_error_contains": "torch._C._nn.gelu",
+      "ok": false
+    }
+  },
+  "source": {
+    "bound": true,
+    "git_sha": "6a74ea97c7017f7c59c1366182c12511920e1158",
+    "github_sha": null,
+    "worktree_dirty": false
+  }
+}
