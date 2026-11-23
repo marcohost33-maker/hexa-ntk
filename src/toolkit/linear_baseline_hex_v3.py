@@ -25,8 +25,11 @@ the ids of the samples it scores and raises if any of them was trained on.
 Since 2026-10-15 ``fit`` also records a SHA-256 per training input row in
 canonical form (float64 little-endian, -0.0 -> 0.0), and ``predict`` raises
 if a scored row repeats a training input under another id.
-The operator view (``__call__``, ``matrix``) carries no ids: it is for
-instruments such as the spectral audit, not for scoring samples.
+The operator view (``__call__``, ``matrix``, ``factors``) carries no ids: it is
+for instruments such as the spectral audit, not for scoring samples.
+``factors`` (2026-11-05) returns ``(L, R)`` with ``matrix() = L @ R``; the
+Phase 1 linear comparator (spec/PHASE1_PROTOCOL_v1.md section 2b) times
+``L @ (R @ u)`` after running the leakage guard of ``predict``.
 
 Deterministic: no randomness; a fit is a function of the training arrays.
 
@@ -252,3 +255,14 @@ class PODRidgeBaseline:
         """The fitted linear map as a dense (M, M) matrix G with uT = G u0."""
         fit = self._require_fit()
         return fit["p_out"] @ fit["b"].T @ (fit["p_in"].T * self.weights[None, :])
+
+    def factors(self) -> Tuple[np.ndarray, np.ndarray]:
+        """The fitted map as two factors ``(L, R)``, ``L`` (M, r_in) and ``R`` (r_in, M), with ``G = L @ R``.
+
+        ``matrix()`` is ``L @ R`` in the same evaluation order. ``L @ (R @ u)`` applies
+        the map at ``2 M r_in`` multiply-adds instead of ``M^2``; the cost-accuracy
+        comparator times exactly this call (spec/PHASE1_PROTOCOL_v1.md section 2b).
+        Copies: changing them does not change the fit.
+        """
+        fit = self._require_fit()
+        return fit["p_out"] @ fit["b"].T, (fit["p_in"].T * self.weights[None, :])

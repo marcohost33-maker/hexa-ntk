@@ -1,0 +1,53 @@
+# Local gate 2026-11-10 -- HNTK-98-01: end-to-end split probe of the fitted comparator + role label; merge of main into #98
+# Branch claude/hexa-ntk-neuronaler-operator-a9vtg8 = #98 head 2f9699c + merge of origin/main 22e6308 (merge commit 1508874)
+# Linux cloud container (4 CPUs), Python 3.12.3, torch 2.6.0+cu124 (PyPI wheel, CPU execution, no CUDA device;
+# download.pytorch.org is blocked from the container), numpy 2.5.3, coverage 7.17.0, ruff 0.17.3;
+# neuraloperator not installed (optional GINO lane, runs in CI)
+# Source: cross-family review 2026-11-06 (Drive 007acc2/02_ANTWORTEN, GPT-6), finding HNTK-98-01 on #98 @2f9699c,
+# verdict REVIEW_REQUIRED: the exact map must never be reported as a learnable fair competitor; the train/test
+# separation must be confirmed end to end with a metamorphic identity probe.
+
+## Instrument check (scratch run on the working tree, synthetic data of the tests: 40 train / 6 test, N = 16 triangle)
+# split_disjoint                         True  40 train / 6 test ids and rows disjoint
+# id_leak_refused                        True  LeakageError: 1 scored sample ids were trained on
+# row_leak_refused                       True  LeakageError: 1 scored samples repeat a training input under another id
+# ids_do_not_enter_the_fit               True  operator bytes equal
+# refit_bitwise                          True  operator bytes equal
+# training_order                         True  relative Frobenius distance 2.246e-15 (tolerance 1.0e-10)
+# targets_do_not_enter_the_prediction    True  operator/predictions equal, error moved 3.828e-10 -> 1.016e+00
+# samples_are_independent                True  bitwise under reversal and replacement of the other inputs
+# point_is_bound                         True  role learned_from_train_split, num_train 40
+# recovers_reference                     True  max relative L2 to the synthetic semigroup 4.517e-10 (tolerance 1e-8)
+# negative controls (tests): bypassed guard -> {id_leak_refused, row_leak_refused}; ids in the fit -> ids_do_not_enter_the_fit;
+# targets x 1e-12 in the prediction -> targets_do_not_enter_the_prediction; batch minimum and row position couplings ->
+# samples_are_independent (each half of the relation seen by one coupling); shared id / row / signed-zero row -> LeakageError, fit never called
+
+## End run (working tree of the commit carrying this log)
+# ruff check src scripts
+All checks passed!
+ruffexit=0
+# python -m compileall src
+compileexit=0
+# python scripts/engine_gate.py
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+engexit=0
+# python scripts/verify_sources.py
+[VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 12 Script-Eintraege | Dateiliste: git (81 Dateien) | PASS
+vsexit=0
+# python -m coverage run -m unittest discover -s src/toolkit -t src/toolkit -p "test_*.py"
+Ran 1163 tests in 73.132s
+OK (skipped=7)
+exit=0
+# skips: 6 x 'optional neuraloperator backend not installed' (GINO lane runs in CI), 1 x 'needs CUDA'
+# python -m coverage report
+TOTAL                                           6495    252   2422    195    95%
+# (fail_under = 87; branch coverage of src/toolkit)
+# a first full run before the README counts were updated had exactly the 4 TestDocsContract count tests red
+# (1114 tests, 187 mutants in the README); after the update: python -m unittest test_hex_timestep_contract -> 32 OK
+# 9 new tests: TestComparatorSplitProbe (9); role asserted in TestLinearComparatorPoint (2 tests changed)
+# python scripts/mutation_probe.py
+[MUTATION-PROBE] baseline green | 210/210 killed | PASS
+mutationexit=0
+# 8 new mutants M203..M210 (role label, both split preconditions, relabel relation, target relation, both halves of
+# the independence relation, read-only predictions), each KILLED; the 15 D-T1 mutants of #98 and the 187 of main
+# all KILLED after the merge (M02, POSIX-only test class, measured and killed on Linux)
