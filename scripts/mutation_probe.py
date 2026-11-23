@@ -44,9 +44,12 @@ baseline is red (the probe proves nothing then).
 """
 from __future__ import annotations
 
+import builtins
+import functools
 import pathlib
 import re
 import subprocess
+import symtable
 import sys
 from typing import NamedTuple
 
@@ -828,15 +831,44 @@ def _tests_ran(output: str) -> int:
 
 
 _SELF_ATTR = re.compile(r"\bself\.([A-Za-z_][A-Za-z0-9_]*)")
+# Names every module has without defining them (module attributes set by the import system).
+_MODULE_NAMES = frozenset({"__name__", "__doc__", "__package__", "__loader__", "__spec__", "__file__",
+                           "__cached__", "__builtins__", "__annotations__", "__dict__"})
+
+
+@functools.lru_cache(maxsize=64)
+def _unresolved_globals(text: str, filename: str) -> frozenset[str]:
+    """Global names ``text`` reads that it never binds at module level and that are no builtins.
+
+    Uses the compiler's own scope analysis (``symtable``), as pyflakes' and ruff's
+    undefined-name rule (F821) do: a name read in a function, class or the module
+    body that resolves to the global scope must be bound there (assignment,
+    import, def, class) or be a builtin.
+    """
+    table = symtable.symtable(text, filename, "exec")
+    known = {sym.get_name() for sym in table.get_symbols()
+             if sym.is_assigned() or sym.is_imported() or sym.is_namespace()}
+    known |= set(dir(builtins)) | _MODULE_NAMES
+    unresolved = {sym.get_name() for sym in table.get_symbols() if sym.is_referenced()} - known
+    stack = list(table.get_children())
+    while stack:
+        scope = stack.pop()
+        stack.extend(scope.get_children())
+        unresolved |= {sym.get_name() for sym in scope.get_symbols()
+                       if sym.is_global() and sym.is_referenced() and sym.get_name() not in known}
+    return frozenset(unresolved)
 
 
 def static_invalid(module_text: str, mutant: Mutant) -> str | None:
     """Why ``mutant`` is broken on ``module_text`` without running a test, else None.
 
-    Checked: the mutated module still parses (Python modules only), and every
+    Checked: the mutated module still parses (Python modules only); every
     ``self.<name>`` the replacement uses already occurs in the module as
     ``self.<name>`` or as ``def <name>`` (so it names something real, not a
-    helper that has since been removed).
+    helper that has since been removed); and the replacement makes no global
+    name unresolved that was resolved before (a removed module-level helper
+    called without ``self.``, 2026-11-24). Only names the mutation newly
+    leaves unresolved count, so nothing already in the module can trigger it.
     """
     mutated = module_text.replace(mutant.original, mutant.mutated)
     if mutant.module.endswith(".py"):
@@ -844,11 +876,17 @@ def static_invalid(module_text: str, mutant: Mutant) -> str | None:
             compile(mutated, mutant.module, "exec")
         except SyntaxError as exc:
             return f"mutated module does not parse: {exc.msg} (line {exc.lineno})"
+        new = sorted(_unresolved_globals(mutated, mutant.module) - _unresolved_globals(module_text, mutant.module))
+        if new:
+            return f"replacement uses {', '.join(new)}, which {mutant.module} never binds and which is no builtin"
     known = set(_SELF_ATTR.findall(module_text)) | set(re.findall(r"\bdef ([A-Za-z_][A-Za-z0-9_]*)", module_text))
     unknown = sorted(set(_SELF_ATTR.findall(mutant.mutated)) - known)
     if unknown:
         return f"replacement uses self.{', self.'.join(unknown)}, which {mutant.module} never defines"
     return None
+
+
+
 # unittest's "FAIL: test_name (module.Class.test_name) [sub] (k=v)" / "ERROR: ..."
 _FAILED = re.compile(r"^(?:FAIL|ERROR): (\w+) \(", re.MULTILINE)
 

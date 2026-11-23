@@ -322,6 +322,31 @@ class TestDocsContract(unittest.TestCase):
         call = probe.Mutant("runner_hex_v3.py", "        return self._b()\n", "        return self._a()\n", "t")
         self.assertIsNone(probe.static_invalid(defined, call))  # a def counts as defined
 
+    def test_static_invalid_catches_a_removed_module_level_helper(self):
+        # 2026-11-24: the self.<name> rule misses a stale FREE helper (the 40ff255 case without
+        # "self."): its NameError would also have counted as a kill. Measured before adding the
+        # rule: no mutant of main (267) or of #112 (289) introduces a new undefined name (ruff F821).
+        probe = self._probe()
+        module = ("import math\n\ndef _helper(x):\n    return x\n\n"
+                  "def check(x, scale):\n    y = abs(x)\n    if y > 1:\n        return _helper(y)\n"
+                  "    return _later(y) * scale\n\ndef _later(z):\n    return math.sqrt(z)\n")
+        site = "        return _helper(y)\n"
+        stale = probe.Mutant("runner_hex_v3.py", site, "        return _removed_helper(y)\n", "t")
+        reason = probe.static_invalid(module, stale)
+        self.assertIsNotNone(reason)
+        self.assertIn("_removed_helper", reason)
+        # negative controls: names that do resolve are no reason
+        for ok in ("        return _later(y)\n",          # module-level def further down
+                   "        return max(y, scale)\n",       # builtin and parameter
+                   "        return math.floor(y)\n",       # imported module
+                   "        return y\n"):                  # local
+            with self.subTest(replacement=ok):
+                self.assertIsNone(probe.static_invalid(module, probe.Mutant("runner_hex_v3.py", site, ok, "t")))
+        # a name the module already leaves unresolved is not blamed on the mutant
+        broken = module.replace("    return _later(y) * scale\n", "    return _absent(y) * scale\n")
+        harmless = probe.Mutant("runner_hex_v3.py", site, "        return y\n", "t")
+        self.assertIsNone(probe.static_invalid(broken, harmless))
+
     def test_run_mutant_reports_a_stale_mutant_invalid_without_running(self):
         # Merge of #103 onto main (killed_by/expect, 2026-11-10): run_mutant_detail returns
         # (verdict, killed_by); the static early exit must return the same shape, otherwise
