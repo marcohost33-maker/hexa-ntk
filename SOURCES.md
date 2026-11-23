@@ -991,3 +991,8 @@
 | EF1BD53ADE38208D | 2026-11-16 19:32 | spec | DDP_RUNNER v1.6 evidence: full probe 267/267 at 748326d: DDP_RUNNER_v1.md |
 | FCD78D0AEB502638 | 2026-11-16 19:45 | src/toolkit | merge of the base branch (R14 collective-order tests, 9372baa) with DDP_RUNNER v1.6 (TestCarriersWP3, resume message): test_ddp_hex_v3.py |
 | 547648448D1FEED9 | 2026-11-16 19:45 | spec | merge of the base branch (R14 DETAIL boundary, 9372baa) with DDP_RUNNER v1.6: DDP_RUNNER_v1.md |
+| 5FC1592849449C99 | 2026-11-09 19:18 | scripts | static validity: static_invalid() (mutated module parses, every self.<name> of a replacement exists in its module), run_mutant reports such a mutant INVALID instead of KILLED (40ff255 left a mutant calling the removed _scaler_active(), killed by AttributeError): mutation_probe.py |
+| 2C843A4498996E03 | 2026-11-09 19:18 | src/toolkit | test_every_mutant_is_statically_valid (whole catalogue in the unit gate: site once, parses, self.<name> defined) + test_static_invalid_catches_the_40ff255_case: test_hex_timestep_contract.py |
+| 47B8F0B2BF99A65B | 2026-11-16 21:00 | scripts | #103 onto main (18ab389): static_invalid() kept next to judge()/killed_by; the static early exit of run_mutant_detail returns ("INVALID", []) like judge(), not the bare string: mutation_probe.py |
+| 37E4206122F230AE | 2026-11-16 21:00 | src/toolkit | #103 onto main: test_run_mutant_reports_a_stale_mutant_invalid_without_running (verdict shape of the static early exit, no test run, no byte change): test_hex_timestep_contract.py |
+| 5FC86949E5C4524D | 2026-11-24 09:00 | scripts | #103 onto main 75fdc57 (DDP_RUNNER v1.6, 267 mutants): static_invalid() and its INVALID early exit kept beside judge()/killed_by and the W3 carrier mutants; no catalogue change: mutation_probe.py |

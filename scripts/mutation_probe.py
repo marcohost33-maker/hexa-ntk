@@ -18,6 +18,14 @@ missing dependencies or import errors would make every mutant look killed. A
 mutant counts as KILLED only if its run executed tests ("Ran N tests", N > 0)
 and ended in "FAILED (...)".
 
+Static validity (2026-11-09, PR #102): a red run is no kill when the mutant
+itself is broken. A mutant that calls ``self.<name>`` which the module never
+defines (a helper removed after the mutant was written: 40ff255 removed
+``_scaler_active`` and a mutant calling it was "killed" by an AttributeError,
+not by a test) or that leaves the module unparsable is INVALID before any test
+runs (``static_invalid``). ``test_hex_timestep_contract`` checks the whole
+catalogue the same way in the fast unit gate.
+
 Which test killed it (2026-11-10, internal NR "Handdiskriminierung als
 Sammelzahl verdeckte blinde Falsifier", Digi #21): a red test class says
 nothing about WHICH test saw the mutant; a test named after a guard can stay
@@ -819,6 +827,28 @@ def _tests_ran(output: str) -> int:
     return int(match.group(1)) if match else 0
 
 
+_SELF_ATTR = re.compile(r"\bself\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def static_invalid(module_text: str, mutant: Mutant) -> str | None:
+    """Why ``mutant`` is broken on ``module_text`` without running a test, else None.
+
+    Checked: the mutated module still parses (Python modules only), and every
+    ``self.<name>`` the replacement uses already occurs in the module as
+    ``self.<name>`` or as ``def <name>`` (so it names something real, not a
+    helper that has since been removed).
+    """
+    mutated = module_text.replace(mutant.original, mutant.mutated)
+    if mutant.module.endswith(".py"):
+        try:
+            compile(mutated, mutant.module, "exec")
+        except SyntaxError as exc:
+            return f"mutated module does not parse: {exc.msg} (line {exc.lineno})"
+    known = set(_SELF_ATTR.findall(module_text)) | set(re.findall(r"\bdef ([A-Za-z_][A-Za-z0-9_]*)", module_text))
+    unknown = sorted(set(_SELF_ATTR.findall(mutant.mutated)) - known)
+    if unknown:
+        return f"replacement uses self.{', self.'.join(unknown)}, which {mutant.module} never defines"
+    return None
 # unittest's "FAIL: test_name (module.Class.test_name) [sub] (k=v)" / "ERROR: ..."
 _FAILED = re.compile(r"^(?:FAIL|ERROR): (\w+) \(", re.MULTILINE)
 
@@ -856,6 +886,10 @@ def run_mutant_detail(mutant: Mutant) -> tuple[str, list[str]]:
     original = path.read_text(encoding="utf-8")
     if original.count(mutant.original) != 1:
         raise LookupError(f"{mutant.module}: mutation site not found exactly once: {mutant.original!r}")
+    reason = static_invalid(original, mutant)
+    if reason is not None:
+        print(f"    INVALID before running: {reason}")
+        return "INVALID", []
     path.write_text(original.replace(mutant.original, mutant.mutated), encoding="utf-8")
     try:
         result = _run_tests(mutant.test)
