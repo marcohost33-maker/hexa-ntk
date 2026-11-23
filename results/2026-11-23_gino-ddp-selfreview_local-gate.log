@@ -1,0 +1,50 @@
+# Local gate 2026-11-23, second round -- self-review of the GINO-under-DDP finding (spec GINO_TRAINING_PHASE1 1.2)
+# Branch claude/hexa-ntk-neuronale-operatoren-ly6bnl; code under test a172775 (clean tree); previous head 73afd71
+# Linux cloud container, Python 3.12.3 (venv), torch 2.6.0+cu124 (PyPI wheel on the CPU), numpy 2.5.3,
+# neuraloperator 2.0.0, ruff 0.17.3, coverage 7.17.0, 4 torch threads. Synthetic tensors only.
+
+## What the first round claimed and how it was checked
+# 1. "the premise test runs in the gate job": CI log of job 137688470875 (head 73afd71, torch 2.6.0+cpu official wheel):
+#    test_ddp_on_gloo_refuses_the_complex_spectral_weights ... ok; GINO lane "Ran 62 tests ... OK".
+# 2. "gloo all-reduces complex (as its real view)": read in torch 2.6.0 torch/distributed/distributed_c10d.py --
+#    all_reduce (l. 2790), all_gather (3699-3701), scatter (4086-4088) and others call torch.view_as_real in Python;
+#    broadcast (2687-2733) passes the tensor unchanged; DDP __init__ (distributed.py l. 827) calls
+#    _sync_module_states -> _broadcast_coalesced. Claim sharpened in spec 8a.
+# 3. "the Adam gap comes from rounding, not from the hook": was an inference; now tested (oracle part D, no distribution):
+#    full batch of 4 vs accumulated halves, 3 epochs: SGD 3.7e-9 (complex 0.0), Adam 6.1e-4 (complex 5.4e-5). Holds.
+# 4. Not considered in round 1: DDP(init_sync=False) (current docs 2.15; absent in 2.6.0; the first release with it was
+#    not determined: docs.pytorch.org does not resolve from this container). Emulated (part E): construction ok,
+#    first backward RuntimeError: Invalid scalar type on both ranks (reducer bucket). Option falsified for 2.6.0's reducer.
+# 5. "1225 tests" (README) vs "Ran 1223": TestCollectiveOrderCheck and ...ThreeRanks (1 test each) skip in setUpClass
+#    outside TORCH_DISTRIBUTED_DEBUG=DETAIL; unittest does not count such tests as run. Not an error. Now 1226 / 1224.
+# 6. Internal rule missed in round 1 (0Meta 4 standing order feedback_007acc2_reviews_je_linie_lesen): read the newest
+#    cross-family answer per line before PR work. Done now for the HexaNTK lines (Gemini doc "Hexa-NTK Validierung und
+#    Haertung" 2026-11-21; Claude-Cloud PR111 handoff 2026-11-19); findings checked against the code:
+#    LATTICE_SLOTS duplicate -> no such constant in the code; nb > 0 mask -> code uses nb >= 0 (hex_fv_solver l. 344, 363, 366);
+#    RelativeL2Loss unweighted -> relative_l2 is unweighted too (uniform cell_area, docstring says so);
+#    G4 "m/2 + 1 = 5.5" -> spec rounds odd n_modes up to even m; new real-backend test confirms the formula.
+
+## Chain at a172775
+# ruff: All checks passed | compileall OK
+# [VERIFY-SOURCES] 53 Toolkit-Eintraege + 19 Spec-Eintraege + 15 Script-Eintraege | Dateiliste: git (87 Dateien) | PASS
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+Ran 1224 tests in 79.566s
+
+OK (skipped=3)
+TOTAL                                           6838    274   2628    216    95%
+Ran 63 tests in 17.671s
+
+OK
+# (last block: GINO lane, -p "test_gino_*_hex_v3.py", adapter 28 + runner connection 35)
+# Mutation probe: catalogue unchanged since the full probe 289/289 (results/2026-11-23_full-probe-merge-111.log);
+# this round adds one test and no guard, so no mutant can change from KILLED to SURVIVED; not re-run.
+
+## Oracle at a172775 (clean tree): python scripts/oracles/gino_ddp_gloo_oracle.py --output results/2026-11-23_gino_ddp_gloo_r2.json
+[GINO-DDP] backend_is_2.0.0                   PASS
+[GINO-DDP] premise_as_recorded                PASS
+[GINO-DDP] parametrize_refused_as_recorded    PASS
+[GINO-DDP] exclude_and_average_holds          PASS
+[GINO-DDP] rounding_control_holds             PASS
+[GINO-DDP] init_sync_false_as_recorded        PASS
+[GINO-DDP] PASS
+exit=0

@@ -1,0 +1,180 @@
+{
+  "data": "synthetic standard-normal tensors on the N = 32 triangle lattice; no T1 data",
+  "environment": {
+    "neuraloperator": "2.0.0",
+    "numpy": "2.5.3",
+    "platform": "Linux-6.18.44-fc-v726-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "torch": "2.6.0+cu124",
+    "torch_threads": 4
+  },
+  "exclude_and_average": {
+    "adam": {
+      "max_abs_vs_single": 0.0009555676952004433,
+      "max_abs_vs_single_complex": 7.421523332595825e-05,
+      "max_abs_vs_single_real": 0.0009555676952004433,
+      "max_abs_weight": 1.02755868434906,
+      "ranks_bitwise_equal": true,
+      "ranks_ok": [
+        true,
+        true
+      ]
+    },
+    "holds": true,
+    "sgd": {
+      "max_abs_vs_single": 3.725290298461914e-09,
+      "max_abs_vs_single_complex": 0.0,
+      "max_abs_vs_single_real": 3.725290298461914e-09,
+      "max_abs_weight": 1.0000020265579224,
+      "ranks_bitwise_equal": true,
+      "ranks_ok": [
+        true,
+        true
+      ]
+    }
+  },
+  "gino_config": {
+    "backend": "neuraloperator==2.0.0",
+    "geometry_semantics": "shared-euclidean-v1",
+    "hidden_channels": 8,
+    "latent_resolution": 16,
+    "n_layers": 2,
+    "n_modes": 4,
+    "radius_factor": 2.5,
+    "resource_policy": "GINO_ADAPTER_PHASE1_v2"
+  },
+  "init_sync_false": {
+    "as_recorded": true,
+    "ranks": [
+      {
+        "run": {
+          "ok": true,
+          "value": {
+            "backward": "failed",
+            "constructed": true,
+            "error": "Invalid scalar type",
+            "error_type": "RuntimeError"
+          }
+        }
+      },
+      {
+        "run": {
+          "ok": true,
+          "value": {
+            "backward": "failed",
+            "constructed": true,
+            "error": "Invalid scalar type",
+            "error_type": "RuntimeError"
+          }
+        }
+      }
+    ]
+  },
+  "parametrize": {
+    "as_recorded": true,
+    "error": "FactorizedTensor.__init_subclass__() missing 1 required positional argument: 'name'",
+    "error_type": "TypeError",
+    "holder_type": "tltorch.factorized_tensors.factorized_tensors.DenseTensor",
+    "ok": false
+  },
+  "premise": {
+    "as_recorded": true,
+    "complex_parameters": {
+      "gino.fno_blocks.convs.0.weight.tensor": [
+        8,
+        8,
+        4,
+        3
+      ],
+      "gino.fno_blocks.convs.1.weight.tensor": [
+        8,
+        8,
+        4,
+        3
+      ]
+    },
+    "ranks": [
+      {
+        "all_reduce": {
+          "ok": true,
+          "value": {
+            "all_reduce_complex": [
+              [
+                2.0,
+                2.0
+              ],
+              [
+                0.0,
+                0.0
+              ]
+            ]
+          }
+        },
+        "broadcast_complex": {
+          "error": "Invalid scalar type",
+          "error_type": "RuntimeError",
+          "ok": false
+        },
+        "ddp_construction": {
+          "error": "Invalid scalar type",
+          "error_type": "RuntimeError",
+          "ok": false
+        }
+      },
+      {
+        "all_reduce": {
+          "ok": true,
+          "value": {
+            "all_reduce_complex": [
+              [
+                2.0,
+                2.0
+              ],
+              [
+                0.0,
+                0.0
+              ]
+            ]
+          }
+        },
+        "broadcast_complex": {
+          "error": "Invalid scalar type",
+          "error_type": "RuntimeError",
+          "ok": false
+        },
+        "ddp_construction": {
+          "error": "Invalid scalar type",
+          "error_type": "RuntimeError",
+          "ok": false
+        }
+      }
+    ]
+  },
+  "rounding_control": {
+    "adam": {
+      "max_abs_complex": 5.3569674491882324e-05,
+      "max_abs_full_vs_halves": 0.0006056353449821472,
+      "max_abs_real": 0.0006056353449821472
+    },
+    "holds": true,
+    "sgd": {
+      "max_abs_complex": 0.0,
+      "max_abs_full_vs_halves": 3.725290298461914e-09,
+      "max_abs_real": 3.725290298461914e-09
+    }
+  },
+  "setup": {
+    "epochs": 3,
+    "learning_rate": 0.01,
+    "per_rank_batch": 2,
+    "seed": 3,
+    "sgd_tolerance": 1e-06,
+    "world": 2
+  },
+  "source": {
+    "bound": true,
+    "git_sha": "a17277553976e5d24f8aa1d151f262c10b82cbb2",
+    "github_sha": null,
+    "worktree_dirty": false
+  }
+}
