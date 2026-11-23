@@ -126,6 +126,20 @@ class TestViewsAndInvariance(unittest.TestCase):
         np.testing.assert_allclose(pred, test_u0 @ g.T, rtol=0, atol=1e-13 * np.max(np.abs(pred)))
         np.testing.assert_allclose(self.model(test_u0[0]), pred[0], rtol=0, atol=1e-13 * np.max(np.abs(pred)))
 
+    def test_factors_are_the_matrix(self):
+        # spec/PHASE1_PROTOCOL_v1.md section 2b: the comparator times L @ (R @ u); L @ R is matrix() bitwise.
+        left, right = self.model.factors()
+        self.assertEqual((left.shape, right.shape), ((TRI.lattice.num_nodes, self.model.info["rank_in"]),
+                                                     (self.model.info["rank_in"], TRI.lattice.num_nodes)))
+        np.testing.assert_array_equal(left @ right, self.model.matrix())
+        test_u0, _ = TRI.data(5, seed=999)
+        pred = self.model.predict(test_u0, [1000 + i for i in range(5)])
+        np.testing.assert_allclose((left @ (right @ test_u0.T)).T, pred, rtol=0, atol=1e-13 * np.max(np.abs(pred)))
+        left[0, 0] += 1.0                                        # copies: the fit is unchanged
+        self.assertNotEqual(self.model.factors()[0][0, 0], left[0, 0])
+        with self.assertRaises(RuntimeError):
+            PODRidgeBaseline(TRI.w).factors()
+
     def test_deterministic(self):
         again = PODRidgeBaseline(TRI.w).fit(self.u0, self.ut, self.ids)
         np.testing.assert_array_equal(again.matrix(), self.model.matrix())

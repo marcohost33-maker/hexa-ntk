@@ -1,0 +1,10 @@
+# Local gate 2026-11-24 -- #105 (HNTK-98-01 split probe, D-T1-1/D-T1-2) onto main 75fdc57 (PR #114)
+# Branch claude/hexa-ntk-phase1-split-probe; merge 2a93b1b; Linux container, Python 3.12.3, torch 2.6.0+cu124 (CPU), numpy 2.5.3, neuraloperator 2.0.0
+## Merge: conflicts only in README.md, SOURCES.md, docs/ROADMAP.md; both sides kept; verify_sources raw merge: [FAIL] mutation_probe.py (row appended) -> PASS
+## Chain on the merged tree: ruff 0 | compileall OK | verify_sources 51 + 18 + 14 PASS | engine 49/49
+# Ran 1237 tests, FAILED (failures=1, skipped=3): only TestDocsContract.test_readme_mutant_count_current (README row awaiting the probe); coverage TOTAL 95%
+# OPENBLAS_CORETYPE Prescott/Sandybridge/Haswell/Zen/SkylakeX: test_hex_fv_solver_hex_v3 + test_reference_case_hex_v3 OK each
+# TORCH_DISTRIBUTED_DEBUG=DETAIL: TestWorldSizeOne TestTwoRanks TestThreeRanks TestCollectiveOrderCheck(+ThreeRanks): OK
+# static_invalid of PR #113 over the 290 mutants: no problem
+## Full mutation probe (tree d9fc5aa): [MUTATION-PROBE] baseline green | 290/290 killed | PASS (real 41m12s, exit 0) -> results/2026-11-24_full-probe-merge-105.log
+## GitHub CI at 2a93b1b: not run -- every job ended after 2-3 s without a runner since 2026-11-23 19:00 UTC (see the PR comment)
