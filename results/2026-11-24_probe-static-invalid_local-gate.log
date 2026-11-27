@@ -1,0 +1,25 @@
+# Local gate 2026-11-24 -- #103 onto main 75fdc57 + free-name rule in static_invalid (PR #113)
+# Branch claude/hexa-ntk-probe-static-invalid; merge df6e01f; code under test 7ea4805
+# Linux cloud container, Python 3.12.3 (venv), torch 2.6.0+cu124 (PyPI wheel on the CPU), numpy 2.5.3, neuraloperator 2.0.0
+
+## Before the change: does any catalogued mutant introduce a new undefined name? (ruff F821 per mutant vs. unmutated module)
+# main 75fdc57: 267 mutants; new undefined names: none
+# #112 head 3f76159: 289 mutants; new undefined names: none
+## After the change: static_invalid (with _unresolved_globals) over both catalogues
+# main: 267 mutants, invalid: [] (8.47 s); #112: 289 mutants, invalid: [] (8.70 s); baseline unresolved sets: empty in every module
+# #114 merge tree d9fc5aa: 290 mutants, static problems under these rules: none
+## Red check: test_static_invalid_catches_a_removed_module_level_helper with the new rule switched off -> FAILED
+
+## Chain at 7ea4805
+# ruff: All checks passed | compileall OK
+# [VERIFY-SOURCES] 51 Toolkit-Eintraege + 18 Spec-Eintraege + 13 Script-Eintraege | Dateiliste: git (82 Dateien) | PASS
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+Ran 1192 tests in 94.032s
+
+OK (skipped=3)
+TOTAL                                           6640    274   2556    217    94%
+## Full mutation probe at 7ea4805: [MUTATION-PROBE] baseline green | 267/267 killed | PASS (real 40m47s, exit 0)
+# -> results/2026-11-24_full-probe-7ea4805.log
+
+## GitHub CI at 7ea4805: not run -- every job ended after 2-3 s without a runner (runner_id 0, logs 404), re-run attempt 2 the same,
+## since 2026-11-23 19:00 UTC on #113 and #114 (account-level Actions block or outage; see the PR comment)
