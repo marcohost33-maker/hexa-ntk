@@ -716,6 +716,9 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   liegen als Freigabekandidat in Draft-PR #91; vor der Freigabe zusaetzlich E1 (D-T1-2,
   Raumverfeinerung) und E2 (D-T1-1, linearer Massstab) entscheiden, Vorlage und Textbausteine in
   `docs/ADR/ADR-003-Phase1-baseline-refinement-and-linear-comparator.md` (Instrumente fertig, oben).
+  Stand 2026-11-27: E1 ist entschieden (Owner 2026-11-08, Option A, ADR-003-Statuszeile seit b5aa428), aber
+  nicht umgesetzt (`_REGISTERED_REFINEMENTS` unveraendert, Vorregistrierung DRAFT; Umsetzung laut ADR in einem
+  PR mit Abweichungsvermerk, nachdem #91 und diese Linie auf `main` sind); E1b, E1c und E2 offen.
 - [x] ~~**ReferenceSpec v1 (#33), Review-Befund.** `ConvergenceStudy.observed_order` wird nur auf
   endlich/positiv geprueft, nicht gegen die Werte der Levels nachgerechnet.~~ Ueberholt (Hinweis
   cross-family GPT-6 R88/R91-09, nachgemessen 2026-10-26): seit #61 (2c82d77) rechnet

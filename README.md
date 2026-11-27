@@ -244,8 +244,9 @@ Vor jedem Training festgelegt, ohne Modell und ohne Lern-Claim:
   Anfangsbedingung aus `prolongate_linear` (fair, im getimten Aufruf; kennt keine Basis der Aufgabe) oder aus den
   exakten Modenkoeffizienten (Orakel-Obergrenze, nicht registrierbar), optional mit Richardson-Extrapolation in `h`
   (`scheme="cn_richardson_h"`, nur berichtet); eine lineare Abbildung (exaktes T1-Orakel oder POD-Ridge) bekommt
-  Latenz und Fehler unter demselben Protokoll. Die Entscheidung akzeptiert bis zum Owner-Entscheid nur `k = 1`
-  (DRAFT-Vorregistrierung). Pilot r2 auf IDs `900100..900149`, `N = 32`, kein Modell
+  Latenz und Fehler unter demselben Protokoll. Die Entscheidung akzeptiert nur `k = 1` (DRAFT-Vorregistrierung),
+  bis der Owner-Entscheid E1 vom 2026-11-08 (ADR-003 Option A, faire lineare Prolongation fuer `k` in (1, 2);
+  E1b/E1c/E2 weiter offen) mit Abweichungsvermerk umgesetzt ist. Pilot r2 auf IDs `900100..900149`, `N = 32`, kein Modell
   (`results/2026-11-05_t1-baseline-refinement-pilot_r2_{triangle_dirichlet,torus_periodic}.json`): **fair** senkt der Boden der Kurve nur um den Faktor
   1.54 (Dreieck) / 1.09 (Torus) — der O(h_N^2)-Interpolationsfehler der Anfangsbedingung ersetzt den
   Diskretisierungsfehler, Richardson hilft dann nicht; mit **Orakel**-Anfangsbedingung Faktor 16.17 / 16.11,
