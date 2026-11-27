@@ -1,0 +1,14 @@
+# Local gate 2026-11-27 -- main 2ebe471 (#113) merged into #112 (merge b18f865)
+# Linux container, Python 3.12.3, torch 2.6.0+cu124 (PyPI wheel on the CPU), numpy 2.5.3, neuraloperator 2.0.0
+## Conflicts only in README.md, SOURCES.md; both sides kept; new SOURCES row for the merged mutation_probe.py
+## ruff 0 | compileall OK | verify_sources 53 + 19 + 15 PASS | TestDocsContract OK
+[ENGINE-GATE] doctests 49/49 | selftests_ok=True | overall=PASS
+Ran 1228 tests in 86.756s
+
+OK (skipped=3)
+TOTAL                                           6838    274   2628    216    95%
+OK
+OK
+# (last two lines: GINO lane test_gino_*_hex_v3.py OK; TORCH_DISTRIBUTED_DEBUG=DETAIL multi-rank classes OK)
+## Full mutation probe at b18f865: [MUTATION-PROBE] baseline green | 289/289 killed | PASS (real 29m52s, exit 0) -> results/2026-11-27_full-probe-b18f865.log
+## GitHub CI at b18f865: 6/6 green on real runners (gate, tests (cpu), stacked gate, stacked tests (cpu), GINO smoke, zizmor)
