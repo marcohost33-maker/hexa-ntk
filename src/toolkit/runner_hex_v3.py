@@ -83,6 +83,7 @@ from checkpoint_integration_hex_v3 import (
 from ddp_hex_v3 import (
     DistributedContractError,
     DistributedRunContext,
+    refuse_data_parallel,
     restore_rng_state_tensors,
     rng_state_tensors,
 )
@@ -1325,12 +1326,19 @@ class HexTrainingRunner:
         self.dist: Optional[DistributedRunContext] = None
         if not config.distributed:
             if isinstance(model, DistributedDataParallel):
+                refuse_data_parallel(model, what="HexTrainingRunner with a DistributedDataParallel model")
                 raise ValueError(
                     "model is DistributedDataParallel but config.distributed is False: "
                     "validation, best-model selection and step skipping would be rank-local"
                 )
             self._build()
             return
+        # A model that is never trained data-parallel (GINO, spec/GINO_TRAINING_PHASE1_v1.md
+        # section 8a) is refused first. Without a process group no peer waits in a
+        # collective, so the refusal is raised here instead of the missing group; with
+        # one, _check_distributed_setup raises it inside run_agreed, on every rank.
+        if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+            refuse_data_parallel(model, what="HexTrainingRunner(config.distributed=True)")
         self.dist = DistributedRunContext(device=self.device)
         # Every check and every local construction step (directories, the EMA
         # copy) runs before the first collective; a failure on one rank fails
@@ -1367,6 +1375,7 @@ class HexTrainingRunner:
         return f"autocast={active}|dtype={self.amp_dtype}|grad_scaler={self.grad_scaler is not None}"
 
     def _check_distributed_setup(self) -> None:
+        refuse_data_parallel(self.model, what="HexTrainingRunner(config.distributed=True)")
         if not isinstance(self.model, DistributedDataParallel):
             raise ValueError(
                 "config.distributed=True needs a DistributedDataParallel model; "

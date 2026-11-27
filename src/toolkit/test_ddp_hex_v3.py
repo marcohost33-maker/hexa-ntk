@@ -49,10 +49,13 @@ from torch.utils.data import DataLoader, Dataset, DistributedSampler, IterableDa
 import numpy as np
 
 from ddp_hex_v3 import (
+    DATA_PARALLEL_REFUSAL_ATTR,
+    DataParallelRefusedError,
     DistributedContractError,
     DistributedRunContext,
     ExactDistributedEvalSampler,
     PeerRankError,
+    refuse_data_parallel,
     restore_rng_state_tensors,
     rng_state_tensors,
 )
@@ -274,6 +277,23 @@ class TestRunnerWithoutProcessGroup(unittest.TestCase):
         # callers that catch RuntimeError (e.g. the OOM rescue path) see both
         self.assertTrue(issubclass(PeerRankError, RuntimeError))
         self.assertTrue(issubclass(DistributedContractError, RuntimeError))
+        self.assertTrue(issubclass(DataParallelRefusedError, DistributedContractError))
+        self.assertEqual(DataParallelRefusedError.code, "HEXANTK-DDP-REFUSED")
+
+    def test_refuse_data_parallel_reads_the_mark_on_any_submodule(self) -> None:
+        # spec/DDP_RUNNER_v1.md section 2 (v1.7): the mark, at any depth and with any value, refuses
+        plain = _model()
+        self.assertIsNone(refuse_data_parallel(plain, what="t"))  # negative control: unmarked passes
+        self.assertIsNone(refuse_data_parallel(object(), what="t"))  # not a module: nothing to read
+        for value in ("reason R", None):
+            with self.subTest(value=value):
+                model = _model()
+                setattr(model[2], DATA_PARALLEL_REFUSAL_ATTR, value)
+                with self.assertRaises(DataParallelRefusedError) as caught:
+                    refuse_data_parallel(model, what="caller")
+                self.assertEqual(str(caught.exception).split(": ")[:2], ["HEXANTK-DDP-REFUSED", "caller"])
+                self.assertIn("submodule '2' (Linear)", str(caught.exception))
+                self.assertIn(f"({value})", str(caught.exception))
 
     def test_config_flags_must_be_bool(self) -> None:
         with self.assertRaises(ValueError):

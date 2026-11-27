@@ -22,6 +22,9 @@ primitives the runner needs for that:
   ranks on every rank and is logged on the failing one (raise_agreed_failure);
   if the agreement itself fails, the local exception still reaches the caller
   (keeping).
+- refuse_data_parallel: a model that marks itself (or a submodule) with
+  DATA_PARALLEL_REFUSAL_ATTR is refused with DataParallelRefusedError before
+  any DDP collective; the pinned GINO does (owner decision 2026-11-27).
 
 Pooled metrics are reduced as sufficient statistics (sum of squared errors, sum
 of squared references, counts), never as a mean of per-rank ratios: for
@@ -37,8 +40,11 @@ References:
 from __future__ import annotations
 
 __all__ = [
+    "DATA_PARALLEL_REFUSAL_ATTR",
+    "DataParallelRefusedError",
     "DistributedContractError",
     "PeerRankError",
+    "refuse_data_parallel",
     "ExactDistributedEvalSampler",
     "DistributedRunContext",
     "rng_state_tensors",
@@ -68,6 +74,44 @@ class DistributedContractError(RuntimeError):
 
 class PeerRankError(RuntimeError):
     """This rank's part succeeded, a peer rank's part failed."""
+
+
+# A module (or a submodule) that sets this attribute, to any value, is never
+# trained data-parallel; the value names the reason (a spec section). The pinned
+# GINO sets it (spec/GINO_TRAINING_PHASE1_v1.md section 8a, owner 2026-11-27).
+DATA_PARALLEL_REFUSAL_ATTR = "hexantk_data_parallel_refusal"
+_UNSET = object()
+
+
+class DataParallelRefusedError(DistributedContractError):
+    """A model that is never trained data-parallel met DistributedDataParallel.
+
+    ``code`` is stable; the message names the refusing module and its reason.
+    """
+
+    code = "HEXANTK-DDP-REFUSED"
+
+
+def refuse_data_parallel(model: Any, *, what: str) -> None:
+    """Raise DataParallelRefusedError if ``model`` or a submodule refuses data parallelism.
+
+    Purely local (no collective). The toolkit never builds DistributedDataParallel
+    itself; a caller that does can call this first and get this error instead of
+    the backend's (for GINO on gloo: ``RuntimeError: Invalid scalar type``).
+    A ``DistributedDataParallel`` wrapper is searched through to its module.
+    """
+    if not isinstance(model, torch.nn.Module):
+        return
+    for name, module in model.named_modules():
+        reason = getattr(module, DATA_PARALLEL_REFUSAL_ATTR, _UNSET)
+        if reason is _UNSET:
+            continue
+        where = f"submodule {name!r}" if name else "the model"
+        raise DataParallelRefusedError(
+            f"{DataParallelRefusedError.code}: {what}: {where} ({type(module).__name__}) is never "
+            f"trained data-parallel ({reason}); train it in one process (RunnerConfig(distributed=False), "
+            f"no DistributedDataParallel)"
+        )
 
 
 def _require_initialized() -> None:

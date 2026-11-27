@@ -18,6 +18,7 @@ import math
 import os
 import tempfile
 import unittest
+from datetime import timedelta
 from unittest.mock import patch
 
 from pathlib import Path
@@ -27,10 +28,22 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.data import Subset
+from torch.utils.data import DataLoader, Subset
 
 import gino_training_hex_v3 as gt
-from gino_adapter_hex_v3 import CONFIG_DIGEST_ATTR, GinoPhase1Config, build_gino, predict_gino
+from ddp_hex_v3 import (
+    DATA_PARALLEL_REFUSAL_ATTR,
+    DataParallelRefusedError,
+    DistributedContractError,
+    refuse_data_parallel,
+)
+from gino_adapter_hex_v3 import (
+    CONFIG_DIGEST_ATTR,
+    GINO_DATA_PARALLEL_REFUSAL,
+    GinoPhase1Config,
+    build_gino,
+    predict_gino,
+)
 from gino_training_hex_v3 import (
     CONFIG_DIGEST_KEY,
     GinoRunnerModule,
@@ -42,7 +55,7 @@ from gino_training_hex_v3 import (
 )
 from heat_operator_task_hex_v3 import relative_l2
 from hex_fv_solver_hex_v3 import torus_hex_lattice, triangle_hex_lattice
-from runner_hex_v3 import RunnerConfig
+from runner_hex_v3 import HexTrainingRunner, RunnerConfig
 
 _HAS_BACKEND = importlib.util.find_spec("neuralop") is not None
 _LATTICE = triangle_hex_lattice(32)
@@ -532,6 +545,97 @@ class TestBuildPhase1Runner(unittest.TestCase):
                 _interrupted_equals_uninterrupted(self, use_ema=use_ema, mid_epoch=True)
 
 
+class _PlainOperator(nn.Module):
+    """A non-GINO model with the runner's call signature: the negative control."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scale = nn.Parameter(torch.ones(1))
+
+    def forward(self, x):
+        return x * self.scale
+
+
+def _runner_on(model: nn.Module, out: str, *, distributed: bool) -> HexTrainingRunner:
+    return HexTrainingRunner(
+        RunnerConfig(output_dir=out, num_epochs=1, distributed=distributed),
+        model, torch.optim.SGD(model.parameters(), lr=1e-2),
+        DataLoader(_pairs(4, 1), batch_size=2), DataLoader(_pairs(2, 2), batch_size=2),
+        loss_fn=RelativeL2Loss(),
+    )
+
+
+class TestNeverDataParallel(unittest.TestCase):
+    """Owner decision 2026-11-27 (spec section 8a): GINO is never trained data-parallel.
+
+    Through the public entry, HexTrainingRunner: a GinoRunnerModule with
+    ``distributed=True`` (no process group, or already inside DDP in a gloo group)
+    and a DDP-wrapped one with ``distributed=False`` raise DataParallelRefusedError;
+    a non-GINO model and the single-process GINO run as before.
+    """
+
+    def setUp(self) -> None:
+        backend = _fake_backend()  # the stand-in is not marked: the class itself must refuse
+        backend.start()
+        self.addCleanup(backend.stop)
+
+    def _assert_refusal(self, caught: BaseException) -> None:
+        self.assertIsInstance(caught, DataParallelRefusedError)
+        self.assertIsInstance(caught, DistributedContractError)
+        text = str(caught)
+        self.assertTrue(text.startswith("HEXANTK-DDP-REFUSED: "), text)
+        self.assertIn("spec/GINO_TRAINING_PHASE1_v1.md section 8a", text)
+        self.assertIn("never data-parallel", text)
+
+    def test_the_module_class_carries_the_refusal(self) -> None:
+        self.assertEqual(getattr(GinoRunnerModule, DATA_PARALLEL_REFUSAL_ATTR), GINO_DATA_PARALLEL_REFUSAL)
+        self.assertIsNone(getattr(_FakeGino(), DATA_PARALLEL_REFUSAL_ATTR, None))  # the stand-in is unmarked
+
+    def test_distributed_runner_refuses_gino_without_a_process_group(self) -> None:
+        if dist.is_initialized():
+            self.skipTest("a process group is already initialized in this process")
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(Exception) as caught:
+                _runner_on(GinoRunnerModule(_CFG, _LATTICE), tmp, distributed=True)
+            self._assert_refusal(caught.exception)
+            # negative control: a non-GINO model fails for the missing group, not with the refusal
+            with self.assertRaises(DistributedContractError) as plain:
+                _runner_on(_PlainOperator(), tmp, distributed=True)
+        self.assertNotIsInstance(plain.exception, DataParallelRefusedError)
+        self.assertIn("not initialized", str(plain.exception))
+
+    def test_runner_refuses_gino_inside_ddp_in_a_gloo_group(self) -> None:
+        if not dist.is_available() or not dist.is_gloo_available():
+            self.skipTest("gloo backend not available")
+        if dist.is_initialized():
+            self.skipTest("a process group is already initialized in this process")
+        with tempfile.TemporaryDirectory() as tmp:
+            dist.init_process_group("gloo", init_method=Path(tmp, "rendezvous").as_uri(), rank=0, world_size=1,
+                                    timeout=timedelta(seconds=60))
+            try:
+                # the stand-in has no complex weight, so DDP constructs: only the refusal can stop it
+                wrapped = DistributedDataParallel(GinoRunnerModule(_CFG, _LATTICE))
+                for distributed in (True, False):
+                    with self.subTest(distributed=distributed):
+                        with self.assertRaises(Exception) as caught:
+                            _runner_on(wrapped, os.path.join(tmp, f"gino-{distributed}"), distributed=distributed)
+                        self._assert_refusal(caught.exception)
+                # negative control: the same path with a non-GINO model constructs
+                runner = _runner_on(DistributedDataParallel(_PlainOperator()), os.path.join(tmp, "plain"),
+                                    distributed=True)
+                self.assertIsNotNone(runner.dist)
+            finally:
+                dist.destroy_process_group()
+
+    def test_single_process_gino_is_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runner, model = build_phase1_runner(_recipe(epochs=1), _CFG, _pairs(4, 1), _pairs(2, 2), output_dir=tmp)
+            self.assertFalse(runner.config.distributed)
+            self.assertEqual(runner.run()["global_step"], 1)
+            runner = _runner_on(GinoRunnerModule(_CFG, _LATTICE), os.path.join(tmp, "direct"), distributed=False)
+            self.assertIsNone(runner.dist)
+
+
 class TestMeanRelL2(unittest.TestCase):
     def setUp(self) -> None:
         backend = _fake_backend()
@@ -681,6 +785,28 @@ class TestRealBackend(unittest.TestCase):
                 DistributedDataParallel(module)
             finally:
                 dist.destroy_process_group()
+
+    def test_every_built_gino_refuses_data_parallel(self) -> None:
+        """Owner decision 2026-11-27: build_gino marks its model, so the refusal also holds for the raw GINO in a
+        caller's wrapper; refuse_data_parallel is what a caller runs instead of meeting gloo's raw error."""
+        backend = build_gino(_CFG, _LATTICE)
+        self.assertEqual(getattr(backend, DATA_PARALLEL_REFUSAL_ATTR), GINO_DATA_PARALLEL_REFUSAL)
+
+        class _CallerWrapper(nn.Module):
+            def __init__(self, inner: nn.Module) -> None:
+                super().__init__()
+                self.inner = inner
+
+        for model, where in ((backend, "the model"), (_CallerWrapper(backend), "submodule 'inner'"),
+                             (GinoRunnerModule(_CFG, _LATTICE), "the model")):
+            with self.subTest(model=type(model).__name__):
+                with self.assertRaises(DataParallelRefusedError) as caught:
+                    refuse_data_parallel(model, what="caller")
+                self.assertIn(where, str(caught.exception))
+                self.assertIn("section 8a", str(caught.exception))
+        # the limit named in spec section 8a: the mark is on the instance, so a GINO built outside build_gino
+        # (and outside GinoRunnerModule) is not recognised
+        self.assertIsNone(getattr(type(backend), DATA_PARALLEL_REFUSAL_ATTR, None))
 
     def test_two_builds_with_one_seed_train_to_the_same_bits(self) -> None:
         states = []

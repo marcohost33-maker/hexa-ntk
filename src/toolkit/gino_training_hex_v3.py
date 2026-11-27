@@ -61,6 +61,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from gino_adapter_hex_v3 import (
     _TRAINING_N,
+    GINO_DATA_PARALLEL_REFUSAL,
     GinoPhase1Config,
     _check_lattice,
     build_gino,
@@ -89,7 +90,13 @@ class GinoRunnerModule(nn.Module):
     training lattice (``build_gino``). The geometry tensors are non-persistent
     buffers: they follow ``.to(device)`` and are not part of the saved weights,
     so one set of weights loads into a module on any lattice.
+
+    Never trained data-parallel (owner decision 2026-11-27, spec section 8a): the
+    class carries ``DATA_PARALLEL_REFUSAL_ATTR`` itself, so the refusal holds with
+    any backend, also a stand-in that build_gino did not mark.
     """
+
+    hexantk_data_parallel_refusal = GINO_DATA_PARALLEL_REFUSAL
 
     def __init__(self, config: GinoPhase1Config, lattice: HexLattice) -> None:
         super().__init__()

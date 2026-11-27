@@ -8,6 +8,7 @@ from __future__ import annotations
 
 __all__ = [
     "GINO_BACKEND_PIN",
+    "GINO_DATA_PARALLEL_REFUSAL",
     "GinoPhase1Config",
     "build_gino",
     "prepare_gino_batch",
@@ -25,9 +26,16 @@ from typing import Any, Dict
 import numpy as np
 import torch
 
+from ddp_hex_v3 import DATA_PARALLEL_REFUSAL_ATTR
 from hex_fv_solver_hex_v3 import HexLattice, torus_hex_lattice, triangle_hex_lattice
 
 GINO_BACKEND_PIN = "neuraloperator==2.0.0"
+# Owner decision 2026-11-27 (owner question 7 of #112): GINO is never trained
+# data-parallel. Every model build_gino returns carries this as its
+# DATA_PARALLEL_REFUSAL_ATTR; HexTrainingRunner and refuse_data_parallel refuse it.
+GINO_DATA_PARALLEL_REFUSAL = (
+    "GINO, spec/GINO_TRAINING_PHASE1_v1.md section 8a: owner decision 2026-11-27, never data-parallel"
+)
 # Bound untrusted lattice metadata before any O(n**2) canonical reconstruction.
 _MAX_ADAPTER_N = 512
 _MAX_LATENT_RESOLUTION = 128
@@ -299,6 +307,7 @@ def build_gino(config: GinoPhase1Config, training_lattice: HexLattice) -> Any:
     # n_modes, hidden_channels, n_layers and radius_factor are baked into the model;
     # predict_gino must not attribute a run to another config's digest (Codex P2, #61).
     setattr(model, CONFIG_DIGEST_ATTR, config.digest())
+    setattr(model, DATA_PARALLEL_REFUSAL_ATTR, GINO_DATA_PARALLEL_REFUSAL)
     return model
 
 
