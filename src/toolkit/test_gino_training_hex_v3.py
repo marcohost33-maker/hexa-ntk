@@ -588,7 +588,7 @@ class TestNeverDataParallel(unittest.TestCase):
         self.assertIn("never data-parallel", text)
 
     def test_the_module_class_carries_the_refusal(self) -> None:
-        self.assertEqual(getattr(GinoRunnerModule, DATA_PARALLEL_REFUSAL_ATTR), GINO_DATA_PARALLEL_REFUSAL)
+        self.assertEqual(getattr(GinoRunnerModule, DATA_PARALLEL_REFUSAL_ATTR, None), GINO_DATA_PARALLEL_REFUSAL)
         self.assertIsNone(getattr(_FakeGino(), DATA_PARALLEL_REFUSAL_ATTR, None))  # the stand-in is unmarked
 
     def test_distributed_runner_refuses_gino_without_a_process_group(self) -> None:
@@ -790,7 +790,7 @@ class TestRealBackend(unittest.TestCase):
         """Owner decision 2026-11-27: build_gino marks its model, so the refusal also holds for the raw GINO in a
         caller's wrapper; refuse_data_parallel is what a caller runs instead of meeting gloo's raw error."""
         backend = build_gino(_CFG, _LATTICE)
-        self.assertEqual(getattr(backend, DATA_PARALLEL_REFUSAL_ATTR), GINO_DATA_PARALLEL_REFUSAL)
+        self.assertEqual(getattr(backend, DATA_PARALLEL_REFUSAL_ATTR, None), GINO_DATA_PARALLEL_REFUSAL)
 
         class _CallerWrapper(nn.Module):
             def __init__(self, inner: nn.Module) -> None:

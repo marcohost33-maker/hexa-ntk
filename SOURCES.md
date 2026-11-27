@@ -1023,3 +1023,5 @@
 | CD464CF869189842 | 2026-11-27 19:00 | spec | version 1.4: owner decision on question 7 = (a) never data-parallel; typed refusal; option 4 documented, not implemented: GINO_TRAINING_PHASE1_v1.md |
 | 241E842C3DA04A73 | 2026-11-27 19:00 | spec | version 1.7: precondition row DataParallelRefusedError for a model marked DATA_PARALLEL_REFUSAL_ATTR: DDP_RUNNER_v1.md |
 | CA6243595270A5D2 | 2026-11-27 19:00 | spec | Amendment 2026-11-27: build_gino marks its model as never data-parallel (owner decision): GINO_ADAPTER_PHASE1_v2.md |
+| E2645758D00CCA56 | 2026-11-27 19:30 | src/toolkit | discrimination run DK-20261127T181922: a missing build_gino mark now fails the assertion (getattr default) instead of an AttributeError: test_gino_training_hex_v3.py |
+| B144D3DD9C930F5A | 2026-11-27 19:30 | src/toolkit | discrimination run DK-20261127T181922: the negative control (unmarked model, non-module) fails as an assertion when refused, not as an error: test_ddp_hex_v3.py |

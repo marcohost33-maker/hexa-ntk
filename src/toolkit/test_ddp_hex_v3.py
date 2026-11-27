@@ -282,9 +282,11 @@ class TestRunnerWithoutProcessGroup(unittest.TestCase):
 
     def test_refuse_data_parallel_reads_the_mark_on_any_submodule(self) -> None:
         # spec/DDP_RUNNER_v1.md section 2 (v1.7): the mark, at any depth and with any value, refuses
-        plain = _model()
-        self.assertIsNone(refuse_data_parallel(plain, what="t"))  # negative control: unmarked passes
-        self.assertIsNone(refuse_data_parallel(object(), what="t"))  # not a module: nothing to read
+        for unmarked in (_model(), object()):  # negative control: unmarked model, not a module
+            try:
+                refuse_data_parallel(unmarked, what="t")
+            except DataParallelRefusedError as exc:
+                self.fail(f"an unmarked {type(unmarked).__name__} was refused: {exc}")
         for value in ("reason R", None):
             with self.subTest(value=value):
                 model = _model()
