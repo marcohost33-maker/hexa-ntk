@@ -101,6 +101,10 @@ probe** at 347abaf: 255/256, one mutant KILLED_ELSEWHERE -- since v1.5 a rank re
 with other weights was also stopped by the end-of-epoch agreement, an epoch later, and
 the test accepted either message; the test now pins the refusal to the resume. No change
 to what a healthy run computes.
+**Version 1.7** (2026-11-27, owner decision on question 7 of `spec/GINO_TRAINING_PHASE1_v1.md`):
+a model that is never trained data-parallel -- it or a submodule carries
+`DATA_PARALLEL_REFUSAL_ATTR`; the pinned GINO does -- is refused with
+`DataParallelRefusedError` (section 2). Nothing changes for an unmarked model.
 **Status:** ACTIVE for `HexTrainingRunner` with `RunnerConfig(distributed=True)`.
 Infrastructure contract; it trains no model for the Phase 1 study and makes no
 learning claim (`spec/PREREGISTRATION_PHASE1_v1.md` stays DRAFT).
@@ -125,6 +129,7 @@ contract lists those decisions and how each is agreed.
 
 | Condition | Violation |
 |---|---|
+| no module of the model carries `DATA_PARALLEL_REFUSAL_ATTR` (v1.7; GINO, `spec/GINO_TRAINING_PHASE1_v1.md` 8a) | `DataParallelRefusedError` (a `DistributedContractError`, code `HEXANTK-DDP-REFUSED`): checked first -- without a process group before the next row, with one inside the agreed construction step; also with `config.distributed=False` and a DDP model, before the last row's `ValueError` |
 | `torch.distributed` initialized | `DistributedContractError` |
 | model is `DistributedDataParallel` | `ValueError` (an unwrapped model trains independently per rank) |
 | `config.is_main_process == (rank == 0)` | `ValueError` |

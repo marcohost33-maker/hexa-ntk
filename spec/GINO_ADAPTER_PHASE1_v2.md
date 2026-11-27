@@ -109,6 +109,12 @@
   wrapper module. With the real backend, DDP on gloo cannot wrap the GINO at all in torch 2.6.0: its
   construction broadcast refuses the complex64 spectral weights (`spec/GINO_TRAINING_PHASE1_v1.md`
   section 8a). NCCL was not run.
+- **Amendment 2026-11-27 (never data-parallel, owner decision).** The owner decided owner question 7 of
+  `spec/GINO_TRAINING_PHASE1_v1.md`: GINO is never trained data-parallel. `build_gino` sets
+  `ddp_hex_v3.DATA_PARALLEL_REFUSAL_ATTR` on every model it returns, with the reason
+  `GINO_DATA_PARALLEL_REFUSAL` (names that spec's section 8a); `HexTrainingRunner` and
+  `ddp_hex_v3.refuse_data_parallel` then raise `DataParallelRefusedError`. Nothing else about the model
+  changes (the attribute is not part of `state_dict()`).
 
 ## Testing and falsification
 

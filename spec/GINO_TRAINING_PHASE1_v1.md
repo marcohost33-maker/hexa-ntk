@@ -1,8 +1,9 @@
 # GINO_TRAINING_PHASE1_v1 — the pinned GINO through the training runner
 
-**Version:** 1.3 (2026-11-27; 1.0 of 2026-11-19, 1.1 added section 8a, 1.2 sharpened 8a: mechanism at
+**Version:** 1.4 (2026-11-27; 1.0 of 2026-11-19, 1.1 added section 8a, 1.2 sharpened 8a: mechanism at
 source level, rounding control, emulated `init_sync=False`; 1.3 added option 4 of 8a, real views inside
-DDP's reducer, measured, not adopted)
+DDP's reducer, measured, not adopted; 1.4 records the owner decision on question 7: GINO is never trained
+data-parallel, and the runner refuses it with a typed error, section 8a)
 **Status:** PROPOSED. Training code only. No model is fit, tuned or evaluated on T1 data
 under this contract; `spec/PREREGISTRATION_PHASE1_v1.md` (lines 14-15) forbids that until
 the owner approves it and allows "writing training code and running smoke tests on
@@ -160,6 +161,8 @@ the plain reading as default. The approved preregistration should state:
 6. the run manifest should carry `Phase1TrainingRecipe.digest()` and `GinoPhase1Config.digest()`;
 7. whether Phase 1 ever runs data-parallel on CPU (gloo). D5 names one CPU machine, so a
    single process needs nothing here; if more processes are wanted, section 8a needs a decision.
+   **Decided by the owner on 2026-11-27: (a) GINO is never trained data-parallel** (section 8a,
+   "Owner decision").
 
 ## 8. Limits
 
@@ -201,9 +204,38 @@ torch.cfloat"; pytorch/pytorch#55375). NCCL was not run.
 
 **Consequence.** No code in this repo is wrong; a data-parallel CPU run of the pinned GINO
 is not possible with the runner as it is. Phase 1 (D5: one CPU machine, one process) is not
-affected. The runner's `distributed=True` path is unchanged and still requires a DDP model.
+affected. Until version 1.3 the runner's `distributed=True` path was unchanged; since 1.4 it
+refuses GINO (next paragraph).
 
-**Options measured for the owner (not adopted).**
+**Owner decision (2026-11-27, owner question 7 = (a)).** GINO is never trained data-parallel.
+Option 4 below stays documented as a measurement and is not implemented; options 1-3 likewise.
+Implemented as a typed refusal instead of the backend's raw error:
+
+- `ddp_hex_v3.DataParallelRefusedError` (a `DistributedContractError`, `code =
+  "HEXANTK-DDP-REFUSED"`; the message starts with the code and names the refusing module and
+  this section). A module refuses data parallelism by carrying the attribute
+  `ddp_hex_v3.DATA_PARALLEL_REFUSAL_ATTR` (any value; the value is the reason).
+  `build_gino` sets it on every model it returns, `GinoRunnerModule` carries it on its class
+  (so a stand-in backend is covered too); the reason is
+  `gino_adapter_hex_v3.GINO_DATA_PARALLEL_REFUSAL`, which names this section.
+- `HexTrainingRunner` refuses such a model, wrapped in `DistributedDataParallel` or not:
+  with `distributed=True` and no process group before the missing-group error; with a process
+  group as the first check inside the agreed construction step (`spec/DDP_RUNNER_v1.md`
+  section 2, so a peer rank raises `PeerRankError` instead of hanging); with `distributed=False`
+  and a DDP-wrapped model instead of the `ValueError` of that case.
+- The toolkit never builds `DistributedDataParallel` itself. `DistributedDataParallel(GinoRunnerModule(...))`
+  in a caller's code still meets gloo's `RuntimeError: Invalid scalar type` first; a caller that
+  calls `ddp_hex_v3.refuse_data_parallel(model, what=...)` before wrapping gets the typed refusal
+  instead. The premise test above stays as it is: it pins the backend behaviour, not the refusal.
+- Limit: the mark is on the instance `build_gino` returns and on `GinoRunnerModule`. A GINO
+  built directly from `neuralop.models.GINO` outside both is not recognised.
+
+Tests: `TestNeverDataParallel` (stand-in backend, no process group and an in-process gloo group of
+world size 1; negative controls: a non-GINO model takes the unchanged path, the single-process GINO
+runs) and `TestRealBackend.test_every_built_gino_refuses_data_parallel` in
+`src/toolkit/test_gino_training_hex_v3.py`; the helper itself in `src/toolkit/test_ddp_hex_v3.py`.
+
+**Options measured for the owner (not adopted; the owner chose none, see above).**
 
 1. *Hold the complex weight as a real parameter* (`torch.nn.utils.parametrize` with
    `view_as_complex`): refused at registration. tltorch's `FactorizedTensor`, the class that

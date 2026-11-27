@@ -799,6 +799,13 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   SGD auf der reellen Sicht rundet in einzelnen Eintraegen anders als SGD auf dem komplexen Gewicht, Adam nicht.
   Offen fuer eine Uebernahme: Optimizer-Zustand in anderem Layout als im Einzelprozess, Resume, EMA, AMP, privates
   DDP-Attribut; Owner-Frage 7 unveraendert. _Evidenz:_ `results/2026-11-27_gino_ddp_realview.json`.
+  **Entschieden 2026-11-27 (Owner, Frage 7 = (a)): GINO wird nie datenparallel trainiert.** Umgesetzt als
+  typisierte Ablehnung statt der rohen gloo-Ausnahme (`spec/GINO_TRAINING_PHASE1_v1.md` v1.4 Abschnitt 8a,
+  `spec/DDP_RUNNER_v1.md` v1.7 Abschnitt 2): `build_gino` und `GinoRunnerModule` tragen die Markierung
+  `DATA_PARALLEL_REFUSAL_ATTR`, `HexTrainingRunner` wirft dafuer `DataParallelRefusedError`
+  (`HEXANTK-DDP-REFUSED`) -- mit `distributed=True` (ohne und mit Prozessgruppe) und bei einem DDP-Modell mit
+  `distributed=False`. Optionen 1-4 bleiben dokumentiert, keine umgesetzt. Offen bleibt nur: `DDP(...)` im
+  Aufrufer-Code trifft weiter zuerst gloo; `ddp_hex_v3.refuse_data_parallel` davor aufrufen.
 
 - [ ] **Engine `load_raw(expected_semantics=None)` ueberspringt die Semantik-Pruefung (NR-Sweep
   2026-11-10).** Gleiches Muster wie SF-R46-01 (Typverwechslung last/best/resume nur geprueft, wenn der
