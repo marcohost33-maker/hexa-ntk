@@ -1,7 +1,8 @@
 # GINO_TRAINING_PHASE1_v1 — the pinned GINO through the training runner
 
-**Version:** 1.2 (2026-11-23; 1.0 of 2026-11-19, 1.1 added section 8a, 1.2 sharpened 8a: mechanism at
-source level, rounding control, emulated `init_sync=False`)
+**Version:** 1.3 (2026-11-27; 1.0 of 2026-11-19, 1.1 added section 8a, 1.2 sharpened 8a: mechanism at
+source level, rounding control, emulated `init_sync=False`; 1.3 added option 4 of 8a, real views inside
+DDP's reducer, measured, not adopted)
 **Status:** PROPOSED. Training code only. No model is fit, tuned or evaluated on T1 data
 under this contract; `spec/PREREGISTRATION_PHASE1_v1.md` (lines 14-15) forbids that until
 the owner approves it and allows "writing training code and running smoke tests on
@@ -15,7 +16,8 @@ through the runner without this module (the failures of section 1) and with it, 
 `results/2026-11-19_gino_runner_integration.json`, bound to the source revision.
 `scripts/oracles/gino_ddp_gloo_oracle.py` measures the module under DDP on gloo (section 8a) and
 writes `results/2026-11-23_gino_ddp_gloo.json` (parts A-C) and `results/2026-11-23_gino_ddp_gloo_r2.json`
-(parts A-E, current).
+(parts A-E, current). `scripts/oracles/gino_ddp_realview_oracle.py` measures option 4 of 8a and
+writes `results/2026-11-27_gino_ddp_realview.json`.
 **Depends on:** `spec/GINO_ADAPTER_PHASE1_v2.md` (model, geometry, config digest),
 `spec/DDP_RUNNER_v1.md` and `spec/MID_EPOCH_RESUME_v1.md` (runner), `spec/HEAT_OPERATOR_TASK_v1.md`
 (metric `rel_l2`).
@@ -241,6 +243,33 @@ affected. The runner's `distributed=True` path is unchanged and still requires a
    reducer hands the complex gradient bucket to gloo without the real view. A torch bump that
    only adds `init_sync` therefore does not remove the finding; whether a newer reducer views
    complex buckets as real is not measured.
+4. *Real views inside DDP's reducer* (added 2026-11-27, `scripts/oracles/gino_ddp_realview_oracle.py`,
+   measured on Windows 11, Python 3.12.10, torch 2.6.0+cpu, neuraloperator 2.0.0, one torch thread per
+   rank). A wrapper registers, per complex weight, a float32 parameter that is
+   `torch.view_as_real` of the SAME storage, calls the module through `torch.func.functional_call`
+   with `torch.view_as_complex` of those views in place of the complex weights, and leaves the
+   complex weights out of DDP (`_ddp_params_and_buffers_to_ignore`, the same private mechanism as
+   option 2) and out of the optimizer. DDP then broadcasts and all-reduces only float32 tensors in
+   its own reducer, so unlike option 2 there is no collective outside DDP. Measured:
+   - construction succeeds where `DDP(GinoRunnerModule)` fails (premise reproduced on 2 ranks);
+   - gradients, 2 ranks with one half batch each: every entry equals `g1 * 0.5 + g2 * 0.5` of the
+     single-process half gradients bitwise (the reducer's own arithmetic for world 2), and is
+     within `64 * eps32 * S` of the full-batch gradient (S = max of `(|g1| + |g2|) / 2 + |G|`);
+   - an optimizer step on the views moves the complex weights (same storage, equal values);
+   - through `HexTrainingRunner` with `distributed=True` under `TORCH_DISTRIBUTED_DEBUG=DETAIL`
+     (R14 order check), 3 epochs, SGD and Adam: both ranks end bitwise equal, **but only if the
+     wrapper leaves the views out of its state dict**. With both in it, the runner's first
+     checkpoint fails: `torch.save` refuses two tensors that view the same storage as different
+     types. Resume from such a checkpoint is not measured.
+   - the optimizer is not neutral: Adam on a real view steps bitwise like Adam on the complex
+     weight (torch 2.6.0 views complex parameters as real inside Adam), SGD does not in every
+     entry (`add_(grad, alpha=-lr)` rounds a complex tensor differently from its real view; 3 steps,
+     50 of 1536 entries differ, largest 1.8e-7).
+   Not adopted: the optimizer state then belongs to the views, so it has another layout than a
+   single-process run (float `[..., 2]` instead of complex) and a checkpoint cannot move between the
+   two; the state-dict contract of the wrapper, resume, EMA over aliased tensors and AMP are not
+   specified or measured; it uses the same private DDP attribute as option 2. It answers the
+   objection to option 2 (collectives outside the reducer), not owner question 7.
 
 ## 9. Sources
 
@@ -253,3 +282,8 @@ affected. The runner's `distributed=True` path is unchanged and still requires a
   https://discuss.pytorch.org/t/error-in-distributeddataparallel-when-parameters-are-torch-cfloat/157430;
   pytorch/pytorch issue 55375 (complex parameters and the DDP broadcast),
   https://github.com/pytorch/pytorch/issues/55375; the measurement itself is the oracle above.
+- Section 8a, option 4: PyTorch `main`, `torch/distributed/distributed_c10d.py` (read 2026-11-27,
+  https://raw.githubusercontent.com/pytorch/pytorch/main/torch/distributed/distributed_c10d.py):
+  `broadcast` now views a complex tensor as real in Python; DDP's construction sync and reducer
+  (C++ `_broadcast_coalesced`, reducer buckets) were not re-read there, so a torch bump is not
+  shown to remove the finding.

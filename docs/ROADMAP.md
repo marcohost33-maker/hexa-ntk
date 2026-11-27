@@ -791,6 +791,14 @@ Status-Konvention: `[x]` erledigt (mit Evidenz) · `[ ]` offen · `[~]` bewusst 
   (`test_spectral_budget_formula_bounds_the_real_spectral_weights`) und in `spec/GINO_ADAPTER_PHASE1_v2.md`
   (Amendment 2026-11-23) klargestellt, dort auch: DDP als Wrapper des echten GINO ist auf gloo nicht moeglich.
   _Evidenz:_ `results/2026-11-23_gino_ddp_gloo_r2.json`.
+  Nachtrag 2026-11-27 (Option 4 von 8a, gemessen, nicht uebernommen): die komplexen Gewichte als reelle
+  Sichten desselben Speichers in DDPs eigenem Reducer (`functional_call`), also ohne Kollektiv ausserhalb von DDP
+  -- der Einwand gegen Option 2. Gradienten auf 2 gloo-Ranks bitgleich zur Reducer-Arithmetik der
+  Einzelprozess-Haelften; Runner unter DETAIL, SGD und Adam, beide Ranks bitgleich, aber nur ohne die Sichten im
+  State-Dict (sonst verweigert `torch.save` den ersten Checkpoint: zwei Tensoren, ein Speicher, zwei Typen);
+  SGD auf der reellen Sicht rundet in einzelnen Eintraegen anders als SGD auf dem komplexen Gewicht, Adam nicht.
+  Offen fuer eine Uebernahme: Optimizer-Zustand in anderem Layout als im Einzelprozess, Resume, EMA, AMP, privates
+  DDP-Attribut; Owner-Frage 7 unveraendert. _Evidenz:_ `results/2026-11-27_gino_ddp_realview.json`.
 
 - [ ] **Engine `load_raw(expected_semantics=None)` ueberspringt die Semantik-Pruefung (NR-Sweep
   2026-11-10).** Gleiches Muster wie SF-R46-01 (Typverwechslung last/best/resume nur geprueft, wenn der
