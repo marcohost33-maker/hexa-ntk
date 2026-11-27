@@ -1,0 +1,371 @@
+{
+  "alias": {
+    "holds": true,
+    "per_parameter": {
+      "gino.fno_blocks.convs.0.weight.tensor": {
+        "moved": true,
+        "same_storage": true,
+        "values_equal": true
+      },
+      "gino.fno_blocks.convs.1.weight.tensor": {
+        "moved": true,
+        "same_storage": true,
+        "values_equal": true
+      }
+    }
+  },
+  "data": "synthetic standard-normal tensors on the N = 32 triangle lattice; no T1 data",
+  "environment": {
+    "neuraloperator": "2.0.0",
+    "numpy": "2.5.3",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10",
+    "torch": "2.6.0+cpu",
+    "torch_threads_in_ranks": 1
+  },
+  "gino_config": {
+    "backend": "neuraloperator==2.0.0",
+    "geometry_semantics": "shared-euclidean-v1",
+    "hidden_channels": 8,
+    "latent_resolution": 16,
+    "n_layers": 2,
+    "n_modes": 4,
+    "radius_factor": 2.5,
+    "resource_policy": "GINO_ADAPTER_PHASE1_v2"
+  },
+  "gradients": {
+    "I1_bitwise_vs_halves": true,
+    "I2_within_tolerance_vs_full_batch": true,
+    "names_match": true,
+    "per_parameter": {
+      "gino.fno_blocks.channel_mlp.0.fcs.0.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 1.8189894035458565e-12,
+        "operand_scale": 9.710150334285572e-05,
+        "tolerance": 7.40825678580137e-10
+      },
+      "gino.fno_blocks.channel_mlp.0.fcs.0.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 9.094947017729282e-13,
+        "operand_scale": 4.236646054778248e-05,
+        "tolerance": 3.2323044241167054e-10
+      },
+      "gino.fno_blocks.channel_mlp.0.fcs.1.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 7.275957614183426e-12,
+        "operand_scale": 0.00028385978657752275,
+        "tolerance": 2.1656783033563443e-09
+      },
+      "gino.fno_blocks.channel_mlp.0.fcs.1.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 9.094947017729282e-13,
+        "operand_scale": 3.6026314774062485e-05,
+        "tolerance": 2.748589689183234e-10
+      },
+      "gino.fno_blocks.channel_mlp.1.fcs.0.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 7.275957614183426e-12,
+        "operand_scale": 0.0002688112435862422,
+        "tolerance": 2.050867031755388e-09
+      },
+      "gino.fno_blocks.channel_mlp.1.fcs.0.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 3.637978807091713e-12,
+        "operand_scale": 0.00013802792818751186,
+        "tolerance": 1.0530695204735707e-09
+      },
+      "gino.fno_blocks.channel_mlp.1.fcs.1.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 1.8189894035458565e-11,
+        "operand_scale": 0.0005137583939358592,
+        "tolerance": 3.919665481078027e-09
+      },
+      "gino.fno_blocks.channel_mlp.1.fcs.1.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 1.8189894035458565e-12,
+        "operand_scale": 9.151003905571997e-05,
+        "tolerance": 6.981661915261839e-10
+      },
+      "gino.fno_blocks.channel_mlp_skips.0.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 4.547473508864641e-13,
+        "operand_scale": 4.059148704982363e-05,
+        "tolerance": 3.096884693132296e-10
+      },
+      "gino.fno_blocks.channel_mlp_skips.1.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 5.002220859751105e-12,
+        "operand_scale": 8.783218800090253e-05,
+        "tolerance": 6.701064148018077e-10
+      },
+      "gino.fno_blocks.convs.0.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 2.2737367544323206e-13,
+        "operand_scale": 1.9440072719589807e-05,
+        "tolerance": 1.483159844939408e-10
+      },
+      "gino.fno_blocks.convs.0.weight.tensor": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 1.1368683772161603e-13,
+        "operand_scale": 4.637077836378012e-06,
+        "tolerance": 3.5378096285842986e-11
+      },
+      "gino.fno_blocks.convs.1.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 3.637978807091713e-12,
+        "operand_scale": 0.0001464664237573743,
+        "tolerance": 1.1174501324262565e-09
+      },
+      "gino.fno_blocks.convs.1.weight.tensor": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 9.094947017729282e-13,
+        "operand_scale": 6.261035741772503e-05,
+        "tolerance": 4.776791184823992e-10
+      },
+      "gino.fno_blocks.fno_skips.0.conv.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 1.1368683772161603e-13,
+        "operand_scale": 4.642947715183254e-06,
+        "tolerance": 3.54228799070988e-11
+      },
+      "gino.fno_blocks.fno_skips.1.conv.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 9.094947017729282e-13,
+        "operand_scale": 6.250431761145592e-05,
+        "tolerance": 4.768700989643548e-10
+      },
+      "gino.gno_in.integral_transform.channel_mlp.fcs.0.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 1.4210854715202004e-14,
+        "operand_scale": 8.823312214190082e-08,
+        "tolerance": 6.731652995445314e-13
+      },
+      "gino.gno_in.integral_transform.channel_mlp.fcs.0.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 4.618527782440651e-14,
+        "operand_scale": 8.823315056361025e-08,
+        "tolerance": 6.731655163849659e-13
+      },
+      "gino.gno_in.integral_transform.channel_mlp.fcs.1.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 4.263256414560601e-14,
+        "operand_scale": 2.7703248406396597e-07,
+        "tolerance": 2.1135901188962247e-12
+      },
+      "gino.gno_in.integral_transform.channel_mlp.fcs.1.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 9.592326932761353e-14,
+        "operand_scale": 2.261775478018535e-07,
+        "tolerance": 1.7255977462909966e-12
+      },
+      "gino.gno_in.integral_transform.channel_mlp.fcs.2.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 8.526512829121202e-14,
+        "operand_scale": 8.485726539220195e-07,
+        "tolerance": 6.474095565200955e-12
+      },
+      "gino.gno_in.integral_transform.channel_mlp.fcs.2.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 4.973799150320701e-14,
+        "operand_scale": 1.9941130346978753e-07,
+        "tolerance": 1.5213875081618311e-12
+      },
+      "gino.gno_in.integral_transform.channel_mlp.fcs.3.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 4.547473508864641e-13,
+        "operand_scale": 1.1418429494369775e-05,
+        "tolerance": 8.711570353980846e-11
+      },
+      "gino.gno_in.integral_transform.channel_mlp.fcs.3.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 3.694822225952521e-13,
+        "operand_scale": 9.938656830854598e-07,
+        "tolerance": 7.582593407329252e-12
+      },
+      "gino.gno_out.integral_transform.channel_mlp.fcs.0.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 3.865352482534945e-11,
+        "operand_scale": 0.000172961299540475,
+        "tolerance": 1.3195899928319932e-09
+      },
+      "gino.gno_out.integral_transform.channel_mlp.fcs.0.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 1.3233147910796106e-10,
+        "operand_scale": 0.00017296131409239024,
+        "tolerance": 1.3195901038542956e-09
+      },
+      "gino.gno_out.integral_transform.channel_mlp.fcs.1.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 6.548361852765083e-11,
+        "operand_scale": 0.000726441154256463,
+        "tolerance": 5.542306169559197e-09
+      },
+      "gino.gno_out.integral_transform.channel_mlp.fcs.1.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 2.02817318495363e-10,
+        "operand_scale": 0.0008403036626987159,
+        "tolerance": 6.411008168782928e-09
+      },
+      "gino.gno_out.integral_transform.channel_mlp.fcs.2.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 2.6193447411060333e-10,
+        "operand_scale": 0.00535261444747448,
+        "tolerance": 4.0837207393451536e-08
+      },
+      "gino.gno_out.integral_transform.channel_mlp.fcs.2.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 4.511093720793724e-10,
+        "operand_scale": 0.0012004512827843428,
+        "tolerance": 9.158716451906912e-09
+      },
+      "gino.lifting.fcs.0.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 9.094947017729282e-13,
+        "operand_scale": 8.069420437095687e-05,
+        "tolerance": 6.156479215313482e-10
+      },
+      "gino.lifting.fcs.0.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 5.684341886080802e-14,
+        "operand_scale": 1.3561559626396047e-06,
+        "tolerance": 1.034664888488468e-11
+      },
+      "gino.lifting.fcs.1.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 7.275957614183426e-12,
+        "operand_scale": 0.0002854742924682796,
+        "tolerance": 2.1779960057699554e-09
+      },
+      "gino.lifting.fcs.1.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 1.8189894035458565e-12,
+        "operand_scale": 0.00011533739598235115,
+        "tolerance": 8.799544981563656e-10
+      },
+      "gino.projection.fcs.0.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 1.1641532182693481e-10,
+        "operand_scale": 0.004128245636820793,
+        "tolerance": 3.149601468521723e-08
+      },
+      "gino.projection.fcs.0.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 2.000888343900442e-11,
+        "operand_scale": 0.0005780804203823209,
+        "tolerance": 4.41040359788758e-09
+      },
+      "gino.projection.fcs.1.bias": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 3.725290298461914e-09,
+        "operand_scale": 0.03891133517026901,
+        "tolerance": 2.968699277516862e-07
+      },
+      "gino.projection.fcs.1.weight": {
+        "bitwise_vs_halves": true,
+        "max_abs_diff_vs_full_batch": 1.1641532182693481e-10,
+        "operand_scale": 0.00716367969289422,
+        "tolerance": 5.4654538672593844e-08
+      }
+    },
+    "ran": true,
+    "ranks": [
+      {
+        "run": {
+          "ok": true,
+          "value": {
+            "complex_params_without_grad": true
+          }
+        }
+      },
+      {
+        "run": {
+          "ok": true,
+          "value": {
+            "complex_params_without_grad": true
+          }
+        }
+      }
+    ]
+  },
+  "optimizer": {
+    "adam": {
+      "bitwise": true,
+      "entries": 1536,
+      "entries_differing": 0,
+      "max_abs_diff": 0.0
+    },
+    "sgd": {
+      "bitwise": false,
+      "entries": 1536,
+      "entries_differing": 50,
+      "max_abs_diff": 1.7881393432617188e-07
+    }
+  },
+  "premise": {
+    "as_recorded": true,
+    "ranks": [
+      {
+        "ddp_construction": {
+          "error": "Invalid scalar type",
+          "error_type": "RuntimeError",
+          "ok": false
+        }
+      },
+      {
+        "ddp_construction": {
+          "error": "Invalid scalar type",
+          "error_type": "RuntimeError",
+          "ok": false
+        }
+      }
+    ]
+  },
+  "runner": {
+    "aliases_saved": {
+      "adam": {
+        "errors": [
+          "Cannot save multiple tensors or storages that view the same data as different types",
+          "checkpoint save at epoch 0 failed on rank(s) [0] (see their logs)"
+        ],
+        "ranks_bitwise_equal": false,
+        "ranks_ok": false
+      },
+      "sgd": {
+        "errors": [
+          "Cannot save multiple tensors or storages that view the same data as different types",
+          "checkpoint save at epoch 0 failed on rank(s) [0] (see their logs)"
+        ],
+        "ranks_bitwise_equal": false,
+        "ranks_ok": false
+      }
+    },
+    "aliases_saved_refused_as_recorded": true,
+    "views_dropped": {
+      "adam": {
+        "errors": [],
+        "max_abs_diff_vs_single_process": 0.0005527632310986519,
+        "ranks_bitwise_equal": true,
+        "ranks_ok": true
+      },
+      "sgd": {
+        "errors": [],
+        "max_abs_diff_vs_single_process": 3.725290298461914e-09,
+        "ranks_bitwise_equal": true,
+        "ranks_ok": true
+      }
+    },
+    "views_dropped_ranks_equal": true
+  },
+  "setup": {
+    "eps32": 1.1920928955078125e-07,
+    "per_rank_batch": 2,
+    "tolerance_factor": 64,
+    "world": 2
+  },
+  "source": {
+    "bound": true,
+    "git_sha": "20ba4ee2fcc9a2f4b82b5f866453cf06913663b3",
+    "github_sha": null,
+    "worktree_dirty": false
+  }
+}
