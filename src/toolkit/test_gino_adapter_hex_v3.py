@@ -376,6 +376,29 @@ class TestGinoPhase1Adapter(unittest.TestCase):
         self.assertTrue(torch.isfinite(out).all())
 
     @unittest.skipUnless(importlib.util.find_spec("neuralop"), "optional neuraloperator backend not installed")
+    def test_spectral_budget_formula_bounds_the_real_spectral_weights(self) -> None:
+        # spec GINO_ADAPTER_PHASE1_v2 "Joint spectral budget": B = 8 L H^2 m (m/2 + 1) with an odd n_modes rounded
+        # UP to an even m, so m/2 is an integer. Checked against the bytes of the real complex spectral parameters
+        # (external review 2026-11-21 read "m/2 + 1" as 5.5 for m = 9 and asked for exactly this check).
+        lattice = triangle_hex_lattice(32)
+        for n_modes in (3, 4, 5, 6):
+            with self.subTest(n_modes=n_modes):
+                cfg = GinoPhase1Config(latent_resolution=16, n_modes=n_modes, hidden_channels=8, n_layers=2,
+                                       radius_factor=2.5)
+                model = build_gino(cfg, lattice)
+                spectral = [p for p in model.parameters() if p.is_complex()]
+                self.assertEqual(len(spectral), cfg.n_layers)
+                for p in spectral:  # dense weight [H, H, m, m // 2 + 1]: real-FFT halving on the last axis
+                    self.assertEqual(tuple(p.shape), (8, 8, n_modes, n_modes // 2 + 1))
+                    self.assertEqual(p.dtype, torch.complex64)
+                real_bytes = sum(p.numel() * p.element_size() for p in spectral)
+                m = n_modes + n_modes % 2
+                budget = 8 * cfg.n_layers * cfg.hidden_channels ** 2 * m * (m // 2 + 1)
+                self.assertLessEqual(real_bytes, budget)
+                if n_modes % 2 == 0:
+                    self.assertEqual(real_bytes, budget)  # exact for an even mode count
+
+    @unittest.skipUnless(importlib.util.find_spec("neuralop"), "optional neuraloperator backend not installed")
     def test_parameter_ntk_of_the_real_gino(self) -> None:
         # PARAM_NTK_v1 on the actual neuraloperator 2.0.0 GINO (owner decision E1015M-03):
         # float64 shim with float32 cross-check, complex spectral weights in real coordinates.

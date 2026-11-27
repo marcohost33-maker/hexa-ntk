@@ -97,6 +97,18 @@
   skips the guard is fail-open"; a docstring does not make it safe in a public API). Measured red on
   0b3f21d with a foreign model under the default config; with the real neuraloperator 2.0.0 backend the
   existing wrapper test passes without `allow_unbound`, five dtype tests on test doubles pass it explicitly.
+- **Amendment 2026-11-23 (two readings checked against the real backend).** (1) *Spectral budget.* An
+  external review (007acc2, 2026-11-21) read `m * (m/2 + 1)` as `9 * 5.5` for an odd mode count. In this
+  contract `m` is the mode count rounded UP to an even number, so `m/2` is an integer and the formula is
+  `m * (m // 2 + 1)`, as `GinoPhase1Config.__post_init__` computes it. Now checked against the pinned
+  backend (`test_spectral_budget_formula_bounds_the_real_spectral_weights`, n_modes 3-6): every dense
+  spectral weight has shape `[H, H, n_modes, n_modes // 2 + 1]` in complex64, the formula equals the real
+  bytes for an even count and bounds them for an odd one. The formula text above stays as written.
+  (2) *DistributedDataParallel as a wrapper.* The amendment of 2026-11-10 names DDP as a wrapper behind
+  which the config binding is found. The binding search is wrapper-agnostic and is tested with a generic
+  wrapper module. With the real backend, DDP on gloo cannot wrap the GINO at all in torch 2.6.0: its
+  construction broadcast refuses the complex64 spectral weights (`spec/GINO_TRAINING_PHASE1_v1.md`
+  section 8a). NCCL was not run.
 
 ## Testing and falsification
 
