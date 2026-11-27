@@ -18,6 +18,14 @@ missing dependencies or import errors would make every mutant look killed. A
 mutant counts as KILLED only if its run executed tests ("Ran N tests", N > 0)
 and ended in "FAILED (...)".
 
+Static validity (2026-11-09, PR #102): a red run is no kill when the mutant
+itself is broken. A mutant that calls ``self.<name>`` which the module never
+defines (a helper removed after the mutant was written: 40ff255 removed
+``_scaler_active`` and a mutant calling it was "killed" by an AttributeError,
+not by a test) or that leaves the module unparsable is INVALID before any test
+runs (``static_invalid``). ``test_hex_timestep_contract`` checks the whole
+catalogue the same way in the fast unit gate.
+
 Which test killed it (2026-11-10, internal NR "Handdiskriminierung als
 Sammelzahl verdeckte blinde Falsifier", Digi #21): a red test class says
 nothing about WHICH test saw the mutant; a test named after a guard can stay
@@ -36,9 +44,12 @@ baseline is red (the probe proves nothing then).
 """
 from __future__ import annotations
 
+import builtins
+import functools
 import pathlib
 import re
 import subprocess
+import symtable
 import sys
 from typing import NamedTuple
 
@@ -871,6 +882,63 @@ def _tests_ran(output: str) -> int:
     return int(match.group(1)) if match else 0
 
 
+_SELF_ATTR = re.compile(r"\bself\.([A-Za-z_][A-Za-z0-9_]*)")
+# Names every module has without defining them (module attributes set by the import system).
+_MODULE_NAMES = frozenset({"__name__", "__doc__", "__package__", "__loader__", "__spec__", "__file__",
+                           "__cached__", "__builtins__", "__annotations__", "__dict__"})
+
+
+@functools.lru_cache(maxsize=64)
+def _unresolved_globals(text: str, filename: str) -> frozenset[str]:
+    """Global names ``text`` reads that it never binds at module level and that are no builtins.
+
+    Uses the compiler's own scope analysis (``symtable``), as pyflakes' and ruff's
+    undefined-name rule (F821) do: a name read in a function, class or the module
+    body that resolves to the global scope must be bound there (assignment,
+    import, def, class) or be a builtin.
+    """
+    table = symtable.symtable(text, filename, "exec")
+    known = {sym.get_name() for sym in table.get_symbols()
+             if sym.is_assigned() or sym.is_imported() or sym.is_namespace()}
+    known |= set(dir(builtins)) | _MODULE_NAMES
+    unresolved = {sym.get_name() for sym in table.get_symbols() if sym.is_referenced()} - known
+    stack = list(table.get_children())
+    while stack:
+        scope = stack.pop()
+        stack.extend(scope.get_children())
+        unresolved |= {sym.get_name() for sym in scope.get_symbols()
+                       if sym.is_global() and sym.is_referenced() and sym.get_name() not in known}
+    return frozenset(unresolved)
+
+
+def static_invalid(module_text: str, mutant: Mutant) -> str | None:
+    """Why ``mutant`` is broken on ``module_text`` without running a test, else None.
+
+    Checked: the mutated module still parses (Python modules only); every
+    ``self.<name>`` the replacement uses already occurs in the module as
+    ``self.<name>`` or as ``def <name>`` (so it names something real, not a
+    helper that has since been removed); and the replacement makes no global
+    name unresolved that was resolved before (a removed module-level helper
+    called without ``self.``, 2026-11-24). Only names the mutation newly
+    leaves unresolved count, so nothing already in the module can trigger it.
+    """
+    mutated = module_text.replace(mutant.original, mutant.mutated)
+    if mutant.module.endswith(".py"):
+        try:
+            compile(mutated, mutant.module, "exec")
+        except SyntaxError as exc:
+            return f"mutated module does not parse: {exc.msg} (line {exc.lineno})"
+        new = sorted(_unresolved_globals(mutated, mutant.module) - _unresolved_globals(module_text, mutant.module))
+        if new:
+            return f"replacement uses {', '.join(new)}, which {mutant.module} never binds and which is no builtin"
+    known = set(_SELF_ATTR.findall(module_text)) | set(re.findall(r"\bdef ([A-Za-z_][A-Za-z0-9_]*)", module_text))
+    unknown = sorted(set(_SELF_ATTR.findall(mutant.mutated)) - known)
+    if unknown:
+        return f"replacement uses self.{', self.'.join(unknown)}, which {mutant.module} never defines"
+    return None
+
+
+
 # unittest's "FAIL: test_name (module.Class.test_name) [sub] (k=v)" / "ERROR: ..."
 _FAILED = re.compile(r"^(?:FAIL|ERROR): (\w+) \(", re.MULTILINE)
 
@@ -908,6 +976,10 @@ def run_mutant_detail(mutant: Mutant) -> tuple[str, list[str]]:
     original = path.read_text(encoding="utf-8")
     if original.count(mutant.original) != 1:
         raise LookupError(f"{mutant.module}: mutation site not found exactly once: {mutant.original!r}")
+    reason = static_invalid(original, mutant)
+    if reason is not None:
+        print(f"    INVALID before running: {reason}")
+        return "INVALID", []
     path.write_text(original.replace(mutant.original, mutant.mutated), encoding="utf-8")
     try:
         result = _run_tests(mutant.test)
